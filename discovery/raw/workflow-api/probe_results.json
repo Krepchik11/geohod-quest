@@ -1,0 +1,164 @@
+[
+  {
+    "name": "Change_event_work_time (Middle)",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/Change_event_work_time (Middle)' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Change_event_work_time (Middle)"
+    }
+  },
+  {
+    "name": "Change_event_work_time (empty)",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/Change_event_work_time (empty)' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Change_event_work_time (empty)"
+    }
+  },
+  {
+    "name": "Change_event_work_time (Full)",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/Change_event_work_time (Full)' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Change_event_work_time (Full)"
+    }
+  },
+  {
+    "name": "Change_event_work_time (Empty)",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/Change_event_work_time (Empty)' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Change_event_work_time (Empty)"
+    }
+  },
+  {
+    "name": "Change_event_work_time (Middle)",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/Change_event_work_time (Middle)' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Change_event_work_time (Middle)"
+    }
+  },
+  {
+    "name": "yKassa",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/yKassa"
+    }
+  },
+  {
+    "name": "create_answer_card_list",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/create_answer_card_list"
+    }
+  },
+  {
+    "name": "addAnswerCard",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/addAnswerCard"
+    }
+  },
+  {
+    "name": "updateOldUser",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/updateOldUser"
+    }
+  },
+  {
+    "name": "666",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/666"
+    }
+  },
+  {
+    "name": "666_copy",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/666_copy"
+    }
+  },
+  {
+    "name": "deleteAnswerCard",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/deleteAnswerCard"
+    }
+  },
+  {
+    "name": "telegramOath",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/telegramOath"
+    }
+  },
+  {
+    "name": "loginid",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/loginid"
+    }
+  },
+  {
+    "name": "createloginlink",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/createloginlink"
+    }
+  },
+  {
+    "name": "telegram_auth",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/telegram_auth"
+    }
+  },
+  {
+    "name": "Update_Old_User",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/Update_Old_User"
+    }
+  },
+  {
+    "name": "edit number",
+    "response": {
+      "_error": "URL can't contain control characters. '/version-test/api/1.1/wf/edit number' (found at least ' ')",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/edit number"
+    }
+  },
+  {
+    "name": "reviewGrade",
+    "response": {
+      "_error": 404,
+      "_body": "{\"statusCode\":404,\"body\":{\"status\":\"NOT_FOUND\",\"message\":\"Workflow not found reviewGrade\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/reviewGrade"
+    }
+  },
+  {
+    "name": "chatbot",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/chatbot"
+    }
+  },
+  {
+    "name": "testeg",
+    "response": {
+      "_error": 405,
+      "_body": "{\"statusCode\":405,\"body\":{\"status\":\"ERROR\",\"message\":\"Wrong method. Should be a POST. Method may change when attempting to use http. Please ensure URL starts with https:// instead.\"}}",
+      "_url": "https://geoquest.bubbleapps.io/version-test/api/1.1/wf/testeg"
+    }
+  }
+]

@@ -1,0 +1,602 @@
+[
+  {
+    "id": "bTGfE",
+    "name": "Image",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 2,
+    "custom_states": [
+      "prevpage_",
+      "closeimage_",
+      "closehintimage_"
+    ]
+  },
+  {
+    "id": "bTHJV",
+    "name": "Slide_Hint",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 3,
+    "custom_states": [
+      "hint_show_",
+      "prev_page_"
+    ]
+  },
+  {
+    "id": "bTHKE",
+    "name": "Slide_Error",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 21,
+    "custom_states": [
+      "screen_",
+      "buyhint_",
+      "prevpage_",
+      "openhintimage_",
+      "hideslideerror_"
+    ]
+  },
+  {
+    "id": "bTHvX",
+    "name": "Quest_Settings",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 16,
+    "custom_states": [
+      "groupfocus_"
+    ]
+  },
+  {
+    "id": "bTHwc",
+    "name": "Main",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 23,
+    "custom_states": [
+      "authorselect_",
+      "statusselect_"
+    ]
+  },
+  {
+    "id": "bTHxJ",
+    "name": "Header",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 19,
+    "custom_states": []
+  },
+  {
+    "id": "bTHxL",
+    "name": "Statistic",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 3,
+    "custom_states": []
+  },
+  {
+    "id": "bTHxo",
+    "name": "Edit_Page",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 55,
+    "custom_states": []
+  },
+  {
+    "id": "bTIHq",
+    "name": "New_Quest",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 4,
+    "custom_states": [
+      "tab_switching_"
+    ]
+  },
+  {
+    "id": "bTIIQ",
+    "name": "Existing_Quest",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 63,
+    "custom_states": [
+      "hoverpage_",
+      "scroll_quest_",
+      "selectauthor_",
+      "tab_switching_"
+    ]
+  },
+  {
+    "id": "bTIar",
+    "name": "Log In",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 5,
+    "custom_states": []
+  },
+  {
+    "id": "bTIhR",
+    "name": "Upload_File_Previe",
+    "type": "CustomDefinition",
+    "group_type": "custom.upload_file",
+    "workflow_count": 2,
+    "custom_states": []
+  },
+  {
+    "id": "bTIom",
+    "name": "Shop_header",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 22,
+    "custom_states": [
+      "filtercolor_",
+      "show_burger_",
+      "sortedcolor_",
+      "desktop_main_",
+      "desktop_contact_",
+      "showfiltermobil_",
+      "desktop_my_quest_",
+      "showsortingmobil_",
+      "desktop_my_profile_",
+      "desktop_shop_quest_",
+      "showfilterandsorting_"
+    ]
+  },
+  {
+    "id": "bTJIb",
+    "name": "Shop_contacts",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 4,
+    "custom_states": []
+  },
+  {
+    "id": "bTKbC",
+    "name": "Rules_of_the_game",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 1,
+    "custom_states": [
+      "closerules_"
+    ]
+  },
+  {
+    "id": "bTLAS",
+    "name": "Crop_element",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 15,
+    "custom_states": [
+      "loading_",
+      "upload_image_"
+    ]
+  },
+  {
+    "id": "bTLGX",
+    "name": "New_statistic",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 23,
+    "custom_states": []
+  },
+  {
+    "id": "bTMvz",
+    "name": "Site_log_in",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 48,
+    "custom_states": [
+      "reset_pw_",
+      "save_quest_",
+      "save_e_mail_r_",
+      "save_password_",
+      "password_repeat_",
+      "switching_screen_",
+      "save_e_mail_log_in_",
+      "error_email_not_found_",
+      "scroll_to_store_log_in_",
+      "save_name_create_account_",
+      "error_password_and_e_mail_",
+      "save_e_mail_create_account_"
+    ]
+  },
+  {
+    "id": "bTORQ",
+    "name": "Comments",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 12,
+    "custom_states": [
+      "hoverpage_",
+      "save_quest_",
+      "scroll_quest_",
+      "tab_switching_"
+    ]
+  },
+  {
+    "id": "bTOuD",
+    "name": "Shop_Player_Rating",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 2,
+    "custom_states": [
+      "sorted_koin_"
+    ]
+  },
+  {
+    "id": "bTPkS",
+    "name": "addLocationAdmin",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 5,
+    "custom_states": [
+      "cityname_",
+      "countryname_"
+    ]
+  },
+  {
+    "id": "bTPxo",
+    "name": "Coupon",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 22,
+    "custom_states": [
+      "screen_",
+      "allquest_",
+      "codeword_",
+      "discount_",
+      "listquest_",
+      "countusers_",
+      "editcoupon_",
+      "validuntil_",
+      "errorvaliddate_",
+      "errorrepeatword_"
+    ]
+  },
+  {
+    "id": "bTQuM",
+    "name": "rules",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 1,
+    "custom_states": []
+  },
+  {
+    "id": "bTRBf",
+    "name": "Shop_FAQ",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 1,
+    "custom_states": []
+  },
+  {
+    "id": "bTRJj",
+    "name": "Admin_FAQ",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 9,
+    "custom_states": [
+      "screen_",
+      "allquest_",
+      "codeword_",
+      "discount_",
+      "listquest_",
+      "countusers_",
+      "editcoupon_",
+      "validuntil_",
+      "errorvaliddate_",
+      "errorrepeatword_",
+      "faq_item_number_"
+    ]
+  },
+  {
+    "id": "bTRTH",
+    "name": "Admin_advantages",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 8,
+    "custom_states": [
+      "screen_",
+      "allquest_",
+      "codeword_",
+      "discount_",
+      "listquest_",
+      "countusers_",
+      "editcoupon_",
+      "validuntil_",
+      "errorvaliddate_",
+      "errorrepeatword_"
+    ]
+  },
+  {
+    "id": "bTRoZ",
+    "name": "Slide_give_prize",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 8,
+    "custom_states": [
+      "music_",
+      "get_prize_",
+      "showpopup4a_",
+      "goingnextpage_"
+    ]
+  },
+  {
+    "id": "bTTkb",
+    "name": "focus_rg_main",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 4,
+    "custom_states": [
+      "show_"
+    ]
+  },
+  {
+    "id": "bTVLL",
+    "name": "mapbox",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 11,
+    "custom_states": []
+  },
+  {
+    "id": "bTHCS1",
+    "name": "Slide_Start",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 3,
+    "custom_states": [
+      "showpopup4a_",
+      "goingnextpage_"
+    ]
+  },
+  {
+    "id": "bTHDP1",
+    "name": "Slide_Greetings",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 4,
+    "custom_states": [
+      "showpopup4a_"
+    ]
+  },
+  {
+    "id": "bTHDz1",
+    "name": "Slide_Question_no_answer",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 7,
+    "custom_states": [
+      "help_",
+      "showpopup4a_",
+      "openbigimage_"
+    ]
+  },
+  {
+    "id": "bTHEp1",
+    "name": "Slide_Question",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 12,
+    "custom_states": [
+      "music_",
+      "errorstyle_",
+      "open_error_",
+      "showpopup4a_",
+      "openbigimage_",
+      "goingnextpage_",
+      "openerrorhint_",
+      "correct_answer_"
+    ]
+  },
+  {
+    "id": "bTHGd1",
+    "name": "Slide_Lead",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 7,
+    "custom_states": [
+      "help_",
+      "showpopup4a_",
+      "openbigimage_"
+    ]
+  },
+  {
+    "id": "bTHHN1",
+    "name": "Slide_Video",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 5,
+    "custom_states": [
+      "showpopup4a_",
+      "goingnextpage_"
+    ]
+  },
+  {
+    "id": "bTHIm1",
+    "name": "Slide_Congratulations",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 9,
+    "custom_states": [
+      "steps_for_accruing_coins_"
+    ]
+  },
+  {
+    "id": "bTHgY0",
+    "name": "Previe",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 0,
+    "custom_states": [
+      "hover_",
+      "previe_"
+    ]
+  },
+  {
+    "id": "bTHlT0",
+    "name": "Dop",
+    "type": "CustomDefinition",
+    "group_type": "custom.page_constructor",
+    "workflow_count": 2,
+    "custom_states": [
+      "hover_",
+      "previe_"
+    ]
+  },
+  {
+    "id": "bTIMT2",
+    "name": "Create_New_Page",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 1,
+    "custom_states": []
+  },
+  {
+    "id": "bTIWh0",
+    "name": "Infographic",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 0,
+    "custom_states": []
+  },
+  {
+    "id": "bTIWj0",
+    "name": "User_Information",
+    "type": "CustomDefinition",
+    "group_type": "user",
+    "workflow_count": 16,
+    "custom_states": [
+      "telegramid_",
+      "filteremail_"
+    ]
+  },
+  {
+    "id": "bTIhu1",
+    "name": "Upload_File",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 5,
+    "custom_states": [
+      "copy_",
+      "upload_"
+    ]
+  },
+  {
+    "id": "bTIsz0",
+    "name": "Shop_main",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 82,
+    "custom_states": [
+      "scroll_",
+      "filtercity_",
+      "couponapply_",
+      "filterauthor_",
+      "sorted_quest_",
+      "filtercountry_",
+      "filtertagsnew_",
+      "selectedplace_",
+      "filteragelimit_",
+      "filterlevelnew_",
+      "filterpricenew_",
+      "showpopupfilter_",
+      "sortingquestnew_",
+      "totalpricequest_",
+      "showpopupsorting_",
+      "showfilterandsorting_",
+      "questsorted___________",
+      "questsorted___________1",
+      "questsorted_________________"
+    ]
+  },
+  {
+    "id": "bTIuZ0",
+    "name": "Shop_quest_detail",
+    "type": "CustomDefinition",
+    "group_type": "custom.quest_name_constructor",
+    "workflow_count": 19,
+    "custom_states": [
+      "couponapply_",
+      "totalpricequest_"
+    ]
+  },
+  {
+    "id": "bTJEW0",
+    "name": "Shop_my_quest",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 6,
+    "custom_states": [
+      "scroll_my_quest_",
+      "scroll_to_store_quest_my_quest__"
+    ]
+  },
+  {
+    "id": "bTJFQ0",
+    "name": "Shop_my_profile",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 18,
+    "custom_states": [
+      "save_password_",
+      "scroll_to_rating_",
+      "scroll_to_store_my_profile__"
+    ]
+  },
+  {
+    "id": "bTJKx0",
+    "name": "Shop_footer",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 8,
+    "custom_states": [
+      "scroll_up_"
+    ]
+  },
+  {
+    "id": "bTJNK0",
+    "name": "Shop_log_in",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 71,
+    "custom_states": [
+      "reset_pw_",
+      "save_quest_",
+      "save_e_mail_r_",
+      "save_password_",
+      "password_repeat_",
+      "switching_screen_",
+      "save_e_mail_log_in_",
+      "error_email_not_found_",
+      "scroll_to_store_log_in_",
+      "save_name_create_account_",
+      "error_password_and_e_mail_",
+      "save_e_mail_create_account_"
+    ]
+  },
+  {
+    "id": "bTKFV0",
+    "name": "Shop_privacy_policy",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 0,
+    "custom_states": []
+  },
+  {
+    "id": "bTKGH0",
+    "name": "Focus_user_information",
+    "type": "CustomDefinition",
+    "group_type": "user",
+    "workflow_count": 4,
+    "custom_states": [
+      "show_"
+    ]
+  },
+  {
+    "id": "bTKaD0",
+    "name": "Shop_public_offer",
+    "type": "CustomDefinition",
+    "group_type": null,
+    "workflow_count": 0,
+    "custom_states": []
+  }
+]

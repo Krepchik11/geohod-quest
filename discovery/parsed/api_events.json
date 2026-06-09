@@ -1,0 +1,1384 @@
+[
+  {
+    "id": "bTOCL",
+    "type": "DatabaseTriggerEvent",
+    "properties": {
+      "event_name": "Change_event_work_time (Middle)",
+      "data_trigger_type": "custom.event_work_time"
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTOCQ",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTOCP",
+    "wf_name": "Change_event_work_time (Middle)",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": "custom.event_work_time",
+    "data_type": null
+  },
+  {
+    "id": "bTOCO",
+    "type": "DatabaseTriggerEvent",
+    "properties": {
+      "event_name": "Change_event_work_time (empty)",
+      "data_trigger_type": "custom.event_work_time"
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTOCT",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTOCR",
+    "wf_name": "Change_event_work_time (empty)",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": "custom.event_work_time",
+    "data_type": null
+  },
+  {
+    "id": "bTOCV",
+    "type": "DatabaseTriggerEvent",
+    "properties": {
+      "event_name": "Change_event_work_time (Full)",
+      "data_trigger_type": "custom.event_work_time"
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTOCU",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTOCY",
+    "wf_name": "Change_event_work_time (Full)",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": "custom.event_work_time",
+    "data_type": null
+  },
+  {
+    "id": "bTOCZ",
+    "type": "DatabaseTriggerEvent",
+    "properties": {
+      "event_name": "Change_event_work_time (Empty)",
+      "data_trigger_type": "custom.event_work_time"
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTOCb",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTOCc",
+    "wf_name": "Change_event_work_time (Empty)",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": "custom.event_work_time",
+    "data_type": null
+  },
+  {
+    "id": "bTOCa",
+    "type": "DatabaseTriggerEvent",
+    "properties": {
+      "event_name": "Change_event_work_time (Middle)",
+      "data_trigger_type": "custom.event_work_time"
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTOCf",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTOCd",
+    "wf_name": "Change_event_work_time (Middle)",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": "custom.event_work_time",
+    "data_type": null
+  },
+  {
+    "id": "bTPIu",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "yKassa",
+      "data_type": "{\"types\":{\"bTPIu\":{\"caption\":\"Request Data\",\"fields\":{\"_wf_type\":{\"ret_value\":\"text\",\"caption\":\"type\",\"sample_value\":\"notification\",\"path\":[\"type\"]},\"_wf_event\":{\"ret_value\":\"text\",\"caption\":\"event\",\"sample_value\":\"payment.succeeded\",\"path\":[\"event\"]},\"_wf_object.id\":{\"ret_value\":\"text\",\"caption\":\"object id\",\"sample_value\":\"2c98f4aa-000f-5000-9000-15eec92630a7\",\"path\":[\"object\",\"id\"]},\"_wf_object.status\":{\"ret_value\":\"text\",\"caption\":\"object status\",\"sample_value\":\"succeeded\",\"path\":[\"object\",\"status\"]},\"_wf_object.amount.value\":{\"ret_value\":\"text\",\"caption\":\"object amount value\",\"sample_value\":\"10.00\",\"path\":[\"object\",\"amount\",\"value\"]},\"_wf_object.amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"amount\",\"currency\"]},\"_wf_object.income_amount.value\":{\"ret_value\":\"text\",\"caption\":\"object income_amount value\",\"sample_value\":\"9.65\",\"path\":[\"object\",\"income_amount\",\"value\"]},\"_wf_object.income_amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object income_amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"income_amount\",\"currency\"]},\"_wf_object.description\":{\"ret_value\":\"text\",\"caption\":\"object description\",\"sample_value\":\"Оплата квеста Color change test\",\"path\":[\"object\",\"description\"]},\"_wf_object.recipient.account_id\":{\"ret_value\":\"text\",\"caption\":\"object recipient account_id\",\"sample_value\":\"245294\",\"path\":[\"object\",\"recipient\",\"account_id\"]},\"_wf_object.recipient.gateway_id\":{\"ret_value\":\"text\",\"caption\":\"object recipient gateway_id\",\"sample_value\":\"2108579\",\"path\":[\"object\",\"recipient\",\"gateway_id\"]},\"_wf_object.payment_method.type\":{\"ret_value\":\"text\",\"caption\":\"object payment_method type\",\"sample_value\":\"bank_card\",\"path\":[\"object\",\"payment_method\",\"type\"]},\"_wf_object.payment_method.id\":{\"ret_value\":\"text\",\"caption\":\"object payment_method id\",\"sample_value\":\"2c98f4aa-000f-5000-9000-15eec92630a7\",\"path\":[\"object\",\"payment_method\",\"id\"]},\"_wf_object.payment_method.saved\":{\"ret_value\":\"boolean\",\"caption\":\"object payment_method saved\",\"sample_value\":false,\"path\":[\"object\",\"payment_method\",\"saved\"]},\"_wf_object.payment_method.title\":{\"ret_value\":\"text\",\"caption\":\"object payment_method title\",\"sample_value\":\"Bank card *0617\",\"path\":[\"object\",\"payment_method\",\"title\"]},\"_wf_object.payment_method.card.first6\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card first6\",\"sample_value\":\"220070\",\"path\":[\"object\",\"payment_method\",\"card\",\"first6\"]},\"_wf_object.payment_method.card.last4\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card last4\",\"sample_value\":\"0617\",\"path\":[\"object\",\"payment_method\",\"card\",\"last4\"]},\"_wf_object.payment_method.card.expiry_year\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card expiry_year\",\"sample_value\":\"2030\",\"path\":[\"object\",\"payment_method\",\"card\",\"expiry_year\"]},\"_wf_object.payment_method.card.expiry_month\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card expiry_month\",\"sample_value\":\"06\",\"path\":[\"object\",\"payment_method\",\"card\",\"expiry_month\"]},\"_wf_object.payment_method.card.card_type\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card card_type\",\"sample_value\":\"Mir\",\"path\":[\"object\",\"payment_method\",\"card\",\"card_type\"]},\"_wf_object.payment_method.card.issuer_country\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card issuer_country\",\"sample_value\":\"RU\",\"path\":[\"object\",\"payment_method\",\"card\",\"issuer_country\"]},\"_wf_object.payment_method.card.issuer_name\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card issuer_name\",\"sample_value\":\"Tinkoff Bank\",\"path\":[\"object\",\"payment_method\",\"card\",\"issuer_name\"]},\"_wf_object.captured_at\":{\"ret_value\":\"text\",\"caption\":\"object captured_at\",\"sample_value\":\"2023-09-17T11:21:35.341Z\",\"path\":[\"object\",\"captured_at\"]},\"_wf_object.created_at\":{\"ret_value\":\"text\",\"caption\":\"object created_at\",\"sample_value\":\"2023-09-17T11:20:10.616Z\",\"path\":[\"object\",\"created_at\"]},\"_wf_object.test\":{\"ret_value\":\"boolean\",\"caption\":\"object test\",\"sample_value\":false,\"path\":[\"object\",\"test\"]},\"_wf_object.refunded_amount.value\":{\"ret_value\":\"text\",\"caption\":\"object refunded_amount value\",\"sample_value\":\"0.00\",\"path\":[\"object\",\"refunded_amount\",\"value\"]},\"_wf_object.refunded_amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object refunded_amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"refunded_amount\",\"currency\"]},\"_wf_object.paid\":{\"ret_value\":\"boolean\",\"caption\":\"object paid\",\"sample_value\":true,\"path\":[\"object\",\"paid\"]},\"_wf_object.refundable\":{\"ret_value\":\"boolean\",\"caption\":\"object refundable\",\"sample_value\":true,\"path\":[\"object\",\"refundable\"]},\"_wf_object.authorization_details.rrn\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details rrn\",\"sample_value\":\"326096690552\",\"path\":[\"object\",\"authorization_details\",\"rrn\"]},\"_wf_object.authorization_details.auth_code\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details auth_code\",\"sample_value\":\"055878\",\"path\":[\"object\",\"authorization_details\",\"auth_code\"]},\"_wf_object.authorization_details.three_d_secure.applied\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure applied\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"applied\"]},\"_wf_object.authorization_details.three_d_secure.protocol\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details three_d_secure protocol\",\"sample_value\":\"v2\",\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"protocol\"]},\"_wf_object.authorization_details.three_d_secure.method_completed\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure method_completed\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"method_completed\"]},\"_wf_object.authorization_details.three_d_secure.challenge_completed\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure challenge_completed\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"challenge_completed\"]}}}}}",
+      "parameters": {
+        "0": {
+          "key": {
+            "type": "Empty"
+          },
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "parameter_def": "auto",
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTPLE",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTSsK",
+        "properties_keys": [
+          "condition",
+          "date",
+          "api_event",
+          "_wf_param_user",
+          "_wf_param_quest",
+          "_wf_param_countCard",
+          "_wf_param_pageNumber"
+        ]
+      }
+    ],
+    "action_count": 2,
+    "api_id": "bTPIv",
+    "wf_name": "yKassa",
+    "expose": null,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": "{\"types\":{\"bTPIu\":{\"caption\":\"Request Data\",\"fields\":{\"_wf_type\":{\"ret_value\":\"text\",\"caption\":\"type\",\"sample_value\":\"notification\",\"path\":[\"type\"]},\"_wf_event\":{\"ret_value\":\"text\",\"caption\":\"event\",\"sample_value\":\"payment.succeeded\",\"path\":[\"event\"]},\"_wf_object.id\":{\"ret_value\":\"text\",\"caption\":\"object id\",\"sample_value\":\"2c98f4aa-000f-5000-9000-15eec92630a7\",\"path\":[\"object\",\"id\"]},\"_wf_object.status\":{\"ret_value\":\"text\",\"caption\":\"object status\",\"sample_value\":\"succeeded\",\"path\":[\"object\",\"status\"]},\"_wf_object.amount.value\":{\"ret_value\":\"text\",\"caption\":\"object amount value\",\"sample_value\":\"10.00\",\"path\":[\"object\",\"amount\",\"value\"]},\"_wf_object.amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"amount\",\"currency\"]},\"_wf_object.income_amount.value\":{\"ret_value\":\"text\",\"caption\":\"object income_amount value\",\"sample_value\":\"9.65\",\"path\":[\"object\",\"income_amount\",\"value\"]},\"_wf_object.income_amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object income_amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"income_amount\",\"currency\"]},\"_wf_object.description\":{\"ret_value\":\"text\",\"caption\":\"object description\",\"sample_value\":\"Оплата квеста Color change test\",\"path\":[\"object\",\"description\"]},\"_wf_object.recipient.account_id\":{\"ret_value\":\"text\",\"caption\":\"object recipient account_id\",\"sample_value\":\"245294\",\"path\":[\"object\",\"recipient\",\"account_id\"]},\"_wf_object.recipient.gateway_id\":{\"ret_value\":\"text\",\"caption\":\"object recipient gateway_id\",\"sample_value\":\"2108579\",\"path\":[\"object\",\"recipient\",\"gateway_id\"]},\"_wf_object.payment_method.type\":{\"ret_value\":\"text\",\"caption\":\"object payment_method type\",\"sample_value\":\"bank_card\",\"path\":[\"object\",\"payment_method\",\"type\"]},\"_wf_object.payment_method.id\":{\"ret_value\":\"text\",\"caption\":\"object payment_method id\",\"sample_value\":\"2c98f4aa-000f-5000-9000-15eec92630a7\",\"path\":[\"object\",\"payment_method\",\"id\"]},\"_wf_object.payment_method.saved\":{\"ret_value\":\"boolean\",\"caption\":\"object payment_method saved\",\"sample_value\":false,\"path\":[\"object\",\"payment_method\",\"saved\"]},\"_wf_object.payment_method.title\":{\"ret_value\":\"text\",\"caption\":\"object payment_method title\",\"sample_value\":\"Bank card *0617\",\"path\":[\"object\",\"payment_method\",\"title\"]},\"_wf_object.payment_method.card.first6\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card first6\",\"sample_value\":\"220070\",\"path\":[\"object\",\"payment_method\",\"card\",\"first6\"]},\"_wf_object.payment_method.card.last4\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card last4\",\"sample_value\":\"0617\",\"path\":[\"object\",\"payment_method\",\"card\",\"last4\"]},\"_wf_object.payment_method.card.expiry_year\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card expiry_year\",\"sample_value\":\"2030\",\"path\":[\"object\",\"payment_method\",\"card\",\"expiry_year\"]},\"_wf_object.payment_method.card.expiry_month\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card expiry_month\",\"sample_value\":\"06\",\"path\":[\"object\",\"payment_method\",\"card\",\"expiry_month\"]},\"_wf_object.payment_method.card.card_type\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card card_type\",\"sample_value\":\"Mir\",\"path\":[\"object\",\"payment_method\",\"card\",\"card_type\"]},\"_wf_object.payment_method.card.issuer_country\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card issuer_country\",\"sample_value\":\"RU\",\"path\":[\"object\",\"payment_method\",\"card\",\"issuer_country\"]},\"_wf_object.payment_method.card.issuer_name\":{\"ret_value\":\"text\",\"caption\":\"object payment_method card issuer_name\",\"sample_value\":\"Tinkoff Bank\",\"path\":[\"object\",\"payment_method\",\"card\",\"issuer_name\"]},\"_wf_object.captured_at\":{\"ret_value\":\"text\",\"caption\":\"object captured_at\",\"sample_value\":\"2023-09-17T11:21:35.341Z\",\"path\":[\"object\",\"captured_at\"]},\"_wf_object.created_at\":{\"ret_value\":\"text\",\"caption\":\"object created_at\",\"sample_value\":\"2023-09-17T11:20:10.616Z\",\"path\":[\"object\",\"created_at\"]},\"_wf_object.test\":{\"ret_value\":\"boolean\",\"caption\":\"object test\",\"sample_value\":false,\"path\":[\"object\",\"test\"]},\"_wf_object.refunded_amount.value\":{\"ret_value\":\"text\",\"caption\":\"object refunded_amount value\",\"sample_value\":\"0.00\",\"path\":[\"object\",\"refunded_amount\",\"value\"]},\"_wf_object.refunded_amount.currency\":{\"ret_value\":\"text\",\"caption\":\"object refunded_amount currency\",\"sample_value\":\"RUB\",\"path\":[\"object\",\"refunded_amount\",\"currency\"]},\"_wf_object.paid\":{\"ret_value\":\"boolean\",\"caption\":\"object paid\",\"sample_value\":true,\"path\":[\"object\",\"paid\"]},\"_wf_object.refundable\":{\"ret_value\":\"boolean\",\"caption\":\"object refundable\",\"sample_value\":true,\"path\":[\"object\",\"refundable\"]},\"_wf_object.authorization_details.rrn\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details rrn\",\"sample_value\":\"326096690552\",\"path\":[\"object\",\"authorization_details\",\"rrn\"]},\"_wf_object.authorization_details.auth_code\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details auth_code\",\"sample_value\":\"055878\",\"path\":[\"object\",\"authorization_details\",\"auth_code\"]},\"_wf_object.authorization_details.three_d_secure.applied\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure applied\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"applied\"]},\"_wf_object.authorization_details.three_d_secure.protocol\":{\"ret_value\":\"text\",\"caption\":\"object authorization_details three_d_secure protocol\",\"sample_value\":\"v2\",\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"protocol\"]},\"_wf_object.authorization_details.three_d_secure.method_completed\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure method_completed\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"method_completed\"]},\"_wf_object.authorization_details.three_d_secure.challenge_completed\":{\"ret_value\":\"boolean\",\"caption\":\"object authorization_details three_d_secure challenge_completed\",\"sample_value\":true,\"path\":[\"object\",\"authorization_details\",\"three_d_secure\",\"challenge_completed\"]}}}}}"
+  },
+  {
+    "id": "bTSrm",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "create_answer_card_list",
+      "parameters": {
+        "0": {
+          "key": "countCard",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "pageNumber",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "quest",
+          "value": "custom.quest_name_constructor",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "3": {
+          "key": "user",
+          "value": "user",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      }
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTTuL0",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "NewThing",
+        "id": "bTTVi1",
+        "properties_keys": [
+          "condition",
+          "initial_values",
+          "thing_type"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTVn1",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "NewThing",
+        "id": "bTSro",
+        "properties_keys": [
+          "condition",
+          "initial_values",
+          "thing_type"
+        ]
+      },
+      {
+        "type": "NewThing",
+        "id": "bTSrs",
+        "properties_keys": [
+          "condition",
+          "initial_values",
+          "thing_type"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTSru",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTSry",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTVt1",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTSsA",
+        "properties_keys": [
+          "condition",
+          "date",
+          "api_event",
+          "_wf_param_user",
+          "_wf_param_quest",
+          "_wf_param_countCard",
+          "_wf_param_pageNumber"
+        ]
+      }
+    ],
+    "action_count": 9,
+    "api_id": "bTSrn",
+    "wf_name": "create_answer_card_list",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTLg",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "addAnswerCard",
+      "parameters": {
+        "0": {
+          "key": "Subscription",
+          "value": "custom.buy_a_qest",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": false,
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "numberSubscription",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "listSubscription",
+          "value": "custom.buy_a_qest",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": true,
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      }
+    },
+    "actions": [
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTME",
+        "properties_keys": [
+          "date",
+          "api_event",
+          "_wf_param_user",
+          "_wf_param_quest",
+          "_wf_param_countCard",
+          "_wf_param_pageNumber"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTMa",
+        "properties_keys": [
+          "condition",
+          "date",
+          "api_event",
+          "_wf_param_Subscription",
+          "_wf_param_listSubscription",
+          "_wf_param_numberSubscription"
+        ]
+      }
+    ],
+    "action_count": 2,
+    "api_id": "bTTLk",
+    "wf_name": "addAnswerCard",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTLq",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "updateOldUser",
+      "parameters": {
+        "0": {
+          "key": "countCard",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "pageNumber",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "quest",
+          "value": "custom.quest_name_constructor",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "3": {
+          "key": "user",
+          "value": "user",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      }
+    },
+    "actions": [
+      {
+        "type": "NewThing",
+        "id": "bTTLs",
+        "properties_keys": [
+          "condition",
+          "initial_values",
+          "thing_type"
+        ]
+      },
+      {
+        "type": "NewThing",
+        "id": "bTTLw",
+        "properties_keys": [
+          "condition",
+          "initial_values",
+          "thing_type"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTLx",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTLy",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTNp",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTOw",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTUw",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTMC",
+        "properties_keys": [
+          "condition",
+          "date",
+          "api_event",
+          "_wf_param_user",
+          "_wf_param_quest",
+          "_wf_param_countCard",
+          "_wf_param_pageNumber"
+        ]
+      }
+    ],
+    "action_count": 8,
+    "api_id": "bTTMD",
+    "wf_name": "updateOldUser",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTPt",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "666",
+      "parameters": {
+        "0": {
+          "key": "listAnswerCard",
+          "value": "custom.answer_card",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": true,
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "OneAnswerCard",
+          "value": "custom.answer_card",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "numberAnswerCard",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeListOfThings",
+        "id": "bTTQu",
+        "properties_keys": [
+          "changes",
+          "to_change",
+          "type_to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTRs0",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTSD0",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTQK",
+        "properties_keys": [
+          "date",
+          "api_event",
+          "_wf_param_AnswerCard",
+          "ignore_privacy_rules",
+          "_wf_param_OneAnswerCard",
+          "_wf_param_listAnswerCard",
+          "_wf_param_numberAnswerCard"
+        ]
+      }
+    ],
+    "action_count": 4,
+    "api_id": "bTTPu",
+    "wf_name": "666",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTSI",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "666_copy",
+      "parameters": {
+        "0": {
+          "key": "listAnswerCard",
+          "value": "custom.answer_card",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": true,
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "OneAnswerCard",
+          "value": "custom.answer_card",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "numberAnswerCard",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeListOfThings",
+        "id": "bTTSK",
+        "properties_keys": [
+          "changes",
+          "to_change",
+          "type_to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTSO",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTTSP",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTSQ",
+        "properties_keys": [
+          "date",
+          "api_event",
+          "_wf_param_AnswerCard",
+          "ignore_privacy_rules",
+          "_wf_param_OneAnswerCard",
+          "_wf_param_listAnswerCard",
+          "_wf_param_numberAnswerCard"
+        ]
+      }
+    ],
+    "action_count": 4,
+    "api_id": "bTTSU",
+    "wf_name": "666_copy",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTUr",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "deleteAnswerCard"
+    },
+    "actions": [
+      {
+        "type": "ChangeListOfThings",
+        "id": "bTTVC",
+        "properties_keys": [
+          "changes",
+          "to_change",
+          "type_to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTTUs",
+    "wf_name": "deleteAnswerCard",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTva",
+    "type": "APIEvent",
+    "api_id": "bTTva",
+    "wf_name": "telegramOath",
+    "expose": null,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": "{\"types\":{\"bTTvZ\":{\"caption\":\"Request Data\",\"fields\":{\"_wf_update_id\":{\"ret_btype\":\"number\",\"caption\":\"update_id\",\"sample_value\":599901306,\"path\":[\"update_id\"]},\"_wf_channel_post.message_id\":{\"ret_btype\":\"number\",\"caption\":\"channel_post message_id\",\"sample_value\":67,\"path\":[\"channel_post\",\"message_id\"]},\"_wf_channel_post.sender_chat.id\":{\"ret_btype\":\"number\",\"caption\":\"channel_post sender_chat id\",\"sample_value\":-1002048454777,\"path\":[\"channel_post\",\"sender_chat\",\"id\"]},\"_wf_channel_post.sender_chat.title\":{\"ret_btype\":\"text\",\"caption\":\"channel_post sender_chat title\",\"sample_value\":\"testMakeGoogleCanedar\",\"path\":[\"channel_post\",\"sender_chat\",\"title\"]},\"_wf_channel_post.sender_chat.username\":{\"ret_btype\":\"text\",\"caption\":\"channel_post sender_chat username\",\"sample_value\":\"testMakeGoogleCanedar\",\"path\":[\"channel_post\",\"sender_chat\",\"username\"]},\"_wf_channel_post.sender_chat.type\":{\"ret_btype\":\"text\",\"caption\":\"channel_post sender_chat type\",\"sample_value\":\"channel\",\"path\":[\"channel_post\",\"sender_chat\",\"type\"]},\"_wf_channel_post.chat.id\":{\"ret_btype\":\"number\",\"caption\":\"channel_post chat id\",\"sample_value\":-1002048454777,\"path\":[\"channel_post\",\"chat\",\"id\"]},\"_wf_channel_post.chat.title\":{\"ret_btype\":\"text\",\"caption\":\"channel_post chat title\",\"sample_value\":\"testMakeGoogleCanedar\",\"path\":[\"channel_post\",\"chat\",\"title\"]},\"_wf_channel_post.chat.username\":{\"ret_btype\":\"text\",\"caption\":\"channel_post chat username\",\"sample_value\":\"testMakeGoogleCanedar\",\"path\":[\"channel_post\",\"chat\",\"username\"]},\"_wf_channel_post.chat.type\":{\"ret_btype\":\"text\",\"caption\":\"channel_post chat type\",\"sample_value\":\"channel\",\"path\":[\"channel_post\",\"chat\",\"type\"]},\"_wf_channel_post.date\":{\"ret_btype\":\"number\",\"caption\":\"channel_post date\",\"sample_value\":1723264372,\"path\":[\"channel_post\",\"date\"]},\"_wf_channel_post.text\":{\"ret_btype\":\"text\",\"caption\":\"channel_post text\",\"sample_value\":\"hi\",\"path\":[\"channel_post\",\"text\"]}}}}}"
+  },
+  {
+    "id": "bTTwO",
+    "type": "APIEvent",
+    "properties": {
+      "expose": true,
+      "wf_name": "loginid",
+      "parameters": {
+        "0": {
+          "key": "id",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "first_name",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "last_name",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "3": {
+          "key": "username",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "4": {
+          "key": "photo_url",
+          "value": "image",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "5": {
+          "key": "id_quest",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "parameter_def": "manual",
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "SignUp",
+        "id": "bTUwG",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "email",
+          "password"
+        ]
+      },
+      {
+        "type": "SendMagicLink",
+        "id": "bTTwU",
+        "properties_keys": [
+          "condition",
+          "body",
+          "email",
+          "failure_page",
+          "success_page",
+          "just_make_link",
+          "failure_customize",
+          "success_customize",
+          "valid_link_time_frame",
+          "add_parameters_success",
+          "url_parameters_success",
+          "keep_current_page_params_success"
+        ]
+      },
+      {
+        "type": "SendMagicLink",
+        "id": "bTUvs",
+        "properties_keys": [
+          "condition",
+          "body",
+          "email",
+          "failure_page",
+          "success_page",
+          "just_make_link",
+          "failure_customize",
+          "success_customize",
+          "valid_link_time_frame"
+        ]
+      },
+      {
+        "type": "APIReturnData",
+        "id": "bTTwV",
+        "properties_keys": [
+          "condition",
+          "return_plain_text",
+          "parameters_actions"
+        ]
+      },
+      {
+        "type": "APIReturnData",
+        "id": "bTUvu",
+        "properties_keys": [
+          "condition",
+          "return_plain_text",
+          "parameters_actions"
+        ]
+      },
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTUvz",
+        "properties_keys": [
+          "condition",
+          "date",
+          "api_event",
+          "_wf_param_user",
+          "_wf_param_quest",
+          "_wf_param_countCard",
+          "_wf_param_pageNumber"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTUvO",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      },
+      {
+        "type": "SendMagicLink",
+        "id": "bTTwW",
+        "properties_keys": [
+          "email",
+          "failure_page",
+          "success_page",
+          "valid_link_time_frame"
+        ]
+      }
+    ],
+    "action_count": 8,
+    "api_id": "bTTwa",
+    "wf_name": "loginid",
+    "expose": true,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTUHG",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "createloginlink",
+      "parameters": {
+        "0": {
+          "key": "user",
+          "value": "user",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "SendMagicLink",
+        "id": "bTUHI",
+        "properties_keys": [
+          "body",
+          "email",
+          "breakpoint",
+          "failure_page",
+          "success_page",
+          "just_make_link",
+          "failure_customize",
+          "success_customize",
+          "valid_link_time_frame"
+        ]
+      },
+      {
+        "type": "ChangeThing",
+        "id": "bTUHN",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 2,
+    "api_id": "bTUHH",
+    "wf_name": "createloginlink",
+    "expose": null,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTVAY",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "telegram_auth",
+      "parameters": {
+        "0": {
+          "key": "id",
+          "value": "number",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "1": {
+          "key": "first_name",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "2": {
+          "key": "last_name",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "3": {
+          "key": "username",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        },
+        "4": {
+          "key": "photo_url",
+          "value": "image",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "SignUp",
+        "id": "bTVAa",
+        "properties_keys": [
+          "condition",
+          "changes",
+          "email",
+          "password"
+        ]
+      },
+      {
+        "type": "LogIn",
+        "id": "bTVAf",
+        "properties_keys": [
+          "email",
+          "password"
+        ]
+      }
+    ],
+    "action_count": 2,
+    "api_id": "bTVAZ",
+    "wf_name": "telegram_auth",
+    "expose": null,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTVbG",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "Update_Old_User",
+      "parameters": {
+        "0": {
+          "key": "user",
+          "value": "user",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "SetTemporaryPassword",
+        "id": "bTVbI",
+        "properties_keys": [
+          "user"
+        ]
+      },
+      {
+        "type": "UpdateCredentials",
+        "id": "bTVbM",
+        "properties_keys": [
+          "email",
+          "password",
+          "require_confirm",
+          "change_email",
+          "old_password",
+          "change_password",
+          "do_not_show_success_alert"
+        ]
+      }
+    ],
+    "action_count": 2,
+    "api_id": "bTVbH",
+    "wf_name": "Update_Old_User",
+    "expose": null,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTIYx0",
+    "type": "APIEvent",
+    "properties": {
+      "expose": false,
+      "wf_name": "edit number",
+      "parameters": {
+        "0": {
+          "key": "number",
+          "value": "custom.page_constructor",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": false,
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTIZD0",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTIYy0",
+    "wf_name": "edit number",
+    "expose": false,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTPeM0",
+    "type": "APIEvent",
+    "properties": {
+      "expose": false,
+      "wf_name": "reviewGrade",
+      "parameters": {
+        "0": {
+          "key": "number",
+          "value": "custom.quest_name_constructor",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "auth_unecessary": false,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTPeO0",
+        "properties_keys": [
+          "changes",
+          "to_change"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTPeN0",
+    "wf_name": "reviewGrade",
+    "expose": false,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTRXI0",
+    "type": "APIEvent",
+    "properties": {
+      "expose": true,
+      "wf_name": "chatbot",
+      "parameters": {
+        "0": {
+          "key": "username",
+          "value": "text",
+          "in_url": {
+            "type": "Empty"
+          },
+          "is_list": {
+            "type": "Empty"
+          },
+          "optional": {
+            "type": "Empty"
+          }
+        }
+      },
+      "parameter_def": "manual",
+      "auth_unecessary": true,
+      "ignore_privacy_rules": true
+    },
+    "actions": [
+      {
+        "type": "ChangeThing",
+        "id": "bTRXV0",
+        "properties_keys": [
+          "to_change"
+        ]
+      },
+      {
+        "type": "SendMagicLink",
+        "id": "bTRXW0",
+        "properties_keys": [
+          "body",
+          "email",
+          "failure_page",
+          "success_page",
+          "just_make_link",
+          "failure_customize",
+          "success_customize",
+          "valid_link_time_frame"
+        ]
+      },
+      {
+        "type": "APIReturnData",
+        "id": "bTRXa0",
+        "properties_keys": [
+          "return_plain_text",
+          "parameters_actions"
+        ]
+      },
+      {
+        "type": "SendMagicLink",
+        "id": "bTRZB0",
+        "properties_keys": [
+          "email",
+          "failure_page",
+          "success_page",
+          "valid_link_time_frame"
+        ]
+      }
+    ],
+    "action_count": 4,
+    "api_id": "bTRXJ0",
+    "wf_name": "chatbot",
+    "expose": true,
+    "auth": true,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTQR0",
+    "type": "APIEvent",
+    "api_id": "bTTQR0",
+    "wf_name": null,
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  },
+  {
+    "id": "bTTRO0",
+    "type": "APIEvent",
+    "properties": {
+      "wf_name": "testeg"
+    },
+    "actions": [
+      {
+        "type": "ScheduleAPIEvent",
+        "id": "bTTRT0",
+        "properties_keys": [
+          "date",
+          "api_event",
+          "_wf_param_AnswerCard",
+          "_wf_param_OneAnswerCard",
+          "_wf_param_listAnswerCard",
+          "_wf_param_numberAnswerCard"
+        ]
+      }
+    ],
+    "action_count": 1,
+    "api_id": "bTTRS0",
+    "wf_name": "testeg",
+    "expose": null,
+    "auth": null,
+    "data_trigger_type": null,
+    "data_type": null
+  }
+]

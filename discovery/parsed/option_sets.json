@@ -1,0 +1,273 @@
+[
+  {
+    "id": "role",
+    "display": "Role ( Translation_en )",
+    "values": [
+      {
+        "id": "admin",
+        "display": "Admin",
+        "db_value": "admin"
+      },
+      {
+        "id": "bTOqx",
+        "display": "Author",
+        "db_value": "author"
+      },
+      {
+        "id": "client",
+        "display": "Client",
+        "db_value": "client"
+      }
+    ]
+  },
+  {
+    "id": "test",
+    "display": "test",
+    "values": [
+      {
+        "id": "bTKvI",
+        "display": "1",
+        "db_value": "1_"
+      },
+      {
+        "id": "bTKvJ",
+        "display": "2",
+        "db_value": "2_"
+      }
+    ]
+  },
+  {
+    "id": "gif_gift",
+    "display": "Gif_Gift",
+    "values": [
+      {
+        "id": "bTRei",
+        "display": "1",
+        "db_value": "1_"
+      },
+      {
+        "id": "bTRej",
+        "display": "2",
+        "db_value": "2_"
+      }
+    ]
+  },
+  {
+    "id": "language",
+    "display": "Language",
+    "values": [
+      {
+        "id": "_______",
+        "display": "ru_ru",
+        "db_value": "_______"
+      },
+      {
+        "id": "english",
+        "display": "en_us",
+        "db_value": "english"
+      },
+      {
+        "id": "serbian",
+        "display": "sr_sp",
+        "db_value": "serbian"
+      }
+    ]
+  },
+  {
+    "id": "age_limit",
+    "display": "Age_limit",
+    "values": [
+      {
+        "id": "bTOJE",
+        "display": "For all",
+        "db_value": "for_all"
+      },
+      {
+        "id": "bTOJI",
+        "display": "For children",
+        "db_value": "for_children"
+      },
+      {
+        "id": "bTOJJ",
+        "display": "For adults",
+        "db_value": "for_adults"
+      }
+    ]
+  },
+  {
+    "id": "page_type",
+    "display": "Page_type",
+    "values": [
+      {
+        "id": "style",
+        "display": "Style",
+        "db_value": "style"
+      },
+      {
+        "id": "hint",
+        "display": "Hint",
+        "db_value": "hint"
+      },
+      {
+        "id": "lead",
+        "display": "Continue",
+        "db_value": "lead"
+      },
+      {
+        "id": "bTReS",
+        "display": "Gift",
+        "db_value": "gift"
+      },
+      {
+        "id": "error",
+        "display": "Error",
+        "db_value": "error"
+      },
+      {
+        "id": "start",
+        "display": "Start",
+        "db_value": "start"
+      },
+      {
+        "id": "video",
+        "display": "Video",
+        "db_value": "video"
+      },
+      {
+        "id": "question",
+        "display": "Question",
+        "db_value": "question"
+      },
+      {
+        "id": "greetings",
+        "display": "Greetings",
+        "db_value": "greetings"
+      },
+      {
+        "id": "question0",
+        "display": "Question",
+        "db_value": "question0"
+      },
+      {
+        "id": "namerequest",
+        "display": "NameRequest",
+        "db_value": "namerequest"
+      },
+      {
+        "id": "congratulations",
+        "display": "Congratulations",
+        "db_value": "congratulations"
+      },
+      {
+        "id": "questionnoanswer",
+        "display": "QuestionNoAnswer",
+        "db_value": "questionnoanswer"
+      },
+      {
+        "id": "screenafterquest",
+        "display": "ScreenAfterQuest",
+        "db_value": "screenafterquest"
+      }
+    ]
+  },
+  {
+    "id": "quest_name",
+    "display": "Quest_name",
+    "values": []
+  },
+  {
+    "id": "quest_level",
+    "display": "Quest_level",
+    "values": [
+      {
+        "id": "bTIsi",
+        "display": "Низкая",
+        "db_value": "______"
+      },
+      {
+        "id": "bTIsj",
+        "display": "Средняя",
+        "db_value": "_______"
+      },
+      {
+        "id": "bTIsk",
+        "display": "Высокая",
+        "db_value": "_______0"
+      }
+    ]
+  },
+  {
+    "id": "status_quest",
+    "display": "status_quest",
+    "values": [
+      {
+        "id": "bTTYW",
+        "display": "Published",
+        "db_value": "published"
+      },
+      {
+        "id": "bTTYa",
+        "display": "Test",
+        "db_value": "test"
+      },
+      {
+        "id": "bTTYb",
+        "display": "Project",
+        "db_value": "project"
+      }
+    ]
+  },
+  {
+    "id": "quest_settings",
+    "display": "Quest_settings",
+    "values": [
+      {
+        "id": "name",
+        "display": "Name",
+        "db_value": "name"
+      }
+    ]
+  },
+  {
+    "id": "event_payment_method",
+    "display": "Event_payment_method",
+    "values": [
+      {
+        "id": "bTNJN",
+        "display": "Cash_upon_meeting",
+        "db_value": "cash_upon_meeting"
+      },
+      {
+        "id": "bTNJO",
+        "display": "Donations",
+        "db_value": "donations"
+      },
+      {
+        "id": "bTNJP",
+        "display": "For_free",
+        "db_value": "for_free"
+      }
+    ]
+  },
+  {
+    "id": "event_work_time_status",
+    "display": "Event_work_time_status",
+    "values": [
+      {
+        "id": "bTOAi",
+        "display": "Full",
+        "db_value": "full"
+      },
+      {
+        "id": "bTOAm",
+        "display": "Empty",
+        "db_value": "empty"
+      },
+      {
+        "id": "bTOAn",
+        "display": "Middle",
+        "db_value": "middle"
+      }
+    ]
+  }
+]

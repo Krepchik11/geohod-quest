@@ -1,0 +1,2199 @@
+[
+  {
+    "id": "event",
+    "display": "Event",
+    "api_typename_guess": "event",
+    "fields": [
+      {
+        "id": "name_event_text",
+        "name": "Name_event",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "duration_event_number",
+        "name": "Duration_event",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_description_text",
+        "name": "Description_event",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "number_of_seats_number",
+        "name": "Number_of_seats",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "workday_custom_workday",
+        "name": "Workday",
+        "bubble_type": "custom.workday",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "image_on_home_page1_image",
+        "name": "Image_on_home_page",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "secondary_photos_list_image",
+        "name": "Secondary_photos",
+        "bubble_type": "list.image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_city_custom_event_city",
+        "name": "Event_city",
+        "bubble_type": "custom.event_city",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_type_custom_event_type",
+        "name": "Event_type",
+        "bubble_type": "custom.event_type",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "language_event_option_language",
+        "name": "Language_event",
+        "bubble_type": "option.language",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "price_event_custom_event_price",
+        "name": "Price_event",
+        "bubble_type": "custom.event_price",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "review_list_custom_review_event",
+        "name": "Review",
+        "bubble_type": "list.custom.review_event",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_country_custom_event_country",
+        "name": "Event_country",
+        "bubble_type": "custom.event_country",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "programm_event_list_custom_event_programm",
+        "name": "Programm_event",
+        "bubble_type": "list.custom.event_programm",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_work_time_list_custom_event_work_time",
+        "name": "Event_work_time",
+        "bubble_type": "list.custom.event_work_time",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "meeting_point_event_custom_event_meeting_point",
+        "name": "Meeting_point_event",
+        "bubble_type": "custom.event_meeting_point",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "included_in_cost_event_list_custom_event_included_in_cost",
+        "name": "Included_in_cost_event",
+        "bubble_type": "list.custom.event_included_in_cost",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "question_and_answer_event_list_custom_question_and_answer",
+        "name": "Question_and_answer_event",
+        "bubble_type": "list.custom.question_and_answer",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "page",
+    "display": "Page",
+    "api_typename_guess": "page",
+    "fields": [
+      {
+        "id": "text_text",
+        "name": "Text",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "image_image",
+        "name": "Image",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "answers_list_text",
+        "name": "Answers",
+        "bubble_type": "list.text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_type_option_page_type",
+        "name": "Page_type",
+        "bubble_type": "option.page_type",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "city",
+    "display": "City",
+    "api_typename_guess": "city",
+    "fields": [
+      {
+        "id": "cityname_text",
+        "name": "cityName",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "country_custom_country",
+        "name": "Country",
+        "bubble_type": "custom.country",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "tags",
+    "display": "Tags",
+    "api_typename_guess": "tags",
+    "fields": [
+      {
+        "id": "tag_name_text",
+        "name": "Tag_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "user",
+    "display": "User",
+    "api_typename_guess": "user",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "first_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "telegram_text",
+        "name": "id",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "last_name_text",
+        "name": "last_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "magiclink_text",
+        "name": "magiclink",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_user_text",
+        "name": "username",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "role_option_role",
+        "name": "Role",
+        "bubble_type": "option.role",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "email_techno_text",
+        "name": "Email_techno",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "incognita_boolean",
+        "name": "Display_the_author's_name_and_avatar",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "closepopup_boolean",
+        "name": "closePopup",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "current_lat_number",
+        "name": "current_lat",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "deleteuser_boolean",
+        "name": "deleteUser",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "previe_image_image",
+        "name": "photo_url",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "balance_coin_number",
+        "name": "Balance_coin",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "current_long_number",
+        "name": "current_long",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "phone_number_number",
+        "name": "Phone_number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "password_techno_text",
+        "name": "Password_techno",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "language_option_language",
+        "name": "Previe_language",
+        "bubble_type": "option.language",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "display_in_rating_boolean",
+        "name": "don't_display_in_rating",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "payment_list_custom_payment",
+        "name": "Payment",
+        "bubble_type": "list.custom.payment",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "coordinates_lat1_list_number",
+        "name": "Coordinates_lat",
+        "bubble_type": "list.number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "coordinates_long_list_number",
+        "name": "Coordinates_long",
+        "bubble_type": "list.number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "editlanguage_option_language",
+        "name": "Edit_language",
+        "bubble_type": "option.language",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "bug_reports_list_custom_bug_report",
+        "name": "Bug_reports",
+        "bubble_type": "list.custom.bug_report",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "buy_a_quest_list_custom_buy_a_qest",
+        "name": "Buy_a_quest",
+        "bubble_type": "list.custom.buy_a_qest",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "answer_card_list_custom_answer_card",
+        "name": "Answer_card",
+        "bubble_type": "list.custom.answer_card",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "currentquest1_custom_quest_name_constructor",
+        "name": "current_quest",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "reviews_on_this_user_list_custom_review_quest",
+        "name": "Reviews_on_this_user_quest",
+        "bubble_type": "list.custom.review_quest",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "completed_quests_list_custom_quest_name_constructor",
+        "name": "Completed_quests",
+        "bubble_type": "list.custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "reviews_on_this_user_event_list_custom_review_event",
+        "name": "Reviews_on_this_user_event",
+        "bubble_type": "list.custom.review_event",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "getting_5_coins_for_completing_list_custom_quest_name_constructor",
+        "name": "Getting_5_coins_for_completing",
+        "bubble_type": "list.custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {
+      "user_": {
+        "condition": {
+          "next": {
+            "args": {
+              "type": "CurrentUser",
+              "is_slidable": false
+            },
+            "type": "Message",
+            "name": "equals",
+            "is_slidable": false
+          },
+          "type": "CurrentUser",
+          "is_slidable": false
+        },
+        "display": "Client",
+        "permissions": {
+          "view_all": true,
+          "search_for": true,
+          "auto_binding": true,
+          "binding_fields": {
+            "0": "name_text",
+            "1": "name_user_text",
+            "2": "buy_a_quest_list_custom_buy_a_qest"
+          },
+          "view_attachments": true
+        }
+      },
+      "everyone": {
+        "display": "everyone",
+        "permissions": {
+          "view_all": false,
+          "search_for": false,
+          "auto_binding": false,
+          "view_attachments": false
+        }
+      }
+    }
+  },
+  {
+    "id": "theme",
+    "display": "Theme",
+    "api_typename_guess": "theme",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "Name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "color_text",
+        "name": "Color",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "locked_boolean",
+        "name": "Locked",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "font_color_text",
+        "name": "Font_color",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "button_frame_color_text",
+        "name": "Button_Frame_color",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "coupon",
+    "display": "Coupon",
+    "api_typename_guess": "coupon",
+    "fields": [
+      {
+        "id": "codeword_text",
+        "name": "codeWord",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "discount_number",
+        "name": "discount",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "validuntil_date",
+        "name": "validUntil",
+        "bubble_type": "date",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "allquest_boolean",
+        "name": "allQuest",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "countusers_number",
+        "name": "countUsers",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "unlimited_boolean",
+        "name": "unlimited",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "usershave_list_user",
+        "name": "usersHave",
+        "bubble_type": "list.user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "listquest_list_custom_quest_name_constructor",
+        "name": "listQuest",
+        "bubble_type": "list.custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "no_buy",
+    "display": "No_buy_a_quest",
+    "api_typename_guess": "no_buy_a_quest",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_list_custom_quest_name_constructor",
+        "name": "Quest_name",
+        "bubble_type": "list.custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "record",
+    "display": "Record",
+    "api_typename_guess": "record",
+    "fields": [
+      {
+        "id": "count_users_number",
+        "name": "Count_users",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "subscriben_user_user",
+        "name": "Subscriprtion_user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "country",
+    "display": "Country",
+    "api_typename_guess": "country",
+    "fields": [
+      {
+        "id": "countryname_text",
+        "name": "countryName",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "city_list_custom_city",
+        "name": "City",
+        "bubble_type": "list.custom.city",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "payment",
+    "display": "Payment",
+    "api_typename_guess": "payment",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "idpayment_text",
+        "name": "idPayment",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "succeeded_boolean",
+        "name": "succeeded",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "amountofmoney_number",
+        "name": "amountOfMoney",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_custom_quest_name_constructor",
+        "name": "quest",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "workday",
+    "display": "Workday",
+    "api_typename_guess": "workday",
+    "fields": [
+      {
+        "id": "data_date",
+        "name": "Data_workday",
+        "bubble_type": "date",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "work_time_list_date",
+        "name": "Work_time",
+        "bubble_type": "list.date",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "deleteid",
+    "display": "deleteId",
+    "api_typename_guess": "deleteid",
+    "fields": [
+      {
+        "id": "id_text",
+        "name": "id",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "faq_item",
+    "display": "Event_FAQ_item",
+    "api_typename_guess": "event_faq_item",
+    "fields": [
+      {
+        "id": "answer_text",
+        "name": "Answer",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "number_number",
+        "name": "Number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "question_text",
+        "name": "Question",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "settings",
+    "display": "Settings",
+    "api_typename_guess": "settings",
+    "fields": [
+      {
+        "id": "e_mail_text",
+        "name": "e-mail",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "loops_number",
+        "name": "loops",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "telegramlink_text",
+        "name": "telegramLink",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "telegrambotlink_text",
+        "name": "telegramBotLink",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "advantage",
+    "display": "Advantage",
+    "api_typename_guess": "advantage",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "Name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "image_image",
+        "name": "Image",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "number_number",
+        "name": "Number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "desription_text",
+        "name": "Description",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "leafy_map",
+    "display": "Leafy_map",
+    "api_typename_guess": "leafy_map",
+    "fields": [
+      {
+        "id": "number_number",
+        "name": "number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "coordinates_lat_number",
+        "name": "Coordinates_lat",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "coordinates_long_number",
+        "name": "Coordinates_long",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "questcity",
+    "display": "questCity",
+    "api_typename_guess": "questcity",
+    "fields": [
+      {
+        "id": "questcityname_text",
+        "name": "questCityName",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcityname1_text",
+        "name": "questCityNameSearch",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcountry_custom_questcountry",
+        "name": "questCountry",
+        "bubble_type": "custom.questcountry",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "questname",
+    "display": "QuestName",
+    "api_typename_guess": "questname",
+    "fields": [],
+    "privacy_role": {}
+  },
+  {
+    "id": "statistic",
+    "display": "Statistic",
+    "api_typename_guess": "statistic",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "User",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "right_answers_number",
+        "name": "Right Answers",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "wrong_answers_number",
+        "name": "Wrong Answers",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "_ompleted_quest_boolean",
+        "name": "Сompleted_Quest",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "last_page_custom_page_constructor",
+        "name": "Last_Page",
+        "bubble_type": "custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "buy_help_list_custom_page_constructor",
+        "name": "Buy_help",
+        "bubble_type": "list.custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_custom_quest_name_constructor",
+        "name": "Quest_Name",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "viewed_page_list_custom_page_constructor",
+        "name": "Viewed_Page",
+        "bubble_type": "list.custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "right_answers_list_custom_page_constructor",
+        "name": "Right_answers",
+        "bubble_type": "list.custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "basket_buy",
+    "display": "Basket_buy",
+    "api_typename_guess": "basket_buy",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "User",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_list_custom_quest_name_constructor",
+        "name": "Quest_name",
+        "bubble_type": "list.custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "bug_report",
+    "display": "Bug_report",
+    "api_typename_guess": "bug_report",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "User",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_report_text",
+        "name": "Text_report",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "number_page_number",
+        "name": "Number_page",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_custom_quest_name_constructor",
+        "name": "Quest",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "buy_a_qest",
+    "display": "Subscription",
+    "api_typename_guess": "subscription",
+    "fields": [
+      {
+        "id": "_subscriber_user",
+        "name": " subscriber",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "subscription_date",
+        "name": "subscription",
+        "bubble_type": "date",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "dataprocessing_date",
+        "name": "dataProcessing",
+        "bubble_type": "date",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "subscription_number_for_sorting_number",
+        "name": "subscription_number_for_sorting",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_custom_quest_name_constructor",
+        "name": "Quest_name",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_city",
+    "display": "Event_city",
+    "api_typename_guess": "event_city",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "city_name_text",
+        "name": "city_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_country_custom_event_country",
+        "name": "event_country",
+        "bubble_type": "custom.event_country",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_type",
+    "display": "Event_type",
+    "api_typename_guess": "event_type",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_type_name_text",
+        "name": "type_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "savegoogle",
+    "display": "SaveGoogle",
+    "api_typename_guess": "savegoogle",
+    "fields": [
+      {
+        "id": "namepage_text",
+        "name": "NamePage",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "answer_card",
+    "display": "Answer_card",
+    "api_typename_guess": "answer_card",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "User",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "del_boolean",
+        "name": "del",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "buy_hint_boolean",
+        "name": "Buy_hint",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "complited_boolean",
+        "name": "Complited",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "youmadeit__boolean",
+        "name": "You_made_it",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "complited_quest_boolean",
+        "name": "Complited_quest",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "count_wrong_answers_number",
+        "name": "Count_wrong_answers",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_constructor_custom_page_constructor",
+        "name": "Page_constructor",
+        "bubble_type": "custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_custom_quest_name_constructor",
+        "name": "Quest_name",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_price",
+    "display": "Event_price",
+    "api_typename_guess": "event_price",
+    "fields": [
+      {
+        "id": "price_event_number",
+        "name": "price_event",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "_request_a_review_boolean",
+        "name": "request_a_review",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "payment_method_event_option_event_payment_method",
+        "name": "payment_method_event",
+        "bubble_type": "option.event_payment_method",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "twoquestion",
+    "display": "twoQuestion",
+    "api_typename_guess": "twoquestion",
+    "fields": [
+      {
+        "id": "answer_text",
+        "name": "answer",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "upload_file",
+    "display": "Upload_File",
+    "api_typename_guess": "upload_file",
+    "fields": [
+      {
+        "id": "url_text",
+        "name": "Url",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "fourquestion",
+    "display": "FourQuestion",
+    "api_typename_guess": "fourquestion",
+    "fields": [
+      {
+        "id": "answer_text",
+        "name": "Answer",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "questcountry",
+    "display": "questCountry",
+    "api_typename_guess": "questcountry",
+    "fields": [
+      {
+        "id": "questcountryname_text",
+        "name": "questCountryName",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcountrynamesearch_text",
+        "name": "questCountryNameSearch",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcity_list_custom_questcity",
+        "name": "questCity",
+        "bubble_type": "list.custom.questcity",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "review_event",
+    "display": "Review_event",
+    "api_typename_guess": "review_event",
+    "fields": [
+      {
+        "id": "text_text",
+        "name": "text",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "grade_number",
+        "name": "grade",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "published_boolean",
+        "name": "Published",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_custom_event",
+        "name": "Event",
+        "bubble_type": "custom.event",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "review_quest",
+    "display": "Review_quest",
+    "api_typename_guess": "review_quest",
+    "fields": [
+      {
+        "id": "text_text",
+        "name": "text",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "grade_number",
+        "name": "grade",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "published_boolean",
+        "name": "Published",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_custom_quest_name_constructor",
+        "name": "Quest",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_country",
+    "display": "Event_country",
+    "api_typename_guess": "event_country",
+    "fields": [
+      {
+        "id": "user_user",
+        "name": "user",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "country_name_text",
+        "name": "country_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_city_list_custom_event_city",
+        "name": "event_city",
+        "bubble_type": "list.custom.event_city",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "numberofusers",
+    "display": "NumberOfUsers",
+    "api_typename_guess": "numberofusers",
+    "fields": [
+      {
+        "id": "number_number",
+        "name": "Number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "questsettings",
+    "display": "QuestSettings",
+    "api_typename_guess": "questsettings",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "Name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "counter_number",
+        "name": "counter",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "maxpage_number",
+        "name": "MaxPage",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "theme_custom_theme",
+        "name": "Theme",
+        "bubble_type": "custom.theme",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "numberofusers_number",
+        "name": "NumberOfUsers",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "language_list_option_language",
+        "name": "Language",
+        "bubble_type": "list.option.language",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_custom_quest_name_constructor",
+        "name": "Quest_Name",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "threequestion",
+    "display": "ThreeQuestion",
+    "api_typename_guess": "threequestion",
+    "fields": [
+      {
+        "id": "answer_text",
+        "name": "answer",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_programm",
+    "display": "Event_program_item",
+    "api_typename_guess": "event_program_item",
+    "fields": [
+      {
+        "id": "event_custom_event",
+        "name": "event",
+        "bubble_type": "custom.event",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_programm_event_text",
+        "name": "Name_programm_event",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "photo_programm_event_image",
+        "name": "Photo_programm_event",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "description_programm_event_text",
+        "name": "Description_programm_event",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_parameter",
+    "display": "Event_parameter",
+    "api_typename_guess": "event_parameter",
+    "fields": [
+      {
+        "id": "parameter_name_text",
+        "name": "parameter_name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "parameter_icon_image",
+        "name": "parameter_icon",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_work_time",
+    "display": "Event_worktime_item",
+    "api_typename_guess": "event_worktime_item",
+    "fields": [
+      {
+        "id": "work_time_date",
+        "name": "work_time",
+        "bubble_type": "date",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_custom_event",
+        "name": "work_event",
+        "bubble_type": "custom.event",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "work_users_list_user",
+        "name": "work_users",
+        "bubble_type": "list.user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "status_option_event_work_time_status",
+        "name": "Status",
+        "bubble_type": "option.event_work_time_status",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "page_constructor",
+    "display": "Page",
+    "api_typename_guess": "page",
+    "fields": [
+      {
+        "id": "text_text",
+        "name": "Main_text_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "place_text",
+        "name": "Place_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "video_file",
+        "name": "Video_link",
+        "bubble_type": "file",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "image_image",
+        "name": "Image_link",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_page_text",
+        "name": "Page_name_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "textbutto_text",
+        "name": "Button_text_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "latitude_number",
+        "name": "latitude",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "duration_ru_text",
+        "name": "Duration_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "hint_image_image",
+        "name": "Hint_Image",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "longitude_number",
+        "name": "longitude",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "duration_eng_text",
+        "name": "Duration_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "duration_srb_text",
+        "name": "Duration_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "gift_coins_number",
+        "name": "Gift_Coins",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "placeenglish_text",
+        "name": "Place_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "placeserbian_text",
+        "name": "Place_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "number_page_number",
+        "name": "Page_number",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_ru_text",
+        "name": "Quest_name_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_eng_text",
+        "name": "Quest_name_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_srb_text",
+        "name": "Quest_name_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_pageenglish_text",
+        "name": "Page_name_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_pageserbian_text",
+        "name": "Page_name_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_option_page_type",
+        "name": "Page_type",
+        "bubble_type": "option.page_type",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_buttonenglish_text",
+        "name": "Button_text_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_buttonserbian_text",
+        "name": "Button_text_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "gift_gif_option_gif_gift",
+        "name": "Gift_Gif",
+        "bubble_type": "option.gif_gift",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_for_assignment_text",
+        "name": "Question_RU",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_on_the_pageenglish_text",
+        "name": "Main_text_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_on_the_pageserbian_text",
+        "name": "Main_text_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "answer_for_exercise_list_text",
+        "name": "Answer",
+        "bubble_type": "list.text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "hint1_custom_page_constructor",
+        "name": "Hint",
+        "bubble_type": "custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_for_exerciseenglish_text",
+        "name": "Question_ENG",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "text_for_exerciseserbian_text",
+        "name": "Question_SRB",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "sample_custom_sample_constructor",
+        "name": "Sample",
+        "bubble_type": "custom.sample_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "next_page_custom_page_constructor",
+        "name": "Next_page",
+        "bubble_type": "custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "answer_card_list_custom_answer_card",
+        "name": "Answer_card",
+        "bubble_type": "list.custom.answer_card",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name1_custom_quest_name_constructor",
+        "name": "Quest_name",
+        "bubble_type": "custom.quest_name_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "sample_constructor",
+    "display": "Sample_constructor",
+    "api_typename_guess": "sample_constructor",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "Name_ru",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "image_image",
+        "name": "Image",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_eng_text",
+        "name": "Name_eng",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "name_srb_text",
+        "name": "Name_srb",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_type_option_page_type",
+        "name": "Page_type",
+        "bubble_type": "option.page_type",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_custom_page_constructor",
+        "name": "Page",
+        "bubble_type": "custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_meeting_point",
+    "display": "Event_meeting_point",
+    "api_typename_guess": "event_meeting_point",
+    "fields": [
+      {
+        "id": "latitude_meeting_point_text",
+        "name": "Latitude_meeting_point",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "longtitude_meeting_point_text",
+        "name": "Longtitude_meeting_point",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "description_meeting_point_text",
+        "name": "Description_meeting_point",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "photo_meeting_point_list_image",
+        "name": "Photo_meeting_point",
+        "bubble_type": "list.image",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "question_and_answer",
+    "display": "Event_question_and_answer",
+    "api_typename_guess": "event_question_and_answer",
+    "fields": [
+      {
+        "id": "answer_text",
+        "name": "Answer",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "question_text",
+        "name": "Question",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "event_included_in_cost",
+    "display": "Event_included_in_cost",
+    "api_typename_guess": "event_included_in_cost",
+    "fields": [
+      {
+        "id": "name_text",
+        "name": "Name",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "included_boolean",
+        "name": "Included",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "event_custom_event",
+        "name": "Event",
+        "bubble_type": "custom.event",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  },
+  {
+    "id": "quest_name_constructor",
+    "display": "Quest",
+    "api_typename_guess": "quest",
+    "fields": [
+      {
+        "id": "price_number",
+        "name": "Price",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "link_video_text",
+        "name": "link_video",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "users_list_user",
+        "name": "Users",
+        "bubble_type": "list.user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "creatoruser_user",
+        "name": "creatorUser",
+        "bubble_type": "user",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "placestart_number",
+        "name": "placeStartLatitude",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "shop_name_en_text",
+        "name": "Shop_name_en",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "shop_name_ru_text",
+        "name": "Shop_name_ru",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "previe_image_image",
+        "name": "Preview_image",
+        "bubble_type": "image",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_en_text",
+        "name": "Quest_name_en",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "reviewgrade_number",
+        "name": "reviewGrade",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "shop_name_srb_text",
+        "name": "Shop_name_srb",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_eng_text",
+        "name": "Quest_name_ru",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_name_srb1_text",
+        "name": "Quest_name_srb",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "completedcount_number",
+        "name": "completedcount",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "tags_list_custom_tags",
+        "name": "Tags",
+        "bubble_type": "list.custom.tags",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "countcoinmadeit_number",
+        "name": "countCoinMadeIt",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "summary_of_the_quest_text",
+        "name": "Summary_of_the_quest_ru",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "age_limit_option_age_limit",
+        "name": "Age_limit",
+        "bubble_type": "option.age_limit",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcity_custom_questcity",
+        "name": "questCity",
+        "bubble_type": "custom.questcity",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "placestartlongtitude_number",
+        "name": "placeStartLongitude",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "publish_on_the_site_boolean",
+        "name": "Publish_on_the_site",
+        "bubble_type": "boolean",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "summary_of_the_quest_en_text",
+        "name": "Summary_of_the_quest_en",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "summary_of_the_quest_srb_text",
+        "name": "Summary_of_the_quest_srb",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "quest_level_option_quest_level",
+        "name": "Quest_level",
+        "bubble_type": "option.quest_level",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "review_list_custom_review_quest",
+        "name": "Reviews",
+        "bubble_type": "list.custom.review_quest",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "statusquest_option_status_quest",
+        "name": "statusQuest",
+        "bubble_type": "option.status_quest",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questcountry_custom_questcountry",
+        "name": "questCountry",
+        "bubble_type": "custom.questcountry",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "page_list_custom_page_constructor",
+        "name": "Page",
+        "bubble_type": "list.custom.page_constructor",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "questsetting_custom_questsettings",
+        "name": "Quest_setting",
+        "bubble_type": "custom.questsettings",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "informationaboutthecreatorofthequest_text",
+        "name": "informationAboutTheCreatorOfTheQuest",
+        "bubble_type": "text",
+        "is_list": false,
+        "deleted": false
+      },
+      {
+        "id": "thenumberofuserswhocompletedthequest_number",
+        "name": "theNumberOfUsersWhoCompletedTheQuest",
+        "bubble_type": "number",
+        "is_list": false,
+        "deleted": false
+      }
+    ],
+    "privacy_role": {}
+  }
+]
