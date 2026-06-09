@@ -393,6 +393,38 @@ This integration converges with prior slices (events/facts as the unifying robus
 
 ---
 
+## Client Requirements Alignment & Resolutions (from mismatch analysis — mandatory cross-cut)
+**Summary (harsh but necessary):** Prior blueprint/locked (pre this client block) was internally consistent (KISS one-shape GameStep + facts + snapshots + content-first vs old 14 Page_type/36-field/1163-WF mess) but *client-misaligned* on core gameplay/UX/product details from the explicit "Описание сайта" (3 components, 4 templates as primary, comic per page + roles, navigator button, wrong-popup hints, any-page "Оставить отзыв" errors + post rate, animated/voiced bonuses + rating spend, physical "move + optional action"). Grep confirmed zero prior mentions of key terms. Ignoring would make blueprint invalid for the product.
+
+**Resolutions (chosen after mini-cycles per point; see full table + self-crit in client-requirements-mismatch-analysis.md):**
+- Marketplace as explicit peer (publish surfaces with comics).
+- 4 templates primary UI (map to modes + narrative; ctor picker; richer supporting on them).
+- Physical: uniform confirm (locked) + optional action metadata + rich content (statue fits); optional navigator.
+- Navigator: optional supporting data on physical/location steps: `navigator?: {lat, lng, label?, hint_only?}`. Constructor geo picker + "enable navigator button" toggle. Player: button on Task-no (device maps or in-app). Hint can gate reveal.
+- Comics/graphic per page: Role-based in GameStep media: `{primary/task, character, hint, atmosphere}` (comic style author-driven or flag). Per-step assignment in ctor (zones + thumbs). Bundle includes all. Hint role = the coin-gated one. Player renders per template/role.
+- Coins/bonuses: Earn on tasks (gifts + completion bonuses, snapshot-frozen). Add supporting for `bonus_animation?: {asset_ref, voice_ref?}` (client plays on award). Extend CoinFact kinds for 'TASK_BONUS', 'RATING_SPEND' (or boost). Spend "or for rating": optional post-quest flow (spend to enable/higher-grade Review or derive player rating stat from net coins earned + reviews). Keep hints primary.
+- Hints: Primary trigger = **wrong answer popup** on Task-with (after fail: "Spend X to exchange?"). Uses per-step supporting.hint.cost. Still allow proactive per-step affordance if UX demands. Log in completion.
+- Feedback: New thin **FeedbackReport** (any-page global menu "Оставить отзыв", error/bug-focused, auto-attaches current step/quest/attempt context, synced like completions). Keep/enhance **Review** (post-completion rate + comment). Global menu in all 4 templates. Constructor/quest stats: read-only list of reports per version.
+- Cross (hardened by client flows): **Event-sourced facts mandatory** for all (template advances, navigator uses, popup exchanges, mid FeedbackReports, anim triggers, rating spends) — resolves AN05 races exacerbated by new mid-quest state. Offline bundle **must** pack comics (roles), navigator data, animation/voice refs (beyond prior geo/hint). Constructor gates + minis now include "every Task template has primary comic?", navigator valid, etc. "Hard to publish bad" amplified for visuals.
+- Marketplace integration: Constructor publish → "list in marketplace" (with comic primary + template summary). Grants/purchase flow through marketplace surface.
+
+**Impacts table (condensed from report):**
+| Client Point | Resolution | Key Cross |
+|--------------|------------|-----------|
+| 3 components + marketplace | Elevate as peer catalog + grants; publish → list with comic primary | 02/00/06/04 publish flow |
+| 4 templates primary | UI-primary 4 (First/narrative, Task-no/physical, Task-with/answer, Continue/narrative); ctor picker + richer ok | 01/04 GameStep + ctor; player render; bundle |
+| Physical move+optional action | Uniform confirm (locked) + optional action metadata/content + nav | 01/04 supporting; 03/05 events (physical_confirmed) |
+| Comic per page + 4 roles | Role media in GameStep; ctor assignment; bundle includes | 03 offline bundle; 04 ctor media zones; player per-template |
+| Navigator button (optional hint) | Optional navigator data on physical; ctor geo+toggle; player button | 01/04/03 supporting + bundle; events if used |
+| Bonuses animated/voiced + rating spend | supporting.bonus_animation + voice; CoinFact extensions (TASK_BONUS, RATING_SPEND); post-quest flow | 04 coins facts; 05 events; 03 bundle assets; ctor flags |
+| Hints via wrong popup | Popup primary on answer fail (exchange cost); per-step still | 01/04 hint; 05 hint_purchased event (wrong flow only); player answer flow |
+| Any-page "Оставить отзыв" errors + post rate | FeedbackReport (menu any, error, context) + Review (post); global menu all templates | 01 domain (new entity); 05 facts/sync; 04 ctor visibility; player all 4 |
+| (Cross) events + bundle + ctor for new flows | Facts mandatory (AN05 hardened); bundle: comics/roles/nav/anim/voice; ctor: picker + roles + nav + anim + popup wiring + visual gates | All slices; "hard to publish bad" now includes visuals |
+
+**Self-crit of alignment:** Resolutions preserve blueprint strengths (one GameStep, facts robustness, snapshot freeze, rich content primary, client local val) while achieving client fidelity. Risks (bundle >5MB, ctor velocity, new sync surfaces) accepted and mitigated (compression, presets, facts + keys). Without real 556-step export walk, some mappings (comic role frequency, action vs pure move, popup UX) remain hypothetical — repeated rec across analyses. "Marketplace" may be mostly naming/UX elevation (low risk). Full table + mini-cycles + impacts in the dedicated mismatch report.
+
+**Path:** Lock in 08 (done); propagate to 01/03/04/00/02/06/07 (key invariants + fields + sync rewrite + client visuals + marketplace); update blueprint (this section + revisions to 1-6); CONCEPTUAL_DESIGN_RU.md already incorporates; real quest data walk for validation; pre-impl shared types + golden fixtures including new visuals; measure bundle/velocity post-MVP.
+
 ## 7. Commerce, AccessGrant, Coupons, Free Quests, Lifetime Access, Single-Purchase (from ANALYZE-06 — launching now)
 
 **Locked (02 + 08):** One-time purchase (or 100% coupon or free) for a player+quest creates permanent lifetime AccessGrant. Coupons = % discounts (different % supported; 100% = free via coupon). Free quests = identical mechanics (added to collection, downloadable, playable; price=0 or is_free flag). Single quest checkout only (v1, no cart). Grants from Payment/CouponRedemption/Free/Admin. Idempotent (webhook retries, double-clicks).
