@@ -1,0 +1,18 @@
+# Python venv
+.venv/
+
+# Secrets
+discovery/config/app.env
+.env
+.env.*
+
+# Raw data (may contain PII)
+discovery/raw/data-api/**/list_page_*.json
+discovery/raw/exports/
+
+# Logs
+discovery/logs/
+*.log
+
+# Checkpoints with potentially sensitive metadata
+discovery/checkpoints/
