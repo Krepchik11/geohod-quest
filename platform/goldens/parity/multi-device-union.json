@@ -1,0 +1,11 @@
+{
+  "name": "multi-device-union",
+  "description": "Post-union log with facts from two devices for different steps. Projection is device-blind: completed union, single gift counted once (cross-device duplicates were absorbed at append).",
+  "facts": [
+    { "type": "physical_confirmed", "step_position": 0, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-a" },
+    { "type": "answer_submitted", "step_position": 1, "submitted_value": "1730", "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-b" },
+    { "type": "gift_claimed", "step_position": 1, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "device-b" },
+    { "type": "navigator_used", "step_position": 0, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-a" }
+  ],
+  "expected": { "balance": 5, "completed_steps": [0, 1], "revealed_hints": [] }
+}

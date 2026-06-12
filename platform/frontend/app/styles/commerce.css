@@ -1,0 +1,179 @@
+/* ============================================================
+   GEOHOD QUEST — витрина/коммерция. Ported from
+   design/commerce/site-theme.css. Adaptations: asset urls point
+   to /assets/icons/; the .site container sizing rules are owned
+   by the app shell (body.site), not this file.
+   ============================================================ */
+
+.site {
+  --blue: #3B71FE;
+  --navy: #1A2B48;
+  --navy-display: #122947;
+  --ink: #000F08;
+  --dark: #232323;
+  --pink: #E75A7C;
+  --star: #FFB21D;
+  --bg-light: #F7F8FA;
+  --border: #DEDEDE;
+  --gray: #83858C;
+  --green: #1F8A5B;
+  --shadow-card: 0 12px 12px rgba(0,0,0,.05), 1px 2px 15px rgba(0,0,0,.08);
+  --font-display: 'Jost', sans-serif;
+}
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--navy-display);
+}
+
+/* ---------- Шапка ---------- */
+.s-head {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24px 48px;
+}
+.s-logo { display: flex; align-items: center; gap: 10px; }
+.s-logo .mark { width: 34px; height: 30px; background: url("/assets/icons/logo-mark--navy.svg") no-repeat center / contain; }
+.s-logo .text { width: 60px; height: 32px; background: url("/assets/icons/logo-text--navy.svg") no-repeat center / contain; }
+.s-nav { display: flex; gap: 28px; }
+.s-nav a { font-family: var(--font-display); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--navy-display); text-decoration: none; white-space: nowrap; }
+.s-nav a:hover, .s-nav a.active { color: var(--blue); }
+.s-head__right { display: flex; align-items: center; gap: 16px; }
+.s-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  border: 1px solid var(--border);
+  position: relative; flex: none;
+}
+/* Геометрия фигуры: иконка 24×24 в центре аватара 48 (проценты — масштабируется на моб. 36px) */
+.s-avatar .head { position: absolute; left: 41.5%; top: 29%; width: 17%; height: 19%; background: url("/assets/icons/ic-user-head--navy.svg") no-repeat center / contain; }
+.s-avatar .body { position: absolute; left: 33.5%; top: 53%; width: 33%; height: 18%; background: url("/assets/icons/ic-user-body--navy.svg") no-repeat center / contain; }
+
+/* ---------- Кнопки ---------- */
+.s-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 52px; padding: 0 36px;
+  border-radius: 26px; border: none; cursor: pointer;
+  background: var(--blue); color: #fff;
+  font: 700 14px/1 'Inter', sans-serif;
+  transition: filter .12s ease, transform .12s ease;
+  text-decoration: none;
+}
+.s-btn:hover { filter: brightness(1.08); }
+.s-btn--dark { background: var(--dark); }
+.s-btn--outline { background: transparent; color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
+.s-btn--outline:hover { background: rgba(59,113,254,.06); filter: none; }
+.s-btn--block { width: 100%; }
+.s-btn:disabled { background: var(--border); color: var(--gray); cursor: default; filter: none; }
+.s-link { background: none; border: none; padding: 0; color: var(--blue); font: 400 13px/1.4 'Inter', sans-serif; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- Карточки и поля ---------- */
+.s-card { background: #fff; border-radius: 18px; box-shadow: var(--shadow-card); }
+.s-input {
+  width: 100%; height: 50px; padding: 0 16px;
+  border: 1px solid var(--border); border-radius: 10px;
+  font: 400 14px/1 'Inter', sans-serif; color: var(--navy);
+  outline: none; transition: border-color .12s ease;
+}
+.s-input:focus { border-color: var(--blue); }
+.s-input::placeholder { color: rgba(26,43,72,.5); }
+.s-input--error { border-color: var(--pink); }
+.s-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--pink); margin-top: 6px; }
+
+/* ---------- Чекаут ---------- */
+.co-wrap { flex: 1; padding: 8px 140px 64px; }
+.co-title { font-size: 20px; font-weight: 700; }
+.co-sub { margin-top: 6px; font-size: 13px; color: var(--gray); }
+.co-cols { display: grid; grid-template-columns: 1fr 388px; gap: 28px; margin-top: 28px; align-items: start; }
+
+.co-quest { padding: 24px; display: flex; gap: 20px; }
+.co-quest__photo {
+  flex: none; width: 200px; height: 148px; border-radius: 12px;
+  background: center / cover no-repeat; position: relative; overflow: hidden;
+}
+.co-quest__photo .qmark { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Prata', serif; font-size: 40px; color: #fff; }
+.co-quest__body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.co-quest__meta { display: flex; gap: 16px; font-size: 12px; color: var(--navy); opacity: .55; }
+.co-quest__meta span { display: inline-flex; align-items: center; gap: 5px; }
+.co-quest__meta .ic { width: 13px; height: 13px; background: center / contain no-repeat; }
+.co-quest h3 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1.3; }
+.co-quest__author { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--navy); opacity: .6; margin-top: auto; }
+.co-quest__author img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.co-life {
+  margin-top: 16px; padding: 14px 18px;
+  border: 1px dashed var(--border); border-radius: 12px;
+  font-size: 13px; color: var(--gray);
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.co-life b { color: var(--navy); font-weight: 600; }
+
+.co-order { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.co-order h4 { margin: 0; font-size: 16px; font-weight: 700; }
+.co-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.co-row .lbl { color: var(--gray); }
+.co-row--discount { color: var(--green); }
+.co-row--discount .lbl { color: var(--green); }
+.co-divider { height: 1px; background: var(--border); }
+.co-total { display: flex; justify-content: space-between; align-items: baseline; }
+.co-total .lbl { font-size: 14px; color: var(--gray); }
+.co-total b { font-size: 24px; font-weight: 700; }
+.co-total .was { font-size: 14px; color: var(--gray); text-decoration: line-through; margin-right: 8px; font-weight: 400; }
+.co-coupon { display: flex; gap: 8px; }
+.co-coupon .s-input { flex: 1; }
+.co-coupon .s-btn { height: 50px; padding: 0 22px; border-radius: 10px; }
+.co-applied {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; border-radius: 10px;
+  background: rgba(31,138,91,.08); color: var(--green);
+  font-size: 13px; font-weight: 600;
+}
+.co-applied .s-link { color: var(--green); font-size: 12px; }
+.co-pays { display: flex; align-items: center; gap: 10px; }
+.co-pays .note { font-size: 12px; color: var(--gray); margin-right: auto; }
+.co-pays img, .co-pays .pay { height: 22px; }
+.co-secure { font-size: 12px; color: var(--gray); line-height: 1.5; }
+
+/* ---------- Результат ---------- */
+.res-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; }
+.res-card { width: 520px; padding: 44px 48px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.res-icon { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: rgba(59,113,254,.1); color: var(--blue); }
+.res-icon--fail { background: rgba(231,90,124,.1); color: var(--pink); }
+.res-card h2 { margin: 0; font-size: 22px; font-weight: 700; }
+.res-card p { margin: 0; font-size: 14px; color: var(--gray); max-width: 360px; }
+.res-details { width: 100%; margin-top: 8px; padding: 16px 20px; border-radius: 12px; background: var(--bg-light); display: flex; flex-direction: column; gap: 8px; }
+.res-details .co-row { font-size: 13px; }
+.res-actions { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* ---------- Вход перед покупкой ---------- */
+.auth-ctx {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 16px; border-radius: 12px;
+  background: rgba(59,113,254,.07);
+  font-size: 13px; color: var(--navy);
+}
+.auth-consent { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--gray); }
+.auth-consent input { margin-top: 2px; accent-color: var(--blue); }
+.ic-tg { width: 18px; height: 18px; background: url("/assets/icons/ic-telegram-plane--white.svg") no-repeat center / contain; }
+
+/* ---------- Точки входа (фрагмент страницы квеста) ---------- */
+.entry-card { padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+.entry-price { display: flex; align-items: baseline; gap: 10px; }
+.entry-price .lbl { font-size: 16px; }
+.entry-price b { font-size: 22px; font-weight: 700; }
+.entry-price .free { color: var(--green); }
+.entry-owned { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--green); font-weight: 600; }
+
+/* ---------- Оверлей «переход к оплате» ---------- */
+.pay-overlay {
+  position: fixed; inset: 0; z-index: 10;
+  background: rgba(35,35,35,.8);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  color: #fff; font-size: 14px;
+}
+.pay-overlay .spin {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.25); border-top-color: #fff;
+  animation: co-spin .8s linear infinite;
+}
+@keyframes co-spin { to { transform: rotate(360deg); } }

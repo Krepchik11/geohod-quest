@@ -1,0 +1,32 @@
+## Why
+
+After the quest-player-pwa + backend-facts-sync + player-reconnect-wiring + marketplace-grants cycles (4-template player with any-page feedback, append-only facts with idempotent natural keys + corrections + manifest + client/server projector fidelity on real export goldens including "МИХАЙЛО ПУПИН" + gift +5 + edges/wrongs/hints/feedback/nav, real reconnect wiring, lifetime idemp source-audited grants + peer marketplace + checkout + 100% coupon + free identical, 100% shared + TDD goldens + enhance existing + YAGNI), Phase 3 Admin visibility is required per PLAN. Per-version stats (grants, attempts, completion rates, submitted wrong answers, hints used, navigator clicks, FeedbackReports per step) + list of FeedbackReports per quest/version (read-only for authors) close the loop for quality (mitigates "frozen bad content" risk on immutable snapshots) and author visibility. Facts are sole source for usage/hints/wrongs/nav/feedback/grants/attempts/completion (idemp ensures accuracy); snapshots provide versioned content. This is the required slice after Player + Sync + Commerce.
+
+## What Changes
+
+- Per-version stats projector (pure fold from facts logs bound to snapshots + grants by quest; counts grants/attempts/completions + per-step wrongs/hints/nav/feedback; mirrors client project* + marketplace grant logic exactly).
+- FeedbackReport thin append-only (already via unified Fact::FeedbackReported with mid-quest step context; idempotent natural key like facts; read-only list endpoint per quest/version for authors).
+- Admin surface (small focused components for stats cards + FeedbackReports list read-only per version; 100% reuse snapshots/goldens for versioned content display; enhance existing or narrow new per react agents).
+- TDD goldens contract extended first (RED for stats computation + feedback listing + grant/attempt/completion correlation using happy-with-gift + edges, then green; backend replay + frontend cases).
+- Backend minimal (in-mem store extension or pure fns for aggregation over existing fact_logs + grants + published meta + snap bindings; new read-only routes; idempotent like grants/facts; explicit swap path documented; no new deps).
+- Strict reuse: facts/snapshots/goldens as TDD contract (no dupe logic for stats/feedback); small comps per rust/react agents; YAGNI (in-mem for admin data, no advanced UI/analytics, no real-money adjustments, no external authors, no GDPR).
+- No **BREAKING** changes (additive endpoints, extend existing projectors/stores, goldens fidelity + all prior flows untouched).
+
+## Capabilities
+
+### New Capabilities
+- `admin-visibility`: Per-version stats (grants, attempts, completion rates, submitted wrong answers, hints used, navigator clicks, FeedbackReports per step) computed as pure fold from facts (idempotent sole source) + grants; list of FeedbackReports per quest/version (read-only for authors, mid-quest step context attached); admin visibility surface in frontend + minimal backend projector/read; TDD goldens extended for stats/feedback flows + grant/attempt/completion correlation; 100% reuse of facts/snapshots/goldens/snap bindings; small surface (stats cards + read-only list); YAGNI in-mem/simple; survives races via idemp facts + pure recompute + snapshot freeze. (Creates `specs/admin-visibility/spec.md`)
+
+### Modified Capabilities
+(none; existing facts-sync / marketplace-grants / quest-player-pwa REQUIREMENTS unchanged — projectors additive, feedback already in facts, grants/attempts correlation additive for stats; no behavior change to append/idemp/player/grants)
+
+## Impact
+
+- **Frontend**: `frontend/app/page.tsx` or ctor/landing enhance (narrow admin section or cards); small focused components (e.g. AdminStats cards for per-version metrics, FeedbackReportsList read-only per quest/version; co-located like MarketplaceList/CheckoutForm/FeedbackMenu); 100% import from goldens/shared for snapshots/versioned content + no dupe; additive only.
+- **Backend**: `backend/src/facts.rs` (un-allow or expose project_analytics + new pure per_version_stats/project_grants_for_quest etc); `backend/src/store.rs` (additive reverse snap->attempts index or scan helpers + list_feedbacks_for_snapshot; extension point); `backend/src/main.rs` (new read-only routes e.g. /api/admin/versions/:snapshot/stats + /feedbacks or /api/quests/... ; AppState reuse; handlers thin lock + pure fold); `backend/src/errors.rs` (additive if needed); integration tests in #[cfg(test)] for stats accuracy on golden facts + feedback list + grant/attempt/completion corr.
+- **Tests/goldens**: `frontend/lib/__tests__/player-replay.test.ts` + goldens (extend with stats/feedback cases + corr); backend tests replay + new stats cases; all prior goldens "МИХАЙЛО ПУПИН"+gift+5 + edges preserved.
+- **OpenSpec + quality**: New `proposal.md` + `design.md` + `specs/admin-visibility/spec.md` + `tasks.md`; on apply syncs to `openspec/specs/`. 20+ small TDD tasks (heavy reads first, goldens RED first for stats/feedback + corr, pure impls, reuse greps, rust/react gates, cargo/frontend build/lint, manual admin views + stats accuracy + feedback mid-quest + publish version + reconnect no-inflate).
+- **Downstream**: Enables per-version analytics/feedback for authors (per PLAN Phase 3 after Player+Sync+Commerce/Marketplace); mitigates frozen bad content risk via step-level visibility; "Save + open in real player" + grants now have usage stats; all invariants (facts sole source, snapshots frozen, client auth, idemp) preserved + prior cycle fidelity.
+- Follows TDD (goldens non-negotiable), SOLID/DRY/KISS/YAGNI (pure fold reuse, small, in-mem, enhance), agents (rust.md: docs/Result/AAA/4sp/no unwrap/clippy; react.md: RSC, small comps, derived, narrow, no barrels), blueprint (Admin visibility bullets + Phase 4 polish note + risks), archived artifacts (reuse facts/snap/goldens exactly like marketplace did grants). All client/server contracts survive races (stats during active/reconnect/version publish, concurrent feedback, multi-device merge for counts, feedback mid-quest).
+
+This change makes admin visibility (per-version stats + read-only FeedbackReports) real and verifiable against the facts-as-source contract after the prior cycles. All artifacts produced via full adversarial cycle (deconstruct/expose/rebuild/self-crit on every artifact/decision). Ready for orchestrator review + apply.

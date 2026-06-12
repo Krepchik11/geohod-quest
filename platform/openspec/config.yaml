@@ -1,0 +1,48 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  Monorepo root: platform/
+    - backend/ : Rust 1.96.0 (edition 2024) + Axum 0.8 web server. Clean architecture: config, errors (thiserror + anyhow), router + AppState, tracing + tower-http middleware (trace, cors, timeout), graceful shutdown. Strict adherence to agents/rust.md (no .unwrap() in prod paths, doc comments on all pub items, #[test] modules, cargo fmt + clippy -D warnings, meaningful names, 4-space, Result everywhere, etc.).
+    - frontend/ : Next.js 16.2 + React 19 (App Router, RSC-first). Tailwind, TypeScript strict. Strict adherence to agents/react.md (eliminate waterfalls via composition and parallel fetching, module-level hoisting for static, avoid barrel files, narrow dependencies, explicit conditionals, use of Suspense, no premature client components, performance-first patterns).
+    - openspec/ : spec-driven schema for managing changes, proposals, tasks, specs, design.
+    - .claude/ : Custom skills and slash commands (/openspec-apply-change, /openspec-propose, etc.) for the OpenSpec workflow. Moved here so the monorepo is self-contained.
+    - Root: npm workspaces (frontend), package.json orchestration scripts (dev, build, test, lint across parts), .gitignore, high-quality README.
+
+  Tech stack details:
+    - Backend: axum, tokio (full), tower-http (trace/cors/timeout), tracing + tracing-subscriber (env-filter), serde + serde_json, anyhow, thiserror, dotenvy. rust-toolchain.toml pins 1.96.0 + rustfmt/clippy.
+    - Frontend: next@16.2, react@19, tailwind, eslint (flat), typescript. Uses Geist fonts (module-hoisted), Image component, pure Server Components by default.
+    - Tooling: npm (workspaces + concurrently for joint dev). Cargo for Rust.
+
+  Domain (primary source: ../blueprint/ — the distilled concepts and development plan. Historical analyses and legacy material from the exploratory phase are archived in ../old-knowledgebase/ for reference only):
+    GeoQuest: Three peer components (Marketplace of quests, Quest player experience, internal-only Quest Constructor).
+    Core model: linear GameSteps (4 primary templates: First screen, Task no answer/physical, Task with answer, Continue), per-page comic images (4 roles: task/character/hint/atmosphere), navigator button (optional hint/shortest route on physical), coins earned only from play (gifts + completion bonuses, animated+voiced), hints ONLY via wrong-answer popup spend.
+    Critical invariants: Immutable version snapshots on explicit Publish (old attempts stay bound to their snapshot forever). All progress/coins/hints/navigator/feedback/rating spends recorded as append-only immutable facts (AttemptFact + CoinFact). Client is authoritative for validation against the exact snapshot it downloaded (full offline PWA support, ~5MB bundles). Server only appends facts (idempotent) and projects authoritative state + issues corrections on sync. Lifetime AccessGrant required before play. No branching in v1. Russian only. Internal admins only for authoring.
+
+  Principles (non-negotiable):
+    - TDD, SOLID, DRY, KISS, YAGNI.
+    - Highest readability and maintainability. Role: Chief Staff Engineer + extreme skepticism. Every approach (including this one) must survive adversarial scrutiny: deconstruct edge cases/races/bottlenecks/best-practice violations, expose flaws harshly, rebuild superior alternative, self-critique.
+    - Follow agents/rust.md and agents/react.md to the letter on all code.
+    - Initial setup must produce immediately verifiable, runnable, high-quality skeleton with tests, lint, fmt, build passing cleanly. No gold-plating.
+
+  Current project state (after this change):
+    - Fresh monorepo created with clean backend + frontend skeletons.
+    - OpenSpec engine (.claude skills + openspec/ config) moved from sibling 'engine/' into this monorepo for self-contained spec-driven development.
+    - All quality gates passing (cargo test/clippy/fmt, next build, root orchestration scripts).
+    - No production domain logic yet (YAGNI); health endpoint + descriptive landing only.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+rules:
+  proposal:
+    - Be concise but include clear goals, non-goals, and rationale for the monorepo + engine move.
+    - Reference the adversarial cycle and constraints.
+  tasks:
+    - Break into small, verifiable steps with explicit "verify with command X" where possible.
+    - Immediately mark [x] when a task is truly complete and verified (not just started).
+    - Include a final "self-critique + gates" task.
+  design:
+    - For infrastructure changes, focus on layout decisions, trade-offs considered (YAGNI vs best-practice monorepo DX), and how it enables future slices (facts, snapshots, 4-template player, constructor).
+

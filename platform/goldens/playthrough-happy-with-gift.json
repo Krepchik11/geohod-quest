@@ -1,0 +1,75 @@
+{
+  "golden_id": "golden-mystery-fortress-v1-happy-path",
+  "quest_snapshot_id": "golden-mystery-fortress-v1",
+  "description": "Happy path exercising first_screen (physical), one answer step with real synonym list, gift award, and terminal. Uses real acceptable data from export. Tests isAnswerCorrect, gift fact, basic projection, terminal completion.",
+  "actions": [
+    {
+      "step_position": 0,
+      "type": "physical_confirm",
+      "value": null,
+      "note": "Started the journey",
+      "device_id": "device-a",
+      "local_ts": 1000,
+      "local_is_correct": true
+    },
+    {
+      "step_position": 1,
+      "type": "submit_answer",
+      "value": "МИХАЙЛО ПУПИН",
+      "note": null,
+      "device_id": "device-a",
+      "local_ts": 2000,
+      "local_is_correct": true
+    },
+    {
+      "step_position": 3,
+      "type": "physical_confirm",
+      "value": null,
+      "note": "Completed the quest",
+      "device_id": "device-a",
+      "local_ts": 3000,
+      "local_is_correct": true
+    }
+  ],
+  "expected_facts": [
+    {
+      "type": "physical_confirmed",
+      "step_position": 0,
+      "submitted_value": null,
+      "local_is_correct": true,
+      "coins_delta": 0,
+      "note": "Started the journey",
+      "device_id": "device-a"
+    },
+    {
+      "type": "answer_submitted",
+      "step_position": 1,
+      "submitted_value": "МИХАЙЛО ПУПИН",
+      "local_is_correct": true,
+      "coins_delta": 0,
+      "note": null,
+      "device_id": "device-a"
+    },
+    {
+      "type": "gift_claimed",
+      "step_position": 2,
+      "submitted_value": null,
+      "local_is_correct": true,
+      "coins_delta": 5,
+      "note": "Gift from step 2 (synthesized coverage)",
+      "device_id": "device-a"
+    },
+    {
+      "type": "attempt_completed",
+      "step_position": 3,
+      "submitted_value": null,
+      "local_is_correct": true,
+      "coins_delta": 0,
+      "note": "Completed the quest",
+      "device_id": "device-a"
+    }
+  ],
+  "expected_final_balance": 5,
+  "expected_revealed_hints": [],
+  "notes": "Real synonym 'МИХАЙЛО ПУПИН' from export used for isAnswerCorrect test. Gift fact synthesized on a step that had supporting.gift in the clean snapshot (to cover coin projection). All local_is_correct match client claims per blueprint (server records, does not override). This golden can be fed directly to projectBalance and fact emission logic."
+}
