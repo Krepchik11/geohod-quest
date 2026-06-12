@@ -123,6 +123,18 @@ select.field-ui { cursor:pointer; padding-right:56px; background:var(--white) ur
 .modal__close::before { content:"✕"; font-size:18px; line-height:1; }
 .modal__close:hover { color:var(--blue); }
 
+/* AUTH — карточка входа/регистрации (геометрия .auth-card из design/commerce/site-theme.css) */
+.auth-wrap { display:flex; justify-content:center; padding:48px 24px 96px; min-height:60vh; }
+.auth-card { position:relative; width:460px; padding:40px 44px; align-self:flex-start; }
+.auth-title { font-size:20px; font-weight:700; text-align:center; }
+.auth-card__close { position:absolute; top:16px; right:16px; width:24px; height:24px; display:grid; place-items:center; font-size:18px; line-height:1; color:var(--ink); }
+.auth-card__close:hover { color:var(--blue); }
+.auth-policy { display:flex; gap:10px; align-items:flex-start; font-size:12.5px; color:var(--gray); margin:6px 0 4px; cursor:pointer; }
+.auth-policy input { margin-top:2px; accent-color:var(--blue); }
+.auth-policy .box { display:none; }
+.auth-policy a { text-decoration:underline; }
+.auth-error { margin-top:10px; padding:10px 14px; border-radius:10px; background:rgba(231,90,124,.1); color:var(--pink); font-size:13px; }
+
 /* SITE */
 body.site { min-width:1240px; }
 .container { width:1240px; margin:0 auto; padding:0 42px; }
@@ -143,8 +155,8 @@ body.site { min-width:1240px; }
 .lang-switch .globe { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; }
 .lang-switch:hover { color:var(--blue); }
 .globe-icon { position:relative; width:27px; height:27px; }
-.globe-icon .ring, .globe-icon .m1, .globe-icon .m2 { position:absolute; background:var(--ic) no-repeat center/contain; }
-.globe-icon .ring { inset:0; --ic:url("/assets/icons/c/ic-globe-ring--navy.svg"); }
+.globe-icon .ic-ring, .globe-icon .m1, .globe-icon .m2 { position:absolute; background:var(--ic) no-repeat center/contain; }
+.globe-icon .ic-ring { inset:0; --ic:url("/assets/icons/c/ic-globe-ring--navy.svg"); }
 .globe-icon .m1 { left:32%; top:0; width:15%; height:100%; --ic:url("/assets/icons/c/ic-lang-mer1--navy.svg"); }
 .globe-icon .m2 { left:51%; top:0; width:15%; height:100%; --ic:url("/assets/icons/c/ic-lang-mer2--navy.svg"); }
 .globe-icon::before, .globe-icon::after { content:""; position:absolute; left:9%; right:9%; height:1.5px; background:var(--navy); border-radius:1px; }
@@ -222,11 +234,12 @@ a.contact:hover .contact__tile { background:#2E5FE3; }
 .ic-globe .r { inset:12.5%; --ic:url("/assets/icons/c/ic-globe-ring--white.svg"); }
 .ic-globe .s { left:33%; top:33%; width:34%; height:34%; --ic:url("/assets/icons/c/ic-globe-small--white.svg"); }
 .ic-tg { --ic:url("/assets/icons/c/ic-telegram-plane--white.svg"); }
+.ic-phone { --ic:url("/assets/icons/c/ic-phone--white.svg"); }
 .site-footer__links { grid-row:1/3; grid-column:3; justify-self:end; display:flex; flex-direction:column; gap:13px; font-size:14px; line-height:20px; }
 .site-footer__links a:hover { text-decoration:underline; }
 .payments { display:flex; gap:12px; margin-top:12px; }
 .pay { width:32px; height:32px; border-radius:50%; background:var(--white); display:grid; place-items:center; position:relative; }
-.pay--visa .g { width:19px; height:7px; background:url("/assets/icons/c/pay-visa--brand.svg") no-repeat center/contain; transform:scaleY(-1); }
+.pay--visa .g { width:19px; height:7px; background:url("/assets/icons/c/pay-visa--brand.svg") no-repeat center/contain; }
 .pay--mc .g { position:relative; width:20px; height:12px; }
 .pay--mc .g::before, .pay--mc .g::after { content:""; position:absolute; top:0; width:12px; height:12px; border-radius:50%; }
 .pay--mc .g::before { left:0; background:#EB001B; }

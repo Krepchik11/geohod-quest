@@ -233,7 +233,7 @@ export default function MyQuestsPage() {
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>
         ) : rows.length === 0 ? (
           <div className="s-card mq-empty" style={{ marginTop: 24 }}>
-            <div className="ring">?</div>
+            <div className="ic-ring">?</div>
             <h3>Пока ни одного квеста</h3>
             <p>Выберите квест в магазине — после покупки или получения он появится здесь и останется навсегда.</p>
             <Link className="s-btn" href="/">В магазин квестов</Link>

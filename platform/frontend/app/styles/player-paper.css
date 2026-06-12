@@ -122,14 +122,14 @@
   position: absolute; inset: 0; display: grid; place-items: center;
   background: rgba(0,0,0,.28); border: none; cursor: pointer; color: #fff;
 }
-.p-media__play .ring {
+.p-media__play .ic-ring {
   width: 64px; height: 64px; border-radius: 50%;
   display: grid; place-items: center;
   background: rgba(0,0,0,.5);
   border: 2px solid #fff;
   transition: transform .15s ease;
 }
-.p-media__play:hover .ring { transform: scale(1.08); }
+.p-media__play:hover .ic-ring { transform: scale(1.08); }
 .p-media__dur {
   position: absolute; right: 10px; bottom: 10px;
   font: 600 11px/1 'Inter', sans-serif; letter-spacing: .05em;

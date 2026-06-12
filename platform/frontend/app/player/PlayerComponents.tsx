@@ -246,7 +246,7 @@ export function MediaBlock({ image, imageLabel, video, onPlay }: {
       <div className="p-media">
         {video.poster ? <img src={video.poster} alt="" /> : <div className="p-media--ph" style={{ position: "absolute", inset: 0 }}><span>{video.label || "видео"}</span></div>}
         <button className="p-media__play" type="button" aria-label="Смотреть видео" onClick={onPlay}>
-          <span className="ring"><PPlay /></span>
+          <span className="ic-ring"><PPlay /></span>
         </button>
         <span className="p-media__dur">{video.dur}</span>
       </div>
