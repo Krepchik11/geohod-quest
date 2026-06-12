@@ -1,0 +1,46 @@
+# Shared goldens
+
+Single source of truth for projection goldens, consumed by **both** test suites:
+
+- Rust: `backend` integration test deserializes every `parity/*.json`, folds with
+  `project_balance` / `project_state`, asserts `expected`.
+- TypeScript: `frontend` vitest does the same with `projectBalance` / `projectState`.
+
+Neither side may keep its own copy of expected values for these scenarios
+(spec: `parity-goldens`). Editing a fixture must flip both suites together.
+
+## Parity fixture format (`parity/*.json`)
+
+```json
+{
+  "name": "scenario-slug",
+  "description": "human-readable intent",
+  "facts": [ { "type": "...", "step_position": 0, "submitted_value": null,
+               "local_is_correct": true, "coins_delta": 0, "note": null,
+               "device_id": "device-a" } ],
+  "expected": { "balance": 0, "completed_steps": [], "revealed_hints": [] }
+}
+```
+
+Fact wire format: externally tagged via `"type"` in `snake_case`
+(`physical_confirmed`, `answer_submitted`, `gift_claimed`, `hint_purchased`,
+`completion_bonus`, `attempt_completed`, `feedback_reported`, `navigator_used`).
+All variants carry the same six fields. There are no correction fact types:
+corrections are client-side projection diffs, never stored facts.
+
+Fold rules pinned by these fixtures:
+
+- balance = plain signed sum of `coins_delta`; **may be negative**, never clamped;
+- a step is completed by `physical_confirmed`, `attempt_completed`, or
+  `answer_submitted` **with `local_is_correct: true`** — wrong answers never
+  complete a step;
+- `hint_purchased` reveals its step's hint permanently;
+- fixtures are post-dedup logs: append-time idempotency (device-agnostic natural
+  key; completion bonus once per player+quest) is asserted by facts-sync tests,
+  not here.
+
+## Quest goldens
+
+- `golden-mystery-fortress-v1.json` — quest snapshot derived from a real export.
+- `playthrough-happy-with-gift.json` — action script + expected emitted facts for
+  the happy path (used by the frontend replay test).

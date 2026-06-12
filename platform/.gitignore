@@ -1,0 +1,57 @@
+# GeoQuest platform — root gitignore (only project files)
+# Keep this dir clean of docs, discovery data, and historical artifacts.
+
+# === Rust (backend) ===
+backend/target/
+**/*.rs.bk
+*.pdb
+
+# NOTE: backend/Cargo.lock is committed for reproducible builds of the service.
+# (We do not ignore it.)
+
+# === Node / Next.js / frontend ===
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+frontend/*.tsbuildinfo
+frontend/.vercel/
+frontend/.turbo/
+
+# Root level (if any extra builds)
+.next/
+out/
+
+# === Environment & secrets (never commit) ===
+.env
+.env.local
+.env.*.local
+*.env
+backend/.env
+frontend/.env.local
+
+# === OS / Editor / Tooling ===
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.sublime-*
+*.code-workspace
+
+# === Logs & temp ===
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+
+# === Test / coverage artifacts (keep minimal) ===
+coverage/
+.nyc_output/
+
+# === Misc (add as needed, keep YAGNI) ===
+# Do not add project-specific data dumps, quest exports, or large assets here.
+# Those belong in controlled storage / migration jobs, not the source tree.

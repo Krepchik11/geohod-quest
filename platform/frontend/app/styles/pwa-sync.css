@@ -1,0 +1,38 @@
+/* GEOHOD QUEST — PWA-синк: баннеры соединения, коррекции, очередь событий.
+   Ported from design/pwa/pwa.css (sim-panel omitted — design-canvas-only).
+   Дополнение к styles/player-paper.css (та же «бумажная» система). */
+
+/* Баннер состояния — модификаторы к .p-syncbar */
+.p-syncbar--syncing .dot { background: #3B71FE; animation: sync-pulse 1s ease infinite; }
+.p-syncbar--done .dot { background: #4CAF50; }
+@keyframes sync-pulse { 50% { opacity: .35; } }
+.p-syncbar .cnt {
+  margin-left: auto; font-weight: 700; font-size: 11px;
+  background: rgba(255,255,255,.18); border-radius: 10px; padding: 3px 8px;
+}
+
+/* Строки очереди событий (шторка «Синхронизация») */
+.sync-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 2px; border-bottom: 1px solid var(--p-line);
+  font-size: 13.5px;
+}
+.sync-row:last-child { border-bottom: 0; }
+.sync-row .what { flex: 1; min-width: 0; }
+.sync-row .what small { display: block; font-size: 11px; color: var(--p-muted); margin-top: 1px; }
+.sync-chip {
+  flex: none; font: 600 10.5px/1 'Inter', sans-serif;
+  padding: 5px 9px; border-radius: 10px; letter-spacing: .03em;
+}
+.sync-chip--wait { color: #8a6a1f; background: rgba(201,155,63,.18); }
+.sync-chip--sent { color: #2e6b4f; background: rgba(76,175,80,.16); }
+.sync-chip--fix { color: #8c2f1b; background: rgba(163,59,42,.14); }
+
+/* Коррекция баланса: до/после */
+.fix-balance {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  font-family: var(--p-display); font-size: 22px;
+}
+.fix-balance .arrow { font-family: 'Inter', sans-serif; font-size: 16px; color: var(--p-muted); }
+.fix-balance .old { text-decoration: line-through; opacity: .45; }
+.fix-balance b { display: inline-flex; align-items: center; gap: 7px; }

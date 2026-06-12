@@ -1,0 +1,6 @@
+{
+  "name": "empty-log",
+  "description": "Zero facts project to zero balance and empty sets on both sides.",
+  "facts": [],
+  "expected": { "balance": 0, "completed_steps": [], "revealed_hints": [] }
+}

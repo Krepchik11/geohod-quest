@@ -1,0 +1,12 @@
+{
+  "name": "happy-with-gift-bonus",
+  "description": "Happy playthrough: physical start, correct answer, gift +5, completion bonus +5, terminal completion. Balance 10, completed [0,1,3].",
+  "facts": [
+    { "type": "physical_confirmed", "step_position": 0, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": "Started the journey", "device_id": "device-a" },
+    { "type": "answer_submitted", "step_position": 1, "submitted_value": "МИХАЙЛО ПУПИН", "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-a" },
+    { "type": "gift_claimed", "step_position": 2, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": "Gift from step 2", "device_id": "device-a" },
+    { "type": "completion_bonus", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": "Completion bonus", "device_id": "device-a" },
+    { "type": "attempt_completed", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": "Completed the quest", "device_id": "device-a" }
+  ],
+  "expected": { "balance": 10, "completed_steps": [0, 1, 3], "revealed_hints": [] }
+}
