@@ -101,7 +101,7 @@
 .wsp-metacard .mc-body { flex: 1; min-width: 0; line-height: 1.5; }
 .wsp-metacard .mc-body span { color: var(--gray); }
 .wsp-vidzone { position: relative; height: 140px; border-radius: 10px; background: #1F222B; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
-.wsp-vidzone .ring { width: 44px; height: 44px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; }
+.wsp-vidzone .ic-ring { width: 44px; height: 44px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; }
 .wsp-vidzone .dur { position: absolute; right: 10px; bottom: 8px; font: 600 11px/1 'Inter', sans-serif; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 6px; }
 .wsp .comic-zone { border: 2px dashed var(--border); }
 .wsp .comic-zone .rm { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; border: none; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; cursor: pointer; font-size: 11px; line-height: 1; }

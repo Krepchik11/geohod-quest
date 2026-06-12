@@ -50,7 +50,7 @@ function VideoBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   return (
     <WspBlock title="Видео" aside="инлайн-блок на странице, не отдельный экран">
       <div className="wsp-vidzone">
-        <span className="ring"><PPlay /></span>
+        <span className="ic-ring"><PPlay /></span>
         <span>{v.label || 'видео'}</span>
         <span className="dur">{v.dur || '0:00'}</span>
       </div>

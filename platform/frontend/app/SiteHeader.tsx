@@ -39,7 +39,7 @@ export default function SiteHeader() {
       <button className="lang-switch" type="button" title="Сменить язык">
         <span className="globe">
           <span className="globe-icon">
-            <span className="ring" />
+            <span className="ic-ring" />
             <span className="m1" />
             <span className="m2" />
           </span>

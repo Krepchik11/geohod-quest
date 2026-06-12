@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Prata&amp;family=Russo+One&amp;family=Neucha&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="player/theme.css">
+<meta name="ext-resource-dependency" content="./assets/img/quest-card.png" data-resource-id="questCard" />
+<meta name="ext-resource-dependency" content="./assets/img/church.jpg" data-resource-id="church" />
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
@@ -16,6 +18,14 @@
 </style>
 </head>
 <body>
+<template id="__bundler_thumbnail" data-bg-color="#FBF1E5">
+  <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+    <rect x="38" y="24" width="44" height="72" rx="3" fill="none" stroke="#3E2C2C" stroke-width="3"></rect>
+    <line x1="46" y1="40" x2="74" y2="40" stroke="#3E2C2C" stroke-width="2.4"></line>
+    <line x1="46" y1="50" x2="74" y2="50" stroke="#A33B2A" stroke-width="2.4"></line>
+    <circle cx="60" cy="68" r="9" fill="#C99B3F" stroke="#8A6A1F" stroke-width="2.4"></circle>
+  </svg>
+</template>
 <div id="root"></div>
 
 <script src="player/quest-data.js"></script>

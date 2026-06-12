@@ -2,6 +2,11 @@
 // Один GameStep-шейп; template — дискриминатор семи шаблонов из Figma:
 // start | video | task_no | task_answer | continue | route_video | congrats
 
+// В standalone-бандле картинки приходят через window.__resources; в проекте — с диска.
+var QD_RES = window.__resources || {};
+var QD_IMG_CARD = QD_RES.questCard || "assets/img/quest-card.png";
+var QD_IMG_CHURCH = QD_RES.church || "assets/img/church.jpg";
+
 window.QUEST_DEMO = {
   title: "Ирония судьбы",
   subtitle: "по следам исторических личностей",
@@ -14,7 +19,7 @@ window.QUEST_DEMO = {
       kicker: "Городской квест",
       title: "Ирония судьбы",
       text: "по следам исторических личностей",
-      image: "assets/img/quest-card.png",
+      image: QD_IMG_CARD,
     },
     {
       id: "s2", template: "video", name: "Приветственное видео",
@@ -23,7 +28,7 @@ window.QUEST_DEMO = {
     },
     {
       id: "s3", template: "continue", name: "Продолжить — завязка",
-      image: "assets/img/church.jpg",
+      image: QD_IMG_CHURCH,
       text: "1913 год. Нови Сад. В церковной книге появляется запись о крещении двух мальчиков — Эдуарда и Альберта.\n\nИх мать — сербка Милева Марич. Об отце пока умолчим: вы сами назовёте его имя к концу прогулки.",
     },
     {
@@ -53,7 +58,7 @@ window.QUEST_DEMO = {
     },
     {
       id: "s7", template: "continue", name: "Продолжить — диалог",
-      image: "assets/img/quest-card.png",
+      image: QD_IMG_CARD,
       text: "— Вот, спасибо, удружили! Что там у вас? Так, где у меня книга 1913 года была? 20 сентября, говорите?\n\nДа тут одна запись всего: «Едуард и Алберт, крштени су по православном обреду...»\n\nПодождите, да их же мать та самая Милева. Ну и дела!",
     },
     {

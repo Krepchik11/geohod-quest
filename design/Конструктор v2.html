@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — конструктор v2: рабочее место</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Prata&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ctor/admin-theme.css">
+<link rel="stylesheet" href="player/theme.css">
+<link rel="stylesheet" href="ctor2/workspace.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  body { margin: 0; background: #F7F8FA; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="player/quest-data.js"></script>
+<script src="player/matcher.js"></script>
+<script type="text/babel" src="lib/tweaks-panel.jsx"></script>
+<script type="text/babel" src="player/components.jsx"></script>
+<script type="text/babel" src="ctor2/store.jsx"></script>
+<script type="text/babel" src="ctor2/quest-list.jsx"></script>
+<script type="text/babel" src="ctor2/page-editor.jsx"></script>
+<script type="text/babel" src="ctor2/publish.jsx"></script>
+<script type="text/babel" src="ctor2/test-player.jsx"></script>
+<script type="text/babel" src="ctor2/builder.jsx"></script>
+
+<script type="text/babel">
+const WSP_TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "tone": "classic",
+  "density": "comfortable"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(WSP_TWEAK_DEFAULTS);
+  const [state, setState] = React.useState(() => wspLoad());
+  const [test, setTest] = React.useState(null); // { startPos }
+
+  React.useEffect(() => { wspSave(state); }, [state]);
+
+  const quest = state.quests.find((q) => q.id === state.questId) || null;
+
+  const go = (patch) => setState((s) => ({ ...s, ...patch }));
+
+  const patchQuest = (fn) => setState((s) => ({
+    ...s,
+    quests: s.quests.map((q) => (q.id === s.questId ? { ...fn(q), lastSaved: Date.now() } : q)),
+  }));
+
+  const openQuest = (id) => {
+    const q = state.quests.find((x) => x.id === id);
+    go({
+      screen: "builder", questId: id,
+      sel: q && q.steps.length ? { type: "page", id: q.steps[0].id } : { type: "settings" },
+    });
+  };
+
+  const createQuest = (meta) => {
+    const q = wspNewQuest(meta);
+    setState((s) => ({
+      ...s, quests: [q, ...s.quests],
+      screen: "builder", questId: q.id,
+      sel: { type: "page", id: q.steps[0].id },
+    }));
+  };
+
+  return (
+    <div className="adm wsp" data-density={t.density}>
+      {state.screen === "builder" && quest ? (
+        <BuilderScreen
+          quest={quest}
+          sel={state.sel}
+          tone={t.tone}
+          onSel={(sel) => go({ sel })}
+          onPatchQuest={patchQuest}
+          onBack={() => go({ screen: "list" })}
+          onTest={(pos) => setTest({ startPos: pos })}
+        ></BuilderScreen>
+      ) : (
+        <QuestListScreen quests={state.quests} onOpen={openQuest} onCreate={createQuest}></QuestListScreen>
+      )}
+
+      {test && quest ? (
+        <TestOverlay quest={quest} tone={t.tone} startPos={test.startPos} onClose={() => setTest(null)}></TestOverlay>
+      ) : null}
+
+      <TweaksPanel>
+        <TweakSection label="Превью плеера"></TweakSection>
+        <TweakRadio label="Тон микрокопии" value={t.tone} options={["classic", "playful"]} onChange={(v) => setTweak("tone", v)}></TweakRadio>
+        <TweakSection label="Редактор"></TweakSection>
+        <TweakRadio label="Плотность" value={t.density} options={["comfortable", "compact"]} onChange={(v) => setTweak("density", v)}></TweakRadio>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App></App>);
+</script>
+</body>
+</html>
