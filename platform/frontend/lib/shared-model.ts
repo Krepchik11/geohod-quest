@@ -15,11 +15,19 @@ export interface RichContent {
   hint_reveal_text?: string | null;
 }
 
+/** Inline video reference frozen in the snapshot (video / route_video templates). */
+export interface MediaVideo {
+  ref?: string | null;
+  duration_label?: string | null;
+  caption?: string | null;
+}
+
 export interface Media {
   task?: string | null;
   character?: string | null;
   hint?: string | null; // coin-gated
   atmosphere?: string | null;
+  video?: MediaVideo | null;
 }
 
 export interface Completion {
@@ -236,6 +244,24 @@ export function projectState(facts: Fact[]): ProjectedState {
     balance,
     revealedHints: [...new Set(revealedHints)].sort((a, b) => a - b)
   };
+}
+
+/** Count of incorrect answer submissions at a step (pure fold over the fact log). */
+export function wrongAnswersAt(facts: Fact[], pos: number): number {
+  return facts.filter(
+    (f) => f.type === 'answer_submitted' && !f.local_is_correct && f.step_position === pos
+  ).length;
+}
+
+/**
+ * SPEC §Wrong-Answer / Hint Flow: the hint popup is offered only from the SECOND
+ * wrong answer on a step, only while the step carries a hint that has not been
+ * purchased yet. Derived from the fact log alone — no parallel counter state.
+ */
+export function shouldOfferHint(facts: Fact[], pos: number, step: GameStep): boolean {
+  if (!step.supporting?.hint) return false;
+  if (projectState(facts).revealedHints.includes(pos)) return false;
+  return wrongAnswersAt(facts, pos) >= 2;
 }
 
 /** Balance re-projection notice: show «Баланс обновлён» old → new (SPEC correction 1). */

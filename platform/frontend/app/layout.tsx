@@ -6,6 +6,7 @@ import "./styles/player-paper.css";
 import "./styles/commerce.css";
 import "./styles/myquests.css";
 import "./styles/admin-ctor.css";
+import "./styles/ctor-workspace.css";
 import "./styles/pwa-sync.css";
 
 const geistSans = Geist({

@@ -555,30 +555,62 @@ async fn get_my_stats_handler(
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
 }
 
-/// The golden demo quest, embedded at compile time and seeded at startup so a
-/// fresh dev server has one published quest with real snapshot content.
-const DEMO_SNAPSHOT_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../goldens/golden-mystery-fortress-v1.json"
-));
+/// A demo quest embedded at compile time and seeded at startup so a fresh dev
+/// server has real published quests with frozen snapshot content.
+struct DemoQuest {
+    quest_id: &'static str,
+    name: &'static str,
+    template_summary: &'static str,
+    snapshot_id: &'static str,
+    primary_comic: Option<&'static str>,
+    snapshot_json: &'static str,
+}
 
-async fn seed_demo_quest(grants: &GrantStores) -> Result<(), AppError> {
-    let snapshot: serde_json::Value =
-        serde_json::from_str(DEMO_SNAPSHOT_JSON).map_err(|e| AppError::Internal(e.into()))?;
-    grants
-        .register_published(
-            "mystery-fortress-v1",
-            PublishedMeta {
-                quest_id: "mystery-fortress-v1".into(),
-                name: "Mystery of the Fortress".into(),
-                primary_comic: Some("comic-fortress".into()),
-                template_summary: "4 steps incl. answer task with gift at 2".into(),
-                snapshot_version: 1,
-                snapshot_id: "golden-mystery-fortress-v1".into(),
-            },
-            Some(snapshot),
-        )
-        .await
+const DEMO_QUESTS: &[DemoQuest] = &[
+    DemoQuest {
+        quest_id: "mystery-fortress-v1",
+        name: "Mystery of the Fortress",
+        template_summary: "4 steps incl. answer task with gift at 2",
+        snapshot_id: "golden-mystery-fortress-v1",
+        primary_comic: Some("comic-fortress"),
+        snapshot_json: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/golden-mystery-fortress-v1.json"
+        )),
+    },
+    DemoQuest {
+        quest_id: "ironia-sudby",
+        name: "Ирония судьбы: по следам исторических личностей",
+        template_summary: "8 шагов · все 7 шаблонов · Нови Сад",
+        snapshot_id: "golden-ironia-sudby-v1",
+        primary_comic: Some("/assets/img/quest-card.png"),
+        snapshot_json: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/golden-ironia-sudby-v1.json"
+        )),
+    },
+];
+
+async fn seed_demo_quests(grants: &GrantStores) -> Result<(), AppError> {
+    for quest in DEMO_QUESTS {
+        let snapshot: serde_json::Value =
+            serde_json::from_str(quest.snapshot_json).map_err(|e| AppError::Internal(e.into()))?;
+        grants
+            .register_published(
+                quest.quest_id,
+                PublishedMeta {
+                    quest_id: quest.quest_id.into(),
+                    name: quest.name.into(),
+                    primary_comic: quest.primary_comic.map(Into::into),
+                    template_summary: quest.template_summary.into(),
+                    snapshot_version: 1,
+                    snapshot_id: quest.snapshot_id.into(),
+                },
+                Some(snapshot),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -623,7 +655,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Err(e) = seed_demo_quest(&state.grants).await {
+    if let Err(e) = seed_demo_quests(&state.grants).await {
         tracing::warn!(error = ?e, "demo quest seeding failed (continuing)");
     }
 

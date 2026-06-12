@@ -58,7 +58,7 @@ export default function CabinetPage() {
       <main className="container">
         <section className="welcome">
           <h1>Добро пожаловать!</h1>
-          <Link href="/constructor" className="btn-ui" style={{ minWidth: 218, marginTop: 60, display: 'inline-flex' }}>Создать новый квест</Link>
+          <Link href="/quest-editor" className="btn-ui" style={{ minWidth: 218, marginTop: 60, display: 'inline-flex' }}>Создать новый квест</Link>
           <p className="helper">Здесь Вы можете создавать новые квесты или управлять ранее созданными. Данные из backend (publish + grants).</p>
         </section>
 
@@ -91,8 +91,8 @@ export default function CabinetPage() {
                     <option>Опубликован</option><option>Проект</option><option>Тест</option>
                   </select>
                 </span>
-                <Link href="/constructor" className="btn-ui">Редактировать</Link>
-                <Link href={`/quest?golden=${qid}`} className="btn-ui btn-ui--outline">{owned ? 'Запустить (есть доступ)' : 'Запустить (нужен grant)'}</Link>
+                <Link href="/quest-editor" className="btn-ui">Редактировать</Link>
+                <Link href={`/quest/${qid}`} className="btn-ui btn-ui--outline">Запустить</Link>
                 <button className="btn-ui btn-ui--ghost-danger" onClick={() => setDeleteTarget(q)}>Удалить</button>
               </div>
             );

@@ -25,20 +25,22 @@ const pageA = await ctxA.newPage();
 
 console.log('1. Anonymous marketplace buy');
 await pageA.goto(`${FRONT}/`, { waitUntil: 'networkidle' });
-const buyBtn = pageA.locator('#shop .quest-card button.btn', { hasText: 'Купить' }).first();
+// Buy the quest we will play below (access is grant-enforced; no fake grants).
+const mysteryCard = pageA.locator('#shop .quest-card', { hasText: 'Mystery of the Fortress' });
+const buyBtn = mysteryCard.locator('button.btn', { hasText: 'Купить' });
 await buyBtn.waitFor({ state: 'visible', timeout: 10000 });
 await buyBtn.click();
-await pageA.locator('#shop .quest-card a.btn', { hasText: 'Пройти' }).first().waitFor({ timeout: 10000 });
+await mysteryCard.locator('a.btn', { hasText: 'Пройти' }).waitFor({ timeout: 10000 });
 check('buy button flips to Пройти (grant created, mock payment)', true);
 
 const anonId = await pageA.evaluate(() => `dev:${localStorage.getItem('geohod-device-id:v1')}`);
 check('anonymous identity minted', /^dev:[0-9a-f-]{36}$/.test(anonId), anonId);
 
 console.log('2. Anonymous play (steps + sync)');
-await pageA.goto(`${FRONT}/quest?golden=mystery-fortress-v1`, { waitUntil: 'networkidle' });
+await pageA.goto(`${FRONT}/quest/mystery-fortress-v1`, { waitUntil: 'networkidle' });
 await pageA.locator('.pframe').waitFor({ timeout: 10000 });
-// Step 0 is a physical step: confirm to advance (first visible frame button).
-const confirm = pageA.locator('.pframe button').first();
+// Step 0 is the designed start screen: the primary action advances.
+const confirm = pageA.locator('.pframe .p-btn').first();
 await confirm.click();
 await pageA.waitForTimeout(500);
 check('player advanced past step 0', true);

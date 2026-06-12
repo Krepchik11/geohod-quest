@@ -63,7 +63,7 @@ export default function SiteHeader() {
         </button>
         <div className="user-menu__dropdown" role="menu">
           <Link href="/profile" role="menuitem">мой профиль</Link>
-          <Link href="/constructor" role="menuitem">редактор</Link>
+          <Link href="/quest-editor" role="menuitem">редактор</Link>
           <Link href="/auth" role="menuitem">выход</Link>
         </div>
       </div>

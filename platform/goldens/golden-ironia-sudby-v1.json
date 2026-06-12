@@ -1,0 +1,149 @@
+{
+  "golden_id": "golden-ironia-sudby-v1",
+  "name": "Ирония судьбы",
+  "snapshot_version": 1,
+  "notes": "Full 7-template showcase quest, content verbatim from design/player/quest-data.js (QUEST_DEMO «Ирония судьбы», Нови Сад). Exercises every designed template incl. inline video blocks (media.video), physical action with note, navigator handoff, gifts 3/5, hint cost 5, terminal congrats. Seeded and published by the backend at boot next to mystery-fortress; also a vitest fixture for the GameStep→DesignStep mapper.",
+  "steps": [
+    {
+      "position": 0,
+      "template": "start",
+      "rich_content": {
+        "title": "Ирония судьбы",
+        "main_text": "по следам исторических личностей",
+        "place_text": "Городской квест",
+        "button_text": "начать квест",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": { "task": "/assets/img/quest-card.png", "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": { "is_start": true, "narrative_advance": true }
+    },
+    {
+      "position": 1,
+      "template": "video",
+      "rich_content": {
+        "title": "Приветственное видео",
+        "main_text": "Здравствуйте! Я архивариус Николаевской церкви. Сто лет назад здесь оставил след человек, изменивший наше представление о Вселенной. Готовы пройти по его следам?",
+        "button_text": "продолжить",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null, "character": null, "hint": null, "atmosphere": null,
+        "video": { "ref": null, "duration_label": "0:48", "caption": "видео-приветствие автора" }
+      },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": { "narrative_advance": true }
+    },
+    {
+      "position": 2,
+      "template": "continue",
+      "rich_content": {
+        "title": "Завязка",
+        "main_text": "1913 год. Нови Сад. В церковной книге появляется запись о крещении двух мальчиков — Эдуарда и Альберта.\n\nИх мать — сербка Милева Марич. Об отце пока умолчим: вы сами назовёте его имя к концу прогулки.",
+        "button_text": "продолжить",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": { "task": "/assets/img/church.jpg", "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": { "narrative_advance": true }
+    },
+    {
+      "position": 3,
+      "template": "task_no",
+      "rich_content": {
+        "title": "Николаевская церковь",
+        "main_text": "Дойдите до Николаевской церкви — самой старой православной церкви города.",
+        "place_text": "ул. Николаевска порта 2 · 400 м отсюда",
+        "button_text": "Я на месте, нашёл",
+        "question_prompt": null,
+        "gift_narrative": "За смелость и точность",
+        "hint_reveal_text": null
+      },
+      "media": { "task": null, "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": true },
+      "supporting": {
+        "physical_action": {
+          "description": "Найдите кованую ограду у входа и прикоснитесь к холодному металлу — так здоровались с церковью сто лет назад.",
+          "confirm_label": "Я на месте, нашёл"
+        },
+        "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Николаевская церковь" },
+        "gift": { "coins": 3, "narrative_text": "За смелость и точность" }
+      }
+    },
+    {
+      "position": 4,
+      "template": "task_answer",
+      "rich_content": {
+        "title": "Табличка над входом",
+        "main_text": "Взгляните на табличку над входом. В каком году храм был освящён после перестройки?",
+        "question_prompt": "Введите год",
+        "button_text": "Ответить",
+        "gift_narrative": "Острый глаз!",
+        "hint_reveal_text": "Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки."
+      },
+      "media": { "task": null, "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "answer", "acceptable": ["1730"], "allow_note": false },
+      "supporting": {
+        "gift": { "coins": 5, "narrative_text": "Острый глаз!" },
+        "hint": { "cost_coins": 5, "reveal_text": "Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки." }
+      }
+    },
+    {
+      "position": 5,
+      "template": "route_video",
+      "rich_content": {
+        "title": "Видео маршрута",
+        "main_text": "Теперь — по Дунавской улице к городскому парку. По пути считайте кофейни: их тут больше, чем фонарей.",
+        "button_text": "в путь",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null, "character": null, "hint": null, "atmosphere": null,
+        "video": { "ref": null, "duration_label": "0:31", "caption": "видео маршрута до парка" }
+      },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": {
+        "narrative_advance": true,
+        "navigator": { "lat": 45.2552, "lng": 19.8489, "label": "Дунавский парк" }
+      }
+    },
+    {
+      "position": 6,
+      "template": "continue",
+      "rich_content": {
+        "title": "Диалог в архиве",
+        "main_text": "— Вот, спасибо, удружили! Что там у вас? Так, где у меня книга 1913 года была? 20 сентября, говорите?\n\nДа тут одна запись всего: «Едуард и Алберт, крштени су по православном обреду...»\n\nПодождите, да их же мать та самая Милева. Ну и дела!",
+        "button_text": "продолжить",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": { "task": "/assets/img/quest-card.png", "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": { "narrative_advance": true }
+    },
+    {
+      "position": 7,
+      "template": "congrats",
+      "rich_content": {
+        "title": "Квест пройден!",
+        "main_text": "Имя отца мальчиков вы уже поняли сами: Альберт Эйнштейн. Ирония судьбы в том, что города, хранящие чьи-то следы, сами становятся частью истории.",
+        "button_text": "Оценить квест",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": { "task": null, "character": null, "hint": null, "atmosphere": null },
+      "completion": { "mode": "physical", "acceptable": null, "allow_note": false },
+      "supporting": { "terminal": true }
+    }
+  ]
+}
