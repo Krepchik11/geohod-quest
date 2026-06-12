@@ -1,0 +1,129 @@
+{
+  "golden_id": "golden-mystery-fortress-v1",
+  "name": "Mystery of the Fortress (from real export 1717918496002x437329050516586500)",
+  "snapshot_version": 1,
+  "notes": "Clean fixture derived from real Bubble page_constructor data (re-fetched with admin token). Page_type 'Question' → task_with_answer with real acceptable lists (synonyms preserved). 'Start' and 'Congratulations' mapped to first_screen + continue/terminal. Rich RU text from Main_text_RU where available. Media stubbed from available Image/Hint_Image (legacy single-image model; full 4-role will be added later via Constructor). Gifts/ navigator / bonus_animation / physical_action mostly null in this legacy sample — one gift augmented for coin economy coverage (marked). This tests core linear flow + isAnswerCorrect + basic projections.",
+  "steps": [
+    {
+      "position": 0,
+      "template": "first_screen",
+      "rich_content": {
+        "title": "Mystery of the Fortress - Start",
+        "main_text": "Добро пожаловать в квест. Начните путешествие по городу.",
+        "place_text": "Центр города",
+        "button_text": "Начать",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "completion": {
+        "mode": "physical",
+        "acceptable": null,
+        "allow_note": false
+      },
+      "supporting": {
+        "is_start": true
+      }
+    },
+    {
+      "position": 1,
+      "template": "task_with_answer",
+      "rich_content": {
+        "title": "Первый вопрос",
+        "main_text": "Теперь будет сложно разобраться, что же произошло. Нужно покопаться в истории…",
+        "place_text": "Историческое место",
+        "button_text": "Ответить",
+        "question_prompt": "Как звали этого человека?",
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": "hint-image-ref-from-legacy",
+        "atmosphere": null
+      },
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ПУПИН",
+          "МИХАЙЛО ПУПИН"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "hint": {
+          "cost_coins": 0,
+          "reveal_text": "Подсказка из Hint_Image",
+          "reveal_geo": false
+        }
+      }
+    },
+    {
+      "position": 2,
+      "template": "task_with_answer",
+      "rich_content": {
+        "title": "Второй вопрос",
+        "main_text": "И бульвар при постройке так и был назван в честь Пупина? Нет, он назывался по-другому...",
+        "place_text": "Бульвар",
+        "button_text": "Ответить",
+        "question_prompt": "Какое имя?",
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ТИТО",
+          "БРОЗ ТИТО"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 5,
+          "narrative_text": "Синтезировано для покрытия gift economy (реальные Gift_Coins отсутствовали в этой выборке шагов)"
+        }
+      }
+    },
+    {
+      "position": 3,
+      "template": "continue",
+      "rich_content": {
+        "title": "Финал",
+        "main_text": "Поздравляем! Вы завершили квест.",
+        "place_text": "",
+        "button_text": "Завершить",
+        "question_prompt": null,
+        "gift_narrative": null,
+        "hint_reveal_text": null
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "completion": {
+        "mode": "physical",
+        "acceptable": null,
+        "allow_note": false
+      },
+      "supporting": {
+        "terminal": true
+      }
+    }
+  ]
+}

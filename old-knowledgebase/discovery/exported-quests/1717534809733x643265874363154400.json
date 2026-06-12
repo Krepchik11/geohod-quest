@@ -1,0 +1,134 @@
+{
+  "quest_id": "1717534809733x643265874363154400",
+  "quest_name": "1717534809733x643265874363154400",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-07-12T02:15:58.845Z",
+    "Created Date": "2024-06-04T21:00:09.747Z",
+    "Created By": "1672348260883x323042854737587500",
+    "Page": [
+      "1717534809733x431725529120899100",
+      "1717534809733x936359965595795500",
+      "1717534809733x486674836199833600",
+      "1717581898636x415127745674608640"
+    ],
+    "Quest_setting": "1717534809733x129524330769940480",
+    "Quest_name_ru": "Новый Квест 15",
+    "Price": 0,
+    "Quest_name_en": "New Quest 15",
+    "Quest_name_srb": "Нова Потрага 15",
+    "Shop_name_en": "New Quest 15",
+    "Shop_name_ru": "Новый Квест 15",
+    "Shop_name_srb": "Нова Потрага 15",
+    "Publish_on_the_site": false,
+    "creatorUser": "1672348260883x323042854737587500",
+    "reviewGrade": 5,
+    "theNumberOfUsersWhoCompletedTheQuest": 0,
+    "statusQuest": "Test",
+    "_id": "1717534809733x643265874363154400"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1717534809733x431725529120899100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1717534809733x486674836199833600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1717534809733x936359965595795500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1717581898636x415127745674608640"
+    }
+  ],
+  "step_count": 4,
+  "exported_at": "2026-06-10T10:05:18Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}

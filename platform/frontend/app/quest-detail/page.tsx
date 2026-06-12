@@ -125,7 +125,7 @@ export default function QuestDetailPage() {
                     <svg width="15" height="15" viewBox="0 0 16 16"><polyline points="2.5,8.5 6.5,12.5 13.5,4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     Квест в вашей коллекции
                   </p>
-                  <Link className="s-btn" href={`/quest?golden=${QUEST_ID}`}>Открыть квест</Link>
+                  <Link className="s-btn" href={`/quest/${QUEST_ID}`}>Открыть квест</Link>
                   <p style={{ margin: 0, fontSize: 12, color: 'var(--gray)' }}>Куплен 11.06.2026 · доступ бессрочный</p>
                 </>
               ) : PRICE === 0 ? (
@@ -202,7 +202,7 @@ export default function QuestDetailPage() {
         </section>
       </main>
 
-      <Link href="/quest?golden=mystery-fortress-v1" className="btn" style={{ display: 'block', width: 224, margin: '40px auto', textAlign: 'center' }}>
+      <Link href="/quest/mystery-fortress-v1" className="btn" style={{ display: 'block', width: 224, margin: '40px auto', textAlign: 'center' }}>
         Начать квест (Play)
       </Link>
 

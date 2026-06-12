@@ -157,7 +157,7 @@ function MqState({ q }: { q: MqRow }) {
 
 function MqActions({ q }: { q: MqRow }) {
   // The player's start gate (SPEC) confirms continue/restart with «монеты останутся».
-  const open = `/quest?golden=${encodeURIComponent(q.quest_id)}`;
+  const open = `/quest/${encodeURIComponent(q.quest_id)}`;
   if (q.state === 'progress') {
     return (
       <div className="mq-actions">

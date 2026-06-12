@@ -1,0 +1,767 @@
+{
+  "quest_id": "1687963391062x398103128188125200",
+  "quest_name": "1687963391062x398103128188125200",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-07-12T02:15:58.842Z",
+    "Created Date": "2023-06-28T14:43:11.840Z",
+    "Created By": "1665774116632x867619938298102300",
+    "Page": [
+      "1687963391062x201065339161673730",
+      "1687963391062x283668085937274880",
+      "1687963391062x333880356897816600",
+      "1687963452637x994311116546375700",
+      "1687963773393x984798306621980700",
+      "1687969631466x930574036387758000",
+      "1687970254623x380439580384952300",
+      "1687970655275x311360543669354500",
+      "1687970897223x175264889799704580",
+      "1687971178017x831350169207046100",
+      "1687971453914x883446544738549800",
+      "1687972462553x434828305773887500",
+      "1687973191579x595488442760822800",
+      "1687973755338x228300878853701630",
+      "1687973868055x145863660031967230",
+      "1687974470215x277675787857428500",
+      "1687974584241x932304811621875700",
+      "1688021552744x701219362593833000",
+      "1688021910260x424418442704060400",
+      "1688022255106x813529046727262200",
+      "1688022694530x150569064236056580",
+      "1688023056675x831546334212784100",
+      "1688023129569x633130182162776000",
+      "1688023212909x697286538024190000"
+    ],
+    "Quest_setting": "1687963391062x609447340160319500",
+    "Quest_name_ru": "Русские классики",
+    "Users": [
+      "1665774116632x867619938298102300",
+      "1687527680503x258525847670369570",
+      "1675969290369x570289944696607200",
+      "1675367740630x356805080685017600",
+      "1690542447386x263473568970403520",
+      "1690558300123x162872396618958240",
+      "1690551555354x419567383412226240",
+      "1682261973169x746812855299603800",
+      "1690560211796x261571237748978720",
+      "1690559053040x968349921828116600",
+      "1671731595144x135368245400823600",
+      "1690560281414x733617467954621000",
+      "1690560294849x333366817115910800",
+      "1691250094890x877548992711590300",
+      "1687001398635x671900286638210700",
+      "1691857314590x592253830364988300",
+      "1676453151275x564995987136353500",
+      "1680073134473x656716784986995100",
+      "1682454166048x750392671330237300",
+      "1694242191073x782453976623271700",
+      "1678529219253x905924101497676200",
+      "1697372473958x673548602722818800",
+      "1699793110043x275584476546998140",
+      "1701943709164x976382579062164500",
+      "1676190241339x469446527440279230",
+      "1703195230307x604547679376116200",
+      "1682247382710x664751047942312000",
+      "1704183567261x340820450623136700",
+      "1704182195333x393731965367977400",
+      "1704990910367x116769726309543740",
+      "1705147201038x759522977063550600",
+      "1704474465438x375533402691785600",
+      "1705230120910x650109682514372900",
+      "1704476651800x961099342143265600",
+      "1675454292125x980092617351168400",
+      "1675368210001x308124712477815040",
+      "1675510871882x755401039694497700",
+      "1696686808697x662131720551224400",
+      "1710964463681x409587733691942660",
+      "1712351417158x148424053667211230",
+      "1683323301372x366371711924678100",
+      "1715009144039x663942917238366500",
+      "1716027255198x882251098578778100",
+      "1694339966604x643807881848592000"
+    ],
+    "Preview_image": "//8ebd72cadc76b45bfef67590b0ca2d5f.cdn.bubble.io/f1688023774529x433540982026962400/null.png",
+    "Price": 500,
+    "Reviews": [
+      "1689711182360x250050904333221900",
+      "1689711540585x760787290809434100",
+      "1690564519775x476661035000135700",
+      "1690564534761x128900775124402180",
+      "1690564605169x198095560379203600",
+      "1690627542950x592209455632351200",
+      "1691871385205x292212146313887740",
+      "1702991511196x916214416009855000",
+      "1705076320837x146355121362042880",
+      "1709038779619x146444423088046080",
+      "1710255734642x490278924146966500"
+    ],
+    "Quest_level": "Средняя",
+    "Summary_of_the_quest_ru": "Пушкин, Гоголь, Чехов, Толстой, Горький, Достоевский — эти и другие фамилии великих русских писателей можно легко найти на карте города Нови Сада, культурной столицы Сербии. \nСтарожилы рассказывают, что именно сюда больше ста лет назад планировал перебраться один из русских классиков, чьи следы вам предстоит отыскать в ходе квеста. \nЗапаситесь терпением: живых свидетелей тех времен уже не осталось, поэтому восстанавливать сюжет городской легенды придется по названиям улиц, историческим зданиям и мемориальным доскам. \nПеред началом квеста вспомните основные произведения русской классической литературы — они вам пригодятся для выполнения заданий. \nЗа полтора часа прогулки по Нови Саду вы узнаете об этом городе и его жителях много такого, о чем не пишут в обычных путеводителях.",
+    "Quest_name_en": "New Quest 9",
+    "Quest_name_srb": "Нова Потрага 9",
+    "Shop_name_en": "New Quest 9",
+    "Shop_name_ru": "Русские классики",
+    "Shop_name_srb": "Нова Потрага 9",
+    "Publish_on_the_site": true,
+    "Age_limit": "For all",
+    "Tags": [
+      "1680741746973x950545650515705900"
+    ],
+    "creatorUser": "1665774116632x867619938298102300",
+    "reviewGrade": 4.3,
+    "questCity": "1693914259751x608960791690608600",
+    "questCountry": "1693914259751x302818887647100900",
+    "placeStartLatitude": 45.257276057869525,
+    "placeStartLongitude": 19.84157931294945,
+    "theNumberOfUsersWhoCompletedTheQuest": 50,
+    "completedcount": 23,
+    "statusQuest": "Test",
+    "_id": "1687963391062x398103128188125200"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687963391062x201065339161673730"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687963391062x283668085937274880"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687963391062x333880356897816600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687963452637x994311116546375700"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687963773393x984798306621980700"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ДОСТОЕВСКИЙ",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687969631466x930574036387758000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687970254623x380439580384952300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ВРАНГЕЛЬ",
+          "БАРОН ВРАНГЕЛЬ",
+          "ЧЕРНЫЙ БАРОН",
+          "ЧЁРНЫЙ БАРОН",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687970655275x311360543669354500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687970897223x175264889799704580"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ГАЗПРОМ",
+          "НИС",
+          "GAZPROM",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687971178017x831350169207046100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687971453914x883446544738549800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ГОНЧАРОВ",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687972462553x434828305773887500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ШКОЛА",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687973191579x595488442760822800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687973755338x228300878853701630"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "МУЗЫКА",
+          "ЩИТ",
+          "ПОЛОСА",
+          "ЛИНИЯ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687973868055x145863660031967230"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687974470215x277675787857428500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "СОЛЖЕНИЦИН",
+          "11",
+          "СОЛЖЕНИЦЫН"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1687974584241x932304811621875700"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688021552744x701219362593833000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688021910260x424418442704060400"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ДАВИД",
+          "ДАВИДА",
+          "ЗВЕЗДА ДАВИДА",
+          "11",
+          "ПЕЧАТЬ ЦАРЯ СОЛОМОНА"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688022255106x813529046727262200"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "ТОЛСТОМУ",
+          "ТОЛСТОЙ",
+          "ЛЕВ ТОЛСТОЙ",
+          "ЛЕВ НИКОЛАЕВИЧ ТОЛСТОЙ",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688022694530x150569064236056580"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688023056675x831546334212784100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688023129569x633130182162776000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1688023212909x697286538024190000"
+    }
+  ],
+  "step_count": 24,
+  "exported_at": "2026-06-10T10:05:12Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — визуальный контроль иконографии</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Jost:wght@400;500&amp;family=Prata&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../commerce/site-theme.css">
+<link rel="stylesheet" href="../ctor/admin-theme.css">
+<style>
+  body { margin: 0; background: #E9EBEF; font-family: Inter, sans-serif; color: #1A2B48; padding: 32px 40px 80px; }
+  h1 { font-size: 20px; font-weight: 700; }
+  .hint { font-size: 13px; color: #83858C; margin-top: 6px; max-width: 720px; }
+  h2 { font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #83858C; margin: 36px 0 12px; }
+  .strip { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; background: #fff; border-radius: 14px; padding: 20px 24px; }
+  .strip--dark { background: #232323; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .cell .cap { font-size: 10.5px; color: #83858C; font-family: ui-monospace, monospace; }
+  .strip--dark .cell .cap { color: rgba(255,255,255,.6); }
+  .icon-2x { transform: scale(2); transform-origin: center; margin: 18px; }
+  img.raw { display: block; }
+  .frame { background: #fff; border-radius: 14px; overflow: hidden; }
+</style>
+</head>
+<body>
+<h1>Визуальный контроль: иконография и шапки</h1>
+<p class="hint">Фикстура для проверки после правок ассетов. Все SVG показаны в рабочем размере и ×2.
+   Контроль: ни один контур не обрезан (полные окружности, штрихи логотипа с чистыми концами), виза читается «VISA», фигура профиля по центру аватара.</p>
+
+<h2>Логотип</h2>
+<div class="strip" data-screen-label="Контроль: логотип">
+  <div class="cell"><span class="s-logo"><span class="mark"></span><span class="text"></span></span><span class="cap">шапка сайта (34/60)</span></div>
+  <div class="cell"><img class="raw" src="../assets/icons/logo-mark--navy.svg" width="90" alt=""><span class="cap">logo-mark ×3</span></div>
+  <div class="cell"><img class="raw" src="../assets/icons/logo-text--navy.svg" width="150" alt=""><span class="cap">logo-text ×3</span></div>
+  <div class="cell"><span class="brand" style="display:block;width:40px;height:36px;background:url('../assets/icons/logo-mark--navy.svg') no-repeat center / contain"></span><span class="cap">бренд админки 40×36</span></div>
+</div>
+
+<h2>Аватар профиля</h2>
+<div class="strip" data-screen-label="Контроль: аватар">
+  <div class="cell"><span class="s-avatar"><span class="head"></span><span class="body"></span></span><span class="cap">48px (desktop)</span></div>
+  <div class="cell"><span class="s-avatar" style="width:36px;height:36px"><span class="head"></span><span class="body"></span></span><span class="cap">36px (mobile)</span></div>
+  <div class="cell"><span class="s-avatar icon-2x"><span class="head"></span><span class="body"></span></span><span class="cap">48px ×2</span></div>
+</div>
+
+<h2>Мета-иконки и оплата</h2>
+<div class="strip" data-screen-label="Контроль: мета-иконки">
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/ic-pin--navy.svg" width="14" alt=""><span class="cap">pin ×2</span></div>
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/ic-clock-ring--navy.svg" width="14" alt=""><span class="cap">clock ×2</span></div>
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/ic-star-18--gold.svg" width="18" alt=""><span class="cap">star ×2</span></div>
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/pay-visa--brand.svg" height="14" alt=""><span class="cap">visa ×2</span></div>
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/pay-paypal--brand.svg" height="18" alt=""><span class="cap">paypal ×2</span></div>
+</div>
+<div class="strip strip--dark" style="margin-top:12px" data-screen-label="Контроль: тёмный фон">
+  <div class="cell"><img class="raw icon-2x" src="../assets/icons/ic-telegram-plane--white.svg" width="20" alt=""><span class="cap">telegram ×2</span></div>
+</div>
+
+<h2>Шапка сайта в сборе (1240)</h2>
+<div class="frame" style="width:1240px" data-screen-label="Контроль: шапка сайта">
+  <div class="site" style="min-height:0">
+    <header class="s-head">
+      <span class="s-logo"><span class="mark"></span><span class="text"></span></span>
+      <nav class="s-nav"><a href="#">главная</a><a href="#" class="active">магазин квестов</a><a href="#">мои квесты</a><a href="#">контакты</a></nav>
+      <span class="s-head__right"><span class="display" style="font-size:12px">ру</span><span class="s-avatar"><span class="head"></span><span class="body"></span></span></span>
+    </header>
+  </div>
+</div>
+
+<h2>Шапка админки в сборе (1240)</h2>
+<div class="frame" style="width:1240px" data-screen-label="Контроль: шапка админки">
+  <div class="adm" style="min-height:0">
+    <div class="adm-head">
+      <span class="brand"></span>
+      <nav class="adm-nav"><a href="#" class="active">Квесты</a><a href="#" class="stub">Локации</a><a href="#">Стат.</a><a href="#">Пользователи</a><a href="#">Галерея</a></nav>
+      <span class="s-avatar" style="background:#fff"><span class="head"></span><span class="body"></span></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

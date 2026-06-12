@@ -1,7 +1,8 @@
 /**
  * Replay simulation: drive the playthrough golden's actions through the shared
- * pure functions exactly as the player does (matcher, gift auto-claim, terminal
- * completion) and assert the emitted facts and projections match the golden.
+ * pure functions exactly as the player does (matcher, gift claim ON COMPLETION
+ * — design/player/prototype.jsx semantics — terminal completion) and assert
+ * the emitted facts and projections match the golden.
  */
 import { describe, expect, it } from 'vitest';
 import * as model from '../shared-model';
@@ -13,17 +14,20 @@ const DEVICE = 'device-a';
 function replay(snap: model.QuestSnapshot, play: model.PlaythroughGolden): model.Fact[] {
   const facts: model.Fact[] = [];
 
+  // Gifts are claimed when their step is COMPLETED (confirm / correct answer /
+  // terminal entry), never on reach — mirrors QuestPlayerClient.claimGiftIfNeeded.
   const claimGiftIfNeeded = (pos: number) => {
     const step = snap.steps.find((s) => s.position === pos);
-    if (!step?.supporting?.gift) return;
+    const gift = step?.supporting?.gift;
+    if (!gift) return;
     if (facts.some((f) => f.type === 'gift_claimed' && f.step_position === pos)) return;
     facts.push({
       type: 'gift_claimed',
       step_position: pos,
       submitted_value: null,
       local_is_correct: true,
-      coins_delta: step.supporting.gift.coins,
-      note: `Gift from step ${pos} (synthesized coverage)`,
+      coins_delta: gift.coins,
+      note: gift.narrative_text || null,
       device_id: DEVICE,
     });
   };
@@ -43,20 +47,20 @@ function replay(snap: model.QuestSnapshot, play: model.PlaythroughGolden): model
         note: action.note || (isTerminal ? 'Completed the quest' : null),
         device_id: action.device_id || DEVICE,
       });
+      claimGiftIfNeeded(action.step_position);
     } else if (action.type === 'submit_answer') {
+      const correct = model.isAnswerCorrect(action.value || '', step.completion.acceptable);
       facts.push({
         type: 'answer_submitted',
         step_position: action.step_position,
         submitted_value: action.value || null,
-        local_is_correct: model.isAnswerCorrect(action.value || '', step.completion.acceptable),
+        local_is_correct: correct,
         coins_delta: 0,
         note: null,
         device_id: action.device_id || DEVICE,
       });
+      if (correct) claimGiftIfNeeded(action.step_position);
     }
-
-    claimGiftIfNeeded(action.step_position);
-    claimGiftIfNeeded(action.step_position + 1);
   }
   return facts;
 }

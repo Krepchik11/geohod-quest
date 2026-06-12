@@ -69,7 +69,7 @@ After changes to Rust: always run `cargo fmt`, `cargo clippy -- -D warnings`, `c
 - **Two-tier enforcement**: a REGISTERED player id requires `Authorization: Bearer <token>` on player-scoped endpoints (checkout, attempts, bundle, profile/stats); anonymous ids are credentialed by device possession (`X-Player-Id` header — the client sends the right one automatically via `frontend/lib/identity.ts`).
 - **Payments**: `backend/src/payments.rs` — `PaymentProvider` trait with an always-approving `MockPaymentProvider`; the mock `payment_ref` is audited on the grant (`source_ref`). Real provider (YooKassa redirect + webhook) slots in behind the same trait.
 - Recorded MVP cuts: no email confirmation/password reset/rate limiting/token expiry; login does not merge a device's local anonymous progress into the account.
-- E2E: `node e2e-identity.mjs` (servers on :8080/:3000) covers anonymous buy → play → register → cross-device login → enforcement.
+- E2E: `node e2e-identity.mjs` (servers on :8080/:3000) covers anonymous buy → play → register → cross-device login → enforcement; `node e2e-player-check.mjs` covers the production player (access gate, all 7 templates on «Ирония судьбы», 2nd-wrong hint popup, real offline banner, no debug chrome).
 
 See `../blueprint/TECH.md`, `../blueprint/SPEC.md`, `../blueprint/PLAN.md`, and `../blueprint/CONCEPT.md` for the non-negotiable model (event-sourced facts, client-validated snapshots, frozen supporting values, 4 templates, etc.). Historical supporting material (including prior business docs and analyses) is archived in `../old-knowledgebase/`.
 

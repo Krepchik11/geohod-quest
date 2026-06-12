@@ -1,0 +1,1060 @@
+{
+  "quest_id": "1668715657278x463245509205688300",
+  "quest_name": "1668715657278x463245509205688300",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-07-11T21:40:04.489Z",
+    "Created Date": "2022-11-17T20:07:38.453Z",
+    "Created By": "1665774116632x867619938298102300",
+    "Page": [
+      "1668715657278x333797561362808800",
+      "1668717162319x524438078282006500",
+      "1668717306581x199572511732793340",
+      "1668718179155x837073726225514500",
+      "1668718967423x383674074096468000",
+      "1668719264868x503749374843289600",
+      "1668719443207x283952401040277500",
+      "1668719665354x721055028148961300",
+      "1668860130159x164751904195739650",
+      "1668860224571x969495198996627500",
+      "1668860811246x762355184185638900",
+      "1668860941954x459617217375895550",
+      "1668861076847x932003404353110000",
+      "1668861184169x196056926455332860",
+      "1668875999002x950203352487034900",
+      "1668876192310x612194859981471700",
+      "1668876297572x736259463844462600",
+      "1668876402384x938533300041678800",
+      "1668876511129x698633499549106200",
+      "1668876800652x543057780446068740",
+      "1668876875775x251352400533127170",
+      "1668877114667x340469531639808000",
+      "1668877188318x653469158229934100",
+      "1668877437410x453390678376054800",
+      "1668878528888x996787658651598800",
+      "1668878975923x587726735823601700",
+      "1670510226151x901466938323763200"
+    ],
+    "Quest_setting": "1668715657278x373121060841717760",
+    "Quest_name_ru": "Чёрный барон",
+    "Users": [
+      "1665774116632x867619938298102300",
+      "1667434221342x723572623396144100",
+      "1670443948165x759610415210741600",
+      "1670939723839x296125252662114560",
+      "1671020599539x419146000016180600",
+      "1671624383573x510343480814844350",
+      "1671620960066x356691190752413060",
+      "1671624990240x309379274288695200",
+      "1671598924654x253549619553797400",
+      "1671402474326x478438755437827800",
+      "1672348641978x563676295893458050",
+      "1672348260883x323042854737587500",
+      "1674050989564x991199855293065900",
+      "1674155000781x441353774091266300",
+      "1674364522627x922663464106899000",
+      "1675417661672x892672841470700800",
+      "1676065694525x834016920213788200",
+      "1676109391046x992502496882662400",
+      "1676112660913x350569670971643460",
+      "1676100773946x709805924592594700",
+      "1676120554882x441870815202261250",
+      "1675366315216x762247130726896300",
+      "1671731595144x135368245400823600",
+      "1676061531429x850189031837533800",
+      "1676120596410x191446840163991500",
+      "1676061522627x693804218799644500",
+      "1676207093579x430488185852954800",
+      "1676134913709x676552305256355600",
+      "1676207112520x997876765673068300",
+      "1671732709661x868810590530557800",
+      "1676067401970x447733054787326850",
+      "1676154489953x313020815303675100",
+      "1676207094543x466562433722063940",
+      "1676207567648x951439998725478500",
+      "1675972437461x476657685691829000",
+      "1676202495654x568628569738783900",
+      "1676453151275x564995987136353500",
+      "1676122137871x903682594012489300",
+      "1675366875105x604142445415871700",
+      "1675459977517x741907288229533000",
+      "1675366489968x519261672536313300",
+      "1676716174250x100970614904894110",
+      "1675368210001x308124712477815040",
+      "1676575530128x673358060564164500",
+      "1676119783688x311597786923579970",
+      "1679481799480x971435840833245700",
+      "1676721519394x767623304070512300",
+      "1675510871882x755401039694497700",
+      "1680431759950x172908745032854820",
+      "1675454292125x980092617351168400",
+      "1675367740630x356805080685017600",
+      "1681068316154x819963905318322700",
+      "1681461983794x847519978172318200",
+      "1681504126093x965540601139201000",
+      "1678530711560x230679863621462880",
+      "1677617688004x835541266493271800",
+      "1682139095977x345862211043426600",
+      "1678529219253x905924101497676200",
+      "1669813789745x120835703814000220",
+      "1682672070658x626132403910127200",
+      "1682778063155x491301633674048100",
+      "1683202035887x441237111666298300",
+      "1680073134473x656716784986995100",
+      "1683458377492x552016381811888830",
+      "1683458685167x558114555793539650",
+      "1683308909834x627320193579500000",
+      "1683459564950x182968186913271550",
+      "1676552667249x783327519277333900",
+      "1678528396898x474861716049253000",
+      "1678547141794x577159186572599200",
+      "1682865047886x909610944376853200",
+      "1683461136986x757910144982761200",
+      "1683461173184x205838715476050600",
+      "1683461146044x831016649797312600",
+      "1682197380131x665953361381885300",
+      "1682261973169x746812855299603800",
+      "1683313486129x541686979554364860",
+      "1683461153623x343340929407017100",
+      "1683462076574x948100911526328200",
+      "1683550652813x868301998719489200",
+      "1682454166048x750392671330237300",
+      "1683973250368x360848034576679800",
+      "1684314726754x973142860101030600",
+      "1679049238961x574103681969246200",
+      "1683479703304x652637361925256100",
+      "1676190241339x469446527440279230",
+      "1675372025671x627627025551380100",
+      "1683462317876x162381060704738460",
+      "1676508235827x646184856497386500",
+      "1684937386918x499219901606176450",
+      "1685693865499x787096921311756300",
+      "1685774388199x978565984562136800",
+      "1686142595672x399024379560657860",
+      "1684409507653x439649421274580900",
+      "1682104472209x295701479966630200",
+      "1674357349129x304468391684384450",
+      "1687252195199x597038757100554200",
+      "1686182893457x690212756439245000",
+      "1687001398635x671900286638210700",
+      "1688522816742x277341998484025300",
+      "1679229949598x671602915050888400",
+      "1690617117690x896501077855573400",
+      "1679587385141x865753801633468900",
+      "1683323301372x366371711924678100",
+      "1693045483969x346766849101349100",
+      "1694199761839x136629405534995250",
+      "1694957352475x971158507621122800",
+      "1697308723169x170704258874058140",
+      "1697372461998x423264736639600500",
+      "1696002556693x918928775750419800",
+      "1697372466084x252003663258417730",
+      "1697372464161x285824054654243200",
+      "1697372473958x673548602722818800",
+      "1697366675079x630663108472115200",
+      "1697372466207x435395068454083500",
+      "1697372543890x939975868245663800",
+      "1697372474366x135605168976227200",
+      "1697372466160x202099413683026980",
+      "1698916187167x128527293124446110",
+      "1699100157322x579176055079420700",
+      "1699099830351x614347590773975900",
+      "1670371192925x959764759165176800",
+      "1699264119362x274285161876991700",
+      "1699782283732x569314295472343100",
+      "1699888374470x556868814310593100",
+      "1696606106634x395196662556615400",
+      "1690560211796x261571237748978720",
+      "1696606105708x741339252360648600",
+      "1700659653386x239805741606917700",
+      "1697531576486x974500398228842000",
+      "1701943709164x976382579062164500",
+      "1703098095099x208845687831115550",
+      "1703762259933x149500391337920030",
+      "1702723917064x695795918457852800",
+      "1704365765149x623192710034902100",
+      "1704474465438x375533402691785600",
+      "1705230120910x650109682514372900",
+      "1706904283455x271684942336684060",
+      "1678533106452x655215662135803900",
+      "1703419702037x363469591240975100",
+      "1696598672123x753306902137654400",
+      "1706966588496x294337918278527300",
+      "1706966587701x326267554255594800",
+      "1706966660132x402152102655170200",
+      "1696602628425x755246930407767600",
+      "1706966658586x235065040851515600",
+      "1706966641650x244494210334856640",
+      "1706974869085x714229772833884300",
+      "1707146223386x439053041139193700",
+      "1709758010372x834772430864136800",
+      "1709919290950x263855101905133200",
+      "1709984976146x521023616579956400",
+      "1708171213345x863196327066718700",
+      "1704543442859x719573908709243400",
+      "1709990447280x130934002361610130",
+      "1709990440771x866737090572422100",
+      "1709990495072x142931559502485380",
+      "1709990505520x311318183826683650",
+      "1709990520422x364536138657073150",
+      "1709990511591x138020748779839710",
+      "1709990536463x254687835617926100",
+      "1709990537320x626435264715630000",
+      "1709989293429x304317768095752260",
+      "1709990530610x684566316688611000",
+      "1709990578860x983319743945861400",
+      "1709990681664x275048225113454520",
+      "1709990734158x620584841651917700",
+      "1714211180380x143818743190516910",
+      "1714819301345x629747786394124300",
+      "1696606185392x939116016715069800",
+      "1708170881093x928929780808742400",
+      "1716637727498x403134318872684400",
+      "1716637717451x427398443887728800",
+      "1705147272795x912848945025836800",
+      "1716637831851x453169870603890050",
+      "1716637554613x476320431990602940",
+      "1716639627309x682882806900635400",
+      "1716637454240x488995183458832200",
+      "1716639629131x120731554027964770",
+      "1708171011738x161405015690567760",
+      "1716715901993x622554910300885400",
+      "1716565807310x645525808165310000",
+      "1716714692132x654139150205811600",
+      "1717680669899x151563398732585280"
+    ],
+    "Preview_image": "//s3.amazonaws.com/appforest_uf/f1669802777296x756760685640587800/%D0%92%D1%80%D0%B0%D0%BD%D0%B3%D0%B5%D0%BB%D1%8C4.jpg",
+    "Price": 500,
+    "Reviews": [
+      "1676304848374x229257335937957900",
+      "1679486473672x232577911388897280",
+      "1679826193084x740808781942489100",
+      "1680439885651x940242096263004200",
+      "1680444424317x463332291938091000",
+      "1681578951898x925090661104615400",
+      "1682438808137x819360236155437000",
+      "1683242873272x206005832122368000",
+      "1683463893631x817337251048194000",
+      "1683463925071x684334073175867400",
+      "1683464009932x225658188123340800",
+      "1683464128281x873008697577308200",
+      "1683464259816x224409339617869820",
+      "1683464305885x887151459645259800",
+      "1683464309719x710119259433861100",
+      "1683464356234x437929244506980350",
+      "1683464395171x305235654392676350",
+      "1683464436344x624235976189542400",
+      "1683464483246x385536995282124800",
+      "1683980785932x345541978596311040",
+      "1685192611237x903685515424038900",
+      "1685198042138x973927959363584000",
+      "1685258894157x755195211864342500",
+      "1685258983622x778158133821046800",
+      "1687030904706x481242465863729150",
+      "1687252332692x477160466835570700",
+      "1688215528501x573089156227137540",
+      "1690738351694x434510144449019900",
+      "1697388295142x888597817562759200",
+      "1697388299457x100187409233739780",
+      "1699095955877x678620074354147300",
+      "1700662249284x530204390731546600",
+      "1700662225792x531931220134854660",
+      "1703068214102x322747953013588000",
+      "1704192077806x784806999726751700",
+      "1706366005538x134672507899215870",
+      "1706970292766x134386023327072260",
+      "1706973078186x507322285578780700",
+      "1707052961055x583984817547509800",
+      "1709985255219x331633459637780500",
+      "1709991829314x137768216638259200",
+      "1709991842523x393194297465765900",
+      "1709992193036x466109116598190100",
+      "1709992245757x137559593102082050",
+      "1709992656268x410492974549434400",
+      "1709993793253x243244304845504500",
+      "1709993866838x811526070103179300",
+      "1709994050490x143154368539525120",
+      "1709994996686x892798547598770200",
+      "1716641660875x500285060145479700",
+      "1716641830229x463066524399697900",
+      "1716641830715x609657027051126800",
+      "1716643278171x741713254097616900"
+    ],
+    "Quest_level": "Средняя",
+    "Summary_of_the_quest_ru": "Центром Русской православной церкви за границей в начале 1920-х годов стал маленький городок в Королевстве сербов, хорватов и словенцев Сремски Карловцы, где находилась резиденция сербского патриарха. В декабре 1921-го здесь прошло Всезаграничное русское церковное собрание, провозгласившее одной из своих целей “восстановление истинной царской власти дома Романовых”. Именно так Сремски Карловцы стали центром притяжения для разгромленного в России белого движения, вынужденного покинуть сначала Крым, а потом и не очень гостеприимную Турцию.",
+    "Quest_name_en": "New Quest 5",
+    "Quest_name_srb": "Нова Потрага 5",
+    "Shop_name_en": "New Quest 5",
+    "Shop_name_ru": "Чёрный барон: последняя тайна Петра Врангеля",
+    "Shop_name_srb": "Нова Потрага 5",
+    "Publish_on_the_site": true,
+    "Age_limit": "For all",
+    "Tags": [
+      "1680741746973x950545650515705900"
+    ],
+    "creatorUser": "1665774116632x867619938298102300",
+    "reviewGrade": 5,
+    "questCity": "1693914658428x307216824558944260",
+    "questCountry": "1693914259751x302818887647100900",
+    "placeStartLatitude": 45.20297516067363,
+    "placeStartLongitude": 19.93380326432525,
+    "theNumberOfUsersWhoCompletedTheQuest": 200,
+    "completedcount": 99,
+    "statusQuest": "Project",
+    "_id": "1668715657278x463245509205688300"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1663027216273x564727825462404860"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668715657278x333797561362808800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668717162319x524438078282006500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668717306581x199572511732793340"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668718179155x837073726225514500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668718967423x383674074096468000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "1848",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668719264868x503749374843289600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668719443207x283952401040277500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "1987",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668719665354x721055028148961300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668860130159x164751904195739650"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "8",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668860224571x969495198996627500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668860811246x762355184185638900"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "21",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668860941954x459617217375895550"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "МАРТ",
+          "3",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668861076847x932003404353110000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668861184169x196056926455332860"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "САБОВ",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668875999002x950203352487034900"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876192310x612194859981471700"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876297572x736259463844462600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876402384x938533300041678800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876511129x698633499549106200"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876800652x543057780446068740"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668876875775x251352400533127170"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668877114667x340469531639808000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "1928",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668877188318x653469158229934100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "85",
+          "11"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668877437410x453390678376054800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668878528888x996787658651598800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1668878975923x587726735823601700"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1670510226151x901466938323763200"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1671324673533x929523478784772600"
+    }
+  ],
+  "step_count": 29,
+  "exported_at": "2026-06-10T10:05:09Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}

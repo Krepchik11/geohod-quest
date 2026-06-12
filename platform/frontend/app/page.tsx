@@ -1,4 +1,4 @@
-'use client'; // narrow island ONLY for buy/checkout + admin demo (react.md + design). All visual is static design-matched.
+'use client'; // narrow island ONLY for buy/checkout (react.md + design). All visual is static design-matched.
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -19,19 +19,6 @@ export type PublishedQuest = {
   template_summary: string;
 };
 
-// Admin visibility types (small inline co-located per YAGNI/no-new-files; explicit/derived; reuse goldens note for snap key; casts for TS json)
-type AdminStats = {
-  grants_count: number;
-  attempts_count: number;
-  completions_count: number;
-  completion_rate: number;
-  per_step: Record<string, { wrongs?: number; hints?: number; nav?: number; feedbacks?: number }>;
-  hints_used: number;
-  wrongs_submitted: number;
-  navigator_clicks: number;
-  feedback_count: number;
-};
-
 /** Design demo card — rendered ONLY when the backend is unreachable (labeled). */
 const DEMO_MARKET_CARD: PublishedQuestWire = {
   quest_id: 'mystery-fortress-v1',
@@ -49,9 +36,6 @@ export default function GeoQuestHome() {
   const [market, setMarket] = useState<PublishedQuestWire[] | null>(null);
   const [owned, setOwned] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<string>('');
-  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
-  const [adminFbs, setAdminFbs] = useState<unknown[]>([]);
-  const [adminStatus, setAdminStatus] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -69,36 +53,15 @@ export default function GeoQuestHome() {
   }, []);
 
   const handleBuy = async (questId: string) => {
-    setStatus('Покупаем (тестовый платёжный провайдер)…');
+    setStatus('Оформляем покупку…');
     try {
-      const data = await api.checkout({ player_id: currentPlayerId(), quest_id: questId }) as
-        { created?: boolean; grant?: { source?: string } };
+      await api.checkout({ player_id: currentPlayerId(), quest_id: questId });
       setOwned((o) => ({ ...o, [questId]: true }));
-      setStatus(`Квест ваш — навсегда (${data.created ? 'новая покупка' : 'уже куплен'}, source=${data.grant?.source || 'n/a'})`);
-    } catch (e) {
-      setStatus('Не удалось купить (бэкенд доступен? NEXT_PUBLIC_API_URL): ' + (e as Error).message);
+      setStatus('Квест ваш — навсегда. Найдёте его в «Моих квестах».');
+    } catch {
+      setStatus('Не удалось завершить покупку. Попробуйте ещё раз чуть позже.');
     }
   };
-
-  const loadAdmin = async () => {
-    setAdminStatus('Loading (pure facts)...');
-    try {
-      const base = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) || 'http://localhost:8080';
-      const [sres, fres] = await Promise.all([
-        fetch(`${base}/api/admin/versions/golden-mystery-fortress-v1/stats`),
-        fetch(`${base}/api/admin/versions/golden-mystery-fortress-v1/feedbacks`),
-      ]);
-      if (!sres.ok || !fres.ok) throw new Error(`HTTP ${sres.status}/${fres.status}`);
-      const stats = (await sres.json()) as AdminStats;
-      const fbs = (await fres.json()) as unknown[];
-      setAdminStats(stats);
-      setAdminFbs(fbs);
-      setAdminStatus('Loaded from facts');
-    } catch (e) {
-      setAdminStatus('Admin demo needs backend+play: ' + (e as Error).message);
-    }
-  };
-
 
   return (
     <div className="site">
@@ -152,16 +115,6 @@ export default function GeoQuestHome() {
         </div>
       </section>
 
-      {/* Big visible callout to the *actually implemented* designed player (paper "Бумага" + full 7 templates + overlays + real backend sync) */}
-      <div style={{ background: '#FBF1E5', padding: '20px 0', textAlign: 'center', borderTop: '1px solid #d9d0c3', borderBottom: '1px solid #d9d0c3' }}>
-        <a href="/quest" style={{ fontSize: 15, fontWeight: 600, color: '#3E2C2C', textDecoration: 'underline' }}>
-          → Открыть реализованный дизайн-плеер (бумажный фрейм, 7 шаблонов, меню, подсказки после 2-й ошибки, синхронизация с бэкендом) — «Ирония судьбы»
-        </a>
-        <div style={{ fontSize: 11, opacity: 0.65, marginTop: 4 }}>
-          Для твоего запуска: <code>NEXT_PUBLIC_API_URL=http://localhost:8087 PORT=8089 npm run dev:frontend</code> (backend на 8087)
-        </div>
-      </div>
-
       {/* магазин + .quest-grid (design card layout) — LIVE published quests with
           per-quest buy (mock payment) and owned state; static demo card only as
           a labeled fallback when the backend is unreachable */}
@@ -174,7 +127,7 @@ export default function GeoQuestHome() {
         )}
         <div className="quest-grid" style={{ marginTop: 48 }}>
           {(market ?? [DEMO_MARKET_CARD]).map((q) => {
-            const playUrl = `/quest?golden=${encodeURIComponent(q.quest_id)}`;
+            const playUrl = `/quest/${encodeURIComponent(q.quest_id)}`;
             const isOwned = !!owned[q.quest_id];
             return (
               <article className="quest-card card" key={q.quest_id}>
@@ -203,6 +156,7 @@ export default function GeoQuestHome() {
             );
           })}
         </div>
+        {status && <p style={{ textAlign: 'center', marginTop: 24, fontSize: 13 }}>{status}</p>}
       </section>
 
       {/* (about text already in features section above per design) */}
@@ -252,14 +206,6 @@ export default function GeoQuestHome() {
           </Link>
         </div>
       </footer>
-
-      {/* Admin demo narrow */}
-      <div style={{ maxWidth: 1240, margin: '40px auto', padding: '0 42px' }}>
-        <button onClick={loadAdmin} className="btn-ui" style={{ minWidth: 180 }}>Load admin demo (facts)</button>
-        {adminStatus && <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>{adminStatus}</div>}
-        {adminStats && <div style={{ marginTop: 12, fontSize: 12 }}>Grants: {adminStats.grants_count} • Attempts: {adminStats.attempts_count} • Rate: {adminStats.completion_rate}%</div>}
-        {status && <div style={{ marginTop: 8, fontSize: 12 }}>{status}</div>}
-      </div>
     </div>
   );
 }

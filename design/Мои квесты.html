@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — мои квесты, попытки, офлайн-бандл, профиль</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Jost:wght@400;500&amp;family=Prata&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="commerce/site-theme.css">
+<link rel="stylesheet" href="myquests/myquests.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="lib/design-canvas.jsx"></script>
+<script type="text/babel" src="commerce/screens.jsx"></script>
+<script type="text/babel" src="myquests/screens.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="ctx" title="Мои квесты — контекст" subtitle="Мост между витриной и плеером: коллекция с lifetime-грантами, попытки с привязкой к версии, офлайн-бандл ~5 МБ, баланс монет в профиле">
+        <DCPostIt>
+          Инварианты SPEC: попытка живёт на версии, на которой началась; новые попытки — на последней
+          опубликованной. Сброс попытки не трогает баланс монет (факты неизменяемы).
+          Скачивание бандла — условие игры офлайн.
+        </DCPostIt>
+      </DCSection>
+
+      <DCSection id="desktop" title="Desktop · 1240" subtitle="Список с тремя состояниями попытки (не начат / в процессе / пройден), статусом офлайн-загрузки и предупреждением о новой версии">
+        <DCArtboard id="d-list" label="Мои квесты · список" width={1240} height={820}><MyQuestsPage></MyQuestsPage></DCArtboard>
+        <DCArtboard id="d-empty" label="Пустое состояние" width={1240} height={640}><MyQuestsEmpty></MyQuestsEmpty></DCArtboard>
+        <DCArtboard id="d-profile" label="Профиль · монеты и рейтинг" width={1240} height={760}><ProfilePage></ProfilePage></DCArtboard>
+      </DCSection>
+
+      <DCSection id="mobile" title="Мобильные · 360" subtitle="Старт-гейт решает судьбу попытки до входа в плеер; загрузка бандла — три состояния">
+        <DCArtboard id="m-list" label="Мои квесты" width={360} height={740}><MobileMyQuests></MobileMyQuests></DCArtboard>
+        <DCArtboard id="m-gate" label="Старт-гейт · продолжить или заново" width={360} height={740}><StartGate></StartGate></DCArtboard>
+        <DCArtboard id="m-dl1" label="Бандл · скачивание" width={360} height={740}><BundleDownload stage="downloading"></BundleDownload></DCArtboard>
+        <DCArtboard id="m-dl2" label="Бандл · готов офлайн" width={360} height={740}><BundleDownload stage="ready"></BundleDownload></DCArtboard>
+        <DCArtboard id="m-dl3" label="Бандл · доступна новая версия" width={360} height={740}><BundleDownload stage="update"></BundleDownload></DCArtboard>
+      </DCSection>
+
+      <DCSection id="proto" title="Играбельный прототип" subtitle="Скачать → прогресс загрузки → старт-гейт → «Начать заново» с подтверждением (монеты сохраняются)">
+        <DCArtboard id="m-proto" label="Прототип · играть здесь" width={360} height={740}><MyQuestsProto></MyQuestsProto></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App></App>);
+</script>
+</body>
+</html>

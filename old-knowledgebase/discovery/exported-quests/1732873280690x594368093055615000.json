@@ -1,0 +1,219 @@
+{
+  "quest_id": "1732873280690x594368093055615000",
+  "quest_name": "1732873280690x594368093055615000",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-11-29T09:50:54.723Z",
+    "Created Date": "2024-11-29T09:41:21.145Z",
+    "Created By": "1732872925634x336977945697919800",
+    "Page": [
+      "1732873280690x832588924598616000",
+      "1732873280690x797175123749109800",
+      "1732873280690x214255017250521100",
+      "1732873319996x845672447165595600",
+      "1732873325606x697707426005909500",
+      "1732873331298x234662565064474620",
+      "1732873787343x317136200032845800"
+    ],
+    "Quest_setting": "1732873280690x550093398570172400",
+    "Quest_name_ru": "пятницаНоябрь",
+    "Price": 0,
+    "Reviews": [
+      "1732873849624x900928452299587600"
+    ],
+    "Quest_name_en": "New Quest 21",
+    "Quest_name_srb": "Нова Потрага 21",
+    "Shop_name_en": "New Quest 21",
+    "Shop_name_ru": "пятницаНоябрь",
+    "Shop_name_srb": "Нова Потрага 21",
+    "Publish_on_the_site": false,
+    "creatorUser": "1732872925634x336977945697919800",
+    "reviewGrade": 5,
+    "theNumberOfUsersWhoCompletedTheQuest": 0,
+    "completedcount": 1,
+    "statusQuest": "Published",
+    "countCoinMadeIt": 1,
+    "_id": "1732873280690x594368093055615000"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873280690x214255017250521100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873280690x797175123749109800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873280690x832588924598616000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873319996x845672447165595600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873325606x697707426005909500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "12"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873331298x234662565064474620"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873787343x317136200032845800"
+    }
+  ],
+  "step_count": 7,
+  "exported_at": "2026-06-10T10:05:22Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}

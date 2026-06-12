@@ -1,8 +1,16 @@
 'use client';
 
-import React, { useReducer, useEffect, useCallback } from 'react';
-import type { Fact, GameStep, QuestSnapshot, AccessGrant, SyncCorrections } from '../../lib/shared-model';
-import { isAnswerCorrect, projectBalance, projectState, isEligibleForAttempt, deriveSyncCorrections } from '../../lib/shared-model';
+import React, { useReducer, useEffect, useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import type { Fact, GameStep, QuestSnapshot, SyncCorrections } from '../../lib/shared-model';
+import {
+  isAnswerCorrect,
+  projectBalance,
+  projectState,
+  shouldOfferHint,
+  deriveSyncCorrections,
+} from '../../lib/shared-model';
+import { toDesignStep } from '../../lib/design-step';
 import { api } from '../../lib/api';
 import {
   factNaturalKey,
@@ -16,51 +24,54 @@ import {
 import { flushPending } from '../../lib/sync';
 import { currentPlayerId, getDeviceId } from '../../lib/identity';
 import { StartGate } from './StartGate';
-
-import { WrongHintPopup } from './WrongHintPopup';
-import { FeedbackMenu } from './FeedbackMenu';
-import { CoinDisplay } from './CoinDisplay';
-import { OfflineBanner } from './OfflineBanner';
-import { BonusAnimation } from './BonusAnimation';
-
-// Full design player components (paper "Бумага" + 7 templates + overlays per design/player/components.jsx + quest-data)
+import { coinChime } from './sound';
+import { useOnline } from './useOnline';
 import {
-  PlayerFrame, StepView, TopBar, SyncBanner,
+  PlayerFrame, StepView, TopBar, SyncBanner, CoinToast,
   HintPopup, MenuOverlay, FeedbackSheet,
-  SyncSheet, BalanceCorrectionPopup, AdvanceOfferPopup
+  SyncSheet, BalanceCorrectionPopup, AdvanceOfferPopup,
 } from '../player/PlayerComponents';
+
+/** RU copy, classic tone — shared with the constructor preview/test player. */
+import { PLAYER_COPY as COPY } from '../../lib/player-copy';
+
+const SOUND_PREF_KEY = 'geohod-player-sound:v1';
+const TOAST_MS = 1900;
+const SYNCED_BANNER_MS = 2400;
+
+/** Elapsed attempt time as the design's h:mm stat (e.g. «1:24»). */
+function formatElapsed(createdAt: string | null): string {
+  if (!createdAt) return '0:00';
+  const ms = Math.max(0, Date.now() - new Date(createdAt).getTime());
+  const minutes = Math.floor(ms / 60_000);
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}
 
 interface PlayerState {
   facts: Fact[];
   stepIdx: number;
-  simOffline: boolean;
-  showWrongPopup: boolean;
-  wrongStepPos: number | null;
-  bonusMessage: string | null;
   /* Local attempt identity from the IndexedDB queue (server id lives there too). */
   attemptKey: string | null;
   attemptCreatedAt: string | null;
   isSyncing: boolean;
-  syncError: string | null;
-  lastCorrMessage: string | null;
+  /** Briefly true after a successful flush — drives the «синхронизировано» banner. */
+  justSynced: boolean;
   /* The two SPEC corrections, derived client-side after sync (popups). */
   corrections: SyncCorrections | null;
   /* Per-fact queue status mirror (natural key → status) — chips/pending counts. */
   queueStatus: Record<string, 'pending' | 'sent'>;
   /* Start gate (SPEC): shown when an in-progress attempt was hydrated. */
   showStartGate: boolean;
-  // eligibility gate additive (marketplace-grants): demo grant or ?owned=1 or local after buy; mystery golden demo allows for happy untouched
-  grant: AccessGrant | null;
-  accessWarning: string | null;
+  /** Step whose hint popup is open (SPEC: from the 2nd wrong answer only). */
+  hintOfferPos: number | null;
+  /** Designed coin toast (gift / completion bonus). */
+  toast: { amount: number; narrative?: string } | null;
 }
 
 type PlayerAction =
   | { type: 'append'; fact: Fact }
-  | { type: 'advance'; to?: number }
-  | { type: 'setPopup'; show: boolean; pos?: number | null }
-  | { type: 'toggleOffline' }
+  | { type: 'advance'; to: number }
   | { type: 'reset'; attemptKey: string; attemptCreatedAt: string }
-  | { type: 'setBonus'; msg: string | null }
   | {
       type: 'hydrate';
       facts: Fact[];
@@ -72,32 +83,26 @@ type PlayerAction =
     }
   | { type: 'dismissStartGate' }
   | { type: 'setSyncing'; v: boolean }
-  | { type: 'setSyncResult'; error: string | null; corrMsg: string | null }
+  | { type: 'setJustSynced'; v: boolean }
   | { type: 'setCorrections'; corrections: SyncCorrections | null }
   | { type: 'dismissBalanceNotice' }
   | { type: 'resolveAdvanceOffer' }
   | { type: 'setQueueStatus'; status: Record<string, 'pending' | 'sent'> }
-  // eligibility gate additive (demo grant or from marketplace buy / ?owned)
-  | { type: 'setGrant'; grant: AccessGrant | null }
-  | { type: 'setAccessWarning'; msg: string | null };
+  | { type: 'offerHint'; pos: number | null }
+  | { type: 'setToast'; toast: PlayerState['toast'] };
 
 const initialState: PlayerState = {
   facts: [],
   stepIdx: 0,
-  simOffline: false,
-  showWrongPopup: false,
-  wrongStepPos: null,
-  bonusMessage: null,
   attemptKey: null,
   attemptCreatedAt: null,
   isSyncing: false,
-  syncError: null,
-  lastCorrMessage: null,
+  justSynced: false,
   corrections: null,
   queueStatus: {},
   showStartGate: false,
-  grant: null,
-  accessWarning: null,
+  hintOfferPos: null,
+  toast: null,
 };
 
 function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
@@ -112,21 +117,13 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
           : { ...state.queueStatus, [factNaturalKey(action.fact)]: 'pending' },
       };
     case 'advance':
-      return { ...state, stepIdx: action.to ?? Math.min(state.stepIdx + 1, 999) };
-    case 'setPopup':
-      return { ...state, showWrongPopup: action.show, wrongStepPos: action.pos ?? null };
-    case 'toggleOffline':
-      return { ...state, simOffline: !state.simOffline };
+      return { ...state, stepIdx: action.to };
     case 'reset':
       return {
         ...initialState,
-        simOffline: state.simOffline,
-        grant: state.grant,
         attemptKey: action.attemptKey,
         attemptCreatedAt: action.attemptCreatedAt,
       };
-    case 'setBonus':
-      return { ...state, bonusMessage: action.msg };
     case 'hydrate':
       return {
         ...state,
@@ -141,8 +138,8 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
       return { ...state, showStartGate: false };
     case 'setSyncing':
       return { ...state, isSyncing: action.v };
-    case 'setSyncResult':
-      return { ...state, syncError: action.error, lastCorrMessage: action.corrMsg };
+    case 'setJustSynced':
+      return { ...state, justSynced: action.v };
     case 'setCorrections':
       return { ...state, corrections: action.corrections };
     case 'dismissBalanceNotice':
@@ -155,29 +152,33 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
         : state;
     case 'setQueueStatus':
       return { ...state, queueStatus: action.status };
-    case 'setGrant':
-      return { ...state, grant: action.grant, accessWarning: null };
-    case 'setAccessWarning':
-      return { ...state, accessWarning: action.msg };
+    case 'offerHint':
+      return { ...state, hintOfferPos: action.pos };
+    case 'setToast':
+      return { ...state, toast: action.toast };
     default:
       return state;
   }
 }
 
-
 export default function QuestPlayerClient({
   snapshot,
-  goldenId,
+  questId,
   snapshotId,
 }: {
   snapshot: QuestSnapshot;
-  goldenId: string;
-  /** Snapshot identity for attempt binding; bundle id when playing from a bundle. */
-  snapshotId?: string;
+  questId: string;
+  /** Snapshot identity for attempt binding (bundle snapshot_id). */
+  snapshotId: string;
 }) {
+  const router = useRouter();
+  const online = useOnline();
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
-  const { facts, stepIdx, simOffline, showWrongPopup, wrongStepPos, bonusMessage, attemptKey, attemptCreatedAt, isSyncing, lastCorrMessage, corrections, queueStatus, showStartGate, grant, accessWarning } = state; // syncError kept in state/reducer for completeness (YAGNI no deep UI render yet)
+  const {
+    facts, stepIdx, attemptKey, attemptCreatedAt, isSyncing, justSynced,
+    corrections, queueStatus, showStartGate, hintOfferPos, toast,
+  } = state;
 
   const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
   const bal = projectBalance(facts);
@@ -185,79 +186,87 @@ export default function QuestPlayerClient({
   /** Facts the server has not acknowledged yet — banner badge + menu + sheet chips. */
   const pendingCount = Object.values(queueStatus).filter((s) => s === 'pending').length;
 
-  // Attempt binding id: bundle snapshot when present, golden marker otherwise.
-  const boundSnapshotId = snapshotId || `golden:${goldenId}`;
+  const displaySteps = useMemo(() => steps.map(toDesignStep), [steps]);
+  const currentDisplayStep = displaySteps[Math.min(stepIdx, displaySteps.length - 1)];
 
-  // eligibility gate additive (marketplace-grants): demo grant for mystery golden (keeps happy "МИХАЙЛО ПУПИН"+5 + reconnect 100% untouched per TDD goldens); for other quests require grant (from buy or ?owned=1); pure isEligibleForAttempt from shared (reuse, no dupe)
-  const demoGrant: AccessGrant | null = goldenId === 'mystery-fortress-v1'
-    ? { player_id: currentPlayerId(), quest_id: goldenId, granted_at: '2026-06-10T00:00:00Z', source: 'Payment', source_ref: null }
-    : grant;
-  const isEligible = isEligibleForAttempt(demoGrant, goldenId, /*free flag*/ goldenId.includes('free') || false);
+  // Ephemeral per-step UI state. Facts/reducer remain the sole durable source.
+  // Client-only component (gated by BundleGate), so the sound preference can be
+  // read lazily from localStorage at first render.
+  const [ui, setUi] = useState(() => ({
+    answer: '',
+    wrong: false,
+    note: '',
+    menuOpen: false,
+    feedbackOpen: false,
+    syncSheetOpen: false,
+    feedbackText: '',
+    rating: 0,
+    reviewSent: false,
+    soundOn: typeof window === 'undefined' ? true : localStorage.getItem(SOUND_PREF_KEY) !== 'off',
+  }));
 
+  const toggleSound = useCallback(() => {
+    setUi((u) => {
+      localStorage.setItem(SOUND_PREF_KEY, u.soundOn ? 'off' : 'on');
+      return { ...u, soundOn: !u.soundOn };
+    });
+  }, [setUi]);
+
+  const showToast = useCallback((amount: number, narrative?: string, soundOn?: boolean) => {
+    dispatch({ type: 'setToast', toast: { amount, narrative } });
+    if (soundOn) coinChime();
+    setTimeout(() => dispatch({ type: 'setToast', toast: null }), TOAST_MS);
+  }, []);
+
+  /** Append to the reducer + write-through to the durable queue; returns the built fact. */
   const appendFact = useCallback(
-    (partial: Omit<Fact, 'device_id'>) => {
+    (partial: Omit<Fact, 'device_id'>): Fact => {
       const fact: Fact = { ...partial, device_id: getDeviceId() };
       dispatch({ type: 'append', fact });
-      // Write-through to the durable queue; storage failure degrades to in-memory
-      // play (offline never blocks play), never to a blocked action.
+      // Storage failure degrades to in-memory play (offline never blocks play),
+      // never to a blocked action.
       void (async () => {
         try {
           const key = attemptKey
-            ?? (await ensureActiveAttempt(goldenId, boundSnapshotId)).attempt_key;
+            ?? (await ensureActiveAttempt(questId, snapshotId)).attempt_key;
           await queueAppendFact(key, fact);
         } catch (err) {
           console.warn('fact write-through failed (in-memory only)', err);
         }
       })();
+      return fact;
     },
-    [attemptKey, goldenId, boundSnapshotId]
+    [attemptKey, questId, snapshotId]
   );
 
+  // Gifts are claimed when their step is COMPLETED (physical confirm, correct
+  // answer, terminal entry) — design/player/prototype.jsx semantics, never on reach.
   const claimGiftIfNeeded = useCallback(
     (pos: number) => {
       const step = steps[pos];
-      if (!step?.supporting?.gift) return false;
-      const alreadyClaimed = facts.some(
-        (f) => f.type === 'gift_claimed' && f.step_position === pos
-      );
-      if (alreadyClaimed) return false;
-      const gift = step.supporting.gift!;
+      const gift = step?.supporting?.gift;
+      if (!gift) return;
+      const alreadyClaimed = facts.some((f) => f.type === 'gift_claimed' && f.step_position === pos);
+      if (alreadyClaimed) return;
       appendFact({
         type: 'gift_claimed',
         step_position: pos,
         submitted_value: null,
         local_is_correct: true,
         coins_delta: gift.coins,
-        note: gift.narrative_text || `Gift from step ${pos} (synthesized coverage)`,
+        note: gift.narrative_text || null,
       });
-      if (step.supporting.bonus_animation) {
-        const msg = `+${gift.coins} coins!`;
-        dispatch({ type: 'setBonus', msg });
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          try {
-            const utter = new SpeechSynthesisUtterance(msg);
-            window.speechSynthesis.speak(utter);
-          } catch {}
-        }
-        setTimeout(() => dispatch({ type: 'setBonus', msg: null }), 2400);
-      }
-      return true;
+      showToast(gift.coins, gift.narrative_text, ui.soundOn);
     },
-    [steps, facts, appendFact]
+    [steps, facts, appendFact, showToast, ui.soundOn]
   );
 
   const doAdvance = useCallback(() => {
-    const pos = stepIdx;
-    claimGiftIfNeeded(pos);
-    const next = Math.min(stepIdx + 1, steps.length - 1);
-    dispatch({ type: 'advance', to: next });
-    // reach next may auto-claim (e.g. gift step with no recorded action in happy golden)
-    setTimeout(() => claimGiftIfNeeded(next), 0);
-  }, [stepIdx, steps.length, claimGiftIfNeeded]);
+    dispatch({ type: 'advance', to: Math.min(stepIdx + 1, steps.length - 1) });
+  }, [stepIdx, steps.length]);
 
   const handlePhysicalConfirm = useCallback(
     (note?: string) => {
-      if (!isEligible) { dispatch({ type: 'setAccessWarning', msg: 'Access required - visit marketplace' }); return; }
       appendFact({
         type: 'physical_confirmed',
         step_position: stepIdx,
@@ -267,17 +276,18 @@ export default function QuestPlayerClient({
         note: note || null,
       });
       claimGiftIfNeeded(stepIdx);
+      setUi((u) => ({ ...u, note: '' }));
       doAdvance();
     },
-    [stepIdx, appendFact, claimGiftIfNeeded, doAdvance, isEligible]
+    [stepIdx, appendFact, claimGiftIfNeeded, doAdvance, setUi]
   );
 
   const handleAnswerSubmit = useCallback(
     (value: string) => {
-      if (!isEligible) { dispatch({ type: 'setAccessWarning', msg: 'Access required - visit marketplace' }); return; }
+      if (!value.trim()) return;
       const step = currentStep;
       const correct = isAnswerCorrect(value, step.completion.acceptable);
-      appendFact({
+      const fact = appendFact({
         type: 'answer_submitted',
         step_position: stepIdx,
         submitted_value: value,
@@ -285,36 +295,36 @@ export default function QuestPlayerClient({
         coins_delta: 0,
         note: null,
       });
-      if (!correct && step.supporting?.hint) {
-        // ONLY via wrong popup (per spec)
-        dispatch({ type: 'setPopup', show: true, pos: stepIdx });
+      if (!correct) {
+        setUi((u) => ({ ...u, wrong: true, answer: value }));
+        // SPEC Wrong-Answer flow: inline error on the 1st wrong; popup only
+        // from the 2nd wrong on this step while its hint is unbought.
+        if (shouldOfferHint([...facts, fact], stepIdx, step)) {
+          dispatch({ type: 'offerHint', pos: stepIdx });
+        }
         return;
       }
+      setUi((u) => ({ ...u, wrong: false, answer: '' }));
       claimGiftIfNeeded(stepIdx);
       doAdvance();
     },
-    [stepIdx, currentStep, appendFact, claimGiftIfNeeded, doAdvance, isEligible]
+    [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, doAdvance, setUi]
   );
 
-  const handleSpendHint = useCallback(() => {
-    const pos = wrongStepPos ?? stepIdx;
-    const step = steps[pos];
-    const cost = step?.supporting?.hint?.cost_coins ?? 0;
+  const handleBuyHint = useCallback(() => {
+    const pos = hintOfferPos ?? stepIdx;
+    const hint = steps[pos]?.supporting?.hint;
     // Never blocked by balance — overdraft is a legal state (SPEC).
     appendFact({
       type: 'hint_purchased',
       step_position: pos,
       submitted_value: null,
       local_is_correct: true,
-      coins_delta: -cost,
-      note: step?.supporting?.hint?.reveal_text || null,
+      coins_delta: -(hint?.cost_coins ?? 0),
+      note: hint?.reveal_text || null,
     });
-    dispatch({ type: 'setPopup', show: false, pos: null });
-  }, [wrongStepPos, stepIdx, steps, appendFact]);
-
-  const handleCancelPopup = useCallback(() => {
-    dispatch({ type: 'setPopup', show: false, pos: null });
-  }, []);
+    dispatch({ type: 'offerHint', pos: null });
+  }, [hintOfferPos, stepIdx, steps, appendFact]);
 
   const handleFeedback = useCallback(
     (note: string) => {
@@ -341,24 +351,22 @@ export default function QuestPlayerClient({
       coins_delta: 0,
       note: nav.label || null,
     });
-    const url = `https://www.google.com/maps/search/?api=1&query=${nav.lat},${nav.lng}`;
-    if (typeof window !== 'undefined') {
-      window.open(url, '_blank');
-    }
+    window.open(`https://www.google.com/maps/search/?api=1&query=${nav.lat},${nav.lng}`, '_blank');
   }, [stepIdx, currentStep, appendFact]);
 
+  // Emit attempt_completed + completion bonus once on entering the terminal step.
+  // Local guard for this attempt; the server enforces once-per-(player, quest) ever.
+  const isTerminalStep = !!currentStep?.supporting?.terminal || currentStep?.template === 'congrats';
+  const hasCompleted = facts.some((f) => f.type === 'attempt_completed');
   const handleTerminal = useCallback(() => {
-    if (!isEligible) { dispatch({ type: 'setAccessWarning', msg: 'Access required - visit marketplace' }); return; }
     appendFact({
       type: 'attempt_completed',
       step_position: stepIdx,
       submitted_value: null,
       local_is_correct: true,
       coins_delta: 0,
-      note: currentStep.rich_content.button_text || 'Completed the quest',
+      note: currentStep.rich_content.button_text || 'Квест пройден',
     });
-    // Canonical completion bonus: toast on entering the terminal step. Local guard for this
-    // attempt; the server enforces once-per-(player, quest) across attempts/devices/resets.
     if (!facts.some((f) => f.type === 'completion_bonus')) {
       appendFact({
         type: 'completion_bonus',
@@ -368,16 +376,10 @@ export default function QuestPlayerClient({
         coins_delta: 5,
         note: 'Бонус за прохождение',
       });
-      dispatch({ type: 'setBonus', msg: '+5 монет — бонус за прохождение' });
-      setTimeout(() => dispatch({ type: 'setBonus', msg: null }), 2400);
+      showToast(5, 'Бонус за прохождение', ui.soundOn);
     }
     claimGiftIfNeeded(stepIdx);
-  }, [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, isEligible]);
-
-  // Emit attempt_completed + completion bonus on entering the terminal step
-  // (guards make this idempotent across re-renders and LS restores).
-  const isTerminalStep = !!currentStep?.supporting?.terminal || currentStep?.template === 'congrats';
-  const hasCompleted = facts.some((f) => f.type === 'attempt_completed');
+  }, [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, showToast, ui.soundOn]);
   useEffect(() => {
     if (isTerminalStep && !hasCompleted) handleTerminal();
   }, [isTerminalStep, hasCompleted, handleTerminal]);
@@ -387,13 +389,14 @@ export default function QuestPlayerClient({
   const handleReplay = useCallback(() => {
     void (async () => {
       try {
-        const fresh = await restartAttempt(goldenId, boundSnapshotId);
+        const fresh = await restartAttempt(questId, snapshotId);
         dispatch({ type: 'reset', attemptKey: fresh.attempt_key, attemptCreatedAt: fresh.created_at });
+        setUi((u) => ({ ...u, answer: '', wrong: false, note: '', rating: 0, reviewSent: false }));
       } catch (err) {
         console.warn('restart failed', err);
       }
     })();
-  }, [goldenId, boundSnapshotId]);
+  }, [questId, snapshotId, setUi]);
 
   // Re-mirror per-fact queue status into state (chips + pending counts).
   const refreshQueueStatus = useCallback(async (key: string) => {
@@ -403,46 +406,36 @@ export default function QuestPlayerClient({
 
   // Flush: upload the queue's pending facts idempotently (lib/sync owns attempt
   // registration + single-flight), then derive the two SPEC corrections by diffing
-  // the pre-flush local projection against the authoritative one. No correction
-  // facts exist. On error everything stays pending (client authoritative), retry-safe.
-  const runFlush = useCallback(async (opts?: { silent?: boolean }) => {
-    if (simOffline) return; // ALL flush triggers gate on the sim toggle (SPEC)
+  // the pre-flush local projection against the authoritative one. On error
+  // everything stays pending (client authoritative), retry-safe.
+  const runFlush = useCallback(async () => {
+    if (!online) return; // real connectivity gates every flush trigger
     dispatch({ type: 'setSyncing', v: true });
     try {
-      const result = await flushPending({ questId: goldenId, playerId: currentPlayerId(), api });
+      const result = await flushPending({ questId, playerId: currentPlayerId(), api });
       if (result) {
-        const corrections = deriveSyncCorrections(result.localBefore, result.authoritative);
-        if (corrections.balanceNotice || corrections.advanceOffer) {
-          dispatch({ type: 'setCorrections', corrections });
+        const derived = deriveSyncCorrections(result.localBefore, result.authoritative);
+        if (derived.balanceNotice || derived.advanceOffer) {
+          dispatch({ type: 'setCorrections', corrections: derived });
         }
         if (attemptKey) await refreshQueueStatus(attemptKey);
-        dispatch({ type: 'setSyncResult', error: null, corrMsg: 'synced' });
-        setTimeout(() => dispatch({ type: 'setSyncResult', error: null, corrMsg: null }), 2400);
+        dispatch({ type: 'setJustSynced', v: true });
+        setTimeout(() => dispatch({ type: 'setJustSynced', v: false }), SYNCED_BANNER_MS);
       }
-    } catch {
-      if (!opts?.silent) {
-        dispatch({ type: 'setSyncResult', error: 'sync failed, still offline (local authoritative)', corrMsg: null });
-      }
+    } catch (err) {
+      console.warn('sync failed — facts stay pending (local authoritative)', err);
     } finally {
       dispatch({ type: 'setSyncing', v: false });
     }
-  }, [simOffline, goldenId, attemptKey, refreshQueueStatus]);
-
-  const handleSyncClick = useCallback(async () => {
-    if (simOffline) {
-      alert('Simulated: facts would be uploaded idempotently and corrections derived from the projection diff.');
-      return;
-    }
-    await runFlush();
-  }, [simOffline, runFlush]);
+  }, [online, questId, attemptKey, refreshQueueStatus]);
 
   // Mount: one-time localStorage migration, then hydrate from the queue (single dispatch).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        await migrateLegacyLocalStorage(goldenId, boundSnapshotId, window.localStorage);
-        const attempt = await ensureActiveAttempt(goldenId, boundSnapshotId);
+        await migrateLegacyLocalStorage(questId, snapshotId, window.localStorage);
+        const attempt = await ensureActiveAttempt(questId, snapshotId);
         const rows = await getFacts(attempt.attempt_key);
         if (cancelled) return;
         const hydratedFacts = rows.map((r) => r.fact);
@@ -463,13 +456,13 @@ export default function QuestPlayerClient({
     return () => {
       cancelled = true;
     };
-  }, [goldenId, boundSnapshotId]);
+  }, [questId, snapshotId]);
 
-  // Start flush once hydrated; also refires when the sim toggle flips off
-  // (runFlush identity change) — "back online" semantics. Silent: no error UI.
+  // Flush once hydrated; refires when connectivity returns (runFlush identity
+  // changes with `online`) — "back online" semantics.
   useEffect(() => {
     if (!attemptKey) return;
-    void runFlush({ silent: true });
+    void runFlush();
   }, [attemptKey, runFlush]);
 
   // Resume position write-through (covers every advance path incl. the advance offer).
@@ -478,230 +471,109 @@ export default function QuestPlayerClient({
     setLastStepIdx(attemptKey, stepIdx).catch(() => {});
   }, [attemptKey, stepIdx]);
 
-  // Reconnect trigger: flush when the browser comes back online (sim-gated via ref).
-  useEffect(() => {
-    const onOnline = () => {
-      void runFlush({ silent: true });
-    };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
-  }, [runFlush]);
-
-  // UI state for controlled paper StepView (answer val, wrong flag for shake, hintRevealed, note, menu/sheet/rating per design full flows)
-  // Narrow 'use client' state; facts/reducer remain sole mutable source for TDD goldens fidelity.
-  const [uiState, setUiState] = React.useState({
-    answer: '' as string,
-    wrong: false as boolean,
-    hintRevealed: false as boolean,
-    note: '' as string,
-    menuOpen: false as boolean,
-    feedbackOpen: false as boolean,
-    syncSheetOpen: false as boolean,
-    feedbackText: '' as string,
-    rating: 0 as number,
-    reviewSent: false as boolean,
-    soundOn: true as boolean,
-  });
-
-  // Real 7-tpl demo data from design/player/quest-data.js (Ирония судьбы) mapped to designStep + supporting for rich paper render.
-  // Used for visual fidelity + full template coverage when golden=ironia (or default demo). Mystery golden kept for exact TDD replay.
-  const DEMO_IRONIA_STEPS = [
-    { template: 'start', title: 'Ирония судьбы', text: 'по следам исторических личностей', kicker: 'Городской квест', image: '/assets/img/quest-card.png' },
-    { template: 'video', text: 'Здравствуйте! Я архивариус Николаевской церкви. Сто лет назад здесь оставил след человек, изменивший наше представление о Вселенной. Готовы пройти по его следам?', video: { dur: '0:48', label: 'видео-приветствие автора' } },
-    { template: 'continue', text: '1913 год. Нови Сад. В церковной книге появляется запись о крещении двух мальчиков — Эдуарда и Альберта.\n\nИх мать — сербка Милева Марич. Об отце пока умолчим: вы сами назовёте его имя к концу прогулки.', image: '/assets/img/church.jpg' },
-    { template: 'task_no', text: 'Дойдите до Николаевской церкви — самой старой православной церкви города.', place: 'ул. Николаевска порта 2 · 400 м отсюда', action: { desc: 'Найдите кованую ограду у входа и прикоснитесь к холодному металлу — так здоровались с церковью сто лет назад.', confirmLabel: 'Я на месте, нашёл' }, nav: { lat: 45.2551, lng: 19.8451, label: 'Николаевская церковь' }, gift: { coins: 3, narrative_text: 'За смелость и точность' }, allowNote: true },
-    { template: 'task_answer', text: 'Взгляните на табличку над входом. В каком году храм был освящён после перестройки?', prompt: 'Введите год', acceptable: ['1730'], gift: { coins: 5, narrative_text: 'Острый глаз!' }, hint: { cost: 5, text: 'Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки.' } },
-    { template: 'route_video', text: 'Теперь — по Дунавской улице к городскому парку. По пути считайте кофейни: их тут больше, чем фонарей.', video: { dur: '0:31', label: 'видео маршрута до парка' }, nav: { lat: 45.2552, lng: 19.8489, label: 'Дунавский парк' } },
-    { template: 'continue', text: '— Вот, спасибо, удружили! Что там у вас? Так, где у меня книга 1913 года была? 20 сентября, говорите?\n\nДа тут одна запись всего: «Едуард и Алберт, крштени су по православном обреду...»\n\nПодождите, да их же мать та самая Милева. Ну и дела!', image: '/assets/img/quest-card.png' },
-    { template: 'congrats', title: 'Квест пройден!', text: 'Имя отца мальчиков вы уже поняли сами: Альберт Эйнштейн. Ирония судьбы в том, что города, хранящие чьи-то следы, сами становятся частью истории.' },
-  ];
-
-  const useIroniaDemo = goldenId === 'ironia' || goldenId === 'ironia-sudby';
-  const displaySteps = useIroniaDemo ? DEMO_IRONIA_STEPS : steps.map((s: GameStep) => {
-    return {
-      template: s.template,
-      title: s.rich_content?.title || s.template,
-      text: s.rich_content?.main_text || '',
-      image: s.media?.task || s.media?.character || null,
-      place: s.rich_content?.place_text,
-      prompt: s.rich_content?.question_prompt,
-      acceptable: s.completion?.acceptable,
-      action: s.supporting?.physical_action ? { desc: s.supporting.physical_action.description || '', confirmLabel: s.rich_content?.button_text } : undefined,
-      nav: s.supporting?.navigator ?? undefined,
-      gift: s.supporting?.gift ?? undefined,
-      hint: s.supporting?.hint ? { cost: s.supporting.hint.cost_coins, text: s.supporting.hint.reveal_text } : undefined,
-      allowNote: s.completion?.allow_note,
-    };
-  });
-
-  const currentDisplayStep = displaySteps[Math.min(stepIdx, displaySteps.length - 1)] || displaySteps[0];
-
-  // thin StepRenderer — now ALWAYS full paper frame + StepView (design fidelity). Controlled st/on for answer/hint/note/menu.
-  const renderCurrentView = () => {
-    const pos = (currentStep.position ?? stepIdx);
-    const revealed = proj.revealedHints.includes(pos) || uiState.hintRevealed;
-
-    const designStep = currentDisplayStep;
-
-    const questMeta = useIroniaDemo
-      ? { city: 'Нови Сад', duration: '90 минут', title: 'Ирония судьбы', completionBonus: 5, stepsDone: `${Math.min(stepIdx + 1, displaySteps.length)} / ${displaySteps.length}` }
-      : { city: 'Нови Сад', duration: '1.5 часа' };
-
-    const copy = {
-      next: 'продолжить', onward: 'в путь', start: 'начать квест', navigator: 'навигатор',
-      submit: 'Ответить', wrong1: 'Неверно. Попробуйте ещё раз.', noteHolder: 'Заметка для себя (необязательно)',
-      hintTitle: 'Нужна подсказка?', hintBody: (c: number) => `Обменяйте ${c} монет на подсказку — она останется с вами до конца шага.`,
-      hintYes: (c: number) => `Потратить ${c} монет`, hintNo: 'Попробую сам',
-      finalBtn: 'Оценить квест', finalDone: 'Спасибо! Отзыв отправлен',
-      giftToast: (n: number) => `+${n} монет`,
-    };
-
-    if (accessWarning) {
-      return <div className="rounded border border-red-300 p-3 text-sm text-red-700 dark:text-red-400">{accessWarning} (demo: buy in marketplace or use ?golden with owned)</div>;
-    }
-
-    // ALWAYS paper frame for all 7 templates (start/video/task_no/task_answer/continue/route_video/congrats) + congrats FinalB
-    return (
-      <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel={`player-step-${pos}`}>
-        <TopBar
-          pos={pos + 1}
-          total={displaySteps.length}
-          coins={bal}
-          onMenu={() => setUiState(u => ({ ...u, menuOpen: true }))}
-        />
-        <StepView
-          step={designStep}
-          quest={questMeta}
-          copy={copy}
-          st={{
-            hintRevealed: revealed,
-            wrong: uiState.wrong,
-            answer: uiState.answer,
-            note: uiState.note,
-            rating: uiState.rating,
-            reviewSent: uiState.reviewSent,
-            coinsEarned: bal,
-            time: '1:24',
-            steps: questMeta.stepsDone,
-            allowNote: designStep.allowNote,
-          }}
-          on={{
-            next: () => { setUiState(u => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
-            confirm: (note?: string) => handlePhysicalConfirm(note || uiState.note || undefined),
-            submit: (val: string) => {
-              if (!val || !val.trim()) return;
-              handleAnswerSubmit(val);
-              // reflect local verdict for shake + inline wrong (popup for hint is in parent WrongHintPopup/HintPopup)
-              const ok = isAnswerCorrect(val, designStep.acceptable);
-              setUiState(u => ({ ...u, wrong: !ok, answer: ok ? '' : val }));
-              if (ok) setTimeout(() => setUiState(u => ({ ...u, wrong: false })), 1200);
-            },
-            answer: (v: string) => setUiState(u => ({ ...u, answer: v, wrong: false })),
-            note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUiState(u => ({ ...u, note: e.target.value })),
-            buyHint: () => { handleSpendHint(); setUiState(u => ({ ...u, hintRevealed: true })); },
-            navigator: handleNavigator,
-            play: () => { /* video play stub */ },
-            rate: (n: number) => setUiState(u => ({ ...u, rating: n })),
-            review: () => {
-              handleFeedback(uiState.feedbackText || 'Rated via final');
-              setUiState(u => ({ ...u, reviewSent: true }));
-            },
-          }}
-        />
-        <SyncBanner kind={simOffline ? 'offline' : (isSyncing ? 'syncing' : 'done')} count={pendingCount} />
-      </PlayerFrame>
-    );
-  };
-
-  const isDone = proj.completedSteps.includes(steps.length - 1) || stepIdx >= steps.length - 1;
-
-  // Close menu helper
-  const closeMenu = () => setUiState(u => ({ ...u, menuOpen: false }));
-  const openFeedback = () => { setUiState(u => ({ ...u, menuOpen: false, feedbackOpen: true })); };
-  const closeFeedback = () => setUiState(u => ({ ...u, feedbackOpen: false }));
+  const closeMenu = () => setUi((u) => ({ ...u, menuOpen: false }));
   const sendFeedback = () => {
-    handleFeedback(uiState.feedbackText || 'Reported via menu');
-    setUiState(u => ({ ...u, feedbackOpen: false, feedbackText: '' }));
+    handleFeedback(ui.feedbackText || 'Сообщение об ошибке');
+    setUi((u) => ({ ...u, feedbackOpen: false, feedbackText: '' }));
   };
+
+  if (showStartGate) {
+    return (
+      <StartGate
+        title={snapshot.name}
+        cover={displaySteps[0]?.image || null}
+        createdAt={attemptCreatedAt}
+        pos={Math.min(stepIdx + 1, displaySteps.length)}
+        total={displaySteps.length}
+        version={snapshot.snapshot_version}
+        onContinue={() => dispatch({ type: 'dismissStartGate' })}
+        onRestart={handleReplay}
+      />
+    );
+  }
+
+  const pos = currentStep.position ?? stepIdx;
+  const bannerKind = !online ? 'offline' : isSyncing ? 'syncing' : justSynced ? 'done' : null;
+  const questMeta = {
+    title: snapshot.name,
+    city: 'Нови Сад',
+    duration: '90 минут',
+    completionBonus: 5,
+    stepsDone: `${Math.min(stepIdx + 1, displaySteps.length)} / ${displaySteps.length}`,
+  };
+  const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
 
   return (
-    <div className="rounded-2xl border bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="mb-3 flex items-center justify-between text-sm">
-        <CoinDisplay balance={bal} />
-        <div>
-          Step {stepIdx + 1}/{steps.length}
-          {proj.completedSteps.length > 0 && ` • done ${proj.completedSteps.join(',')}`}
-        </div>
-        <OfflineBanner
-          simOffline={simOffline}
-          onToggle={() => dispatch({ type: 'toggleOffline' })}
-          onSimSync={handleSyncClick}
-          pendingCount={pendingCount}
-          isSyncing={isSyncing}
-          corrMessage={lastCorrMessage}
-        />
-      </div>
-
-      <BonusAnimation message={bonusMessage} />
-
-      {/* Start gate (SPEC): in-progress attempt → continue / restart («монеты останутся») */}
-      {showStartGate ? (
-        <StartGate
-          title={useIroniaDemo ? 'Ирония судьбы' : snapshot.name}
-          cover={displaySteps[0]?.image || null}
-          createdAt={attemptCreatedAt}
-          pos={Math.min(stepIdx + 1, displaySteps.length)}
-          total={displaySteps.length}
-          version={snapshot.snapshot_version}
-          onContinue={() => dispatch({ type: 'dismissStartGate' })}
-          onRestart={handleReplay}
-        />
-      ) : (
-        /* Always the designed paper player (PlayerFrame + StepView + overlays) per design/player/components.jsx + quest-data.js */
-        renderCurrentView()
-      )}
-
-      {/* Legacy feedback + popups kept for wiring; HintPopup + Menu + FeedbackSheet are the design ones */}
-      <FeedbackMenu onReport={handleFeedback} />
-
-      {/* Hint popup: design version when wrong + hint available (also keep old WrongHintPopup for compat during transition) */}
-      {showWrongPopup && currentStep.supporting?.hint && (
-        <HintPopup
-          step={{ hint: { cost: currentStep.supporting.hint.cost_coins } }}
-          copy={null}
-          on={{ buy: () => { handleSpendHint(); setUiState(u => ({ ...u, hintRevealed: true })); dispatch({ type: 'setPopup', show: false }); }, dismiss: handleCancelPopup }}
-        />
-      )}
-      <WrongHintPopup
-        show={showWrongPopup}
-        cost={(currentStep.supporting?.hint?.cost_coins) || 0}
-        currentBal={bal}
-        onSpend={handleSpendHint}
-        onCancel={handleCancelPopup}
+    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: true }} screenLabel={`player-step-${pos}`}>
+      <TopBar
+        pos={pos + 1}
+        total={displaySteps.length}
+        coins={bal}
+        onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
       />
+      <StepView
+        step={currentDisplayStep}
+        quest={questMeta}
+        copy={COPY}
+        st={{
+          hintRevealed: proj.revealedHints.includes(pos),
+          wrong: ui.wrong,
+          answer: ui.answer,
+          note: ui.note,
+          rating: ui.rating,
+          reviewSent: ui.reviewSent,
+          coinsEarned: bal,
+          time: formatElapsed(attemptCreatedAt),
+          steps: questMeta.stepsDone,
+          allowNote: currentDisplayStep.allowNote,
+        }}
+        on={{
+          next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
+          confirm: (note?: string) => handlePhysicalConfirm(note || ui.note || undefined),
+          submit: handleAnswerSubmit,
+          answer: (v: string) => setUi((u) => ({ ...u, answer: v, wrong: false })),
+          note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUi((u) => ({ ...u, note: e.target.value })),
+          buyHint: handleBuyHint,
+          navigator: handleNavigator,
+          play: () => { /* inline video playback lands with real media refs */ },
+          rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
+          review: () => {
+            handleFeedback(`Оценка: ${ui.rating}/5`);
+            setUi((u) => ({ ...u, reviewSent: true }));
+          },
+        }}
+      />
+      {bannerKind && <SyncBanner kind={bannerKind} count={pendingCount} />}
+      {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
 
-      {/* Full design menu + feedback sheet overlays */}
-      {uiState.menuOpen && (
+      {hintStep?.supporting?.hint && (
+        <HintPopup
+          step={{ hint: { cost: hintStep.supporting.hint.cost_coins } }}
+          copy={COPY}
+          on={{ buy: handleBuyHint, dismiss: () => dispatch({ type: 'offerHint', pos: null }) }}
+        />
+      )}
+      {ui.menuOpen && (
         <MenuOverlay
-          quest={{ title: useIroniaDemo ? 'Ирония судьбы' : currentStep.rich_content.title, name: goldenId }}
-          copy={null}
-          st={{ pos: stepIdx + 1, total: displaySteps.length, coins: bal, online: !simOffline, sound: uiState.soundOn, pendingCount }}
+          quest={questMeta}
+          copy={COPY}
+          st={{ pos: stepIdx + 1, total: displaySteps.length, coins: bal, online, sound: ui.soundOn, pendingCount }}
           on={{
             close: closeMenu,
-            feedback: openFeedback,
-            sync: () => setUiState(u => ({ ...u, menuOpen: false, syncSheetOpen: true })),
-            exit: () => { closeMenu(); window.location.href = '/my-quests'; },
+            feedback: () => setUi((u) => ({ ...u, menuOpen: false, feedbackOpen: true })),
+            sync: () => { setUi((u) => ({ ...u, menuOpen: false, syncSheetOpen: true })); void runFlush(); },
+            exit: () => router.push('/my-quests'),
             reset: () => { closeMenu(); handleReplay(); },
-            sound: () => setUiState(u => ({ ...u, soundOn: !u.soundOn })),
+            sound: toggleSound,
           }}
         />
       )}
-      {uiState.syncSheetOpen && (
+      {ui.syncSheetOpen && (
         <SyncSheet
           facts={facts}
           isSent={(f) => queueStatus[factNaturalKey(f)] === 'sent'}
-          online={!simOffline}
-          onClose={() => setUiState(u => ({ ...u, syncSheetOpen: false }))}
+          online={online}
+          onClose={() => setUi((u) => ({ ...u, syncSheetOpen: false }))}
         />
       )}
       {corrections?.balanceNotice && (
@@ -721,35 +593,18 @@ export default function QuestPlayerClient({
           onStay={() => dispatch({ type: 'resolveAdvanceOffer' })}
         />
       )}
-      {uiState.feedbackOpen && (
+      {ui.feedbackOpen && (
         <FeedbackSheet
-          quest={{ title: useIroniaDemo ? 'Ирония судьбы' : currentStep.rich_content.title }}
-          copy={null}
-          st={{ pos: stepIdx + 1, stepName: currentStep.rich_content?.title || currentDisplayStep.title }}
+          quest={questMeta}
+          copy={COPY}
+          st={{ pos: stepIdx + 1, stepName: currentDisplayStep.title, text: ui.feedbackText }}
           on={{
-            dismiss: closeFeedback,
-            text: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUiState(u => ({ ...u, feedbackText: e.target.value })),
+            dismiss: () => setUi((u) => ({ ...u, feedbackOpen: false })),
+            text: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUi((u) => ({ ...u, feedbackText: e.target.value })),
             send: sendFeedback,
           }}
         />
       )}
-
-      {isDone && (
-        <div className="mt-5 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950">
-          Complete. Final bal from projectBalance: {bal}
-          <button onClick={handleReplay} className="ml-3 underline">
-            Replay (clear facts + LS)
-          </button>
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs">facts (debug, append-only)</summary>
-            <pre className="mt-1 max-h-40 overflow-auto text-[10px]">{JSON.stringify(facts, null, 2)}</pre>
-          </details>
-        </div>
-      )}
-
-      <div className="mt-4 text-[10px] text-zinc-500">
-        append-only facts • always re-projectBalance/projectState • LS roundtrip • popup ONLY on wrong answer • gift auto on reach • paper 7-tpl full
-      </div>
-    </div>
+    </PlayerFrame>
   );
 }

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — аудит покрытия дизайна</title>
+<style>
+  :root {
+    --blue: #3B71FE; --navy: #1A2B48; --ink: #000F08; --dark: #232323;
+    --pink: #E75A7C; --star: #FFB21D; --bg: #F7F8FA; --border: #DEDEDE; --gray: #83858C;
+    --ok: #1F8A5B; --warn: #B7791F;
+    --shadow: 0 12px 12px rgba(0,0,0,.05), 1px 2px 15px rgba(0,0,0,.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Inter, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); padding: 56px 24px 96px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 28px; font-weight: 500; color: var(--navy); }
+  .sub { margin-top: 10px; font-size: 14px; color: var(--gray); line-height: 1.5; max-width: 760px; }
+  h2 { font-size: 16px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gray); margin: 48px 0 16px; padding-bottom: 10px; border-bottom: 1px solid #D5D9E0; }
+  .card { background: #fff; border-radius: 18px; box-shadow: var(--shadow); padding: 24px 28px; margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--gray); padding: 8px 12px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid #EEF0F3; vertical-align: top; line-height: 1.45; }
+  tr:last-child td { border-bottom: 0; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 12px; white-space: nowrap; }
+  .pill--ok { background: #E3F4EC; color: var(--ok); }
+  .pill--miss { background: #FBE9EE; color: var(--pink); }
+  .pill--part { background: #FBF3E2; color: var(--warn); }
+  .ref { font-family: ui-monospace, monospace; font-size: 11px; color: var(--gray); }
+  .note { font-size: 13px; color: var(--navy); line-height: 1.55; }
+  .note + .note { margin-top: 10px; }
+  .note b { color: var(--ink); }
+  .conflict { border-left: none; background: #fff; }
+  .conflict li { margin: 0 0 12px 18px; font-size: 13.5px; line-height: 1.55; }
+  .conflict li:last-child { margin-bottom: 0; }
+  .kicker { font-size: 12px; font-weight: 600; color: var(--blue); letter-spacing: .08em; text-transform: uppercase; }
+  .legend { display: flex; gap: 12px; margin-top: 16px; font-size: 12px; color: var(--gray); align-items: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="kicker">geohod quest · аудит</p>
+  <h1>Покрытие концепции дизайном: что есть, чего не хватает</h1>
+  <p class="sub">Сверка CONCEPT/SPEC/PLAN с design.fig (161 фрейм) и скомпилированным HTML-дизайном (design/).
+     Вывод: маркетплейс, авторизация и конструктор покрыты; <b>игровой опыт квеста — ядро продукта — в дизайне отсутствует полностью</b>
+     (есть только миниатюра шаблона 180×320 и превью телефона в редакторе страницы). Коммерция и вся экономика монет также не отрисованы.</p>
+  <div class="legend">
+    <span class="pill pill--ok">есть</span><span class="pill pill--part">частично / устарело</span><span class="pill pill--miss">нет</span>
+  </div>
+
+  <h2>1 · Что уже покрыто</h2>
+  <div class="card">
+    <table>
+      <tr><th style="width:34%">Экран</th><th style="width:14%">Статус</th><th>Источник / примечание</th></tr>
+      <tr><td>Главная (desktop + mobile)</td><td><span class="pill pill--ok">есть</span></td><td class="ref">901:1895, 467:1719 · site/Главная.html</td></tr>
+      <tr><td>Страница квеста в магазине</td><td><span class="pill pill--ok">есть</span></td><td class="ref">198:490 · site/Квест.html</td></tr>
+      <tr><td>Вход через Telegram + состояния</td><td><span class="pill pill--ok">есть</span></td><td class="ref">1140:1998… · auth/Вход.html</td></tr>
+      <tr><td>Моб.: меню, мои квесты, профиль, контакты, квест</td><td><span class="pill pill--ok">есть</span></td><td class="ref">2:183–2:668 · mobile/</td></tr>
+      <tr><td>Кабинет автора, список квестов, удаление</td><td><span class="pill pill--ok">есть</span></td><td class="ref">3:1855, 489:1994 · admin/Кабинет.html</td></tr>
+      <tr><td>Редактирование квеста (конструктор + магазин)</td><td><span class="pill pill--part">устарело</span></td><td>Есть, но под старую модель: выбор языка (v1 — только RU), нет Publish-снапшота</td></tr>
+      <tr><td>Выбор шаблона страницы</td><td><span class="pill pill--part">устарело</span></td><td>7 старых шаблонов (Start, Video, QuestionNoAnswer, Question, Continue, RouteVideo, Congratulations) вместо 4 по CONCEPT</td></tr>
+      <tr><td>Редактор страницы</td><td><span class="pill pill--part">устарело</span></td><td class="ref">1061:1926</td></tr>
+      <tr><td>Галерея, Статистика, Пользователи, Инфографика</td><td><span class="pill pill--ok">есть</span></td><td class="ref">3:1958, 3:2166, 3:2203, 3:2219</td></tr>
+    </table>
+  </div>
+
+  <h2>2 · Игрок: квест-флоу — отсутствует полностью (приоритет)</h2>
+  <div class="card">
+    <table>
+      <tr><th style="width:34%">Экран / состояние</th><th style="width:14%">Статус</th><th>Требование из CONCEPT/SPEC</th></tr>
+      <tr><td>Шаблон «Первый экран»</td><td><span class="pill pill--miss">нет</span></td><td>Старт/приветствие. Существует лишь миниатюра 180×320 (крем-фон, Prata, винтажный коллаж)</td></tr>
+      <tr><td>Шаблон «Задание без ответа»</td><td><span class="pill pill--miss">нет</span></td><td>physical: подтверждение «Я сделал», опц. действие + своя надпись кнопки, опц. заметка</td></tr>
+      <tr><td>Шаблон «Задание с ответом»</td><td><span class="pill pill--miss">нет</span></td><td>answer: ввод значения, локальная проверка по списку</td></tr>
+      <tr><td>Шаблон «Продолжить» (+ терминальный)</td><td><span class="pill pill--miss">нет</span></td><td>Нарратив / финал с бонусом и приглашением к отзыву. Есть только превью в редакторе</td></tr>
+      <tr><td>Попап неверного ответа → обмен монет на подсказку</td><td><span class="pill pill--miss">нет</span></td><td>Единственный механизм подсказки в v1; «Потратить X монет?»; состояние «не хватает монет»?</td></tr>
+      <tr><td>Состояние «подсказка раскрыта» (hint-роль комикса / текст / гео)</td><td><span class="pill pill--miss">нет</span></td><td>4 роли изображений: task / character / hint / atmosphere</td></tr>
+      <tr><td>Кнопка и режим «Навигатор»</td><td><span class="pill pill--miss">нет</span></td><td>На физических шагах; кратчайший маршрут; необязательная подсказка</td></tr>
+      <tr><td>Начисление монет — анимировано + озвучено</td><td><span class="pill pill--miss">нет</span></td><td>Gift на шаге + бонус за прохождение; нигде в дизайне монеты вообще не встречаются</td></tr>
+      <tr><td>Глобальное меню внутри квеста</td><td><span class="pill pill--miss">нет</span></td><td>Доступно с любой страницы; «Оставить отзыв» (репорт ошибки с контекстом шага)</td></tr>
+      <tr><td>Форма «Оставить отзыв» (mid-quest репорт)</td><td><span class="pill pill--miss">нет</span></td><td>FeedbackReport ≠ Review; работает офлайн</td></tr>
+      <tr><td>Review после прохождения (оценка + комментарий + буст за монеты)</td><td><span class="pill pill--miss">нет</span></td><td>Форма отзыва есть только на странице магазина</td></tr>
+      <tr><td>Старт владельца: продолжить / сбросить / новая попытка</td><td><span class="pill pill--miss">нет</span></td><td>Lifetime-грант, попытки привязаны к версии</td></tr>
+      <tr><td>Загрузка бандла (~5 МБ) и «готов офлайн»</td><td><span class="pill pill--miss">нет</span></td><td>PWA: скачивание, кэш, повторная загрузка исторических версий</td></tr>
+      <tr><td>Офлайн-индикатор + статус синка + коррекции</td><td><span class="pill pill--miss">нет</span></td><td>«Баланс скорректирован», «подсказка отозвана» — баннеры по SPEC</td></tr>
+      <tr><td>Баланс монет / личный рейтинг игрока</td><td><span class="pill pill--miss">нет</span></td><td>Монеты копятся в рейтинг; где игрок видит баланс?</td></tr>
+    </table>
+  </div>
+
+  <h2>3 · Коммерция и витрина</h2>
+  <div class="card">
+    <table>
+      <tr><th style="width:34%">Экран</th><th style="width:14%">Статус</th><th>Примечание</th></tr>
+      <tr><td>Чекаут (покупка одного квеста)</td><td><span class="pill pill--miss">нет</span></td><td>В HANDOFF отмечено явно: после «Купить» ничего нет (только иконки Visa/MC/PayPal)</td></tr>
+      <tr><td>Купон (% скидка, 100% = бесплатно)</td><td><span class="pill pill--miss">нет</span></td><td>Где вводится купон — в чекауте?</td></tr>
+      <tr><td>Бесплатный квест → «добавить в коллекцию»</td><td><span class="pill pill--miss">нет</span></td><td>Идентичная механика, цена 0</td></tr>
+      <tr><td>Успешная покупка → грант → переход к квесту</td><td><span class="pill pill--miss">нет</span></td><td></td></tr>
+      <tr><td>«Мои квесты» (desktop)</td><td><span class="pill pill--part">только моб.</span></td><td>В шапке сайта ссылка есть; desktop-версия не отрисована</td></tr>
+      <tr><td>«Все фото» (галерея квеста)</td><td><span class="pill pill--miss">нет</span></td><td>Есть только кнопка (отмечено в HANDOFF)</td></tr>
+      <tr><td>Политика / соглашение</td><td><span class="pill pill--miss">нет</span></td><td>Ссылки в футере ведут в никуда</td></tr>
+    </table>
+  </div>
+
+  <h2>4 · Конструктор: дельта к новой модели GameStep</h2>
+  <div class="card">
+    <p class="note"><b>Существующий редактор страницы поддерживает только: текст + 1 изображение + следующая страница.</b>
+       Новая модель из SPEC требует значительно больше — текущий дизайн конструктора не способен создать ни один answer-шаг:</p>
+    <table style="margin-top:14px">
+      <tr><th style="width:42%">Элемент редактора</th><th style="width:14%">Статус</th><th>SPEC</th></tr>
+      <tr><td>Пикер 4 шаблонов с пресетами</td><td><span class="pill pill--part">7 старых</span></td><td>Первый экран / Задание без ответа / Задание с ответом / Продолжить</td></tr>
+      <tr><td>AnswerListEditor + «Вставить строками» + живой «Тест ответа»</td><td><span class="pill pill--miss">нет</span></td><td>Та же функция isAnswerCorrect, что у игрока</td></tr>
+      <tr><td>Подформа подарка (монеты + нарратив + «заморозится в снапшоте»)</td><td><span class="pill pill--miss">нет</span></td><td></td></tr>
+      <tr><td>4 зоны загрузки комикса (task/character/hint/atmosphere)</td><td><span class="pill pill--miss">нет</span></td><td>Сейчас — одна картинка</td></tr>
+      <tr><td>Гео-пикер навигатора + тумблер</td><td><span class="pill pill--miss">нет</span></td><td>lat/lng, hint_only, кратчайший маршрут</td></tr>
+      <tr><td>Анимация/озвучка бонуса; стоимость подсказки (попап)</td><td><span class="pill pill--miss">нет</span></td><td></td></tr>
+      <tr><td>Чек-лист перед публикацией + гейты + оценка размера бандла</td><td><span class="pill pill--miss">нет</span></td><td>«Тяжело опубликовать плохое»</td></tr>
+      <tr><td>Явный Publish (иммутабельный снапшот) + версии</td><td><span class="pill pill--miss">нет</span></td><td>Сейчас — мутабельный статус-селект Опубликован/Проект/Тест</td></tr>
+      <tr><td>Импорт/экспорт YAML; «Открыть как тест-игрок»</td><td><span class="pill pill--part">кнопка есть</span></td><td>«Открыть квест как пользователь» есть в макете</td></tr>
+      <tr><td>FeedbackReports по шагам; аналитика: подсказки, навигатор, неверные ответы</td><td><span class="pill pill--part">частично</span></td><td>Статистика/инфографика покрывают только верные/неверные ответы и конверсию</td></tr>
+    </table>
+  </div>
+
+  <h2>5 · Конфликты и решения, которые нужно принять</h2>
+  <div class="card conflict">
+    <ol>
+      <li><b>7 шаблонов против 4.</b> Figma и старая система — 7 типов страниц; CONCEPT жёстко требует 4. Видео становится медиа-контентом внутри шаблона, «Поздравление» = «Продолжить»+terminal, «Видео маршрута» умирает. Подтвердить.</li>
+      <li><b>Визуальный язык игрока ≠ визуальный язык сайта.</b> Единственные артефакты квест-флоу (миниатюра шаблона, превью редактора) — винтажная «бумага»: крем #FCF3EA, шрифт Prata, коричневые чернила #3E2C2C, контурные кнопки. Сайт — синий #3B71FE + Inter. Это глобальный стиль плеера или арт-дирекшн конкретного квеста «Ирония судьбы»? От ответа зависит вся система шаблонов (и конструктор: появится ли выбор темы).</li>
+      <li><b>Мультиязычность.</b> Конструктор в Figma выбирает язык (EN/RU/SRB), v1 — только русский. Упрощаем дизайн или оставляем задел?</li>
+      <li><b>Навигатор.</b> SPEC допускает и переход в системные карты (maps://), и встроенную карту по данным бандла. Для офлайна это принципиально разные дизайны.</li>
+      <li><b>Экономика нигде не визуализирована.</b> Нет ни иконки монеты, ни баланса, ни рейтинга игрока — нужен микро-дизайн-язык монет (иконография, анимация, звук) с нуля.</li>
+      <li><b>Две сущности отзывов.</b> FeedbackReport (репорт ошибки, любая страница) и Review (оценка после финала) — в текущем дизайне существует только маркетплейс-отзыв. Нельзя смешивать UI.</li>
+      <li><b>Статусы квеста.</b> Старый селект «Опубликован/Проект/Тест» противоречит иммутабельным снапшотам: публикация — необратимое действие с версией, а не переключатель.</li>
+    </ol>
+  </div>
+</div>
+</body>
+</html>

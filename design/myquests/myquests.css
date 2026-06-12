@@ -1,0 +1,87 @@
+/* GEOHOD QUEST — «Мои квесты», попытки, загрузка бандла, профиль.
+   Дополнение к commerce/site-theme.css (тот же витринный язык). */
+
+/* ---------- Строка квеста (desktop) ---------- */
+.mq-list { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
+.mq-row { display: flex; align-items: center; gap: 20px; padding: 18px 24px 18px 18px; }
+.mq-row__photo {
+  flex: none; width: 124px; height: 92px; border-radius: 10px;
+  background: center / cover no-repeat; position: relative; overflow: hidden;
+}
+.mq-row__photo .qmark { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Prata', serif; font-size: 26px; color: #fff; }
+.mq-row__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mq-row__body h3 { margin: 0; font-size: 15.5px; font-weight: 700; line-height: 1.3; }
+.mq-row__meta { display: flex; gap: 14px; font-size: 12px; color: var(--navy); opacity: .55; }
+.mq-row__meta span { display: inline-flex; align-items: center; gap: 5px; }
+.mq-row__meta .ic { width: 12px; height: 12px; background: center / contain no-repeat; }
+.mq-state { flex: none; width: 210px; display: flex; flex-direction: column; gap: 8px; }
+.mq-actions { flex: none; display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 178px; }
+.mq-actions .s-btn { height: 46px; padding: 0 24px; font-size: 13px; }
+
+/* Бейджи статуса попытки */
+.mq-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.mq-badge--new { color: var(--gray); }
+.mq-badge--progress { color: var(--blue); }
+.mq-badge--done { color: var(--green); }
+.mq-sub { font-size: 11.5px; color: var(--gray); }
+.mq-progressline { height: 4px; border-radius: 2px; background: #E7EAF0; overflow: hidden; }
+.mq-progressline i { display: block; height: 100%; border-radius: 2px; background: var(--blue); }
+.mq-stars { display: inline-flex; gap: 2px; }
+.mq-stars .st { width: 14px; height: 14px; background: url("../assets/icons/ic-star-18--gold.svg") no-repeat center / contain; }
+
+/* Статус офлайн-загрузки */
+.mq-dl { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--gray); }
+.mq-dl--ready { color: var(--green); }
+.mq-dl .s-link { font-size: 11.5px; }
+.mq-version {
+  margin-top: 2px; padding: 8px 12px; border-radius: 8px;
+  background: rgba(59,113,254,.07); font-size: 11.5px; color: var(--navy); line-height: 1.45;
+}
+
+/* Пустое состояние */
+.mq-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 64px 40px; text-align: center; }
+.mq-empty .ring {
+  width: 72px; height: 72px; border-radius: 50%;
+  border: 2px dashed var(--border);
+  display: grid; place-items: center; color: var(--gray);
+  font-family: 'Prata', serif; font-size: 28px;
+}
+.mq-empty h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.mq-empty p { margin: 0; font-size: 13.5px; color: var(--gray); max-width: 320px; }
+
+/* ---------- Профиль ---------- */
+.pf-grid { display: grid; grid-template-columns: 1fr 388px; gap: 28px; margin-top: 28px; align-items: start; }
+.pf-card { padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+.pf-card h4 { margin: 0; font-size: 16px; font-weight: 700; }
+.pf-row { display: flex; justify-content: space-between; font-size: 14px; }
+.pf-row .lbl { color: var(--gray); }
+.pf-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.pf-tile { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.pf-tile b { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.pf-tile span { font-size: 11.5px; color: var(--gray); }
+.pf-coin { width: 18px; height: 18px; border-radius: 50%; background: #FFB21D; box-shadow: inset 0 0 0 2px #B27607; }
+.pf-note { font-size: 12px; color: var(--gray); line-height: 1.5; }
+
+/* ---------- Мобильные (360) ---------- */
+.mqm-card { margin-top: 14px; overflow: hidden; }
+.mqm-card__photo { position: relative; height: 150px; background: center / cover no-repeat; border-radius: 18px 18px 0 0; }
+.mqm-card__photo .qmark { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Prata', serif; font-size: 34px; color: #fff; }
+.mqm-card__body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.mqm-card__body h3 { margin: 0; font-size: 14.5px; font-weight: 700; line-height: 1.3; }
+.mqm-card__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mqm-card__foot .s-btn { height: 44px; padding: 0 26px; font-size: 13px; }
+
+/* Старт-гейт и загрузка */
+.sg-body { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 8px 16px 20px; }
+.sg-cover { position: relative; height: 180px; border-radius: 18px; overflow: hidden; background: center / cover no-repeat; }
+.sg-cover .qmark { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Prata', serif; font-size: 38px; color: #fff; }
+.sg-attempt {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px; border-radius: 12px; background: var(--bg-light);
+  font-size: 13px;
+}
+.sg-attempt .co-row { font-size: 12.5px; }
+.dl-bar { height: 8px; border-radius: 4px; background: #E7EAF0; overflow: hidden; }
+.dl-bar i { display: block; height: 100%; border-radius: 4px; background: var(--blue); transition: width .3s ease; }
+.dl-status { display: flex; justify-content: space-between; font-size: 12px; color: var(--gray); }
+.dl-ready { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--green); font-weight: 600; }

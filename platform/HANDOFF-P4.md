@@ -301,7 +301,7 @@ npm run build                                # next build
 cd frontend && npm run build && npm start    # :3000
 
 # Useful URLs
-# http://localhost:3000/quest?golden=mystery-fortress-v1   player
+# http://localhost:3000/quest/mystery-fortress-v1   player
 # http://localhost:3000/my-quests   /profile   /commerce   /constructor
 # http://localhost:3000/review/visual-control              visual regression fixture
 # http://localhost:8080/api/quests                          published list (seeded golden)

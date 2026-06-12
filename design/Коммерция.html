@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — коммерция: чекаут, купоны, результаты</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Jost:wght@400;500&amp;family=Prata&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="commerce/site-theme.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="lib/design-canvas.jsx"></script>
+<script type="text/babel" src="commerce/screens.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="ctx" title="Коммерция — контекст" subtitle="Решения: редирект к платёжному провайдеру (без полей карты у нас) · отдельная страница чекаута · вход через Telegram обязателен до оплаты · купон — свёрнутая ссылка · бесплатно = тот же чекаут с итогом 0 ₽ (единая механика грантов)">
+        <DCPostIt>
+          Грант создаётся после оплаты / купона 100% / бесплатного получения — механика одна,
+          источник записывается для аудита (SPEC: AccessGrant). Без корзины: один квест — один чекаут.
+          В прототипе работают купоны GEO50 и GEOFREE.
+        </DCPostIt>
+      </DCSection>
+
+      <DCSection id="checkout" title="Чекаут" subtitle="Витринный стиль из design/: Inter + Jost, синий #3B71FE, карточки r18, pill-кнопки">
+        <DCArtboard id="co-base" label="Базовый · купон свёрнут" width={1240} height={800}><CheckoutBase></CheckoutBase></DCArtboard>
+        <DCArtboard id="co-applied" label="Купон −50% применён" width={1240} height={800}><CheckoutApplied></CheckoutApplied></DCArtboard>
+        <DCArtboard id="co-free" label="Купон 100% · итог 0 ₽" width={1240} height={800}><CheckoutFree></CheckoutFree></DCArtboard>
+        <DCArtboard id="co-error" label="Ошибка купона" width={1240} height={800}><CheckoutError></CheckoutError></DCArtboard>
+      </DCSection>
+
+      <DCSection id="results" title="Результат и вход" subtitle="Успех → грант навсегда + два CTA. Ошибка — без паники, деньги не списаны. Вход — гейт перед чекаутом с объяснением, зачем">
+        <DCArtboard id="res-ok" label="Успех покупки → грант" width={1240} height={700}><SuccessScreen></SuccessScreen></DCArtboard>
+        <DCArtboard id="res-fail" label="Оплата не прошла" width={1240} height={700}><FailScreen></FailScreen></DCArtboard>
+        <DCArtboard id="res-auth" label="Вход перед покупкой (Telegram)" width={1240} height={700}><AuthGateScreen></AuthGateScreen></DCArtboard>
+      </DCSection>
+
+      <DCSection id="entries" title="Точки входа на странице квеста" subtitle="Три состояния ценового блока: платный · бесплатный · уже в коллекции">
+        <DCArtboard id="e-paid" label="Платный квест" width={420} height={250}><EntryCard variant="paid"></EntryCard></DCArtboard>
+        <DCArtboard id="e-free" label="Бесплатный квест" width={420} height={250}><EntryCard variant="free"></EntryCard></DCArtboard>
+        <DCArtboard id="e-owned" label="Уже куплен" width={420} height={250}><EntryCard variant="owned"></EntryCard></DCArtboard>
+      </DCSection>
+
+      <DCSection id="mobile" title="Мобильный чекаут · 360" subtitle="Покупка чаще происходит с телефона — PWA-продукт">
+        <DCArtboard id="m-co" label="Чекаут" width={360} height={740}><MobileCheckout></MobileCheckout></DCArtboard>
+        <DCArtboard id="m-ok" label="Успех + подсказка про офлайн" width={360} height={740}><MobileSuccess></MobileSuccess></DCArtboard>
+      </DCSection>
+
+      <DCSection id="proto" title="Играбельный прототип чекаута" subtitle="Раскройте купон («Есть купон?»), введите GEO50 или GEOFREE, оплатите — редирект-оверлей и успех. Неверный код покажет ошибку">
+        <DCArtboard id="co-proto" label="Прототип · играть здесь" width={1240} height={800}><CheckoutProto></CheckoutProto></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App></App>);
+</script>
+</body>
+</html>

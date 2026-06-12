@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEOHOD QUEST — квест-флоу игрока</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=Prata&amp;family=Russo+One&amp;family=Neucha&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="player/theme.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="player/quest-data.js"></script>
+<script src="player/matcher.js"></script>
+<script type="text/babel" src="lib/design-canvas.jsx"></script>
+<script type="text/babel" src="lib/tweaks-panel.jsx"></script>
+<script type="text/babel" src="player/components.jsx"></script>
+<script type="text/babel" src="player/canvas-screens.jsx"></script>
+<script type="text/babel" src="player/prototype.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "art": "Бумага",
+  "layout": "Картинка сверху",
+  "tone": "Сдержанный",
+  "anims": true,
+  "final": "A — сдержанный"
+}/*EDITMODE-END*/;
+
+const ART_MAP = { "Бумага": "paper", "Комикс": "comic", "Современный": "modern" };
+const LAYOUT_MAP = { "Картинка сверху": "image", "Текст сверху": "text" };
+const TONE_MAP = { "Сдержанный": "classic", "Игровой": "playful" };
+const FINAL_MAP = { "A — сдержанный": "A", "B — итоги": "B", "C — конфетти": "C" };
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const tw = {
+    art: ART_MAP[t.art] || "paper",
+    layout: LAYOUT_MAP[t.layout] || "image",
+    tone: TONE_MAP[t.tone] || "classic",
+    anims: !!t.anims,
+    final: FINAL_MAP[t.final] || "B",
+  };
+  const B = 360, H = 740;
+  return (
+    <React.Fragment>
+      <DesignCanvas>
+        <DCSection id="context" title="Контекст и решения" subtitle="Квест-флоу игрока · «Ирония судьбы» как демо-контент · стиль плеера глобальный, отличен от витрины">
+          <DCPostIt>
+            Решения из интервью: 7 шаблонов как в Figma · навигатор → системные карты ·
+            монеты — компактный тост со звуком · попап подсказки со 2-й ошибки ·
+            бонус прохождения +5 · «Оставить отзыв» из меню с контекстом шага ·
+            буст рейтинга за монеты исключён из v1.
+            Tweaks (панель справа): арт-дирекшн, раскладка, тон текстов, анимации, вариант финала.
+          </DCPostIt>
+        </DCSection>
+
+        <DCSection id="templates" title="Семь шаблонов страниц" subtitle="Базовая система: один GameStep, семь вариантов рендера. Стиль «Бумага» восстановлен по артефактам Figma (миниатюра шаблона + превью редактора)">
+          <DCArtboard id="t-start" label="1 · Первый экран" width={B} height={H}><BoardStart tw={tw}></BoardStart></DCArtboard>
+          <DCArtboard id="t-video" label="2 · Приветственное видео" width={B} height={H}><BoardVideo tw={tw}></BoardVideo></DCArtboard>
+          <DCArtboard id="t-continue" label="3 · Продолжить" width={B} height={H}><BoardContinue tw={tw}></BoardContinue></DCArtboard>
+          <DCArtboard id="t-taskno" label="4 · Задание без ответа" width={B} height={H}><BoardTaskNo tw={tw}></BoardTaskNo></DCArtboard>
+          <DCArtboard id="t-taskanswer" label="5 · Задание с ответом" width={B} height={H}><BoardTaskAnswer tw={tw}></BoardTaskAnswer></DCArtboard>
+          <DCArtboard id="t-routevideo" label="6 · Видео маршрута" width={B} height={H}><BoardRouteVideo tw={tw}></BoardRouteVideo></DCArtboard>
+          <DCArtboard id="t-congrats" label="7 · Поздравление" width={B} height={H}><BoardCongrats tw={tw}></BoardCongrats></DCArtboard>
+        </DCSection>
+
+        <DCSection id="states" title="Состояния и оверлеи" subtitle="Ошибки, подсказки, монеты, меню, репорт, офлайн — всё, что живёт поверх шаблонов">
+          <DCArtboard id="s-wrong" label="Неверный ответ · 1-я попытка" width={B} height={H}><BoardWrong tw={tw}></BoardWrong></DCArtboard>
+          <DCArtboard id="s-hint" label="Попап подсказки · со 2-й ошибки" width={B} height={H}><BoardHintOffer tw={tw}></BoardHintOffer></DCArtboard>
+          <DCArtboard id="s-revealed" label="Подсказка раскрыта" width={B} height={H}><BoardHintRevealed tw={tw}></BoardHintRevealed></DCArtboard>
+          <DCArtboard id="s-toast" label="Начисление монет · тост" width={B} height={H}><BoardToast tw={tw}></BoardToast></DCArtboard>
+          <DCArtboard id="s-menu" label="Меню квеста" width={B} height={H}><BoardMenu tw={tw}></BoardMenu></DCArtboard>
+          <DCArtboard id="s-feedback" label="Репорт ошибки · с контекстом шага" width={B} height={H}><BoardFeedback tw={tw}></BoardFeedback></DCArtboard>
+          <DCArtboard id="s-offline" label="Офлайн-баннер" width={B} height={H}><BoardOffline tw={tw}></BoardOffline></DCArtboard>
+        </DCSection>
+
+        <DCSection id="finals" title="Финал — три варианта" subtitle="A: сдержанный (как «Продолжить» + тост). B: итоги и оценка на месте. C: конфетти + комментарий. Переключается и в прототипе (Tweak «Финал»)">
+          <DCArtboard id="f-a" label="A · Сдержанный" width={B} height={H}><BoardFinalA tw={tw}></BoardFinalA></DCArtboard>
+          <DCArtboard id="f-b" label="B · Итоги + оценка" width={B} height={H}><BoardFinalB tw={tw}></BoardFinalB></DCArtboard>
+          <DCArtboard id="f-c" label="C · Конфетти + комментарий" width={B} height={H}><BoardFinalC tw={tw}></BoardFinalC></DCArtboard>
+        </DCSection>
+
+        <DCSection id="proto" title="Играбельный прототип" subtitle="Сквозное прохождение: ответ на шаге 5 — «1730»; две ошибки откроют попап подсказки. Прогресс хранится локально — обновление страницы не собьёт попытку">
+          <DCArtboard id="proto-app" label="Прототип · играть здесь" width={B} height={H}><PlayerApp tw={tw}></PlayerApp></DCArtboard>
+          <DCPostIt>
+            Как смотреть: пройдите квест целиком. На «Задании без ответа» — кнопка навигатора
+            (откроет системные карты) и заметка. На «Задании с ответом» введите неверный год дважды —
+            появится попап обмена монет. Меню (бургер) — баланс, звук, репорт, выход с паузой, сброс.
+          </DCPostIt>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel>
+        <TweakSection label="Арт-дирекшн"></TweakSection>
+        <TweakRadio label="Стиль" value={t.art} options={["Бумага", "Комикс", "Современный"]} onChange={(v) => setTweak("art", v)}></TweakRadio>
+        <TweakSection label="Раскладка"></TweakSection>
+        <TweakRadio label="Медиа" value={t.layout} options={["Картинка сверху", "Текст сверху"]} onChange={(v) => setTweak("layout", v)}></TweakRadio>
+        <TweakSection label="Текст и движение"></TweakSection>
+        <TweakRadio label="Тон" value={t.tone} options={["Сдержанный", "Игровой"]} onChange={(v) => setTweak("tone", v)}></TweakRadio>
+        <TweakToggle label="Анимации" value={t.anims} onChange={(v) => setTweak("anims", v)}></TweakToggle>
+        <TweakSection label="Финал"></TweakSection>
+        <TweakSelect label="Вариант" value={t.final} options={["A — сдержанный", "B — итоги", "C — конфетти"]} onChange={(v) => setTweak("final", v)}></TweakSelect>
+      </TweaksPanel>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App></App>);
+</script>
+</body>
+</html>

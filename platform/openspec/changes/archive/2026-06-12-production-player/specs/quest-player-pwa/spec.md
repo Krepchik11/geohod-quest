@@ -1,0 +1,47 @@
+# quest-player-pwa (delta)
+
+## MODIFIED Requirements
+
+### Requirement: Local append-only facts + deterministic re-projection exactly matches goldens (incl. gifts, balance, revealed)
+
+All player actions SHALL append immutable facts using the exact shared Fact shape and types (physical_confirmed, answer_submitted, gift_claimed, hint_purchased, attempt_completed, feedback_reported, …). Gifts from supporting.gift SHALL be claimed (append gift_claimed with the frozen coins_delta and the gift's narrative_text as note) when the step is COMPLETED — physical confirm, correct answer, or terminal entry — never on merely reaching the step (design/player/prototype.jsx award semantics; the happy-with-gift golden is updated accordingly). On any append, the player SHALL re-project via imported projectBalance(facts) and projectState(facts) from shared-model. The resulting facts and projections for the happy-with-gift replay SHALL exactly equal the golden's expected_facts, expected_final_balance, and revealed state. Local facts and resume position SHALL persist in the IndexedDB fact queue (write-through on append, keyed by attempt) and restore on reload to resume at last step with identical projection; a pre-existing localStorage save is imported into the queue exactly once and the legacy key removed.
+
+The player route SHALL be `/quest/{questId}` where questId is a published quest id; bare `/quest` and the legacy `?golden=` query SHALL redirect. The player SHALL resolve its snapshot in this order: the active attempt's bound bundle (version freeze), the latest downloaded bundle for the quest, then `GET /api/quests/{id}/bundle` (grant-gated server-side; a successful fetch SHALL also store the bundle for offline reuse). There SHALL be no build-time snapshot fallback in the runtime path and no client-side synthesized grants: a 403 SHALL render a designed access screen linking to the marketplace, and an unresolvable snapshot (offline with no bundle, or unknown quest) SHALL render a designed unavailable screen. Wrong-answer flow per SPEC: the first wrong submit on a step SHALL show only the inline error and shake; the hint popup SHALL appear only from the second wrong submit on that step, only while the step has a hint that is not yet purchased; the popup decision SHALL be derived from the fact log by pure shared helpers (wrongAnswersAt, shouldOfferHint), never from parallel counter state.
+
+Real reconnect SHALL upload the queue's pending facts, mark them sent on success, derive the two client-side corrections from the projection diff, re-project, and persist; the final projection after apply SHALL match the server's authoritative projected. Attempt identity SHALL come from the local attempts store (client attempt_key, server_attempt_id bound on first successful registration).
+
+#### Scenario: Replay happy-with-gift actions (incl. real synonyms + completion-claimed gift at 2) produces exact match
+- **WHEN** player (or replay test) performs actions equivalent to happy-with-gift (physical 0 with note, submit "МИХАЙЛО ПУПИН" on 1, submit "ТИТО" on 2 → its +5 gift claims on completion, physical 3) against the mystery snapshot
+- **THEN** emitted facts exactly match the golden's expected_facts array; projectBalance(facts) === 5; projectState matches completed/revealed; after reload, hydration from the IndexedDB queue yields identical state and balance with no lost/double facts.
+
+#### Scenario: First wrong answer is inline-only; popup appears from the second wrong
+- **WHEN** player submits a wrong answer on a hint-bearing step once, then submits wrong again
+- **THEN** after the first wrong only the inline «Неверно…» error and input shake are shown (one answer_submitted fact, local_is_correct=false); after the second wrong the designed «Нужна подсказка?» popup opens; purchasing appends hint_purchased with the frozen negative delta and reveals the hint box; a step whose hint is already purchased never re-offers the popup.
+
+#### Scenario: No grant on a paid quest renders the designed access screen
+- **WHEN** a player with no grant opens `/quest/{paid-quest-id}` with no local bundle
+- **THEN** the bundle fetch is refused by the server (403) and the player renders the designed access screen with a marketplace CTA; no snapshot content is shown, no facts can be appended; after purchase the same URL resolves the bundle and plays normally.
+
+#### Scenario: Unknown quest or offline-without-bundle renders the designed unavailable screen
+- **WHEN** a player opens `/quest/{unknown-id}`, or opens a known quest while offline with no downloaded bundle
+- **THEN** the player renders the designed unavailable screen (with an offline note when applicable) instead of silently playing another quest's snapshot.
+
+## REMOVED Requirements
+
+### Requirement: Offline indicator, simulate disconnect, and local-only persistence for replay
+
+**Reason**: The shipped product contains no network-simulation UI; the sim-toggle contract is superseded by the real-connectivity requirement below. The PWA sim screens remain reproducible in the design canvases.
+
+## ADDED Requirements
+
+### Requirement: Real connectivity drives the offline indicator and sync; local-first persistence survives reload
+
+The player SHALL derive connectivity from the browser (`navigator.onLine` + `online`/`offline` events) — the shipped product contains no network simulation UI. While offline, the designed sync banner SHALL show the offline state with the count of queued (pending) facts and all flush triggers SHALL be suppressed; play is never blocked. Flushes run on mount, on the `online` event, and on the user's «Синхронизация» action; during a flush the banner shows the syncing state, after a successful flush the synced state briefly (then hides), and corrections derive exclusively from deriveSyncCorrections over the projection diff. All state (facts, current step, attempt identity, per-fact sent/pending status) SHALL survive full page reload via the IndexedDB queue; the sync sheet's ждёт/отправлено chips SHALL reflect per-fact queue status.
+
+#### Scenario: Go offline, play, reload, reconnect
+- **WHEN** the browser goes offline (real network state), the player completes several steps (incl. gift claim and a hint purchase), the page is reloaded, then the browser comes back online
+- **THEN** the offline banner with the pending count is shown while offline and no fetches are attempted; after reload the exact step, facts, balance and revealed state are restored from the queue; on the `online` event the pending batch is posted idempotently, rows flip to sent, the banner shows syncing → synced and then hides, and the UI matches the authoritative projection.
+
+#### Scenario: Real reconnect after offline play clears pending and applies authoritative state
+- **WHEN** pending facts exist and a flush runs (mount, online event, or manual)
+- **THEN** queue rows for the batch flip to sent (no local fact mutation), corrections (balance notice / advance offer) appear only when the projection diff demands, and re-flush is idempotent.

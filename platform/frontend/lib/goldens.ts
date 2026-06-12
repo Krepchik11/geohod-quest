@@ -5,6 +5,7 @@
  * Use load* from shared-model + these for tests.
  */
 import mysterySnapshot from '../../goldens/golden-mystery-fortress-v1.json';
+import ironiaSnapshot from '../../goldens/golden-ironia-sudby-v1.json';
 import happyPlaythrough from '../../goldens/playthrough-happy-with-gift.json';
 
 import { loadQuestSnapshot, loadPlaythroughGolden, QuestSnapshot, PlaythroughGolden } from './shared-model';
@@ -12,6 +13,7 @@ import { loadQuestSnapshot, loadPlaythroughGolden, QuestSnapshot, PlaythroughGol
 export const GOLDENS = {
   snapshots: {
     'mystery-fortress-v1': loadQuestSnapshot(mysterySnapshot),
+    'ironia-sudby': loadQuestSnapshot(ironiaSnapshot),
   } as Record<string, QuestSnapshot>,
   playthroughs: {
     'happy-with-gift': loadPlaythroughGolden(happyPlaythrough),

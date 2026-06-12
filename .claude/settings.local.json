@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec new *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo test *)",
+      "Bash(npm run *)",
+      "Bash(npx eslint *)",
+      "Bash(npx vitest *)",
+      "Bash(sed -i 's/- \\\\[ \\\\] 4\\\\.1/- [x] 4.1/; s/- \\\\[ \\\\] 4\\\\.2/- [x] 4.2/; s/- \\\\[ \\\\] 4\\\\.3/- [x] 4.3/' openspec/changes/spec-repair-parity-harness/tasks.md)",
+      "Bash(npm test *)",
+      "Bash(openspec validate *)",
+      "Bash(openspec archive *)",
+      "Bash(podman compose *)",
+      "Bash(podman-compose up *)",
+      "Bash(podman ps *)",
+      "Bash(podman exec *)",
+      "Bash(DATABASE_URL=postgres://geohod:geohod@localhost:5432/geohod cargo test pg_full_suite -- --nocapture)",
+      "Bash(DATABASE_URL=postgres://geohod:geohod@localhost:5432/geohod cargo test pg_full_suite)",
+      "Bash(DATABASE_URL=postgres://geohod:geohod@localhost:5432/geohod PORT=8099 cargo run)",
+      "Bash(curl -s localhost:8099/health)",
+      "Bash(curl -s -X POST localhost:8099/api/checkout -H 'content-type: application/json' -d '{\"player_id\":\"smoke-p\",\"quest_id\":\"mystery-fortress-v1\"}')",
+      "Bash(curl -s \"localhost:8099/api/quests/mystery-fortress-v1/bundle?player_id=smoke-p\")",
+      "Bash(curl -s \"localhost:8099/api/quests/mystery-fortress-v1/bundle?player_id=nobody\")",
+      "Bash(pkill -f \"geohod-backend\")",
+      "Bash(curl -s localhost:8099/api/quests)",
+      "Bash(DATABASE_URL=postgres://geohod:geohod@localhost:5432/geohod PORT=8099 ./target/debug/geohod-backend)",
+      "Read(//tmp/**)",
+      "Bash(pkill -f geohod-backend)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"eslint exit=$?\")",
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(echo \"LINT-EXIT:$?\")"
+    ]
+  }
+}

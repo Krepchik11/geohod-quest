@@ -1,0 +1,1085 @@
+{
+  "quest_id": "1690021646503x187331566442381300",
+  "quest_name": "1690021646503x187331566442381300",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-07-12T02:15:58.843Z",
+    "Created Date": "2023-07-22T10:27:27.447Z",
+    "Created By": "1665774116632x867619938298102300",
+    "Page": [
+      "1690021646503x161847796599357440",
+      "1690021646503x703634546452856800",
+      "1690021646503x196616549374623740",
+      "1690022573246x234280955841609730",
+      "1690022721217x329935147357962240",
+      "1690022793791x290671290686898200",
+      "1690022933566x174717367977771000",
+      "1690023000028x189493150844190720",
+      "1690023117673x256707445928493060",
+      "1690023817304x641467791036645400",
+      "1690023893947x442958995709231100",
+      "1690023994455x186161757002661900",
+      "1690024087651x919439382264414200",
+      "1690024210647x802651893594325000",
+      "1690024388975x218847789145128960",
+      "1690024503449x725546079522914300",
+      "1690029226936x413266614363095040",
+      "1690029290332x918196327423672300",
+      "1690029383296x446492631019028500",
+      "1690029763629x698319666961711100",
+      "1690029844182x615843884565004300",
+      "1690029916598x632408612516921300",
+      "1690029996329x243287042416705540",
+      "1690030087433x779885927001489400",
+      "1690030155669x800653499686715400",
+      "1690030200921x765654819600859100",
+      "1690030400426x262179794982535170",
+      "1690030546638x662464808611479600",
+      "1690030587964x723155015322304500",
+      "1690030717305x630286630751567900",
+      "1690030904523x592860790240575500",
+      "1690030988121x930176143542190000",
+      "1690031292880x746319342689321000"
+    ],
+    "Quest_setting": "1690021646503x756325057398046700",
+    "Quest_name_ru": "Месть Великого магистра. Часть 1.",
+    "Users": [
+      "1665774116632x867619938298102300",
+      "1672348260883x323042854737587500",
+      "1671731595144x135368245400823600",
+      "1683323301372x366371711924678100",
+      "1693663776534x557108338344094000",
+      "1693669371896x599590556582249500",
+      "1679049238961x574103681969246200",
+      "1683454838340x870294105981595100",
+      "1683461146044x831016649797312600",
+      "1693670673185x968540827956121000",
+      "1693660054181x403480076329146800",
+      "1693669562628x978903220604789900",
+      "1693670766496x710271470932963200",
+      "1693670978637x945183547843062800",
+      "1682941682083x915807260683414300",
+      "1691857314590x592253830364988300",
+      "1682865047886x909610944376853200",
+      "1693670970413x161692973781867970",
+      "1690726190465x630714695610908400",
+      "1693903572635x488369884454459500",
+      "1694512242979x326033124735503940",
+      "1695804600760x310044955081691700",
+      "1695890389204x842223646422064300",
+      "1695937254521x914684340928122900",
+      "1696002202746x290720848877252800",
+      "1686740716769x452719307789883460",
+      "1695021803708x522970905823911800",
+      "1696002556693x918928775750419800",
+      "1683461153623x343340929407017100",
+      "1696003473366x274275733868003070",
+      "1696003477141x548008389472935300",
+      "1678547141794x577159186572599200",
+      "1678529219253x905924101497676200",
+      "1676190241339x469446527440279230",
+      "1697903106605x252441285354314980",
+      "1676119783688x311597786923579970",
+      "1698501381442x183827748990385440",
+      "1698501928565x773389024407299200",
+      "1696606106634x395196662556615400",
+      "1696606105708x741339252360648600",
+      "1678547092102x541036100663483200",
+      "1699708019578x546036943149330800",
+      "1675497063560x205146423128328200",
+      "1699882876708x791823098615220400",
+      "1696606147089x469564908966632960",
+      "1700906965494x192967117211559000",
+      "1698916187167x128527293124446110",
+      "1702723917064x695795918457852800",
+      "1699794084432x379400863214864640",
+      "1702728081368x448333125513610500",
+      "1702728061133x675978637462682400",
+      "1702722707097x722108149547189800",
+      "1702728010429x774980239404009100",
+      "1702729002424x175314506272121760",
+      "1702724524011x302796936791757300",
+      "1702730322996x364685255218617300",
+      "1702804281989x323769774216801300",
+      "1676207093579x430488185852954800",
+      "1703195230307x604547679376116200",
+      "1682247382710x664751047942312000",
+      "1704179474192x321930340283085600",
+      "1697531576486x974500398228842000",
+      "1705073543293x425999757078117300",
+      "1704543651606x552931168077146240",
+      "1704542365889x568173285987350500",
+      "1704538956456x824823268638190500",
+      "1705154753728x609180689211663700",
+      "1704542434551x273400884256913800",
+      "1704474465438x375533402691785600",
+      "1705230120910x650109682514372900",
+      "1693932867113x634300648540270200",
+      "1678547043440x440717384351338100",
+      "1680073134473x656716784986995100",
+      "1706974869085x714229772833884300",
+      "1707567369222x303770118094947700",
+      "1676453151275x564995987136353500",
+      "1696602628425x755246930407767600",
+      "1709758010372x834772430864136800",
+      "1710583710655x920186634858101400",
+      "1710583697500x209320109127491000",
+      "1710583692373x848668258941387600",
+      "1708170881093x928929780808742400",
+      "1710583765246x491106756617535800",
+      "1710577415172x305996178353913340",
+      "1710585179116x827080359107863500",
+      "1709989293429x304317768095752260",
+      "1703929214832x892346545292289000",
+      "1712846666460x353843986654811800",
+      "1714817921467x181290095375227000"
+    ],
+    "Preview_image": "//8ebd72cadc76b45bfef67590b0ca2d5f.cdn.bubble.io/f1690725223855x875463207831056900/null.png",
+    "Price": 500,
+    "Reviews": [
+      "1690480421262x784853057885438000",
+      "1690482515601x469989665998110700",
+      "1693669359046x379089269853782000",
+      "1693674118193x913441850227163100",
+      "1693674124892x526665757936058400",
+      "1693674126889x921461255459307500",
+      "1693674183125x354781302831710200",
+      "1693674183337x427524530397249540",
+      "1693674511471x598897215078400000",
+      "1696006192407x413627929835339800",
+      "1696006309310x969594570806132700",
+      "1696007583979x101932885935390720",
+      "1696007587412x128188130663333890",
+      "1696008691102x127538801591451650",
+      "1697903600281x409908989625892860",
+      "1698337130036x971639805712531500",
+      "1698505560782x282039430529679360",
+      "1698505564929x874270371088171000",
+      "1698506852932x373814744005738500",
+      "1699710196242x766433632823541800",
+      "1699710255856x412642808081940500",
+      "1699710273496x102444388800528380",
+      "1700330757073x610904282650378200",
+      "1700474326169x512834650007928800",
+      "1701003009741x370512425350594560",
+      "1701516899188x960740334099759100",
+      "1702730429964x558105561920962560",
+      "1702731171634x694581659387560000",
+      "1702730738467x230391721585803260",
+      "1702730793601x716993040588472300",
+      "1702730805900x236155685892522000",
+      "1702730824561x646836980210204700",
+      "1702731139502x768314989248249900",
+      "1702731938831x451824811320541200",
+      "1702732017079x891609117071769600",
+      "1702732112364x997759986959384600",
+      "1702732169684x638771446332784600",
+      "1702734270791x147492244003225600",
+      "1702737863333x218143791917039600",
+      "1702804531089x549318181073715200",
+      "1703423196990x240648870847053820",
+      "1704379796061x550588087490576400",
+      "1705157350443x593018803991347200",
+      "1705157357710x692457950522900500",
+      "1705157393622x166802069113536500",
+      "1705157413071x212902281926934530",
+      "1705158086202x128237831280394240",
+      "1705234061775x495950150946521100",
+      "1705234172295x959079168266731500",
+      "1708083165516x307866258751881200",
+      "1709982308462x861676782411317200",
+      "1710424557524x180173266537676800",
+      "1710586511847x959339626084958200",
+      "1711286860747x522012734889656300"
+    ],
+    "Quest_level": "Средняя",
+    "Summary_of_the_quest_ru": "История Европы полна неожиданных и загадочных сюжетов. Какая связь существует между легендарным Мальтийским орденом, сербским городом Нови Садом и русским архитектором Константином Паризо де ла Валеттом, чье имя сегодня помнят только специалисты? \nОтвет на этот вопрос зашифрован в зданиях в центре Нови Сада, которые построил Паризо де ла Валетт, перебравшийся сюда из России после Гражданской войны. \nНа улицах города вы встретите загадочного незнакомца, который расскажет вам о проклятии рода де ла Валеттов, ведущего свое происхождение от Великого магистра Мальтийского ордена, жившего шесть столетий назад, когда Нови Сада еще не было на карте. \nЭтот квест, составленный при помощи профессиональных историков и архитекторов, расскажет вам о том, как далекое прошлое продолжает жить в настоящем.\n",
+    "Quest_name_en": "New Quest 12",
+    "Quest_name_srb": "Нова Потрага 12",
+    "Shop_name_en": "New Quest 12",
+    "Shop_name_ru": "Месть Великого магистра. Часть 1.",
+    "Shop_name_srb": "Нова Потрага 12",
+    "Publish_on_the_site": true,
+    "Age_limit": "For all",
+    "Tags": [
+      "1680741746973x950545650515705900"
+    ],
+    "creatorUser": "1665774116632x867619938298102300",
+    "reviewGrade": 5,
+    "questCity": "1693914259751x608960791690608600",
+    "questCountry": "1693914259751x302818887647100900",
+    "placeStartLatitude": 45.255419106235884,
+    "placeStartLongitude": 19.845362659930196,
+    "theNumberOfUsersWhoCompletedTheQuest": 300,
+    "completedcount": 72,
+    "statusQuest": "Test",
+    "_id": "1690021646503x187331566442381300"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690021646503x161847796599357440"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690021646503x196616549374623740"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690021646503x703634546452856800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690022573246x234280955841609730"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690022721217x329935147357962240"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "АЛЕБАРДА",
+          "АЛЕБАРДУ",
+          "КОПЬЕ",
+          "ПИКУ",
+          "ПИКА",
+          "КОПЬЁ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690022793791x290671290686898200"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690022933566x174717367977771000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690023000028x189493150844190720"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "5",
+          "ПЯТЬ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690023117673x256707445928493060"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690023817304x641467791036645400"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "15",
+          "ПЯТНАДЦАТЬ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690023893947x442958995709231100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690023994455x186161757002661900"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "2",
+          "ДВА"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690024087651x919439382264414200"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690024210647x802651893594325000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690024388975x218847789145128960"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "2",
+          "ДВЕ",
+          "ДВА",
+          "ДВОЕ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690024503449x725546079522914300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029226936x413266614363095040"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029290332x918196327423672300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "2",
+          "ДВА"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029383296x446492631019028500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029763629x698319666961711100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "6",
+          "ШЕСТЬ"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029844182x615843884565004300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029916598x632408612516921300"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "answer",
+        "acceptable": [
+          "11",
+          "ГОЛОВУ",
+          "ГОЛОВА"
+        ],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690029996329x243287042416705540"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030087433x779885927001489400"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030155669x800653499686715400"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030200921x765654819600859100"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030400426x262179794982535170"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030546638x662464808611479600"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030587964x723155015322304500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030717305x630286630751567900"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030904523x592860790240575500"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690030988121x930176143542190000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1690031292880x746319342689321000"
+    }
+  ],
+  "step_count": 33,
+  "exported_at": "2026-06-10T10:05:13Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}

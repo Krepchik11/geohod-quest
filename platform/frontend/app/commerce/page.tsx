@@ -125,7 +125,7 @@ function CheckoutPageInner() {
               {order.coupon && <div className="co-row"><span className="lbl">Купон</span><span>{order.coupon}</span></div>}
             </div>
             <div className="res-actions">
-              <Link className="s-btn" href={`/quest?golden=${QUEST.id}`}>Начать квест</Link>
+              <Link className="s-btn" href={`/quest/${QUEST.id}`}>Начать квест</Link>
               <Link className="s-btn s-btn--outline" href="/my-quests">В мои квесты</Link>
             </div>
           </div>

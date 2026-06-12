@@ -1,0 +1,161 @@
+{
+  "quest_id": "1732872980725x112462895828172800",
+  "quest_name": "1732872980725x112462895828172800",
+  "bubble_raw_quest": {
+    "Modified Date": "2024-11-29T09:40:36.902Z",
+    "Created Date": "2024-11-29T09:36:22.329Z",
+    "Created By": "1732872925634x336977945697919800",
+    "Page": [
+      "1732872980725x886966561071956000",
+      "1732872980725x150682985064038400",
+      "1732872980725x222695896406818800",
+      "1732873047404x794921052516909000",
+      "1732873108949x190754188565413900"
+    ],
+    "Quest_setting": "1732872980725x301678390349135900",
+    "Quest_name_ru": "Ноябрь",
+    "Price": 0,
+    "Quest_name_en": "New Quest 20",
+    "Quest_name_srb": "Нова Потрага 20",
+    "Shop_name_en": "New Quest 20",
+    "Shop_name_ru": "Ноябрь",
+    "Shop_name_srb": "Нова Потрага 20",
+    "Publish_on_the_site": false,
+    "creatorUser": "1732872925634x336977945697919800",
+    "reviewGrade": 5,
+    "theNumberOfUsersWhoCompletedTheQuest": 0,
+    "statusQuest": "Published",
+    "countCoinMadeIt": 1,
+    "_id": "1732872980725x112462895828172800"
+  },
+  "steps": [
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732872980725x150682985064038400"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732872980725x222695896406818800"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732872980725x886966561071956000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873047404x794921052516909000"
+    },
+    {
+      "position": null,
+      "internal_name": null,
+      "title": "",
+      "main_text": null,
+      "place_text": null,
+      "completion": {
+        "mode": "physical",
+        "acceptable": [],
+        "allow_note": false
+      },
+      "supporting": {
+        "gift": {
+          "coins": 0,
+          "narrative_text": null
+        }
+      },
+      "media": {
+        "task": null,
+        "character": null,
+        "hint": null,
+        "atmosphere": null
+      },
+      "raw_bubble_id": "1732873108949x190754188565413900"
+    }
+  ],
+  "step_count": 5,
+  "exported_at": "2026-06-10T10:05:21Z",
+  "notes": "Raw export for goldens. Map further to exact GameStep shape in SPEC.md. Use for Phase 2 tests."
+}
