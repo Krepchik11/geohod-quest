@@ -1,0 +1,53 @@
+name: frontend-ci
+
+# Quality gate ONLY — this does NOT deploy. Vercel's native Git integration
+# owns deployment (push to main -> production, PR -> preview). The job here is
+# to stop a broken build/lint/test from ever reaching a deploy, since
+# `next build` alone does not run eslint or vitest.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "platform/frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    paths:
+      - "platform/frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+defaults:
+  run:
+    working-directory: platform/frontend
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: platform/frontend/package-lock.json
+
+      - name: Install (deterministic)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        # A dummy base URL so the production build-time guard in lib/api.ts is
+        # satisfied. This validates the bundle compiles; it is NOT the deployed
+        # value (Vercel injects the real NEXT_PUBLIC_API_URL).
+        env:
+          NEXT_PUBLIC_API_URL: https://ci.invalid
+        run: npm run build

@@ -1,0 +1,8 @@
+# Keep the build context small and free of secrets.
+# NOTE: do NOT ignore ./migrations or ./src — both are needed at compile time
+# (migrations are embedded by sqlx::migrate!).
+target/
+.env
+.env.*
+*.md
+.git/

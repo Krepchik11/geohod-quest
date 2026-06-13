@@ -1,0 +1,4 @@
+# Quadlet volume unit. Durable Postgres storage (survives container recreation).
+# Install to: ~/.config/containers/systemd/geohod-quest-pgdata.volume
+[Volume]
+VolumeName=geohod-quest-pgdata

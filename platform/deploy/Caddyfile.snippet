@@ -1,0 +1,9 @@
+# Add this block to your existing Caddyfile (alongside app./dev.geohod.ru),
+# then reload Caddy. Requires a DNS A/AAAA record for api.quest.geohod.ru
+# pointing at this VPS, and ports 80/443 reachable for the ACME challenge.
+#
+# 8082 matches the API's PublishPort. Caddy terminates TLS; the backend speaks
+# plain HTTP on loopback only.
+api.quest.geohod.ru {
+        reverse_proxy localhost:8082
+}
