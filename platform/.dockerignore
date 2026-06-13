@@ -1,0 +1,16 @@
+# Build context root for backend/Containerfile is this directory (platform/).
+# The image only needs the crate (backend/) and its compile-time include_str!
+# targets (goldens/). Ignore everything else so the context upload stays small
+# and never carries secrets or the frontend tree.
+#
+# Read by both docker buildx (CI) and podman (VPS build-on-host fallback).
+*
+!backend
+!goldens
+
+# Re-exclude heavy or sensitive paths under the allowed directories.
+backend/target
+backend/.env
+backend/.env.*
+goldens/parity
+**/*.tsbuildinfo

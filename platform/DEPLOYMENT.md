@@ -95,8 +95,9 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    `platform/backend/**` runs `backend-image.yml`, producing
    `ghcr.io/naborka/geohod-quest-api:latest`. Make the package **public**, or
    `podman login ghcr.io` on the VPS once.
-   *Fallback (build on VPS):*
-   `cd platform/backend && podman build -t localhost/geohod-quest-api:latest .`
+   *Fallback (build on VPS):* the context is `platform/` (the crate embeds
+   `../goldens` at compile time), so build from there:
+   `cd platform && podman build -f backend/Containerfile -t localhost/geohod-quest-api:latest .`
    then set `Image=localhost/geohod-quest-api:latest` in the API unit.
 
 2. **Create secrets** (never plaintext env files). Use one strong password in BOTH

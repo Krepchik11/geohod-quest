@@ -5,13 +5,18 @@
 # embedded from ./migrations via `sqlx::migrate!`. So the image builds with no
 # database present.
 #
-# Build context = this directory (platform/backend).
+# Build context = platform/ (the PARENT of the crate). The binary embeds golden
+# JSON from ../goldens at compile time (main.rs include_str!), which lives
+# outside the crate, so the context must include both backend/ and goldens/.
+# Build with:  docker build -f backend/Containerfile <...> platform
 
 # ---- builder ----------------------------------------------------------------
 # Pin matches backend/rust-toolchain.toml (1.96.0). edition = "2024" needs >=1.85.
 FROM docker.io/library/rust:1.96-bookworm AS builder
 WORKDIR /build
-COPY . .
+COPY backend/ ./backend/
+COPY goldens/ ./goldens/
+WORKDIR /build/backend
 # --locked: fail loudly if Cargo.lock is stale instead of silently resolving new deps.
 RUN cargo build --release --locked
 
@@ -25,7 +30,7 @@ RUN apt-get update \
 # Unprivileged runtime user (defense in depth; rootless podman already maps us).
 RUN useradd --system --no-create-home --uid 10001 appuser
 
-COPY --from=builder /build/target/release/geohod-backend /usr/local/bin/geohod-backend
+COPY --from=builder /build/backend/target/release/geohod-backend /usr/local/bin/geohod-backend
 
 USER appuser
 ENV PORT=8082

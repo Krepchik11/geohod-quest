@@ -49,7 +49,9 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: platform/backend
+          # Context is platform/ (not backend/) because the crate embeds files
+          # from ../goldens at compile time — see Containerfile.
+          context: platform
           file: platform/backend/Containerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
