@@ -15,6 +15,17 @@ import { authHeaders, type Session } from './identity';
 
 const API_BASE = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) || 'http://localhost:8080';
 
+/**
+ * Header carrying the shared admin secret for the gated telemetry endpoints
+ * (stats/feedbacks). Sourced from NEXT_PUBLIC_ADMIN_TOKEN — bundle-visible, so
+ * only suitable for an internal admin tool; a public deployment should proxy
+ * these server-side instead. Empty when unset (backend then returns 401/403).
+ */
+function adminHeaders(): Record<string, string> {
+  const token = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_ADMIN_TOKEN : undefined;
+  return token ? { 'X-Admin-Token': token } : {};
+}
+
 /** Published quest meta as served by GET /api/quests (mirrors backend PublishedMeta). */
 export interface PublishedQuestWire {
   quest_id: string;
@@ -79,9 +90,13 @@ export const api = {
   appendFacts: (attemptId: string, facts: unknown[]) =>
     apiFetch(`/api/attempts/${attemptId}/facts`, { method: 'POST', body: JSON.stringify({ facts }) }),
 
-  // Admin / visibility (pure from facts); pass the expected shape at the call site
-  getVersionStats: <T = unknown>(versionId: string) => apiFetch<T>(`/api/admin/versions/${versionId}/stats`),
-  getVersionFeedbacks: <T = unknown>(versionId: string) => apiFetch<T>(`/api/admin/versions/${versionId}/feedbacks`),
+  // Admin / visibility (pure from facts); pass the expected shape at the call site.
+  // Gated by ADMIN_TOKEN on the backend; the internal admin UI forwards it via
+  // adminHeaders() (NEXT_PUBLIC_ADMIN_TOKEN).
+  getVersionStats: <T = unknown>(versionId: string) =>
+    apiFetch<T>(`/api/admin/versions/${versionId}/stats`, { headers: adminHeaders() }),
+  getVersionFeedbacks: <T = unknown>(versionId: string) =>
+    apiFetch<T>(`/api/admin/versions/${versionId}/feedbacks`, { headers: adminHeaders() }),
 
   // Published + grants (for cabinet/market live)
   listQuests: () => apiFetch<PublishedQuestWire[]>('/api/quests'),

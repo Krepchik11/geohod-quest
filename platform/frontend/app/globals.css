@@ -151,18 +151,6 @@ body.site { min-width:1240px; }
 .site-nav a:hover { color:var(--blue); }
 .site-nav a.is-active { border-color:currentColor; }
 
-.lang-switch { display:flex; align-items:center; gap:8px; font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--navy); }
-.lang-switch .globe { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; }
-.lang-switch:hover { color:var(--blue); }
-.globe-icon { position:relative; width:27px; height:27px; }
-.globe-icon .ic-ring, .globe-icon .m1, .globe-icon .m2 { position:absolute; background:var(--ic) no-repeat center/contain; }
-.globe-icon .ic-ring { inset:0; --ic:url("/assets/icons/c/ic-globe-ring--navy.svg"); }
-.globe-icon .m1 { left:32%; top:0; width:15%; height:100%; --ic:url("/assets/icons/c/ic-lang-mer1--navy.svg"); }
-.globe-icon .m2 { left:51%; top:0; width:15%; height:100%; --ic:url("/assets/icons/c/ic-lang-mer2--navy.svg"); }
-.globe-icon::before, .globe-icon::after { content:""; position:absolute; left:9%; right:9%; height:1.5px; background:var(--navy); border-radius:1px; }
-.globe-icon::before { top:36%; }
-.globe-icon::after { top:66%; }
-
 .user-menu { position:relative; flex:none; }
 .user-menu__btn { display:flex; align-items:center; justify-content:center; width:48px; height:48px; border-radius:50%; background:var(--white); border:1px solid var(--border); color:var(--dark); transition:box-shadow .15s ease,border-color .15s ease; }
 .user-menu__btn:hover { box-shadow:var(--shadow-pop); border-color:var(--gray); }

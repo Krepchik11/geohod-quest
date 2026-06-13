@@ -119,6 +119,24 @@ fn claimed_from_headers(headers: &HeaderMap) -> String {
         .to_string()
 }
 
+/// Gate admin-only endpoints (per-version stats/feedbacks, legacy migration)
+/// behind the shared `ADMIN_TOKEN` secret carried in `X-Admin-Token`. These
+/// surfaces expose aggregate telemetry, raw feedback notes and device ids, so
+/// they fail closed: when no secret is configured the endpoints are disabled.
+fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    let expected = state.config.admin_token.as_deref().ok_or_else(|| {
+        AppError::Forbidden("admin endpoints are disabled (ADMIN_TOKEN not set)".into())
+    })?;
+    let provided = headers
+        .get("x-admin-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if provided.is_empty() || provided != expected {
+        return Err(AppError::Unauthorized("invalid admin token".into()));
+    }
+    Ok(())
+}
+
 /// Health check response for probes and tests.
 #[derive(serde::Serialize)]
 struct HealthResponse {
@@ -315,6 +333,9 @@ async fn publish_quest_handler(
     State(state): State<AppState>,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // NOTE: publish is intentionally open to any caller for now (constructor
+    // authoring). Author binding + auth is a tracked follow-up; admin telemetry
+    // and per-player grants are the gated/scoped surfaces in this change.
     let version = req.snapshot_version.unwrap_or(1);
     let snapshot_id = req
         .snapshot_id
@@ -375,16 +396,24 @@ async fn list_quests_handler(
     Ok(Json(state.grants.list_published().await?))
 }
 
+/// Grants for the resolved caller ONLY. Previously returned every player's
+/// grants (incl. payment refs) to anyone — a cross-player data leak. The
+/// marketplace/cabinet only ever need the caller's own ownership set.
 async fn list_grants_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<AccessGrant>>, AppError> {
-    Ok(Json(state.grants.list_all_grants().await?))
+    let claimed = claimed_from_headers(&headers);
+    let player_id = resolve_player(&state, &headers, &claimed).await?;
+    Ok(Json(state.grants.grants_for_player(&player_id).await?))
 }
 
 async fn get_version_stats_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(snapshot_id): Path<String>,
 ) -> Result<Json<facts::PerVersionStats>, AppError> {
+    require_admin(&state, &headers)?;
     let grants_count = state.grants.list_all_grants().await?.len();
     Ok(Json(
         state
@@ -396,8 +425,10 @@ async fn get_version_stats_handler(
 
 async fn get_version_feedbacks_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(snapshot_id): Path<String>,
 ) -> Result<Json<Vec<facts::Fact>>, AppError> {
+    require_admin(&state, &headers)?;
     Ok(Json(
         state.store.list_feedbacks_for_version(&snapshot_id).await?,
     ))
@@ -412,8 +443,10 @@ struct MigrateRequest {
 
 async fn run_migration_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<MigrateRequest>,
 ) -> Result<Json<MigrationResult>, AppError> {
+    require_admin(&state, &headers)?;
     let res = state
         .store
         .run_legacy_migration(
@@ -718,11 +751,46 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
+    /// Admin secret wired into the test app so admin-gated scenarios can
+    /// authenticate (and assert that the wrong/absent token is rejected).
+    const TEST_ADMIN_TOKEN: &str = "test-admin-secret";
+
     fn test_app() -> Router {
         build_router(in_memory_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
+            admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
         }))
+    }
+
+    /// Router with NO admin secret configured — admin surfaces must fail closed.
+    fn test_app_no_admin() -> Router {
+        build_router(in_memory_state(AppConfig {
+            addr: "0.0.0.0:0".parse().expect("test addr"),
+            version: "test-0.0.0",
+            admin_token: None,
+        }))
+    }
+
+    #[tokio::test]
+    async fn admin_endpoints_disabled_when_no_secret_configured() {
+        let app = test_app_no_admin();
+        // Even with a token header, an unset ADMIN_TOKEN disables the surface.
+        let (st, _) = get_json_h(
+            &app,
+            "/api/admin/versions/whatever/stats",
+            &[("x-admin-token", "anything")],
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = post_json_h(
+            &app,
+            "/api/migrate/legacy",
+            json!({"key": "k"}),
+            &[("x-admin-token", "anything")],
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
     }
 
     async fn post_json_h(
@@ -1096,13 +1164,21 @@ mod tests {
                     && m["snapshot_id"] == ids.snap1.as_str())
         );
 
-        let (_, grants) = get_json(app, "/api/grants").await;
+        // /api/grants is caller-scoped: anonymous callers must claim an id, and
+        // the response contains ONLY that player's grants (no cross-player leak).
+        let (st, _) = get_json(app, "/api/grants").await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "grants require an identity");
+
+        let (_, grants) = get_json_h(app, "/api/grants", &[("x-player-id", &ids.player)]).await;
+        let grants = grants.as_array().expect("grants");
         assert!(
             grants
-                .as_array()
-                .expect("grants")
                 .iter()
                 .any(|g| g["player_id"] == ids.player.as_str() && g["source"] == "Payment")
+        );
+        assert!(
+            grants.iter().all(|g| g["player_id"] == ids.player.as_str()),
+            "no other player's grants are exposed"
         );
     }
 
@@ -1196,7 +1272,30 @@ mod tests {
         )
         .await;
 
-        let (st, stats) = get_json(app, &format!("/api/admin/versions/{}/stats", ids.snap1)).await;
+        let stats_uri = format!("/api/admin/versions/{}/stats", ids.snap1);
+        let feedbacks_uri = format!("/api/admin/versions/{}/feedbacks", ids.snap1);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Admin telemetry is gated: no token / wrong token are rejected before
+        // any data is returned (cross-quest aggregate + raw feedback notes).
+        // (Token IS configured in the test app, so missing/wrong are 401; the
+        // 403 "disabled" path applies only when ADMIN_TOKEN is unset.)
+        let (st, _) = get_json(app, &stats_uri).await;
+        assert_eq!(
+            st,
+            StatusCode::UNAUTHORIZED,
+            "missing admin token is rejected"
+        );
+        let (st, _) = get_json_h(app, &stats_uri, &[("x-admin-token", "wrong")]).await;
+        assert_eq!(
+            st,
+            StatusCode::UNAUTHORIZED,
+            "wrong admin token is rejected"
+        );
+        let (st, _) = get_json(app, &feedbacks_uri).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "feedbacks gated too");
+
+        let (st, stats) = get_json_h(app, &stats_uri, &admin).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(stats["attempts_count"], 1);
         assert_eq!(stats["completions_count"], 1);
@@ -1205,8 +1304,7 @@ mod tests {
         assert_eq!(stats["per_step"]["1"]["feedbacks"], 1);
         assert_eq!(stats["navigator_clicks"], 1);
 
-        let (_, feedbacks) =
-            get_json(app, &format!("/api/admin/versions/{}/feedbacks", ids.snap1)).await;
+        let (_, feedbacks) = get_json_h(app, &feedbacks_uri, &admin).await;
         assert!(
             feedbacks
                 .as_array()
@@ -1232,23 +1330,29 @@ mod tests {
     }
 
     async fn scenario_migration_idempotent(app: &Router, key: &str) {
-        let (st, v) = post_json(
-            app,
-            "/api/migrate/legacy",
-            json!({
-                "answer_cards": [
-                    {"step": 2, "type": "gift", "coins": 5},
-                    {"step": 3, "type": "complete", "correct": true}
-                ],
-                "key": key
-            }),
-        )
-        .await;
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let body = json!({
+            "answer_cards": [
+                {"step": 2, "type": "gift", "coins": 5},
+                {"step": 3, "type": "complete", "correct": true}
+            ],
+            "key": key
+        });
+
+        // Migration is admin-gated: unauthenticated callers cannot run it.
+        let (st, _) = post_json(app, "/api/migrate/legacy", body.clone()).await;
+        assert_eq!(
+            st,
+            StatusCode::UNAUTHORIZED,
+            "migration requires admin token"
+        );
+
+        let (st, v) = post_json_h(app, "/api/migrate/legacy", body, &admin).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(v["marked"], true);
         assert_eq!(v["synth_facts"].as_array().expect("facts").len(), 2);
 
-        let (_, v2) = post_json(app, "/api/migrate/legacy", json!({"key": key})).await;
+        let (_, v2) = post_json_h(app, "/api/migrate/legacy", json!({"key": key}), &admin).await;
         assert_eq!(
             v2["synth_facts"].as_array().expect("facts").len(),
             0,
@@ -1679,6 +1783,7 @@ mod tests {
             config: AppConfig {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
                 version: "test-pg",
+                admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
