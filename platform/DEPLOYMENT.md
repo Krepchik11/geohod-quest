@@ -138,12 +138,46 @@ and redeploy the frontend.
 
 ## Updating
 
-CI rebuilds the image on backend changes. On the VPS:
+CI rebuilds and pushes `ghcr.io/naborka/geohod-quest-api:latest` (and a
+`sha-<commit>` tag) on every backend change. Migrations run automatically at
+startup (`sqlx::migrate!`, embedded), so updating = pulling a newer image and
+restarting the unit. Three ways, pick one:
+
+**Recommended — automatic (`podman auto-update`).** The API unit carries
+`AutoUpdate=registry`. Enable the timer once:
+```sh
+systemctl --user enable --now podman-auto-update.timer    # needs linger (set above)
+```
+The timer (default daily) re-pulls `:latest` when its digest changed, restarts
+the unit, and **rolls back to the previous image if the new container fails to
+start**. The DB is intentionally NOT labeled, so it is never touched. Inspect:
+```sh
+systemctl --user list-timers | grep auto-update
+podman auto-update --dry-run
+```
+
+**On-demand (same mechanism, no waiting).** Run it yourself right after a release:
+```sh
+podman auto-update                 # pulls changed images, restarts, rolls back on failure
+```
+
+**Manual (no auto-update).** Explicit pull + restart — note a bare `restart`
+does NOT re-pull (Quadlet `Pull=missing`), so the pull is required:
 ```sh
 podman pull ghcr.io/naborka/geohod-quest-api:latest
 systemctl --user restart geohod-quest-api.service
 ```
-Migrations run automatically at startup (`sqlx::migrate!`, embedded).
+
+**Which build is live / rollback by hand:**
+```sh
+podman inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' geohod-quest-api
+# pin a known-good build instead of :latest, then daemon-reload + restart:
+#   Image=ghcr.io/naborka/geohod-quest-api:sha-<commit>
+```
+
+> After editing any `~/.config/containers/systemd/*.container` file, run
+> `systemctl --user daemon-reload` before restarting — Quadlet regenerates the
+> service unit from the file on reload.
 
 ## Backups (do this before real users)
 
