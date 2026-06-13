@@ -101,15 +101,20 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    then set `Image=localhost/geohod-quest-api:latest` in the API unit.
 
 2. **Create secrets** (never plaintext env files). Use one strong password in BOTH
-   the DB password and the URL — they must match:
+   the DB password and the URL — they must match. Generate it **URL-safe** (hex):
+   the password is embedded in `DATABASE_URL`, so a `/`, `+`, `:`, or `@` (which
+   `openssl rand -base64` produces) corrupts URL parsing — sqlx fails with
+   "invalid port number". `openssl rand -hex` avoids all of them.
    ```sh
-   PGPW='<long-random-password>'
+   PGPW="$(openssl rand -hex 24)"
    printf '%s' "$PGPW" | podman secret create geohod-quest-db-password -
    printf 'postgres://geohod:%s@geohod-quest-db:5432/geohod?sslmode=disable' "$PGPW" \
      | podman secret create geohod-quest-database-url -
-   printf '%s' '<long-random-admin-token>' | podman secret create geohod-quest-admin-token -
+   printf '%s' "$(openssl rand -hex 24)" | podman secret create geohod-quest-admin-token -
    ```
    The admin token must equal the frontend's `NEXT_PUBLIC_ADMIN_TOKEN`.
+   (`POSTGRES_PASSWORD` only applies on first DB init — changing it later requires
+   removing the `geohod-quest-pgdata` volume so Postgres re-initializes.)
 
 3. **Install Quadlet units:**
    ```sh
