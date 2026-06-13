@@ -10,6 +10,10 @@ pub struct AppConfig {
     pub addr: SocketAddr,
     /// Human readable application version (from Cargo).
     pub version: &'static str,
+    /// Shared secret for admin-only endpoints (stats/feedbacks/migration).
+    /// When `None` (env `ADMIN_TOKEN` unset) those endpoints are disabled
+    /// (fail-closed) — they expose aggregate telemetry and raw feedback notes.
+    pub admin_token: Option<String>,
 }
 
 impl AppConfig {
@@ -30,9 +34,14 @@ impl AppConfig {
 
         let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
 
+        let admin_token = std::env::var("ADMIN_TOKEN")
+            .ok()
+            .filter(|t| !t.trim().is_empty());
+
         Ok(Self {
             addr,
             version: env!("CARGO_PKG_VERSION"),
+            admin_token,
         })
     }
 }

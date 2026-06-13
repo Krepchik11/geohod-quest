@@ -488,6 +488,19 @@ impl PgGrantStore {
         rows.iter().map(grant_from_row).collect()
     }
 
+    /// See [`crate::store::InMemoryGrantStore::grants_for_player`].
+    pub async fn grants_for_player(&self, player_id: &str) -> Result<Vec<AccessGrant>, AppError> {
+        let rows = sqlx::query(
+            "SELECT player_id, quest_id, granted_at, source, source_ref
+             FROM access_grants WHERE player_id = $1",
+        )
+        .bind(player_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter().map(grant_from_row).collect()
+    }
+
     /// Latest published meta + frozen snapshot JSON for the bundle endpoint.
     pub async fn get_bundle(
         &self,

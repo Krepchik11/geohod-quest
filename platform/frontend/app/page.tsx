@@ -19,6 +19,19 @@ export type PublishedQuest = {
   template_summary: string;
 };
 
+/**
+ * Card cover background. `primary_comic` may be a real image (uploaded cover as a
+ * data: URL, or an /assets path) OR a bare comic id (e.g. "comic-fortress") that
+ * is not loadable as an image — only the former is used; otherwise the design
+ * placeholder. Prevents a broken/blank cover from an id-style value.
+ */
+const CARD_PLACEHOLDER = '/assets/img/quest-card.png';
+function coverUrl(primaryComic?: string | null): string {
+  const v = primaryComic?.trim();
+  const isImageRef = !!v && (v.startsWith('/') || v.startsWith('data:') || v.startsWith('http'));
+  return `url('${isImageRef ? v : CARD_PLACEHOLDER}')`;
+}
+
 /** Design demo card — rendered ONLY when the backend is unreachable (labeled). */
 const DEMO_MARKET_CARD: PublishedQuestWire = {
   quest_id: 'mystery-fortress-v1',
@@ -131,7 +144,7 @@ export default function GeoQuestHome() {
             const isOwned = !!owned[q.quest_id];
             return (
               <article className="quest-card card" key={q.quest_id}>
-                <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: "url('/assets/img/quest-card.png')" }}>
+                <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: coverUrl(q.primary_comic) }}>
                   <span className="qmark">?</span>
                   <img className="author" src="/assets/img/avatar-author.jpg" alt="Автор квеста" />
                 </a>
@@ -184,7 +197,6 @@ export default function GeoQuestHome() {
             <div className="site-footer__links">
               <a href="#">Политика конфиденциальности</a>
               <a href="#">Пользовательское соглашение</a>
-              <a href="#">Разработано maxidev.io</a>
               <div className="payments" aria-label="Способы оплаты">
                 <span className="pay pay--visa" title="Visa"><span className="g" /></span>
                 <span className="pay pay--mc" title="Mastercard"><span className="g" /></span>

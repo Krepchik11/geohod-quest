@@ -311,9 +311,20 @@ impl InMemoryGrantStore {
         Some((meta, data))
     }
 
-    /// All grants (demo listing; player filtering comes with auth).
+    /// All grants — internal/admin use only (exposes every player's purchases
+    /// and payment refs; never serve to player-scoped callers).
     pub fn list_all_grants(&self) -> Vec<AccessGrant> {
         self.grants.values().cloned().collect()
+    }
+
+    /// Grants owned by a single player — the only grant view safe to return to a
+    /// player-scoped request (no cross-player leakage).
+    pub fn grants_for_player(&self, player_id: &str) -> Vec<AccessGrant> {
+        self.grants
+            .values()
+            .filter(|g| g.player_id == player_id)
+            .cloned()
+            .collect()
     }
 }
 
@@ -647,6 +658,14 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_all_grants()),
             Self::Postgres(pg) => pg.list_all_grants().await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::grants_for_player`].
+    pub async fn grants_for_player(&self, player_id: &str) -> Result<Vec<AccessGrant>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.grants_for_player(player_id)),
+            Self::Postgres(pg) => pg.grants_for_player(player_id).await,
         }
     }
 

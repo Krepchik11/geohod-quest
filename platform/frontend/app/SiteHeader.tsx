@@ -36,17 +36,6 @@ export default function SiteHeader() {
         <a href="#contacts">контакты</a>
       </nav>
 
-      <button className="lang-switch" type="button" title="Сменить язык">
-        <span className="globe">
-          <span className="globe-icon">
-            <span className="ic-ring" />
-            <span className="m1" />
-            <span className="m2" />
-          </span>
-        </span>
-        <span>ру</span>
-      </button>
-
       <div className={`user-menu ${menuOpen ? 'is-open' : ''}`}>
         <button
           className="user-menu__btn"
