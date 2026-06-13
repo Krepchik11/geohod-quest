@@ -174,8 +174,66 @@ fn build_router(state: AppState) -> Router {
         .route("/api/players/me", get(get_me_handler))
         .route("/api/players/me/stats", get(get_my_stats_handler))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive()) // Dev only; tighten for prod
+        .layer(build_cors_layer(&state.config.cors_allowed_origins))
         .with_state(state)
+}
+
+/// True if `origin` is permitted by the allowlist. Each pattern is either an
+/// exact match or a single-`*` wildcard split into (prefix, suffix); the origin
+/// must start with the prefix and end with the suffix. Scheme is part of the
+/// match, so `http://` never satisfies an `https://` pattern. Pure + total so it
+/// can be unit-tested without a server.
+fn origin_allowed(allowed: &[String], origin: &str) -> bool {
+    allowed.iter().any(|pat| match pat.split_once('*') {
+        None => pat == origin,
+        Some((prefix, suffix)) => {
+            origin.len() >= prefix.len() + suffix.len()
+                && origin.starts_with(prefix)
+                && origin.ends_with(suffix)
+        }
+    })
+}
+
+/// CORS layer driven by the configured allowlist.
+///
+/// - Empty allowlist (env unset) → reflect any origin (dev convenience) + warn.
+/// - Non-empty → only origins matching [`origin_allowed`] are reflected.
+///
+/// Allowed methods/headers cover the client surface (JSON + identity headers).
+/// Credentials are NOT enabled: the client authenticates via `Authorization`/
+/// `X-Player-Id` headers, not cookies, so there is no ambient credential to ride.
+fn build_cors_layer(allowed: &[String]) -> CorsLayer {
+    use axum::http::{HeaderName, Method};
+    use tower_http::cors::AllowOrigin;
+
+    let methods = [Method::GET, Method::POST, Method::OPTIONS];
+    let headers = [
+        header::CONTENT_TYPE,
+        header::AUTHORIZATION,
+        HeaderName::from_static("x-player-id"),
+        HeaderName::from_static("x-admin-token"),
+    ];
+
+    let allow_origin = if allowed.is_empty() {
+        tracing::warn!(
+            "CORS_ALLOWED_ORIGINS is unset — reflecting ANY origin (dev mode). \
+             Set it in production (e.g. https://app.your-domain,https://*.vercel.app)."
+        );
+        AllowOrigin::mirror_request()
+    } else {
+        let patterns = allowed.to_vec();
+        AllowOrigin::predicate(move |origin, _parts| {
+            origin
+                .to_str()
+                .map(|o| origin_allowed(&patterns, o))
+                .unwrap_or(false)
+        })
+    };
+
+    CorsLayer::new()
+        .allow_origin(allow_origin)
+        .allow_methods(methods)
+        .allow_headers(headers)
 }
 
 async fn health_handler(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
@@ -760,6 +818,7 @@ mod tests {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
+            cors_allowed_origins: Vec::new(),
         }))
     }
 
@@ -769,7 +828,78 @@ mod tests {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: None,
+            cors_allowed_origins: Vec::new(),
         }))
+    }
+
+    // ---- CORS allowlist -----------------------------------------------------
+
+    #[test]
+    fn origin_allowed_exact_match() {
+        let allow = vec!["https://app.geohod.ru".to_string()];
+        assert!(origin_allowed(&allow, "https://app.geohod.ru"));
+        // Different host, different scheme, and trailing path/garbage all reject.
+        assert!(!origin_allowed(&allow, "https://evil.geohod.ru"));
+        assert!(!origin_allowed(&allow, "http://app.geohod.ru"));
+        assert!(!origin_allowed(&allow, "https://app.geohod.ru.evil.com"));
+    }
+
+    #[test]
+    fn origin_allowed_wildcard_subdomain() {
+        let allow = vec!["https://*.vercel.app".to_string()];
+        assert!(origin_allowed(
+            &allow,
+            "https://geohod-quest-abc123.vercel.app"
+        ));
+        assert!(origin_allowed(&allow, "https://x.vercel.app"));
+        // Scheme is part of the match; suffix must be exact.
+        assert!(!origin_allowed(&allow, "http://x.vercel.app"));
+        assert!(!origin_allowed(&allow, "https://vercel.app.evil.com"));
+    }
+
+    #[test]
+    fn origin_allowed_empty_list_rejects_everything() {
+        assert!(!origin_allowed(&[], "https://app.geohod.ru"));
+    }
+
+    /// With a configured allowlist, a preflight from an allowed origin is
+    /// reflected and a foreign origin is not.
+    #[tokio::test]
+    async fn cors_preflight_reflects_only_allowed_origin() {
+        let app = build_router(in_memory_state(AppConfig {
+            addr: "0.0.0.0:0".parse().expect("test addr"),
+            version: "test-0.0.0",
+            admin_token: None,
+            cors_allowed_origins: vec!["https://app.geohod.ru".to_string()],
+        }));
+
+        let preflight = |origin: &'static str| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/quests")
+                    .header("origin", origin)
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .expect("request");
+                let resp = app.oneshot(req).await.expect("response");
+                resp.headers()
+                    .get("access-control-allow-origin")
+                    .map(|v| v.to_str().unwrap().to_string())
+            }
+        };
+
+        assert_eq!(
+            preflight("https://app.geohod.ru").await.as_deref(),
+            Some("https://app.geohod.ru"),
+            "allowed origin must be reflected"
+        );
+        assert_eq!(
+            preflight("https://evil.example.com").await,
+            None,
+            "foreign origin must NOT receive an allow-origin header"
+        );
     }
 
     #[tokio::test]
@@ -1784,6 +1914,7 @@ mod tests {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
                 version: "test-pg",
                 admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
+                cors_allowed_origins: Vec::new(),
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),

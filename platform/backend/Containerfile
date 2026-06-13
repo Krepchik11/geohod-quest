@@ -1,0 +1,38 @@
+# Multi-stage build for the GeoQuest Rust/Axum backend.
+#
+# No DATABASE_URL is required at build time: all queries are runtime-checked
+# (the crate deliberately avoids sqlx `query!` macros) and migrations are
+# embedded from ./migrations via `sqlx::migrate!`. So the image builds with no
+# database present.
+#
+# Build context = this directory (platform/backend).
+
+# ---- builder ----------------------------------------------------------------
+# Pin matches backend/rust-toolchain.toml (1.96.0). edition = "2024" needs >=1.85.
+FROM docker.io/library/rust:1.96-bookworm AS builder
+WORKDIR /build
+COPY . .
+# --locked: fail loudly if Cargo.lock is stale instead of silently resolving new deps.
+RUN cargo build --release --locked
+
+# ---- runtime ----------------------------------------------------------------
+# slim glibc base matching the bookworm builder (binary is gnu-linked).
+FROM docker.io/library/debian:bookworm-slim AS runtime
+# ca-certificates: TLS trust roots. curl: used only by the container healthcheck.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+# Unprivileged runtime user (defense in depth; rootless podman already maps us).
+RUN useradd --system --no-create-home --uid 10001 appuser
+
+COPY --from=builder /build/target/release/geohod-backend /usr/local/bin/geohod-backend
+
+USER appuser
+ENV PORT=8082
+EXPOSE 8082
+
+# Liveness via the app's own /health endpoint. start-period covers DB cold start.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
+  CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/geohod-backend"]

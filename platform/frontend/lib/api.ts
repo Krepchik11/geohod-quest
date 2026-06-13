@@ -13,7 +13,28 @@
 
 import { authHeaders, type Session } from './identity';
 
-const API_BASE = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) || 'http://localhost:8080';
+/**
+ * Resolved at BUILD time: NEXT_PUBLIC_* is string-inlined into the browser
+ * bundle by `next build`, so this value is frozen at deploy time, not runtime.
+ *
+ * Production safety: a missing env var must FAIL THE BUILD, never silently ship
+ * `http://localhost:8080` to end users (which would point every visitor's API
+ * calls at their own machine). The localhost fallback is kept ONLY for local
+ * dev and tests, where the build-time throw would be unhelpful.
+ */
+function resolveApiBase(): string {
+  const explicit = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL : undefined;
+  if (explicit) return explicit;
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. It must be configured for production builds ' +
+        '(e.g. in Vercel project Environment Variables) so the API base is not the localhost fallback.',
+    );
+  }
+  return 'http://localhost:8080';
+}
+
+const API_BASE = resolveApiBase();
 
 /**
  * Header carrying the shared admin secret for the gated telemetry endpoints

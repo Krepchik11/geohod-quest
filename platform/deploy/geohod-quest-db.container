@@ -1,0 +1,29 @@
+# Quadlet container unit: Postgres for GeoQuest.
+# Install to: ~/.config/containers/systemd/geohod-quest-db.container
+#
+# The password comes from a podman secret (see deploy README), NOT from a
+# plaintext env var. It must MATCH the password embedded in the API's
+# DATABASE_URL secret.
+[Unit]
+Description=GeoQuest Postgres
+
+[Container]
+ContainerName=geohod-quest-db
+Image=docker.io/library/postgres:17-alpine
+Network=geohod-quest.network
+Volume=geohod-quest-pgdata.volume:/var/lib/postgresql/data
+Environment=POSTGRES_USER=geohod
+Environment=POSTGRES_DB=geohod
+Secret=geohod-quest-db-password,type=env,target=POSTGRES_PASSWORD
+# In-container readiness probe (used by `podman healthcheck` / `systemctl status`).
+HealthCmd=pg_isready -U geohod -d geohod
+HealthInterval=5s
+HealthTimeout=3s
+HealthRetries=10
+
+[Service]
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

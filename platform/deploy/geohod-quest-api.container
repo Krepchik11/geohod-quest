@@ -1,0 +1,41 @@
+# Quadlet container unit: GeoQuest Rust/Axum API.
+# Install to: ~/.config/containers/systemd/geohod-quest-api.container
+#
+# Published ONLY on the loopback interface (127.0.0.1:8082). The public reaches
+# it solely through Caddy (api.quest.geohod.ru -> localhost:8082); port 8082 is
+# not externally routable. 8082 is chosen because 8080/8081 are already taken by
+# the existing Caddy sites (app./dev.geohod.ru).
+[Unit]
+Description=GeoQuest API
+# Start after the DB unit. NOTE: this waits for the DB to *start*, not to become
+# *healthy* — Quadlet has no native "wait for healthy". The app's eager
+# PgPoolOptions::connect() may fail on the first boot tick; Restart=always below
+# absorbs that brief crash-loop until Postgres accepts connections.
+Requires=geohod-quest-db.service
+After=geohod-quest-db.service
+
+[Container]
+ContainerName=geohod-quest-api
+# GHCR image built by .github/workflows/backend-image.yml.
+# For a build-on-VPS fallback, replace with: localhost/geohod-quest-api:latest
+Image=ghcr.io/naborka/geohod-quest-api:latest
+Network=geohod-quest.network
+PublishPort=127.0.0.1:8082:8082
+Environment=PORT=8082
+Environment=RUST_LOG=geohod_backend=info,tower_http=warn
+# CORS allowlist (comma-separated; exact origins or single-* wildcards). MUST be
+# set in production or the API reflects ANY origin. Replace the prod frontend
+# origin below with the real Vercel custom domain; the wildcard covers previews.
+Environment=CORS_ALLOWED_ORIGINS=https://app.quest.geohod.ru,https://*.vercel.app
+# Full connection string (incl. password) lives in a secret. Host = the DB
+# container name resolved via netavark DNS. sslmode=disable: local PG has no TLS.
+Secret=geohod-quest-database-url,type=env,target=DATABASE_URL
+# Shared secret enabling the admin telemetry endpoints (fail-closed if unset).
+Secret=geohod-quest-admin-token,type=env,target=ADMIN_TOKEN
+
+[Service]
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -14,6 +14,12 @@ pub struct AppConfig {
     /// When `None` (env `ADMIN_TOKEN` unset) those endpoints are disabled
     /// (fail-closed) — they expose aggregate telemetry and raw feedback notes.
     pub admin_token: Option<String>,
+    /// Browser origins allowed by CORS, from `CORS_ALLOWED_ORIGINS` (comma
+    /// separated). Each entry is either an exact origin
+    /// (`https://app.example.com`) or a single-`*` wildcard
+    /// (`https://*.vercel.app`). When EMPTY (env unset), CORS reflects any
+    /// origin — convenient for local dev, but production MUST set this.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl AppConfig {
@@ -38,10 +44,22 @@ impl AppConfig {
             .ok()
             .filter(|t| !t.trim().is_empty());
 
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .ok()
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(Self {
             addr,
             version: env!("CARGO_PKG_VERSION"),
             admin_token,
+            cors_allowed_origins,
         })
     }
 }
