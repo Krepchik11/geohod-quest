@@ -5,31 +5,56 @@ import Link from 'next/link';
 
 /**
  * SiteHeader — visual + behavior port from the design site header.
- * Narrow client state only for the user dropdown (click-outside close).
+ * Client state: user dropdown + (mobile) nav drawer, both click-outside close.
+ *
+ * Mobile: the desktop inline nav cannot fit a phone, so below 768px a
+ * .nav-toggle hamburger (styled in styles/responsive.css) reveals the nav as
+ * a dropdown panel. Desktop markup/layout is unchanged — the toggle is
+ * display:none until the phone tier, so it stays out of the flex flow.
  */
 export default function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
+  // Single document listener closes whichever popover is open (click-outside).
   useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = () => setMenuOpen(false);
+    if (!menuOpen && !navOpen) return;
+    const onDoc = () => { setMenuOpen(false); setNavOpen(false); };
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
-  }, [menuOpen]);
+  }, [menuOpen, navOpen]);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setNavOpen(false);
     setMenuOpen(v => !v);
   };
 
+  const toggleNav = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setNavOpen(v => !v);
+  };
+
   return (
-    <header className="site-header container">
+    <header className={`site-header container ${navOpen ? 'is-nav-open' : ''}`}>
+      <button
+        className="nav-toggle"
+        type="button"
+        aria-label="Меню"
+        aria-expanded={navOpen}
+        onClick={toggleNav}
+      >
+        <span className="bars" />
+      </button>
+
       <Link className="logo" href="/" aria-label="GEOHOD QUEST — на главную">
         <span className="ic logo-mark" />
         <span className="ic logo-text" />
       </Link>
 
-      <nav className="site-nav" aria-label="Основная навигация">
+      {/* Clicking any link navigates and closes the mobile drawer. */}
+      <nav className="site-nav" aria-label="Основная навигация" onClick={() => setNavOpen(false)}>
         <Link href="/">главная</Link>
         <Link href="/#shop">магазин квестов</Link>
         <Link href="/my-quests">мои квесты</Link>
