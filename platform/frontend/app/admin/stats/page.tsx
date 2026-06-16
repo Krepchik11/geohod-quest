@@ -15,6 +15,9 @@ interface VersionStats {
   wrongs_submitted?: number;
   navigator_clicks?: number;
   feedback_count?: number;
+  /** Optional finale ratings folded across this version's attempts (author signal). */
+  rating_count?: number;
+  rating_avg?: number;
   grants_count?: number;
   error?: string;
 }
@@ -55,7 +58,7 @@ export default function StatsPage() {
                 <tr>
                   <th>Версия</th><th>Попыток</th><th>Завершено</th><th>Rate</th>
                   <th>Подсказок</th><th>Ошибок</th><th>Навигатор</th><th>Фидбеков</th>
-                  <th>Грантов</th>
+                  <th>Рейтинг</th><th>Грантов</th>
                 </tr>
               </thead>
               <tbody>
@@ -68,6 +71,7 @@ export default function StatsPage() {
                   <td>{stats.wrongs_submitted ?? 0}</td>
                   <td>{stats.navigator_clicks ?? 0}</td>
                   <td>{stats.feedback_count ?? 0}</td>
+                  <td>{stats.rating_count ? `${(stats.rating_avg ?? 0).toFixed(1)}★ (${stats.rating_count})` : '—'}</td>
                   <td>{stats.grants_count ?? 0}</td>
                 </tr>
               </tbody>

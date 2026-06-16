@@ -32,6 +32,9 @@ pub enum FactKind {
     FeedbackReported,
     /// Navigator handoff to the system maps app.
     NavigatorUsed,
+    /// Optional finale rating (1–5) in `submitted_value`; routed to the author.
+    /// coins_delta is always 0 — a projection no-op for balance/state.
+    QuestRated,
 }
 
 /// One immutable player event. All kinds share the same shape (the discriminator
@@ -205,6 +208,17 @@ pub struct PerVersionStats {
     pub wrongs_submitted: usize,
     pub navigator_clicks: usize,
     pub feedback_count: usize,
+    /// Number of attempts that left a finale rating (one rating per attempt:
+    /// the last `quest_rated` fact wins, matching the client `latestRating`).
+    pub rating_count: usize,
+    /// Mean of those ratings (1–5), or 0.0 when no attempt has rated yet. This is
+    /// the author-facing signal surfaced through the admin version-stats endpoint.
+    pub rating_avg: f64,
+}
+
+/// Parse a `quest_rated` fact's 1–5 score from its `submitted_value`.
+fn parse_rating(f: &Fact) -> Option<i64> {
+    f.submitted_value.as_deref().and_then(|s| s.trim().parse().ok())
 }
 
 /// Pure per-version stats fold over the logs of attempts bound to `snap`.
@@ -226,6 +240,10 @@ pub fn project_version_stats(
     let mut completions_count = 0usize;
     let mut per_step: std::collections::HashMap<i32, StepStats> = std::collections::HashMap::new();
     let mut all_facts: Vec<Fact> = Vec::new();
+    // Ratings aggregate ONE value per attempt (the last quest_rated fact wins,
+    // matching the client `latestRating`), so re-rating never double-counts.
+    let mut rating_sum: i64 = 0;
+    let mut rating_count = 0usize;
 
     for att in &bound {
         let Some(log) = fact_logs.get(*att) else {
@@ -234,6 +252,7 @@ pub fn project_version_stats(
         if log.iter().any(|f| f.kind == FactKind::AttemptCompleted) {
             completions_count += 1;
         }
+        let mut last_rating: Option<i64> = None;
         for f in log {
             all_facts.push(f.clone());
             let entry = per_step.entry(f.step_position).or_default();
@@ -242,14 +261,24 @@ pub fn project_version_stats(
                 FactKind::HintPurchased => entry.hints += 1,
                 FactKind::NavigatorUsed => entry.nav += 1,
                 FactKind::FeedbackReported => entry.feedbacks += 1,
+                FactKind::QuestRated => last_rating = parse_rating(f),
                 _ => {}
             }
+        }
+        if let Some(r) = last_rating {
+            rating_sum += r;
+            rating_count += 1;
         }
     }
 
     let analytics = project_analytics(&all_facts);
     let completion_rate = if attempts_count > 0 {
         completions_count as f64 / attempts_count as f64
+    } else {
+        0.0
+    };
+    let rating_avg = if rating_count > 0 {
+        rating_sum as f64 / rating_count as f64
     } else {
         0.0
     };
@@ -264,6 +293,8 @@ pub fn project_version_stats(
         wrongs_submitted: analytics.wrongs_submitted,
         navigator_clicks: analytics.navigator_clicks,
         feedback_count: analytics.feedback_count,
+        rating_count,
+        rating_avg,
     }
 }
 
@@ -526,6 +557,65 @@ mod tests {
         let feedbacks = list_feedbacks_for_snapshot("snap-v1", &logs, &snaps);
         assert_eq!(feedbacks.len(), 1);
         assert_eq!(feedbacks[0].note.as_deref(), Some("mid"));
+    }
+
+    #[test]
+    fn version_stats_aggregate_ratings_one_per_attempt_last_wins() {
+        let mut logs = std::collections::HashMap::new();
+        let mut snaps = std::collections::HashMap::new();
+        // Attempt 1 re-rated 3 then 5 — last (5) wins, counted once.
+        logs.insert(
+            "att-1".to_string(),
+            vec![
+                fact(FactKind::AttemptCompleted, 3, 0),
+                Fact {
+                    submitted_value: Some("3".into()),
+                    ..fact(FactKind::QuestRated, 3, 0)
+                },
+                Fact {
+                    submitted_value: Some("5".into()),
+                    ..fact(FactKind::QuestRated, 3, 0)
+                },
+            ],
+        );
+        // Attempt 2 rated 4.
+        logs.insert(
+            "att-2".to_string(),
+            vec![
+                fact(FactKind::AttemptCompleted, 3, 0),
+                Fact {
+                    submitted_value: Some("4".into()),
+                    ..fact(FactKind::QuestRated, 3, 0)
+                },
+            ],
+        );
+        // Attempt 3 completed but never rated — excluded from the average.
+        logs.insert(
+            "att-3".to_string(),
+            vec![fact(FactKind::AttemptCompleted, 3, 0)],
+        );
+        for a in ["att-1", "att-2", "att-3"] {
+            snaps.insert(a.to_string(), "snap-v1".to_string());
+        }
+
+        let stats = project_version_stats("snap-v1", &logs, &snaps, 3);
+        assert_eq!(stats.rating_count, 2, "two attempts left a rating");
+        assert_eq!(stats.rating_avg, 4.5, "(5 + 4) / 2 — last rating per attempt");
+        // A rating must never leak into balance/state projections.
+        assert!(project_state(&logs["att-1"]).completed_steps.contains(&3));
+        assert_eq!(project_balance(&logs["att-1"]), 0);
+    }
+
+    #[test]
+    fn quest_rated_wire_tag_is_snake_case() {
+        let f = Fact {
+            submitted_value: Some("5".into()),
+            ..fact(FactKind::QuestRated, 7, 0)
+        };
+        let json = serde_json::to_value(&f).expect("serialize");
+        assert_eq!(json["type"], "quest_rated");
+        let back: Fact = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, f);
     }
 
     #[test]

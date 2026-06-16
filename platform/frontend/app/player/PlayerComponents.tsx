@@ -106,6 +106,15 @@ export function PWarn({ size = 14 }: { size?: number }) {
   );
 }
 
+export function PArrow() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+      <line x1="2" y1="8" x2="13" y2="8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"></line>
+      <polyline points="8.5,3.5 13,8 8.5,12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"></polyline>
+    </svg>
+  );
+}
+
 /* Design-shape contracts (lifted from design/player/components.jsx class contracts) */
 
 export interface FrameTweaks {
@@ -158,8 +167,20 @@ export interface StepCopy {
   navigator?: string;
   wrong1?: string;
   noteHolder?: string;
-  finalBtn?: string;
-  finalDone?: string;
+  /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
+  final?: string;
+  whatNext?: string;
+  skipRating?: string;
+  rateLead?: string;
+  rateThanks?: string;
+  /* Пост-финальный каталог «Продолжите путешествие». */
+  catalogKicker?: string;
+  catalogTitle?: string;
+  catalogLead?: string;
+  catalogShare?: string;
+  catalogHome?: string;
+  catalogEmpty?: string;
+  shareCopied?: string;
   menuTitle?: string;
   feedback?: string;
   exit?: string;
@@ -197,6 +218,8 @@ export interface StepHandlers {
   play?: () => void;
   navigator?: () => void;
   rate?: (n: number) => void;
+  /** Final screen «что дальше» — leave the finale (into the catalog). */
+  onward?: () => void;
   review?: () => void;
 }
 
@@ -283,7 +306,7 @@ export function StepView({ step, quest, copy, st, on }: {
           <span><PClock />{quest?.duration || "1.5 часа"}</span>
         </div>
         <div className="p-actions">
-          <button className="p-btn" onClick={h.next || noop}>{copy?.start || "начать квест"}</button>
+          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{copy?.start || "начать квест"}</button>
         </div>
       </div>
     );
@@ -296,7 +319,7 @@ export function StepView({ step, quest, copy, st, on }: {
         <p className="p-text">{step.text}</p>
         <div className="p-actions">
           {step.nav && <button className="p-btn p-btn--ghost" onClick={h.navigator || noop}><PCompass />{copy?.navigator || "навигатор"}</button>}
-          <button className="p-btn" onClick={h.next || noop}>{step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}</button>
+          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}</button>
         </div>
       </div>
     );
@@ -319,7 +342,7 @@ export function StepView({ step, quest, copy, st, on }: {
         ) : null}
         <div className="p-actions">
           {step.nav && <button className="p-btn p-btn--ghost" onClick={h.navigator || noop}><PCompass />Навигатор</button>}
-          <button className="p-btn" onClick={() => (h.confirm ? h.confirm() : (h.next || noop)())}>{step.action?.confirmLabel || "Я на месте"}</button>
+          <button className="p-btn p-btn--solid" onClick={() => (h.confirm ? h.confirm() : (h.next || noop)())}>{step.action?.confirmLabel || "Я на месте"}</button>
         </div>
       </div>
     );
@@ -346,7 +369,7 @@ export function StepView({ step, quest, copy, st, on }: {
             onChange={(e) => h.answer && h.answer(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && h.submit) h.submit(val); }}
           />
-          <button className="p-btn" type="button" onClick={() => h.submit && h.submit(val)}>{copy?.submit || "Ответить"}</button>
+          <button className="p-btn p-btn--solid" type="button" onClick={() => h.submit && h.submit(val)}>{copy?.submit || "Ответить"}</button>
         </div>
       </div>
     );
@@ -358,42 +381,17 @@ export function StepView({ step, quest, copy, st, on }: {
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
         <div className="p-actions">
-          <button className="p-btn" onClick={h.next || noop}>{copy?.next || "продолжить"}</button>
+          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{copy?.next || "продолжить"}</button>
         </div>
       </div>
     );
   }
 
   if (step.template === "congrats") {
-    // Full FinalB per design (variant B default celebratory)
-    const coinsEarned = stateIn.coinsEarned != null ? stateIn.coinsEarned : (quest?.completionBonus || 5);
-    const reviewSent = !!stateIn.reviewSent;
-    return (
-      <div className="p-stepbody">
-        <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
-        <h2 className="p-title">{step.title || "Квест пройден!"}</h2>
-        <Flourish />
-        <div className="p-final-coins">
-          <PCoin size={30} /><PCoin size={38} /><PCoin size={30} />
-        </div>
-        <div className="p-final-stats">
-          <div className="p-stat"><b>{coinsEarned}</b><span>монет собрано</span></div>
-          <div className="p-stat"><b>{stateIn.time || "1:24"}</b><span>в пути</span></div>
-          <div className="p-stat"><b>{stateIn.steps || `${quest?.stepsDone || 8} / 8`}</b><span>шагов</span></div>
-        </div>
-        <p className="p-text" style={{ fontSize: "14px" }}>{step.text}</p>
-        <div className="p-actions" style={{ justifyContent: "center", flexDirection: "column", alignItems: "center", gap: 8 }}>
-          {reviewSent ? (
-            <p className="p-kicker" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}><PCheck />{copy?.finalDone || "Спасибо! Отзыв отправлен"}</p>
-          ) : (
-            <>
-              <RateStars value={stateIn.rating} onRate={h.rate} />
-              <button className="p-btn" type="button" onClick={h.review || noop}>{copy?.finalBtn || "Оценить квест"}</button>
-            </>
-          )}
-        </div>
-      </div>
-    );
+    // The final screen is its own component (optional, non-blocking rating +
+    // «что дальше»); StepView delegates so the player, the constructor
+    // test-player, and editor previews all render the one final implementation.
+    return <FinalScreen quest={quest} copy={copy} st={stateIn} on={h} />;
   }
 
   return <div className="p-stepbody"><p>Шаг: {step.template}</p><button className="p-btn" onClick={h.next || noop}>Далее</button></div>;
@@ -404,9 +402,146 @@ export function RateStars({ value, onRate }: { value?: number; onRate?: (n: numb
     <div className="p-rate">
       {[1, 2, 3, 4, 5].map((n) => (
         <button key={n} type="button" className={n <= (value || 0) ? "on" : ""} onClick={() => onRate && onRate(n)} aria-label={n + " звёзд"}>
-          <PStar size={22} />
+          <PStar size={26} />
         </button>
       ))}
+    </div>
+  );
+}
+
+/* ============================================================
+   FINAL — «Квест пройден!»
+   Rating is OPTIONAL and never blocks: tapping a star records it and shows an
+   inline thank-you; the forward action («что дальше») is always available and
+   leads into the post-finale catalog. Replaces the old inline congrats branch —
+   the single final-screen implementation, shared by the player, the constructor
+   test-player and editor previews. Stats are coins + time only (resolved design
+   decision; the «шагов» tile was dropped).
+   ============================================================ */
+export function FinalScreen({ quest, copy, st, on }: {
+  quest?: QuestMeta;
+  copy?: StepCopy | null;
+  st?: StepState;
+  on?: StepHandlers;
+}) {
+  const s = st || {};
+  const h = on || {};
+  const coins = s.coinsEarned != null ? s.coinsEarned : (quest?.completionBonus || 5);
+  const rated = (s.rating || 0) > 0;
+  // The forward action is always available (rating never blocks); «Пропустить
+  // оценку» is just a quieter label for the same action while still unrated.
+  const onward = h.onward || h.next || (() => {});
+
+  return (
+    <div className="p-stepbody">
+      <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
+      <h2 className="p-title">{copy?.final || "Квест пройден!"}</h2>
+      <Flourish />
+      <div className="p-final-coins"><PCoin size={30} /><PCoin size={38} /><PCoin size={30} /></div>
+      <div className="p-final-stats">
+        <div className="p-stat"><b>{coins}</b><span>монет собрано</span></div>
+        <div className="p-stat"><b>{s.time || "0:00"}</b><span>в пути</span></div>
+      </div>
+
+      <div className="p-ratecard">
+        {rated ? (
+          <>
+            <RateStars value={s.rating} onRate={h.rate} />
+            <span className="p-rate-thanks"><PCheck />{copy?.rateThanks || "Спасибо за оценку — отправим автору"}</span>
+          </>
+        ) : (
+          <>
+            <p className="lead">{copy?.rateLead || "Понравился квест? Оцените — это поможет автору. Можно пропустить."}</p>
+            <RateStars value={s.rating} onRate={h.rate} />
+          </>
+        )}
+      </div>
+
+      <div className="p-actions">
+        <button className="p-btn p-btn--solid" type="button" onClick={onward}>
+          {copy?.whatNext || "что дальше"} <PArrow />
+        </button>
+        {!rated && (
+          <button className="p-skip" type="button" onClick={onward}>{copy?.skipRating || "Пропустить оценку"}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A quest card on the post-finale catalog. Rich meta (city/duration/rating/badge)
+ *  is optional and renders only when present — the thin published list omits it. */
+export interface CatalogCardView {
+  id: string;
+  title: string;
+  mark: string;
+  cover?: string | null;
+  badge?: string;
+  city?: string;
+  duration?: string;
+  rating?: string;
+}
+
+export interface CatalogHandlers {
+  pick?: (id: string) => void;
+  share?: () => void;
+  home?: () => void;
+}
+
+/* ============================================================
+   CATALOG — «Продолжите путешествие» (after the finale)
+   The resolved post-finale invite: the finale is no longer a dead end — it offers
+   the next quests to play, with share + home as soft exits.
+   ============================================================ */
+export function CatalogScreen({ quests, copy, on }: {
+  quests: CatalogCardView[];
+  copy?: StepCopy | null;
+  on?: CatalogHandlers;
+}) {
+  const h = on || {};
+  return (
+    <div className="p-stepbody p-catalog">
+      <div className="p-catalog__head">
+        <p className="p-kicker">{copy?.catalogKicker || "маршрут окончен"}</p>
+        <h2 className="p-title">{copy?.catalogTitle || "Продолжите путешествие"}</h2>
+        <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)", textAlign: "center" }}>
+          {copy?.catalogLead || "Рядом — ещё истории этого города. Монеты переходят в ваш баланс."}
+        </p>
+      </div>
+
+      {quests.length > 0 ? (
+        <>
+          {quests.map((q) => (
+            <button key={q.id} className="q-card" type="button" onClick={() => h.pick && h.pick(q.id)}>
+              <div className="q-card__cover">
+                {q.badge && <span className="badge">{q.badge}</span>}
+                {q.cover ? <img src={q.cover} alt="" /> : <span className="qmark">{q.mark}</span>}
+              </div>
+              <div className="q-card__body">
+                <div className="q-card__title">{q.title}</div>
+                {(q.city || q.duration || q.rating) && (
+                  <div className="q-card__meta">
+                    {q.city && <span><PPin size={12} />{q.city}</span>}
+                    {q.duration && <span><PClock size={12} />{q.duration}</span>}
+                    {q.rating && <span className="star">★ {q.rating}</span>}
+                  </div>
+                )}
+                <span className="q-card__cta">{copy?.start || "начать квест"} <PArrow /></span>
+              </div>
+            </button>
+          ))}
+          <div className="p-catalog__sep">или</div>
+        </>
+      ) : (
+        <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)", textAlign: "center" }}>
+          {copy?.catalogEmpty || "Скоро здесь появятся новые истории."}
+        </p>
+      )}
+
+      <div className="p-catalog__foot">
+        <button className="p-btn p-btn--ghost" type="button" onClick={h.share}>{copy?.catalogShare || "поделиться результатом"}</button>
+        <button className="p-skip" type="button" onClick={h.home}>{copy?.catalogHome || "На главную"}</button>
+      </div>
     </div>
   );
 }
@@ -442,6 +577,7 @@ const FACT_LABELS: Record<Fact['type'], string> = {
   attempt_completed: 'Квест пройден',
   feedback_reported: 'Сообщение об ошибке',
   navigator_used: 'Переход в навигатор',
+  quest_rated: 'Оценка квеста',
 };
 
 /* Шторка «Синхронизация»: очередь событий с чипами ждёт/отправлено */
@@ -538,7 +674,7 @@ export function HintPopup({ step, copy, on }: {
       <div className="p-popup" onClick={(e) => e.stopPropagation()}>
         <p className="p-popup__title"><PCoin size={20} />{copy?.hintTitle || "Нужна подсказка?"}</p>
         <p className="p-popup__text">{copy && copy.hintBody ? copy.hintBody(cost) : `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`}</p>
-        <button className="p-btn" type="button" onClick={h.buy}>{copy && copy.hintYes ? copy.hintYes(cost) : `Потратить ${cost} монет`}</button>
+        <button className="p-btn p-btn--solid" type="button" onClick={h.buy}>{copy && copy.hintYes ? copy.hintYes(cost) : `Потратить ${cost} монет`}</button>
         <button className="p-btn p-btn--ghost" type="button" onClick={h.dismiss}>{copy?.hintNo || "Попробую сам"}</button>
       </div>
     </div>

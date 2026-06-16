@@ -71,6 +71,38 @@ describe('golden projection', () => {
   });
 });
 
+describe('latestRating (optional finale rating, append-only last-wins)', () => {
+  const rate = (value: number): model.Fact => ({
+    type: 'quest_rated',
+    step_position: 7,
+    submitted_value: String(value),
+    local_is_correct: true,
+    coins_delta: 0,
+    note: null,
+    device_id: 'device-a',
+  });
+
+  it('is 0 when the player never rated', () => {
+    expect(model.latestRating([])).toBe(0);
+    const play = getPlaythrough('happy-with-gift');
+    expect(model.latestRating(play.expected_facts)).toBe(0);
+  });
+
+  it('returns the LAST rating when re-rated (3 then 5 → 5)', () => {
+    expect(model.latestRating([rate(3), rate(5)])).toBe(5);
+  });
+
+  it('is a projection no-op: rating never changes balance or completed/revealed sets', () => {
+    const play = getPlaythrough('happy-with-gift');
+    const base = model.projectState(play.expected_facts);
+    const withRating = model.projectState([...play.expected_facts, rate(4)]);
+    expect(withRating).toEqual(base);
+    expect(model.projectBalance([...play.expected_facts, rate(4)])).toBe(
+      model.projectBalance(play.expected_facts),
+    );
+  });
+});
+
 describe('AccessGrant idempotency', () => {
   it('first creates, second returns existing with source preserved', () => {
     const g1 = model.createGrantIdemp(null, 'demo-player', 'mystery-fortress-v1', 'Payment');
