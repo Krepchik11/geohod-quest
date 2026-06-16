@@ -170,6 +170,8 @@ export interface StepCopy {
   /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
   final?: string;
   whatNext?: string;
+  /** Финал «пройти заново» — перезапуск этого же квеста с нуля. */
+  playAgain?: string;
   skipRating?: string;
   rateLead?: string;
   rateThanks?: string;
@@ -220,6 +222,8 @@ export interface StepHandlers {
   rate?: (n: number) => void;
   /** Final screen «что дальше» — leave the finale (into the catalog). */
   onward?: () => void;
+  /** Final screen «пройти заново» — replay this quest from step 0 (real player only). */
+  replay?: () => void;
   review?: () => void;
 }
 
@@ -361,7 +365,9 @@ export function StepView({ step, quest, copy, st, on }: {
           </div>
         ) : null}
         {stateIn.wrong ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
-        <div className="p-actions">
+        {/* Non-sticky bar: the input must scroll into view above the mobile
+            keyboard, not stay pinned to the bottom of the dynamic viewport. */}
+        <div className="p-actions p-actions--field">
           <input
             className={"p-input" + (stateIn.wrong ? " p-input--wrong" : "")}
             placeholder={step.prompt || "Введите ответ"}
@@ -431,9 +437,13 @@ export function FinalScreen({ quest, copy, st, on }: {
   // The forward action is always available (rating never blocks); «Пропустить
   // оценку» is just a quieter label for the same action while still unrated.
   const onward = h.onward || h.next || (() => {});
+  // «пройти заново» is a real-player affordance (restart this quest from step 0).
+  // It is gated on a wired handler so the constructor test-player and editor
+  // previews — which pass none — never render a dead button.
+  const replay = h.replay;
 
   return (
-    <div className="p-stepbody">
+    <div className="p-stepbody p-final">
       <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
       <h2 className="p-title">{copy?.final || "Квест пройден!"}</h2>
       <Flourish />
@@ -461,6 +471,9 @@ export function FinalScreen({ quest, copy, st, on }: {
         <button className="p-btn p-btn--solid" type="button" onClick={onward}>
           {copy?.whatNext || "что дальше"} <PArrow />
         </button>
+        {replay && (
+          <button className="p-btn p-btn--ghost" type="button" onClick={replay}>{copy?.playAgain || "пройти заново"}</button>
+        )}
         {!rated && (
           <button className="p-skip" type="button" onClick={onward}>{copy?.skipRating || "Пропустить оценку"}</button>
         )}
