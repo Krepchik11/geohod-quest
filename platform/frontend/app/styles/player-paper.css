@@ -6,6 +6,46 @@
    [data-anims]: on | off; end-state is always the base style.
    ============================================================ */
 
+/* Full-bleed page wrapper for the player route. Centers the frame on large
+   screens; the frame caps itself to the viewport (below) so the page never
+   scrolls to reach a button. `safe center` keeps the top reachable if a screen
+   ever exceeds the viewport (e.g. the start gate on a very short window). */
+.player-shell {
+  background: var(--p-bg, #FBF1E5);
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  align-items: safe center;
+  overflow-y: auto;
+  padding: 16px 8px;
+  box-sizing: border-box;
+}
+
+/* Only the REAL player frame (this shell) caps itself to the viewport so the page
+   never scrolls to reach a button. The bare .pframe stays a fixed 360×740 so the
+   constructor's transform-scaled mini-previews (.ed-phone/.wsp-phone/.mini), which
+   assume that size, are untouched. The shell adds 16px top+bottom padding on large
+   screens — subtract it here; phones drop the padding and go full-bleed (media
+   query at the end of this file). dvh tracks mobile browser chrome; the plain-vh
+   line is the fallback for engines without dvh. */
+.player-shell .pframe {
+  max-width: 100%;
+  max-height: 100vh;
+  max-height: calc(100dvh - 32px);
+}
+
+/* The capped frame can be SHORTER than a full-frame overlay (the quest menu, the
+   feedback sheet, the hint/correction popups) on short or landscape viewports. The
+   old 740px frame let the page scroll to reveal an overflowing overlay; the capped
+   frame clips it (overflow:hidden), so the overlays must scroll internally — else
+   controls like «Сбросить прогресс» / «Отправить» become unreachable. `safe center`
+   keeps the popup's top reachable when it is taller than the frame. Scoped to the
+   real player so the constructor's fixed-size previews are untouched. */
+.player-shell .pframe .p-menu { overflow-y: auto; }
+.player-shell .pframe .p-overlay { overflow-y: auto; align-items: safe center; }
+
 .pframe {
   position: relative;
   width: 360px;
@@ -89,7 +129,9 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 18px 22px 14px;
+  /* Bottom breathing room lives on the sticky .p-actions instead, so the action
+     bar can pin flush to the scroll viewport's bottom edge. */
+  padding: 18px 22px 0;
   min-height: 0;
 }
 .pframe[data-layout="text"] .p-stepbody .p-media { order: 5; }
@@ -189,7 +231,34 @@
 /* Заливная основная кнопка (primary CTA) — чернила на бумаге. */
 .p-btn--solid { background: var(--p-ink); color: var(--p-bg); }
 .p-btn--solid:hover { background: #2c1f1f; }
-.p-actions { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 4px; }
+/* Action bar — pinned to the bottom of the step. `margin-top:auto` floats it to
+   the bottom when the step is short; `position:sticky` keeps it on-screen when a
+   tall step (finale, hint + wrong answer, …) overflows the scroll area, so the
+   primary CTA is ALWAYS reachable without scrolling. The opaque background masks
+   content scrolling beneath it; the ::before is a soft fade above the bar. */
+.p-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 12px 0 16px;
+  background: var(--p-bg);
+}
+.p-actions::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -14px;
+  height: 14px;
+  background: linear-gradient(to top, var(--p-bg), transparent);
+  pointer-events: none;
+}
+/* task_answer keeps its input+submit in normal flow (not sticky) so a focused
+   field scrolls above the on-screen keyboard instead of being pinned behind it. */
+.p-actions--field { position: relative; }
+.p-actions--field::before { display: none; }
 
 /* ---------- Поля ввода ---------- */
 .p-input {
@@ -326,6 +395,14 @@
 .p-offline-chip--off .dot { background: #E8A33A; }
 
 /* ---------- Финал ---------- */
+/* The finale carries the most content (title, coins, stats, rate card, two CTAs),
+   so it is the screen most likely to overflow a short viewport. Tighten its
+   rhythm a touch so it fits without scrolling on common phones; the sticky
+   action bar is the guarantee for anything shorter still. */
+.p-final { gap: 11px; }
+.p-final .p-title { font-size: 23px; }
+.p-final .p-ratecard { padding: 12px 14px 13px; gap: 8px; }
+
 .p-final-coins { display: flex; justify-content: center; gap: 8px; }
 .p-final-coins .p-coin-svg { animation: p-coin-pop .6s cubic-bezier(.2,.9,.3,1.4) backwards; }
 .p-final-coins .p-coin-svg:nth-child(2) { animation-delay: .12s; }
@@ -454,3 +531,22 @@
 .p-catalog__sep::before, .p-catalog__sep::after { content: ""; flex: 1; height: 1px; background: var(--p-line); }
 
 .p-catalog__foot { display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
+
+/* ============================================================
+   Phones — the player goes full-bleed: the frame fills the dynamic viewport
+   exactly (no shell padding, no fixed 360×740 card) so every quest screen is
+   responsive and fits without scrolling. The desktop/tablet card is untouched.
+   ============================================================ */
+@media (max-width: 480px) {
+  .player-shell { padding: 0; }
+  /* Scoped to the real player only — the constructor's fixed-size previews keep
+     their 360×740 box (they live outside .player-shell). */
+  .player-shell .pframe {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+    max-height: 100vh;
+    max-height: 100dvh;
+  }
+}

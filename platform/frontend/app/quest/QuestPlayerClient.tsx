@@ -619,6 +619,13 @@ export default function QuestPlayerClient({
         // single quest_rated fact is committed with the final value on «что дальше».
         rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
         onward: openCatalog,
+        // «пройти заново» restarts from step 0. The tapped rating is intentionally
+        // NOT committed here: a quest_rated fact is delivered only via the forward
+        // «что дальше» path (openCatalog), because the queue flushes only the
+        // ACTIVE attempt — committing on replay would strand the fact on the
+        // just-superseded attempt, never reaching the author. Restart is a fresh
+        // start; «отправим автору» belongs to the forward action.
+        replay: handleReplay,
       }}
     />
   );
