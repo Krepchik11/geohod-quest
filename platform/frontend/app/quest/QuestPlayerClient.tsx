@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useReducer, useEffect, useCallback, useMemo, useState } from 'react';
+import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, QuestSnapshot, SyncCorrections } from '../../lib/shared-model';
 import {
@@ -20,6 +20,7 @@ import {
   getFacts,
   setLastStepIdx,
   restartAttempt,
+  openAttempt,
   migrateLegacyLocalStorage,
   appendFact as queueAppendFact,
 } from '../../lib/queue';
@@ -181,6 +182,12 @@ export default function QuestPlayerClient({
     facts, stepIdx, attemptKey, attemptCreatedAt, isSyncing, justSynced,
     corrections, queueStatus, showStartGate, hintOfferPos, toast,
   } = state;
+
+  // Guards the mount hydration to exactly one execution. `restartAttempt` is a
+  // multi-step DB mutation, so letting StrictMode's setup→cleanup→setup run it
+  // twice would race (the 2nd read could see the attempt before the 1st supersede
+  // commits). A single run also means a stable dispatch — no `cancelled` flag.
+  const didHydrateRef = useRef(false);
 
   const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
   const bal = projectBalance(facts);
@@ -505,33 +512,36 @@ export default function QuestPlayerClient({
     }
   }, [online, questId, attemptKey, refreshQueueStatus]);
 
-  // Mount: one-time localStorage migration, then hydrate from the queue (single dispatch).
+  // Mount (once): localStorage migration, then open the attempt to hydrate,
+  // honoring the «Пройти заново» restart intent (?restart=1 from My Quests).
   useEffect(() => {
-    let cancelled = false;
+    if (didHydrateRef.current) return;
+    didHydrateRef.current = true;
     void (async () => {
+      // Read the intent before the migration await, then strip ?restart=1 once
+      // consumed so a refresh resumes the fresh attempt instead of restarting it.
+      const restart =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('restart') === '1';
       try {
         await migrateLegacyLocalStorage(questId, snapshotId, window.localStorage);
-        const attempt = await ensureActiveAttempt(questId, snapshotId);
-        const rows = await getFacts(attempt.attempt_key);
-        if (cancelled) return;
-        const hydratedFacts = rows.map((r) => r.fact);
+        const opened = await openAttempt(questId, snapshotId, { restart });
+        if (restart && typeof window !== 'undefined') {
+          window.history.replaceState(null, '', `/quest/${encodeURIComponent(questId)}`);
+        }
         dispatch({
           type: 'hydrate',
-          facts: hydratedFacts,
-          stepIdx: attempt.last_step_idx,
-          attemptKey: attempt.attempt_key,
-          attemptCreatedAt: attempt.created_at,
-          queueStatus: Object.fromEntries(rows.map((r) => [r.key, r.status])),
-          // Start gate (SPEC): only for an in-progress hydrated attempt.
-          showStartGate: rows.length > 0 && !hydratedFacts.some((f) => f.type === 'attempt_completed'),
+          facts: opened.facts,
+          stepIdx: opened.attempt.last_step_idx,
+          attemptKey: opened.attempt.attempt_key,
+          attemptCreatedAt: opened.attempt.created_at,
+          queueStatus: opened.queueStatus,
+          showStartGate: opened.showStartGate,
         });
       } catch (err) {
         console.warn('queue hydration failed (in-memory only)', err);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [questId, snapshotId]);
 
   // Flush once hydrated; refires when connectivity returns (runFlush identity

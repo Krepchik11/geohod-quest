@@ -152,6 +152,45 @@ export async function restartAttempt(questId: string, snapshotId: string): Promi
   return ensureActiveAttempt(questId, snapshotId);
 }
 
+/** The attempt to hydrate when opening a quest, projected for the reducer. */
+export interface OpenedAttempt {
+  attempt: AttemptRow;
+  facts: Fact[];
+  queueStatus: Record<string, 'pending' | 'sent'>;
+  /** SPEC start gate — shown only for an in-progress (hydrated, not-yet-completed) attempt. */
+  showStartGate: boolean;
+}
+
+/**
+ * Resolve the attempt to open for a quest, honoring the «Пройти заново» intent.
+ *
+ * `restart` (carried from the My Quests button as `?restart=1`) supersedes the
+ * active attempt and starts a fresh one at step 0. Without it a *completed*
+ * attempt is reopened on its terminal step — `showStartGate` is false for a
+ * completed log, so the player would land back on the finale with no way to
+ * replay. That is the whole reason «Пройти заново» must pass the intent. Coins on
+ * the superseded attempt are kept regardless (facts are immutable). The function
+ * is intent-only and idempotent at the data layer; one-shot consumption (so a
+ * refresh does not restart again) is the caller's concern.
+ */
+export async function openAttempt(
+  questId: string,
+  snapshotId: string,
+  opts: { restart?: boolean } = {},
+): Promise<OpenedAttempt> {
+  const attempt = opts.restart
+    ? await restartAttempt(questId, snapshotId)
+    : await ensureActiveAttempt(questId, snapshotId);
+  const rows = await getFacts(attempt.attempt_key);
+  const facts = rows.map((r) => r.fact);
+  return {
+    attempt,
+    facts,
+    queueStatus: Object.fromEntries(rows.map((r) => [r.key, r.status])),
+    showStartGate: rows.length > 0 && !facts.some((f) => f.type === 'attempt_completed'),
+  };
+}
+
 // ---------- facts ----------
 
 /**

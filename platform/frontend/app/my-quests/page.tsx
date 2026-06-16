@@ -175,7 +175,9 @@ function MqActions({ q }: { q: MqRow }) {
     );
   }
   if (q.state === 'done') {
-    return <div className="mq-actions"><Link className="s-btn" href={open}>Пройти заново</Link></div>;
+    // A completed quest reopens on its finale; ?restart=1 tells the player to
+    // supersede that attempt and start a fresh run from step 0 (coins are kept).
+    return <div className="mq-actions"><Link className="s-btn" href={`${open}?restart=1`}>Пройти заново</Link></div>;
   }
   return <div className="mq-actions"><Link className="s-btn" href={open}>Начать</Link></div>;
 }

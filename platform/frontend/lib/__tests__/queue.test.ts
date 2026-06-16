@@ -13,6 +13,7 @@ import {
   setServerAttemptId,
   setLastStepIdx,
   restartAttempt,
+  openAttempt,
   appendFact,
   getFacts,
   getPendingFacts,
@@ -93,6 +94,59 @@ describe('attempts store', () => {
     // old facts untouched (coins remain), new attempt starts empty
     expect(await getFacts(a.attempt_key)).toHaveLength(1);
     expect(await getFacts(b.attempt_key)).toHaveLength(0);
+  });
+});
+
+describe('openAttempt (player open / «Пройти заново»)', () => {
+  /** Drive an attempt all the way to its terminal completion fact. */
+  async function completeAnAttempt() {
+    const a = await ensureActiveAttempt(QUEST, SNAP);
+    await appendFact(a.attempt_key, fact({ type: 'gift_claimed', step_position: 0, coins_delta: 5 }));
+    await appendFact(a.attempt_key, fact({ type: 'attempt_completed', step_position: 3 }));
+    await setLastStepIdx(a.attempt_key, 3);
+    return a;
+  }
+
+  it('opens a fresh attempt at step 0 with no start gate on first play', async () => {
+    const opened = await openAttempt(QUEST, SNAP);
+    expect(opened.facts).toHaveLength(0);
+    expect(opened.attempt.last_step_idx).toBe(0);
+    expect(opened.showStartGate).toBe(false);
+    expect((await getActiveAttempt(QUEST))?.attempt_key).toBe(opened.attempt.attempt_key);
+  });
+
+  it('reopens an in-progress attempt with the start gate (continue/restart choice)', async () => {
+    const a = await ensureActiveAttempt(QUEST, SNAP);
+    await appendFact(a.attempt_key, fact({ step_position: 0 }));
+    await setLastStepIdx(a.attempt_key, 1);
+    const opened = await openAttempt(QUEST, SNAP);
+    expect(opened.attempt.attempt_key).toBe(a.attempt_key);
+    expect(opened.facts).toHaveLength(1);
+    expect(opened.attempt.last_step_idx).toBe(1);
+    expect(opened.showStartGate).toBe(true);
+  });
+
+  it('reopening a COMPLETED attempt without restart lands on its terminal step (no gate)', async () => {
+    // This is the «stuck on the finale» state the «Пройти заново» button must avoid.
+    const a = await completeAnAttempt();
+    const opened = await openAttempt(QUEST, SNAP, { restart: false });
+    expect(opened.attempt.attempt_key).toBe(a.attempt_key);
+    expect(opened.attempt.last_step_idx).toBe(3);
+    expect(opened.showStartGate).toBe(false);
+    expect(opened.facts.some((f) => f.type === 'attempt_completed')).toBe(true);
+  });
+
+  it('restart supersedes the completed attempt and reopens fresh at step 0', async () => {
+    const completed = await completeAnAttempt();
+    const opened = await openAttempt(QUEST, SNAP, { restart: true });
+    // a brand-new, empty attempt — the player starts from the very beginning
+    expect(opened.attempt.attempt_key).not.toBe(completed.attempt_key);
+    expect(opened.facts).toHaveLength(0);
+    expect(opened.attempt.last_step_idx).toBe(0);
+    expect(opened.showStartGate).toBe(false);
+    expect((await getActiveAttempt(QUEST))?.attempt_key).toBe(opened.attempt.attempt_key);
+    // coins are never lost: the superseded attempt keeps its facts
+    expect(await getFacts(completed.attempt_key)).toHaveLength(2);
   });
 });
 
