@@ -14,6 +14,11 @@ import { currentPlayerId } from '../../lib/identity';
  * queue (attempt state) × bundles store (download state). Structure, classes
  * and RU copy per design/myquests/screens.jsx; design demo rows remain only
  * as a clearly-labeled fallback when the backend is unreachable.
+ *
+ * Player-facing copy (UX): the player only cares "can I play this offline?".
+ * Bundle size, "скачан/работает офлайн" wording, and quest version numbers are
+ * implementation details — they are NOT shown. Offline-ready collapses to a
+ * single "Доступно офлайн" marker; the update prompt is version-number-free.
  */
 
 interface MqRow {
@@ -49,11 +54,6 @@ const DEMO_FALLBACK_ROWS: MqRow[] = [
     bundle: null, updateAvailable: false,
   },
 ];
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} МБ`;
-  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
-}
 
 function formatDate(iso: string | undefined): string {
   if (!iso) return '';
@@ -106,25 +106,33 @@ function MqMeta({ city, duration }: { city: string; duration: string }) {
 
 const STAGE_WIDTH: Record<DownloadStage, number> = { fetching: 33, storing: 66, caching: 90, done: 100 };
 
+/**
+ * Offline-availability marker. Players only need to know whether the quest
+ * works without a connection — not the bundle size or technical status text.
+ */
 function MqDl({ q, stage, onDownload }: { q: MqRow; stage: DownloadStage | null; onDownload: () => void }) {
   if (stage && stage !== 'done') {
     return (
       <span className="mq-dl">
-        Скачиваем для офлайна…
+        Скачиваем…
         <span className="dl-bar" style={{ display: 'block', marginTop: 4 }}><i style={{ width: `${STAGE_WIDTH[stage]}%` }} /></span>
       </span>
     );
   }
   if (q.bundle) {
-    return <span className="mq-dl mq-dl--ready">✓ Скачан · работает офлайн ({formatSize(q.bundle.size_bytes)})</span>;
+    return <span className="mq-dl mq-dl--ready">✓ Доступно офлайн</span>;
   }
   return (
     <span className="mq-dl">
-      Не скачан · <button className="s-link" type="button" onClick={onDownload}>скачать для офлайна</button>
+      <button className="s-link" type="button" onClick={onDownload}>Скачать для офлайна</button>
     </span>
   );
 }
 
+/**
+ * Attempt status. Version numbers are intentionally omitted — players care
+ * about progress and last-played date, not which snapshot they are on.
+ */
 function MqState({ q }: { q: MqRow }) {
   if (q.state === 'progress') {
     return (
@@ -135,7 +143,7 @@ function MqState({ q }: { q: MqRow }) {
         {q.pos && q.total ? (
           <div className="mq-progressline"><i style={{ width: `${(q.pos / q.total) * 100}%` }} /></div>
         ) : null}
-        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)} · версия {q.version}</span>
+        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)}</span>
       </div>
     );
   }
@@ -143,14 +151,14 @@ function MqState({ q }: { q: MqRow }) {
     return (
       <div className="mq-state">
         <span className="mq-badge mq-badge--done">Пройден</span>
-        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)} · версия {q.version}</span>
+        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)}</span>
       </div>
     );
   }
   return (
     <div className="mq-state">
       <span className="mq-badge mq-badge--new">Не начат</span>
-      <span className="mq-sub">Доступ навсегда · версия {q.version}</span>
+      <span className="mq-sub">Доступ навсегда</span>
     </div>
   );
 }
@@ -254,7 +262,7 @@ export default function MyQuestsPage() {
                   <MqDl q={q} stage={downloads[q.quest_id] ?? null} onDownload={() => void handleDownload(q.quest_id)} />
                   {q.updateAvailable && (
                     <div className="mq-version">
-                      Вышла версия {q.version}. Новая попытка начнётся на ней; завершённые остаются на своих версиях.{' '}
+                      Доступно обновление.{' '}
                       <button className="s-link" type="button" onClick={() => void handleDownload(q.quest_id)}>Обновить</button>
                     </div>
                   )}
