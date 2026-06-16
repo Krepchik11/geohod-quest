@@ -99,7 +99,7 @@ export interface QuestSnapshot {
 }
 
 export interface Fact {
-  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used';
+  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated';
   step_position: number;
   submitted_value?: string | null;
   local_is_correct: boolean;
@@ -251,6 +251,25 @@ export function wrongAnswersAt(facts: Fact[], pos: number): number {
   return facts.filter(
     (f) => f.type === 'answer_submitted' && !f.local_is_correct && f.step_position === pos
   ).length;
+}
+
+/**
+ * The player's quest rating for this attempt: the value (1–5) of the LAST
+ * `quest_rated` fact, or 0 if the player never rated. Append-only "last wins" —
+ * changing the rating appends a new fact, never mutates the old one. A rating fact
+ * carries coins_delta 0 and completes/reveals nothing, so it is a projection no-op
+ * for balance/state (parity golden: with-quest-rating). Used to rehydrate the
+ * final screen's stars and to aggregate ratings for the author.
+ */
+export function latestRating(facts: Fact[]): number {
+  let rating = 0;
+  for (const f of facts) {
+    if (f.type === 'quest_rated') {
+      const n = Number(f.submitted_value);
+      if (Number.isFinite(n)) rating = n;
+    }
+  }
+  return rating;
 }
 
 /**

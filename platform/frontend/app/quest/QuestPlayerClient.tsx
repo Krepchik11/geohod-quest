@@ -9,9 +9,11 @@ import {
   projectState,
   shouldOfferHint,
   deriveSyncCorrections,
+  latestRating,
 } from '../../lib/shared-model';
 import { toDesignStep } from '../../lib/design-step';
-import { api } from '../../lib/api';
+import { api, type PublishedQuestWire } from '../../lib/api';
+import { nextQuestsForCatalog } from '../../lib/catalog';
 import {
   factNaturalKey,
   ensureActiveAttempt,
@@ -27,8 +29,8 @@ import { StartGate } from './StartGate';
 import { coinChime } from './sound';
 import { useOnline } from './useOnline';
 import {
-  PlayerFrame, StepView, TopBar, SyncBanner, CoinToast,
-  HintPopup, MenuOverlay, FeedbackSheet,
+  PlayerFrame, StepView, TopBar, SyncBanner, CoinToast, PCheck,
+  HintPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
   SyncSheet, BalanceCorrectionPopup, AdvanceOfferPopup,
 } from '../player/PlayerComponents';
 
@@ -201,9 +203,16 @@ export default function QuestPlayerClient({
     syncSheetOpen: false,
     feedbackText: '',
     rating: 0,
-    reviewSent: false,
+    /** Post-finale catalog («Продолжите путешествие») shown after «что дальше». */
+    showCatalog: false,
+    /** «Ссылка скопирована» confirmation after a clipboard share fallback. */
+    shareToast: false,
     soundOn: typeof window === 'undefined' ? true : localStorage.getItem(SOUND_PREF_KEY) !== 'off',
   }));
+
+  // Lazily-loaded list of other published quests for the post-finale catalog
+  // (null = not fetched yet). Thin metadata; see lib/catalog.nextQuestsForCatalog.
+  const [published, setPublished] = useState<PublishedQuestWire[] | null>(null);
 
   const toggleSound = useCallback(() => {
     setUi((u) => {
@@ -391,12 +400,79 @@ export default function QuestPlayerClient({
       try {
         const fresh = await restartAttempt(questId, snapshotId);
         dispatch({ type: 'reset', attemptKey: fresh.attempt_key, attemptCreatedAt: fresh.created_at });
-        setUi((u) => ({ ...u, answer: '', wrong: false, note: '', rating: 0, reviewSent: false }));
+        setUi((u) => ({ ...u, answer: '', wrong: false, note: '', rating: 0, showCatalog: false, shareToast: false }));
       } catch (err) {
         console.warn('restart failed', err);
       }
     })();
   }, [questId, snapshotId, setUi]);
+
+  // Optional finale rating → a structured quest_rated fact, carried through the
+  // same offline queue + idempotent sync as every other fact and surfaced to the
+  // author via admin version-stats. Last-wins + idempotent: re-rating appends a
+  // new fact, the same score never re-appends (mirrors latestRating).
+  const recordRating = useCallback(
+    (value: number) => {
+      if (value <= 0 || latestRating(facts) === value) return;
+      appendFact({
+        type: 'quest_rated',
+        step_position: stepIdx,
+        submitted_value: String(value),
+        local_is_correct: true,
+        coins_delta: 0,
+        note: null,
+      });
+    },
+    [facts, stepIdx, appendFact]
+  );
+
+  // Fetch the catalog list once (guarded). Used as a prefetch on reaching the
+  // finale AND as a fallback when «что дальше» is tapped — at most one request,
+  // so the catalog never flashes its empty state while loading.
+  const loadCatalog = useCallback(() => {
+    if (published == null) {
+      api.listQuests().then(setPublished).catch(() => setPublished([]));
+    }
+  }, [published]);
+
+  // «что дальше» / «Пропустить»: commit the FINAL rating (once, idempotent), then
+  // reveal the post-finale catalog. Committing the single final value — rather than
+  // one fact per tap — avoids a re-selection ordering bug: with per-tap facts, a
+  // 5→4→5 sequence would dedup the second 5 onto the first by natural key, leaving
+  // 4 as the highest-seq fact and mis-recording the score. «отправим» is future
+  // tense, so committing on proceed matches the copy too.
+  const openCatalog = useCallback(() => {
+    recordRating(ui.rating);
+    setUi((u) => ({ ...u, showCatalog: true }));
+    loadCatalog();
+  }, [recordRating, ui.rating, loadCatalog, setUi]);
+
+  // Share the finished quest: native share sheet when available, else copy the
+  // link and confirm with the «Ссылка скопирована» toast.
+  const handleShare = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const url = `${window.location.origin}/quest/${encodeURIComponent(questId)}`;
+    const nav = window.navigator;
+    if (nav && typeof nav.share === 'function') {
+      nav.share({ title: snapshot.name, url }).catch(() => {});
+      return;
+    }
+    const confirmCopy = () => {
+      setUi((u) => ({ ...u, shareToast: true }));
+      setTimeout(() => setUi((u) => ({ ...u, shareToast: false })), TOAST_MS);
+    };
+    if (nav?.clipboard?.writeText) {
+      nav.clipboard.writeText(url).then(confirmCopy, confirmCopy);
+    } else {
+      confirmCopy();
+    }
+  }, [questId, snapshot.name, setUi]);
+
+  // Prefetch the catalog when the player reaches the finale, so «что дальше»
+  // reveals the next quests without a loading flash.
+  useEffect(() => {
+    if (isTerminalStep) loadCatalog();
+  }, [isTerminalStep, loadCatalog]);
 
   // Re-mirror per-fact queue status into state (chips + pending counts).
   const refreshQueueStatus = useCallback(async (key: string) => {
@@ -499,52 +575,80 @@ export default function QuestPlayerClient({
     city: 'Нови Сад',
     duration: '90 минут',
     completionBonus: 5,
-    stepsDone: `${Math.min(stepIdx + 1, displaySteps.length)} / ${displaySteps.length}`,
   };
   const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
 
+  // The terminal step renders FinalScreen (via StepView's congrats branch): the
+  // rating is local + optional, committed as a quest_rated fact only on «что
+  // дальше»/«Пропустить» (openCatalog). A prior rating rehydrates from the log.
+  const stepBody = (
+    <StepView
+      step={currentDisplayStep}
+      quest={questMeta}
+      copy={COPY}
+      st={{
+        hintRevealed: proj.revealedHints.includes(pos),
+        wrong: ui.wrong,
+        answer: ui.answer,
+        note: ui.note,
+        rating: ui.rating || latestRating(facts),
+        coinsEarned: bal,
+        time: formatElapsed(attemptCreatedAt),
+        allowNote: currentDisplayStep.allowNote,
+      }}
+      on={{
+        next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
+        confirm: (note?: string) => handlePhysicalConfirm(note || ui.note || undefined),
+        submit: handleAnswerSubmit,
+        answer: (v: string) => setUi((u) => ({ ...u, answer: v, wrong: false })),
+        note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUi((u) => ({ ...u, note: e.target.value })),
+        buyHint: handleBuyHint,
+        navigator: handleNavigator,
+        play: () => { /* inline video playback lands with real media refs */ },
+        // Tapping a star only updates local state + shows the inline thanks; the
+        // single quest_rated fact is committed with the final value on «что дальше».
+        rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
+        onward: openCatalog,
+      }}
+    />
+  );
+
+  // Post-finale catalog of other published quests (thin metadata → cover + title
+  // + CTA). Picking one opens its player; share/home are the soft exits.
+  const body = ui.showCatalog ? (
+    <CatalogScreen
+      quests={nextQuestsForCatalog(published || [], questId)}
+      copy={COPY}
+      on={{
+        pick: (id) => router.push(`/quest/${encodeURIComponent(id)}`),
+        share: handleShare,
+        home: () => router.push('/'),
+      }}
+    />
+  ) : stepBody;
+
+  // The final and catalog screens are chromeless (no top bar) — matching the design.
+  const showTop = !isTerminalStep && !ui.showCatalog;
+
   return (
-    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: true }} screenLabel={`player-step-${pos}`}>
-      <TopBar
-        pos={pos + 1}
-        total={displaySteps.length}
-        coins={bal}
-        onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
-      />
-      <StepView
-        step={currentDisplayStep}
-        quest={questMeta}
-        copy={COPY}
-        st={{
-          hintRevealed: proj.revealedHints.includes(pos),
-          wrong: ui.wrong,
-          answer: ui.answer,
-          note: ui.note,
-          rating: ui.rating,
-          reviewSent: ui.reviewSent,
-          coinsEarned: bal,
-          time: formatElapsed(attemptCreatedAt),
-          steps: questMeta.stepsDone,
-          allowNote: currentDisplayStep.allowNote,
-        }}
-        on={{
-          next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
-          confirm: (note?: string) => handlePhysicalConfirm(note || ui.note || undefined),
-          submit: handleAnswerSubmit,
-          answer: (v: string) => setUi((u) => ({ ...u, answer: v, wrong: false })),
-          note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUi((u) => ({ ...u, note: e.target.value })),
-          buyHint: handleBuyHint,
-          navigator: handleNavigator,
-          play: () => { /* inline video playback lands with real media refs */ },
-          rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
-          review: () => {
-            handleFeedback(`Оценка: ${ui.rating}/5`);
-            setUi((u) => ({ ...u, reviewSent: true }));
-          },
-        }}
-      />
+    <PlayerFrame
+      tw={{ art: 'paper', layout: 'image', anims: true }}
+      screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${pos}`}
+    >
+      {showTop && (
+        <TopBar
+          pos={pos + 1}
+          total={displaySteps.length}
+          coins={bal}
+          onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
+        />
+      )}
+      <div className="p-scroll">{body}</div>
       {bannerKind && <SyncBanner kind={bannerKind} count={pendingCount} />}
       {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
+      {ui.shareToast && (
+        <div className="p-toast" role="status"><PCheck size={18} /><span>{COPY.shareCopied || 'Ссылка скопирована'}</span></div>
+      )}
 
       {hintStep?.supporting?.hint && (
         <HintPopup
