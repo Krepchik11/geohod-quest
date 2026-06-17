@@ -363,6 +363,7 @@ impl InMemoryAuthStore {
             player_id: player_id.to_string(),
             email: email.to_string(),
             display_name,
+            role: crate::auth::DEFAULT_ROLE.to_string(),
             created_at: now_secs(),
         };
         self.players.insert(
@@ -386,6 +387,30 @@ impl InMemoryAuthStore {
     /// Public account by player id; `None` for anonymous (unregistered) ids.
     pub fn get_player(&self, player_id: &str) -> Option<PlayerAccount> {
         self.players.get(player_id).map(|r| r.account.clone())
+    }
+
+    /// Assign `role` to a registered account (admin-users spec). Returns 404 for
+    /// an unknown/anonymous id — only registered accounts have a role. The caller
+    /// validates `role` against the known set before reaching here.
+    pub fn set_role(&mut self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+        let record = self
+            .players
+            .get_mut(player_id)
+            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
+        record.account.role = role.to_string();
+        Ok(record.account.clone())
+    }
+
+    /// All registered accounts, newest registration first (admin user list).
+    /// Anonymous devices have no row, so only real accounts are returned. Two stable
+    /// passes give the total order (created_at desc, then player_id asc) without a
+    /// hand-formatted comparator chain.
+    pub fn list_players(&self) -> Vec<PlayerAccount> {
+        let mut accounts: Vec<PlayerAccount> =
+            self.players.values().map(|r| r.account.clone()).collect();
+        accounts.sort_by(|a, b| a.player_id.cmp(&b.player_id));
+        accounts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        accounts
     }
 
     /// Store an opaque session token for the player.
@@ -557,6 +582,22 @@ impl AuthStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_player(player_id)),
             Self::Postgres(pg) => pg.get_player(player_id).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::set_role`].
+    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_role(player_id, role),
+            Self::Postgres(pg) => pg.set_role(player_id, role).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::list_players`].
+    pub async fn list_players(&self) -> Result<Vec<PlayerAccount>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_players()),
+            Self::Postgres(pg) => pg.list_players().await,
         }
     }
 

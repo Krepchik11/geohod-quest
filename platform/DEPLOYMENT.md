@@ -116,6 +116,19 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    (`POSTGRES_PASSWORD` only applies on first DB init — changing it later requires
    removing the `geohod-quest-pgdata` volume so Postgres re-initializes.)
 
+   `ADMIN_TOKEN` also authorizes the user-management surface (`GET /api/admin/users`,
+   `POST /api/admin/users/{id}/role`) behind the `/admin` page. Roles default to
+   `player`; **bootstrap the first admin** with the shared token (it bypasses the
+   self-change guard, so it can also recover if every admin is demoted):
+   ```sh
+   curl -X POST "$API/api/admin/users/<player_id>/role" \
+     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"role":"admin"}'
+   ```
+   After that, admins manage roles from the `/admin` page using their session — and
+   on a public deployment you can leave `NEXT_PUBLIC_ADMIN_TOKEN` unset so the bundle
+   carries no secret and access is purely role-based.
+
 3. **Install Quadlet units:**
    ```sh
    mkdir -p ~/.config/containers/systemd

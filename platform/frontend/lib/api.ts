@@ -47,6 +47,26 @@ function adminHeaders(): Record<string, string> {
   return token ? { 'X-Admin-Token': token } : {};
 }
 
+/**
+ * True when a build-time admin secret is configured (NEXT_PUBLIC_ADMIN_TOKEN).
+ * The admin page uses it to allow the operator/bootstrap path even before any
+ * role==admin account exists; on a public deployment it is unset, so access falls
+ * back to role-based session authorization alone. Bundle-visible by nature — only
+ * set it for an internal admin build.
+ */
+export function hasAdminToken(): boolean {
+  return Object.keys(adminHeaders()).length > 0;
+}
+
+/** One registered account as served by GET /api/admin/users (admin-users spec). */
+export interface AdminUserWire {
+  player_id: string;
+  email: string;
+  display_name: string | null;
+  role: string;
+  created_at: number;
+}
+
 /** Published quest meta as served by GET /api/quests (mirrors backend PublishedMeta). */
 export interface PublishedQuestWire {
   quest_id: string;
@@ -139,6 +159,18 @@ export const api = {
   getVersionFeedbacks: <T = unknown>(versionId: string) =>
     apiFetch<T>(`/api/admin/versions/${versionId}/feedbacks`, { headers: adminHeaders() }),
 
+  // Admin user management (admin-users spec). Gated server-side by a role==admin
+  // session OR the shared ADMIN_TOKEN; adminHeaders() forwards the latter when the
+  // build configures it (otherwise the Bearer session is the sole credential).
+  adminListUsers: () =>
+    apiFetch<AdminUserWire[]>('/api/admin/users', { headers: adminHeaders() }),
+  adminSetUserRole: (playerId: string, role: string) =>
+    apiFetch<AdminUserWire>(`/api/admin/users/${encodeURIComponent(playerId)}/role`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ role }),
+    }),
+
   // Published + grants (for cabinet/market live)
   listQuests: () => apiFetch<PublishedQuestWire[]>('/api/quests'),
   listGrants: () => apiFetch<GrantWire[]>('/api/grants'),
@@ -151,9 +183,13 @@ export const api = {
   authLogin: (body: { email: string; password: string }) =>
     apiFetch<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   me: () =>
-    apiFetch<{ player_id: string; registered: boolean; email: string | null; display_name: string | null }>(
-      '/api/players/me'
-    ),
+    apiFetch<{
+      player_id: string;
+      registered: boolean;
+      email: string | null;
+      display_name: string | null;
+      role: string | null;
+    }>('/api/players/me'),
   myStats: () =>
     apiFetch<{
       balance: number;

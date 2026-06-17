@@ -19,12 +19,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::AppError;
 
+/// Access role attached to a registered account (admin-users spec). The default
+/// for every new registration is [`DEFAULT_ROLE`] (`player`); `admin` is the only
+/// role that unlocks the admin surface (see `require_admin_actor` in main.rs).
+/// Stored as a plain string (one column, simple wire) but constrained to the three
+/// known values both in code ([`validate_role`]) and at the DB (a CHECK constraint).
+pub const ROLE_ADMIN: &str = "admin";
+pub const ROLE_EDITOR: &str = "editor";
+pub const ROLE_PLAYER: &str = "player";
+pub const DEFAULT_ROLE: &str = ROLE_PLAYER;
+/// The full set of assignable roles, in display order (admin → editor → player).
+pub const ROLES: [&str; 3] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_PLAYER];
+
+/// Reject any role outside the known set (400). Keeps the `role` column honest in
+/// the in-memory store too, where no DB CHECK constraint exists.
+pub fn validate_role(role: &str) -> Result<(), AppError> {
+    if ROLES.contains(&role) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!(
+            "invalid role '{role}' (expected one of: admin, editor, player)"
+        )))
+    }
+}
+
 /// Public account data (never carries the password hash).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PlayerAccount {
     pub player_id: String,
     pub email: String,
     pub display_name: Option<String>,
+    /// Access role (admin/editor/player). New accounts default to `player`.
+    pub role: String,
     /// Unix seconds at registration (0 on clock error; informational only).
     pub created_at: u64,
 }
@@ -111,5 +137,15 @@ mod tests {
         assert!(validate_credentials("no-at-sign", "longenough").is_err());
         assert!(validate_credentials("a @b.io", "longenough").is_err());
         assert!(validate_credentials("a@b.io", "short").is_err());
+    }
+
+    #[test]
+    fn role_validation_accepts_known_and_rejects_unknown() {
+        assert!(validate_role("admin").is_ok());
+        assert!(validate_role("editor").is_ok());
+        assert!(validate_role("player").is_ok());
+        assert!(validate_role("superuser").is_err());
+        assert!(validate_role("").is_err());
+        assert!(validate_role("Admin").is_err(), "case-sensitive");
     }
 }

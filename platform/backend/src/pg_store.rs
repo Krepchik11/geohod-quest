@@ -540,6 +540,7 @@ fn account_from_row(row: &sqlx::postgres::PgRow) -> Result<PlayerAccount, AppErr
         player_id: row.try_get("player_id").map_err(internal)?,
         email: row.try_get("email").map_err(internal)?,
         display_name: row.try_get("display_name").map_err(internal)?,
+        role: row.try_get("role").map_err(internal)?,
         created_at: created_at as u64,
     })
 }
@@ -566,7 +567,7 @@ impl PgAuthStore {
             "INSERT INTO players (player_id, email, password_hash, display_name, created_at)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT DO NOTHING
-             RETURNING player_id, email, display_name, created_at",
+             RETURNING player_id, email, display_name, role, created_at",
         )
         .bind(player_id)
         .bind(email)
@@ -587,7 +588,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::find_by_email`].
     pub async fn find_by_email(&self, email: &str) -> Result<Option<PlayerRecord>, AppError> {
         let row = sqlx::query(
-            "SELECT player_id, email, password_hash, display_name, created_at
+            "SELECT player_id, email, password_hash, display_name, role, created_at
              FROM players WHERE email = $1",
         )
         .bind(email)
@@ -606,13 +607,47 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::get_player`].
     pub async fn get_player(&self, player_id: &str) -> Result<Option<PlayerAccount>, AppError> {
         let row = sqlx::query(
-            "SELECT player_id, email, display_name, created_at FROM players WHERE player_id = $1",
+            "SELECT player_id, email, display_name, role, created_at \
+             FROM players WHERE player_id = $1",
         )
         .bind(player_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(internal)?;
         row.as_ref().map(account_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::set_role`]. An UPDATE touching zero
+    /// rows means the id is unregistered → 404 (only accounts have roles).
+    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+        let row = sqlx::query(
+            "UPDATE players SET role = $2 WHERE player_id = $1 \
+             RETURNING player_id, email, display_name, role, created_at",
+        )
+        .bind(player_id)
+        .bind(role)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match row {
+            Some(r) => account_from_row(&r),
+            None => Err(AppError::NotFound(format!(
+                "no account for player '{player_id}'"
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::list_players`]. Newest-first via the
+    /// created_at index; ties broken by player_id for a stable order.
+    pub async fn list_players(&self) -> Result<Vec<PlayerAccount>, AppError> {
+        let rows = sqlx::query(
+            "SELECT player_id, email, display_name, role, created_at \
+             FROM players ORDER BY created_at DESC, player_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter().map(account_from_row).collect()
     }
 
     /// See [`crate::store::InMemoryAuthStore::create_session`].
