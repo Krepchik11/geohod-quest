@@ -130,8 +130,18 @@ export const api = {
   checkout: (body: { player_id: string; quest_id: string; coupon_percent?: number }) =>
     apiFetch('/api/checkout', { method: 'POST', body: JSON.stringify(body) }),
 
+  // Publishing is the editor capability (backend require_editor): the editor's
+  // Bearer session (always sent by authHeaders) authorizes it. adminHeaders() is
+  // also forwarded so an operator build (NEXT_PUBLIC_ADMIN_TOKEN set) can publish
+  // via the shared-secret path even before any editor/admin account exists — the
+  // same dual-credential model the admin endpoints use. Unset in public builds, so
+  // nothing extra is sent and access is purely role-based.
   publishQuest: (body: Record<string, unknown>) =>
-    apiFetch('/api/quests/publish', { method: 'POST', body: JSON.stringify(body) }),
+    apiFetch('/api/quests/publish', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
 
   // Grant-gated attempt creation: 403 without a grant, 404 for unpublished quests.
   createAttempt: (body: { player_id: string; quest_id: string }) =>
