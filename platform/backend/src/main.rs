@@ -101,7 +101,7 @@ async fn resolve_player(
     if claimed.is_empty() {
         return Err(AppError::Unauthorized("missing identity".into()));
     }
-    if state.auth.get_player(claimed).await?.is_some() {
+    if state.auth.get_user(claimed).await?.is_some() {
         return Err(AppError::Unauthorized(
             "registered account requires login (bearer token)".into(),
         ));
@@ -183,7 +183,7 @@ async fn require_admin_actor(
         if let Some(player_id) = state.auth.get_session(&token).await? {
             let is_admin = state
                 .auth
-                .get_player(&player_id)
+                .get_user(&player_id)
                 .await?
                 .is_some_and(|a| a.role == auth::ROLE_ADMIN);
             if is_admin {
@@ -194,6 +194,43 @@ async fn require_admin_actor(
         }
     }
     Err(AppError::Forbidden("admin access required".into()))
+}
+
+/// Authorize a quest-authoring request (the constructor / `/quest-editor` surface).
+///
+/// Authoring is the `editor` capability: a `Bearer` session whose account role is
+/// `editor` or `admin` (admin ⊃ editor), OR the shared `ADMIN_TOKEN` operator
+/// credential. Anonymous devices and plain `player` accounts get an opaque 403.
+///
+/// This is the server-side half of the role model — the `/quest-editor` page hides
+/// itself from non-editors, but publish is a direct API call, so it must be gated
+/// here too (a player could otherwise POST `/api/quests/publish` straight). It does
+/// NOT bind authorship to the editor (any editor may publish any quest); per-author
+/// ownership remains a separate, tracked follow-up.
+async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    if let Some(expected) = state.config.admin_token.as_deref() {
+        let provided = headers
+            .get("x-admin-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        if !provided.is_empty() && provided == expected {
+            return Ok(());
+        }
+    }
+    if let Some(token) = bearer_token(headers) {
+        if let Some(player_id) = state.auth.get_session(&token).await? {
+            let role = state
+                .auth
+                .get_user(&player_id)
+                .await?
+                .map(|a| a.role)
+                .unwrap_or_default();
+            if role == auth::ROLE_EDITOR || role == auth::ROLE_ADMIN {
+                return Ok(());
+            }
+        }
+    }
+    Err(AppError::Forbidden("editor access required".into()))
 }
 
 /// Health check response for probes and tests.
@@ -453,11 +490,14 @@ struct PublishRequest {
 
 async fn publish_quest_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // NOTE: publish is intentionally open to any caller for now (constructor
-    // authoring). Author binding + auth is a tracked follow-up; admin telemetry
-    // and per-player grants are the gated/scoped surfaces in this change.
+    // Publishing is the editor capability (role editor/admin or the ops token):
+    // authoring lives behind /quest-editor, which only editors/admins can open, but
+    // publish is a direct API call so the role is enforced here too. Author binding
+    // (which editor owns which quest) remains a tracked follow-up.
+    require_editor(&state, &headers).await?;
     let version = req.snapshot_version.unwrap_or(1);
     let snapshot_id = req
         .snapshot_id
@@ -630,7 +670,7 @@ async fn register_handler(
     let password_hash = auth::hash_password(&req.password)?;
     let account = state
         .auth
-        .register_player(&req.player_id, &req.email, &password_hash, req.display_name)
+        .register_user(&req.player_id, &req.email, &password_hash, req.display_name)
         .await?;
     let token = auth::generate_token();
     state
@@ -682,7 +722,7 @@ async fn get_me_handler(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let claimed = claimed_from_headers(&headers);
     let player_id = resolve_player(&state, &headers, &claimed).await?;
-    let account = state.auth.get_player(&player_id).await?;
+    let account = state.auth.get_user(&player_id).await?;
     Ok(Json(match account {
         Some(a) => serde_json::json!({
             "player_id": a.player_id, "registered": true,
@@ -708,8 +748,8 @@ struct AdminUserWire {
     created_at: u64,
 }
 
-impl From<auth::PlayerAccount> for AdminUserWire {
-    fn from(a: auth::PlayerAccount) -> Self {
+impl From<auth::UserAccount> for AdminUserWire {
+    fn from(a: auth::UserAccount) -> Self {
         Self {
             player_id: a.player_id,
             email: a.email,
@@ -734,7 +774,7 @@ async fn list_users_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<AdminUserWire>>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    let users = state.auth.list_players().await?;
+    let users = state.auth.list_users().await?;
     Ok(Json(users.into_iter().map(AdminUserWire::from).collect()))
 }
 
@@ -1152,6 +1192,49 @@ mod tests {
         }
     }
 
+    /// A registered editor session authorized to publish (publish is gated on the
+    /// editor capability). The account is derived from `tag` so the shared Postgres
+    /// suite never collides; a 409 (account already exists from a prior run) falls
+    /// back to login. Returns the `Authorization: Bearer <token>` value.
+    async fn editor_bearer(app: &Router, tag: &str) -> String {
+        let id = format!("ed-{tag}");
+        let email = format!("{id}@example.com");
+        let (st, v) = post_json(
+            app,
+            "/api/auth/register",
+            json!({"player_id": id, "email": email, "password": "hunter2hunter2"}),
+        )
+        .await;
+        let token = if st == StatusCode::OK {
+            let (st2, _) = post_json_h(
+                app,
+                &format!("/api/admin/users/{id}/role"),
+                json!({"role": "editor"}),
+                &[("x-admin-token", TEST_ADMIN_TOKEN)],
+            )
+            .await;
+            assert_eq!(st2, StatusCode::OK, "promote editor");
+            v["token"].as_str().expect("token").to_string()
+        } else {
+            let (_, lv) = post_json(
+                app,
+                "/api/auth/login",
+                json!({"email": email, "password": "hunter2hunter2"}),
+            )
+            .await;
+            lv["token"].as_str().expect("token").to_string()
+        };
+        format!("Bearer {token}")
+    }
+
+    /// Publish `body` as an editor (the editor account is derived from `ids.player`).
+    /// Replaces bare `post_json(app, "/api/quests/publish", ...)` now that publish is
+    /// role-gated by [`require_editor`].
+    async fn publish(app: &Router, ids: &Ids, body: Value) -> (StatusCode, Value) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        post_json_h(app, "/api/quests/publish", body, &[("authorization", &bearer)]).await
+    }
+
     /// Grants + publishes ids.quest (v1, ids.snap1) and creates an attempt.
     /// Returns the attempt_id.
     async fn grant_publish_attempt(app: &Router, ids: &Ids) -> String {
@@ -1162,9 +1245,9 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let (st, _) = post_json(
+        let (st, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({
                 "quest_id": ids.quest, "name": "Q", "template_summary": "demo",
                 "snapshot_version": 1, "snapshot_id": ids.snap1
@@ -1367,9 +1450,9 @@ mod tests {
     async fn scenario_version_freeze(app: &Router, ids: &Ids) {
         let first = grant_publish_attempt(app, ids).await;
 
-        let (_, _) = post_json(
+        let (_, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
                    "snapshot_version": 2, "snapshot_id": ids.snap2}),
         )
@@ -1422,9 +1505,9 @@ mod tests {
         .await;
         assert_eq!(v3["grant"]["source"], "CouponRedemption");
 
-        let (_, _) = post_json(
+        let (_, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({"quest_id": ids.quest, "name": "Q", "primary_comic": "comic-q",
                    "template_summary": "demo", "snapshot_version": 1, "snapshot_id": ids.snap1}),
         )
@@ -1468,9 +1551,9 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
 
-        let (_, _) = post_json(
+        let (_, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
                    "snapshot_version": 1, "snapshot_id": ids.snap1, "snapshot": snapshot}),
         )
@@ -1504,17 +1587,16 @@ mod tests {
 
     async fn scenario_snapshot_immutability(app: &Router, ids: &Ids) {
         let v1 = json!({"steps": [1, 2, 3]});
-        let publish = |snapshot: Value| {
+        let publish_body = |snapshot: Value| {
             json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
                    "snapshot_version": 1, "snapshot_id": ids.snap1, "snapshot": snapshot})
         };
 
-        let (st, _) = post_json(app, "/api/quests/publish", publish(v1.clone())).await;
+        let (st, _) = publish(app, ids, publish_body(v1.clone())).await;
         assert_eq!(st, StatusCode::OK);
-        let (st, _) = post_json(app, "/api/quests/publish", publish(v1)).await;
+        let (st, _) = publish(app, ids, publish_body(v1)).await;
         assert_eq!(st, StatusCode::OK, "identical re-publish is idempotent");
-        let (st, body) =
-            post_json(app, "/api/quests/publish", publish(json!({"steps": [9]}))).await;
+        let (st, body) = publish(app, ids, publish_body(json!({"steps": [9]}))).await;
         assert_eq!(
             st,
             StatusCode::BAD_REQUEST,
@@ -1723,9 +1805,9 @@ mod tests {
         assert_eq!(st, StatusCode::UNAUTHORIZED);
 
         // The pre-registration grant still authorizes attempts (with the session).
-        let (st, _) = post_json(
+        let (st, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
                    "snapshot_version": 1, "snapshot_id": ids.snap1}),
         )
@@ -1917,6 +1999,87 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND, "unknown account rejected");
     }
 
+    /// Publishing a quest is the editor capability (admin-roles): anonymous devices
+    /// and plain `player` accounts are refused (403); an editor, an admin, and the
+    /// shared ops token all succeed. This is the server enforcement behind the
+    /// role-gated /quest-editor surface — a player must not be able to POST publish.
+    async fn scenario_publish_authz(app: &Router, ids: &Ids) {
+        let body = json!({
+            "quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+            "snapshot_version": 1, "snapshot_id": ids.snap1
+        });
+
+        // Anonymous (device id only, no session) cannot publish.
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            body.clone(),
+            &[("x-player-id", &ids.player)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "anonymous cannot publish");
+
+        // A plain player session cannot publish.
+        let pl = format!("{}-pl", ids.player);
+        let pl_email = format!("{pl}@example.com");
+        let (st, rv) = post_json(
+            app,
+            "/api/auth/register",
+            json!({"player_id": pl, "email": pl_email, "password": "hunter2hunter2"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let pl_bearer = format!("Bearer {}", rv["token"].as_str().expect("token"));
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            body.clone(),
+            &[("authorization", &pl_bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "a player cannot publish");
+
+        // The shared ops token can publish (operator/bootstrap path).
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            body.clone(),
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "ops token can publish");
+
+        // An editor session can publish.
+        let editor = editor_bearer(app, &ids.player).await;
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            body.clone(),
+            &[("authorization", &editor)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "an editor can publish");
+
+        // An admin session can publish too: promote the player to admin via ops,
+        // then the SAME session token now resolves to an admin role.
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/users/{pl}/role"),
+            json!({"role": "admin"}),
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "promote admin");
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            body,
+            &[("authorization", &pl_bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "an admin can publish");
+    }
+
     async fn scenario_player_stats(app: &Router, ids: &Ids) {
         // Quest A: completed with gift +5 and completion bonus +5.
         let attempt_a = grant_publish_attempt(app, ids).await;
@@ -1941,9 +2104,9 @@ mod tests {
             json!({"player_id": ids.player, "quest_id": quest_b}),
         )
         .await;
-        let (_, _) = post_json(
+        let (_, _) = publish(
             app,
-            "/api/quests/publish",
+            ids,
             json!({"quest_id": quest_b, "name": "QB", "template_summary": "demo",
                    "snapshot_version": 1, "snapshot_id": snap_b}),
         )
@@ -2103,6 +2266,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn publish_requires_editor_role() {
+        scenario_publish_authz(&test_app(), &Ids::new("pubauthz")).await;
+    }
+
+    #[tokio::test]
     async fn bad_payload_rejected_with_4xx() {
         scenario_bad_payload(&test_app(), &Ids::new("bad")).await;
     }
@@ -2195,6 +2363,7 @@ mod tests {
         scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
         scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
+        scenario_publish_authz(&app, &Ids::new(&format!("pubauthz-{run}"))).await;
         scenario_bad_payload(&app, &Ids::new(&format!("bad-{run}"))).await;
         scenario_migration_idempotent(&app, &format!("legacy:{run}")).await;
         scenario_auth_register_login(&app, &Ids::new(&format!("auth-{run}"))).await;
@@ -2258,7 +2427,7 @@ mod tests {
                    "password": "hunter2hunter2"}),
         )
         .await;
-        assert_eq!(st, StatusCode::OK, "players table survives restart");
+        assert_eq!(st, StatusCode::OK, "users table survives restart");
         let bearer = format!("Bearer {}", v["token"].as_str().expect("token"));
         let (st, me) = get_json_h(&app2, "/api/players/me", &[("authorization", &bearer)]).await;
         assert_eq!(st, StatusCode::OK);

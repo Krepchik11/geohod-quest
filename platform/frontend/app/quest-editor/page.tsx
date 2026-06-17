@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import WorkspaceGate from './WorkspaceGate';
+import EditorGate from './EditorGate';
 
 /**
  * Конструктор квестов v2 — рабочее место (design «Конструктор v2.html»):
@@ -15,5 +15,7 @@ export const metadata: Metadata = {
 };
 
 export default function QuestEditorPage() {
-  return <WorkspaceGate />;
+  // EditorGate enforces the editor/admin role before mounting the constructor
+  // (admin-roles); the backend re-checks on publish via require_editor.
+  return <EditorGate />;
 }
