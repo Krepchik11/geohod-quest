@@ -9,6 +9,7 @@ import type { Fact } from '../shared-model';
 import {
   foldLocalPlayerStats,
   gatherLocalAttemptLogs,
+  gatherOtherAttemptLogs,
   mergeProfileStats,
   type AttemptLog,
   type PlayerStatsFold,
@@ -123,5 +124,51 @@ describe('gatherLocalAttemptLogs (queue integration)', () => {
     const stats = foldLocalPlayerStats(logs);
     // a: gift+5 + completed; b: gift+5 → 10, completed via the superseded attempt.
     expect(stats).toEqual({ balance: 10, completed_quest_ids: ['q1'] });
+  });
+});
+
+describe('gatherOtherAttemptLogs (in-play wallet slice)', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory();
+    __resetQueueForTests();
+  });
+
+  it('excludes the active attempt and returns every other attempt', async () => {
+    const a = await ensureActiveAttempt('q1', 'snap-v1');
+    await appendFact(a.attempt_key, gift(3));
+    const b = await restartAttempt('q1', 'snap-v1'); // b is now active, a superseded
+
+    const others = await gatherOtherAttemptLogs(b.attempt_key);
+    expect(others).toHaveLength(1); // only the superseded attempt a
+    expect(others[0].quest_id).toBe('q1');
+    expect(others[0].facts.some((f) => f.type === 'gift_claimed')).toBe(true);
+  });
+
+  it('a null active key returns every attempt (no active attempt yet)', async () => {
+    const a = await ensureActiveAttempt('q1', 'snap-v1');
+    await appendFact(a.attempt_key, gift(3));
+    expect(await gatherOtherAttemptLogs(null)).toHaveLength(1);
+  });
+
+  it('the replay wallet continues from its real value with the bonus deduped', async () => {
+    // The reported bug: finish a quest (gift 3 + bonus 5 = 8), replay, and the top
+    // bar reset to 0 while the profile kept climbing. The wallet is now the fold of
+    // the prior attempts + this attempt's LIVE facts, so it continues from 8 and the
+    // once-per-quest bonus never re-credits.
+    const a = await ensureActiveAttempt('q1', 'snap-v1');
+    await appendFact(a.attempt_key, gift(3));
+    await appendFact(a.attempt_key, bonus());
+    await appendFact(a.attempt_key, completed());
+    const b = await restartAttempt('q1', 'snap-v1');
+
+    const priorLogs = await gatherOtherAttemptLogs(b.attempt_key);
+    const priorWallet = foldLocalPlayerStats(priorLogs).balance;
+    expect(priorWallet).toBe(8); // wallet at the START of the replay — not 0
+
+    // Replay re-earns the gift and re-emits a (locally distinct) completion bonus.
+    const liveFacts: Fact[] = [gift(3), bonus(), completed()];
+    const wallet = foldLocalPlayerStats([...priorLogs, { quest_id: 'q1', facts: liveFacts }]).balance;
+    expect(wallet).toBe(11); // 8 + re-earned gift 3; the +5 bonus is deduped once-per-quest
+    expect(wallet - priorWallet).toBe(3); // «монет собрано» this run == what the wallet actually gained
   });
 });

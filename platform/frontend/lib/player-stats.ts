@@ -84,6 +84,24 @@ export async function gatherLocalAttemptLogs(): Promise<AttemptLog[]> {
 }
 
 /**
+ * Gather every attempt's log EXCEPT the given active one — the prior slice of the
+ * cross-quest wallet. The in-play coin display folds these together with the active
+ * attempt's LIVE (in-memory) facts, so the wallet stays correct as the player earns
+ * and spends without re-reading the active attempt's possibly-stale stored copy.
+ * Passing a null key returns every attempt (no active attempt yet).
+ */
+export async function gatherOtherAttemptLogs(activeKey: string | null): Promise<AttemptLog[]> {
+  const attempts = await listAttempts();
+  const logs: AttemptLog[] = [];
+  for (const a of attempts) {
+    if (a.attempt_key === activeKey) continue;
+    const facts = (await getFacts(a.attempt_key)).map((r) => r.fact);
+    logs.push({ quest_id: a.quest_id, facts });
+  }
+  return logs;
+}
+
+/**
  * Merge the server's authoritative aggregate with the device-local fold.
  *
  * - completed quests: the UNION — a quest the user finished is shown whether the
