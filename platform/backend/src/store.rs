@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{PlayerAccount, PlayerRecord};
+use crate::auth::{UserAccount, UserRecord};
 use crate::errors::AppError;
 use crate::facts::{
     Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, project_state,
@@ -328,12 +328,12 @@ impl InMemoryGrantStore {
     }
 }
 
-/// In-memory identity store: registrations (players) + opaque sessions.
-/// A record exists ONLY for registered players — anonymous ids have no row by
+/// In-memory identity store: registrations (the `users` table) + opaque sessions.
+/// A record exists ONLY for registered users — anonymous ids have no row by
 /// design (registration is metadata on an existing id, never a migration).
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryAuthStore {
-    players: HashMap<String, PlayerRecord>,
+    users: HashMap<String, UserRecord>,
     email_index: HashMap<String, String>,
     sessions: HashMap<String, String>,
 }
@@ -345,30 +345,30 @@ impl InMemoryAuthStore {
     }
 
     /// Register `player_id` with credentials. Rejects (409) a taken email or an
-    /// already-registered player atomically (no partial state on failure).
-    pub fn register_player(
+    /// already-registered user atomically (no partial state on failure).
+    pub fn register_user(
         &mut self,
         player_id: &str,
         email: &str,
         password_hash: &str,
         display_name: Option<String>,
-    ) -> Result<PlayerAccount, AppError> {
-        if self.players.contains_key(player_id) {
+    ) -> Result<UserAccount, AppError> {
+        if self.users.contains_key(player_id) {
             return Err(AppError::Conflict("player is already registered".into()));
         }
         if self.email_index.contains_key(email) {
             return Err(AppError::Conflict("email is already taken".into()));
         }
-        let account = PlayerAccount {
+        let account = UserAccount {
             player_id: player_id.to_string(),
             email: email.to_string(),
             display_name,
             role: crate::auth::DEFAULT_ROLE.to_string(),
             created_at: now_secs(),
         };
-        self.players.insert(
+        self.users.insert(
             player_id.to_string(),
-            PlayerRecord {
+            UserRecord {
                 account: account.clone(),
                 password_hash: password_hash.to_string(),
             },
@@ -379,22 +379,22 @@ impl InMemoryAuthStore {
     }
 
     /// Full record (account + hash) by email — the login lookup.
-    pub fn find_by_email(&self, email: &str) -> Option<PlayerRecord> {
+    pub fn find_by_email(&self, email: &str) -> Option<UserRecord> {
         let player_id = self.email_index.get(email)?;
-        self.players.get(player_id).cloned()
+        self.users.get(player_id).cloned()
     }
 
     /// Public account by player id; `None` for anonymous (unregistered) ids.
-    pub fn get_player(&self, player_id: &str) -> Option<PlayerAccount> {
-        self.players.get(player_id).map(|r| r.account.clone())
+    pub fn get_user(&self, player_id: &str) -> Option<UserAccount> {
+        self.users.get(player_id).map(|r| r.account.clone())
     }
 
     /// Assign `role` to a registered account (admin-users spec). Returns 404 for
     /// an unknown/anonymous id — only registered accounts have a role. The caller
     /// validates `role` against the known set before reaching here.
-    pub fn set_role(&mut self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+    pub fn set_role(&mut self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
         let record = self
-            .players
+            .users
             .get_mut(player_id)
             .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
         record.account.role = role.to_string();
@@ -405,9 +405,9 @@ impl InMemoryAuthStore {
     /// Anonymous devices have no row, so only real accounts are returned. Two stable
     /// passes give the total order (created_at desc, then player_id asc) without a
     /// hand-formatted comparator chain.
-    pub fn list_players(&self) -> Vec<PlayerAccount> {
-        let mut accounts: Vec<PlayerAccount> =
-            self.players.values().map(|r| r.account.clone()).collect();
+    pub fn list_users(&self) -> Vec<UserAccount> {
+        let mut accounts: Vec<UserAccount> =
+            self.users.values().map(|r| r.account.clone()).collect();
         accounts.sort_by(|a, b| a.player_id.cmp(&b.player_id));
         accounts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         accounts
@@ -550,54 +550,54 @@ impl AuthStores {
             .map_err(|e| AppError::Internal(anyhow::anyhow!("auth lock poisoned: {e}")))
     }
 
-    /// See [`InMemoryAuthStore::register_player`].
-    pub async fn register_player(
+    /// See [`InMemoryAuthStore::register_user`].
+    pub async fn register_user(
         &self,
         player_id: &str,
         email: &str,
         password_hash: &str,
         display_name: Option<String>,
-    ) -> Result<PlayerAccount, AppError> {
+    ) -> Result<UserAccount, AppError> {
         match self {
             Self::InMemory(m) => {
-                Self::lock_inmem(m)?.register_player(player_id, email, password_hash, display_name)
+                Self::lock_inmem(m)?.register_user(player_id, email, password_hash, display_name)
             }
             Self::Postgres(pg) => {
-                pg.register_player(player_id, email, password_hash, display_name)
+                pg.register_user(player_id, email, password_hash, display_name)
                     .await
             }
         }
     }
 
     /// See [`InMemoryAuthStore::find_by_email`].
-    pub async fn find_by_email(&self, email: &str) -> Result<Option<PlayerRecord>, AppError> {
+    pub async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.find_by_email(email)),
             Self::Postgres(pg) => pg.find_by_email(email).await,
         }
     }
 
-    /// See [`InMemoryAuthStore::get_player`].
-    pub async fn get_player(&self, player_id: &str) -> Result<Option<PlayerAccount>, AppError> {
+    /// See [`InMemoryAuthStore::get_user`].
+    pub async fn get_user(&self, player_id: &str) -> Result<Option<UserAccount>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_player(player_id)),
-            Self::Postgres(pg) => pg.get_player(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_user(player_id)),
+            Self::Postgres(pg) => pg.get_user(player_id).await,
         }
     }
 
     /// See [`InMemoryAuthStore::set_role`].
-    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
         match self {
             Self::InMemory(m) => Self::lock_inmem(m)?.set_role(player_id, role),
             Self::Postgres(pg) => pg.set_role(player_id, role).await,
         }
     }
 
-    /// See [`InMemoryAuthStore::list_players`].
-    pub async fn list_players(&self) -> Result<Vec<PlayerAccount>, AppError> {
+    /// See [`InMemoryAuthStore::list_users`].
+    pub async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_players()),
-            Self::Postgres(pg) => pg.list_players().await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_users()),
+            Self::Postgres(pg) => pg.list_users().await,
         }
     }
 

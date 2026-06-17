@@ -3,9 +3,13 @@
 //! The model (player-identity spec): the client mints a device UUID and uses
 //! `dev:<uuid>` as its player id with NO server round-trip — identity exists
 //! before any network. Registration attaches email + argon2 password hash to
-//! that SAME player id (a `players` row whose PK is the anonymous id), so every
+//! that SAME player id (a `users` row whose PK is the anonymous id), so every
 //! grant/attempt/fact/bonus key survives with zero migration. Login from another
 //! device returns the account's player id; the device adopts it.
+//!
+//! Naming: a row in `users` is a registered *account* ([`UserAccount`]); the
+//! `player_id` it carries is the *playing identity* (the same id an anonymous
+//! device uses before it ever registers). Account = user, identity = player_id.
 //!
 //! Enforcement (honest two-tier threat model): a REGISTERED player id requires a
 //! valid Bearer session token for player-scoped actions; an anonymous id is
@@ -43,9 +47,11 @@ pub fn validate_role(role: &str) -> Result<(), AppError> {
     }
 }
 
-/// Public account data (never carries the password hash).
+/// Public account data (never carries the password hash). One row in `users`.
+/// `player_id` is the playing identity the account is attached to (kept as-is so
+/// every grant/attempt/fact key survives registration — see module docs).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PlayerAccount {
+pub struct UserAccount {
     pub player_id: String,
     pub email: String,
     pub display_name: Option<String>,
@@ -57,8 +63,8 @@ pub struct PlayerAccount {
 
 /// Stored registration record: public account + secret hash (store-layer only).
 #[derive(Clone, Debug)]
-pub struct PlayerRecord {
-    pub account: PlayerAccount,
+pub struct UserRecord {
+    pub account: UserAccount,
     pub password_hash: String,
 }
 

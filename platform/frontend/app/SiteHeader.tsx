@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getSession, subscribeSession } from '../lib/identity';
 import { logoutAndReset } from '../lib/session-actions';
 import { hasAdminToken } from '../lib/api';
+import { canEditQuests, isAdmin } from '../lib/roles';
 
 /**
  * SiteHeader — visual + behavior port from the design site header.
@@ -99,15 +100,20 @@ export default function SiteHeader() {
         </button>
         <div className="user-menu__dropdown" role="menu">
           <Link href="/profile" role="menuitem">мой профиль</Link>
-          {/* Inbound nav to the admin surface — shown to a logged-in admin (role from
-              the stored session) or an operator build that carries the admin token.
-              The /admin page and backend both re-check authorization regardless. */}
-          {(session?.role === 'admin' || hasAdminToken()) && (
+          {/* Role-gated nav (admin-roles). The role comes from the stored session, so
+              it can be briefly stale; the destination pages AND the backend re-check
+              authorization regardless, so a stale link can only ever lead to a clean
+              "no access" screen, never real access. The admin-token path admits an
+              operator build before any admin/editor account exists. */}
+          {(isAdmin(session?.role) || hasAdminToken()) && (
             <Link href="/admin" role="menuitem">админка</Link>
           )}
           {session ? (
             <>
-              <Link href="/quest-editor" role="menuitem">редактор</Link>
+              {/* Quest editor — editors and admins only (authoring capability). */}
+              {(canEditQuests(session.role) || hasAdminToken()) && (
+                <Link href="/quest-editor" role="menuitem">редактор</Link>
+              )}
               <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
             </>
           ) : (

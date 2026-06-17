@@ -11,8 +11,11 @@
  * email obfuscator) and is deliberately NOT ported — it would corrupt copy/paste.
  */
 import type { AdminUserWire } from './api';
+import type { Role } from './roles';
 
-export type Role = 'admin' | 'editor' | 'player';
+// Re-exported so existing importers (`import { type Role } from './admin-users'`)
+// keep working while the canonical definition lives in ./roles (admin-roles, DRY).
+export type { Role };
 
 /** Roles in display order (admin → editor → player), mirroring the backend. */
 export const ROLE_ORDER: Role[] = ['admin', 'editor', 'player'];

@@ -13,7 +13,7 @@
 
 use sqlx::{PgPool, Row};
 
-use crate::auth::{PlayerAccount, PlayerRecord};
+use crate::auth::{UserAccount, UserRecord};
 use crate::errors::AppError;
 use crate::facts::{
     Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, list_feedbacks_for_snapshot,
@@ -528,15 +528,15 @@ impl PgGrantStore {
     }
 }
 
-/// Identity (players + sessions) on PostgreSQL.
+/// Identity (the `users` table + sessions) on PostgreSQL.
 #[derive(Clone, Debug)]
 pub struct PgAuthStore {
     pool: PgPool,
 }
 
-fn account_from_row(row: &sqlx::postgres::PgRow) -> Result<PlayerAccount, AppError> {
+fn account_from_row(row: &sqlx::postgres::PgRow) -> Result<UserAccount, AppError> {
     let created_at: i64 = row.try_get("created_at").map_err(internal)?;
-    Ok(PlayerAccount {
+    Ok(UserAccount {
         player_id: row.try_get("player_id").map_err(internal)?,
         email: row.try_get("email").map_err(internal)?,
         display_name: row.try_get("display_name").map_err(internal)?,
@@ -551,20 +551,20 @@ impl PgAuthStore {
         Self { pool }
     }
 
-    /// See [`crate::store::InMemoryAuthStore::register_player`]. Both uniqueness
+    /// See [`crate::store::InMemoryAuthStore::register_user`]. Both uniqueness
     /// invariants (one registration per player_id, one account per email) are
     /// enforced by database constraints; a conflicting insert affects zero rows
     /// and maps to 409 — concurrent duplicate registrations are absorbed.
-    pub async fn register_player(
+    pub async fn register_user(
         &self,
         player_id: &str,
         email: &str,
         password_hash: &str,
         display_name: Option<String>,
-    ) -> Result<PlayerAccount, AppError> {
+    ) -> Result<UserAccount, AppError> {
         let created_at = now_secs();
         let inserted = sqlx::query(
-            "INSERT INTO players (player_id, email, password_hash, display_name, created_at)
+            "INSERT INTO users (player_id, email, password_hash, display_name, created_at)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT DO NOTHING
              RETURNING player_id, email, display_name, role, created_at",
@@ -586,17 +586,17 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::find_by_email`].
-    pub async fn find_by_email(&self, email: &str) -> Result<Option<PlayerRecord>, AppError> {
+    pub async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
         let row = sqlx::query(
             "SELECT player_id, email, password_hash, display_name, role, created_at
-             FROM players WHERE email = $1",
+             FROM users WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(&self.pool)
         .await
         .map_err(internal)?;
         row.map(|r| {
-            Ok(PlayerRecord {
+            Ok(UserRecord {
                 account: account_from_row(&r)?,
                 password_hash: r.try_get("password_hash").map_err(internal)?,
             })
@@ -604,11 +604,11 @@ impl PgAuthStore {
         .transpose()
     }
 
-    /// See [`crate::store::InMemoryAuthStore::get_player`].
-    pub async fn get_player(&self, player_id: &str) -> Result<Option<PlayerAccount>, AppError> {
+    /// See [`crate::store::InMemoryAuthStore::get_user`].
+    pub async fn get_user(&self, player_id: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
             "SELECT player_id, email, display_name, role, created_at \
-             FROM players WHERE player_id = $1",
+             FROM users WHERE player_id = $1",
         )
         .bind(player_id)
         .fetch_optional(&self.pool)
@@ -619,9 +619,9 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::set_role`]. An UPDATE touching zero
     /// rows means the id is unregistered → 404 (only accounts have roles).
-    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<PlayerAccount, AppError> {
+    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
         let row = sqlx::query(
-            "UPDATE players SET role = $2 WHERE player_id = $1 \
+            "UPDATE users SET role = $2 WHERE player_id = $1 \
              RETURNING player_id, email, display_name, role, created_at",
         )
         .bind(player_id)
@@ -637,12 +637,12 @@ impl PgAuthStore {
         }
     }
 
-    /// See [`crate::store::InMemoryAuthStore::list_players`]. Newest-first via the
+    /// See [`crate::store::InMemoryAuthStore::list_users`]. Newest-first via the
     /// created_at index; ties broken by player_id for a stable order.
-    pub async fn list_players(&self) -> Result<Vec<PlayerAccount>, AppError> {
+    pub async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
         let rows = sqlx::query(
             "SELECT player_id, email, display_name, role, created_at \
-             FROM players ORDER BY created_at DESC, player_id ASC",
+             FROM users ORDER BY created_at DESC, player_id ASC",
         )
         .fetch_all(&self.pool)
         .await
