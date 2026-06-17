@@ -22,6 +22,10 @@ export interface Session {
   player_id: string;
   email: string;
   display_name?: string | null;
+  /** Access role (admin/editor/player) captured at login/register. Drives the
+   *  admin-surface nav link; may go stale if the role changes mid-session (a
+   *  re-login refreshes it, and the admin page re-checks /api/players/me anyway). */
+  role?: string | null;
 }
 
 /** True when persistent storage exists (browser); false on the server. */

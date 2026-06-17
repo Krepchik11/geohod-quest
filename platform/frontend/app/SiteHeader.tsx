@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { getSession, subscribeSession, logout } from '../lib/identity';
+import { hasAdminToken } from '../lib/api';
 
 /**
  * SiteHeader — visual + behavior port from the design site header.
@@ -94,6 +95,12 @@ export default function SiteHeader() {
         </button>
         <div className="user-menu__dropdown" role="menu">
           <Link href="/profile" role="menuitem">мой профиль</Link>
+          {/* Inbound nav to the admin surface — shown to a logged-in admin (role from
+              the stored session) or an operator build that carries the admin token.
+              The /admin page and backend both re-check authorization regardless. */}
+          {(session?.role === 'admin' || hasAdminToken()) && (
+            <Link href="/admin" role="menuitem">админка</Link>
+          )}
           {session ? (
             <>
               <Link href="/quest-editor" role="menuitem">редактор</Link>
