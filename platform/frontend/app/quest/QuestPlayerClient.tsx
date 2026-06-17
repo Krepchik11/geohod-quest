@@ -551,6 +551,26 @@ export default function QuestPlayerClient({
     void runFlush();
   }, [attemptKey, runFlush]);
 
+  // Flush shortly after new facts appear. Completion, the completion bonus, the
+  // final gift and the finale rating all land as facts, and nothing else pushes
+  // them to the server in-session — so without this the «квестов пройдено / монеты»
+  // a player just earned never reach the profile until a reconnect, restart or
+  // manual sync (and «Начать заново» could supersede the attempt first, stranding
+  // them for good). Debounced so a burst of facts coalesces; lib/sync single-flight
+  // dedupes against the mount/online flushes; pendingCount→0 after a flush ends the
+  // loop. Gated on real connectivity (runFlush also checks).
+  const flushDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!attemptKey || !online || pendingCount === 0) return;
+    if (flushDebounce.current) clearTimeout(flushDebounce.current);
+    flushDebounce.current = setTimeout(() => {
+      void runFlush();
+    }, 1200);
+    return () => {
+      if (flushDebounce.current) clearTimeout(flushDebounce.current);
+    };
+  }, [attemptKey, online, pendingCount, runFlush]);
+
   // Resume position write-through (covers every advance path incl. the advance offer).
   useEffect(() => {
     if (!attemptKey) return;
