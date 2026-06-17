@@ -75,6 +75,30 @@ describe('currentPlayerId', () => {
   });
 });
 
+describe('logout rotates the device id (un-bricks anonymous use)', () => {
+  // Registration binds the account to the device's dev:<uuid>; if logout kept that
+  // id, the backend would 401 every anonymous call ("registered account requires
+  // login"). clearSession must mint a FRESH device id so the post-logout anonymous
+  // identity is not the now-registered one.
+  it('mints a fresh device id on clearSession', () => {
+    const before = getDeviceId();
+    setSession(SESSION);
+    clearSession();
+    const after = getDeviceId();
+    expect(after).not.toBe(before);
+    expect(after).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('sends the fresh anonymous id (not the registered one) after logout', () => {
+    setSession(SESSION);
+    clearSession();
+    const headers = authHeaders();
+    expect(headers).toEqual({ 'X-Player-Id': anonymousPlayerId() });
+    // The post-logout claimed id must differ from the registered account id.
+    expect(headers['X-Player-Id']).not.toBe(SESSION.player_id);
+  });
+});
+
 describe('authHeaders', () => {
   it('sends X-Player-Id while anonymous (device possession is the credential)', () => {
     expect(authHeaders()).toEqual({ 'X-Player-Id': anonymousPlayerId() });

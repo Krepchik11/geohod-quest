@@ -8,6 +8,7 @@ import {
   clearSession,
   getSession,
   setSession,
+  subscribeSession,
   type Session,
 } from '../../lib/identity';
 
@@ -21,21 +22,6 @@ import {
  */
 type Mode = 'login' | 'register';
 
-/** Session as an external store: storage events + a local bump for same-tab
- * mutations (setSession/clearSession don't fire 'storage' in the same tab). */
-const sessionBumpListeners = new Set<() => void>();
-function bumpSession() {
-  for (const cb of sessionBumpListeners) cb();
-}
-function subscribeSession(cb: () => void) {
-  sessionBumpListeners.add(cb);
-  window.addEventListener('storage', cb);
-  return () => {
-    sessionBumpListeners.delete(cb);
-    window.removeEventListener('storage', cb);
-  };
-}
-
 export default function AuthPage() {
   const [mode, setMode] = useState<Mode>('register');
   const [email, setEmail] = useState('');
@@ -45,10 +31,11 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const session: Session | null = useSyncExternalStore(subscribeSession, getSession, () => null);
 
+  // setSession/clearSession notify the shared store themselves, so subscribers
+  // (this page's session view, the header) update without a manual bump.
   const applySession = useCallback((s: Session | null) => {
     if (s) setSession(s);
     else clearSession();
-    bumpSession();
   }, []);
 
   const submit = async () => {

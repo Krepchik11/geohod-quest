@@ -14,6 +14,7 @@ type GateState =
   | { kind: 'loading' }
   | { kind: 'ready'; snapshot: QuestSnapshot; snapshotId: string }
   | { kind: 'denied' }
+  | { kind: 'login-required' }
   | { kind: 'unavailable'; offline: boolean };
 
 function httpStatus(err: unknown): number | null {
@@ -71,6 +72,7 @@ export default function BundleGate({ questId }: { questId: string }) {
       } catch (err) {
         const status = httpStatus(err);
         if (status === 403) apply({ kind: 'denied' });
+        else if (status === 401) apply({ kind: 'login-required' });
         else apply({ kind: 'unavailable', offline: typeof navigator !== 'undefined' && !navigator.onLine });
       }
     })();
@@ -88,6 +90,15 @@ export default function BundleGate({ questId }: { questId: string }) {
         title="Нужен доступ"
         text="Этот квест появится в вашей коллекции после покупки — навсегда, со всеми обновлениями."
         cta={{ href: '/#shop', label: 'Выбрать в магазине' }}
+      />
+    );
+  }
+  if (state.kind === 'login-required') {
+    return (
+      <GateScreen
+        title="Нужен вход"
+        text="Этот квест привязан к аккаунту, в который вы сейчас не вошли. Войдите, чтобы открыть свою коллекцию."
+        cta={{ href: '/auth', label: 'Войти в аккаунт' }}
       />
     );
   }

@@ -52,7 +52,7 @@ export default function RootLayout({
       lang="ru"
       className={`${geistSans.variable} ${geistMono.variable} ${jost.variable} ${prata.variable} h-full antialiased`}
     >
-      {/* Design body classes applied by pages (body.site for public, body.admin for ctor/cabinet). 
+      {/* Design body classes applied by pages (body.site for public, body.admin for the editor).
           Per react.md: RSC shell thin, no shared mutable state, lang=ru from design. */}
       <body className="min-h-full flex flex-col">
         {children}

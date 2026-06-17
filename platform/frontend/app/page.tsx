@@ -50,18 +50,25 @@ export default function GeoQuestHome() {
   const [owned, setOwned] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<string>('');
 
+  // Catalog and grants load INDEPENDENTLY. The catalog (GET /api/quests) is public
+  // and identity-free; grants are auth-scoped. Coupling them in one Promise.all
+  // meant a grants rejection discarded the perfectly available catalog and showed
+  // the demo "сервер недоступен" card. Now that card appears ONLY when the catalog
+  // itself is unreachable; a grants failure merely leaves the owned-set empty.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listQuests(), api.listGrants()])
-      .then(([quests, grants]) => {
+    api.listQuests()
+      .then((quests) => { if (!cancelled) setMarket(quests); })
+      .catch(() => { if (!cancelled) setMarket(null); });
+    api.listGrants()
+      .then((grants) => {
         if (cancelled) return;
         const playerId = currentPlayerId();
-        setMarket(quests);
         setOwned(Object.fromEntries(
           grants.filter((g) => g.player_id === playerId).map((g) => [g.quest_id, true])
         ));
       })
-      .catch(() => { if (!cancelled) setMarket(null); });
+      .catch(() => { if (!cancelled) setOwned({}); });
     return () => { cancelled = true; };
   }, []);
 
