@@ -11,6 +11,7 @@ import {
   subscribeSession,
   type Session,
 } from '../../lib/identity';
+import { logoutAndReset } from '../../lib/session-actions';
 
 /**
  * Вход / регистрация — email + пароль (owner requirement supersedes the design's
@@ -67,7 +68,10 @@ export default function AuthPage() {
   };
 
   const logout = () => {
-    applySession(null);
+    // Flush, clear+rotate the session, and wipe local play (see session-actions);
+    // clearSession inside it notifies the shared store, flipping this view back to
+    // the login form.
+    void logoutAndReset();
     setEmail('');
     setPassword('');
   };

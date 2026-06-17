@@ -13,9 +13,10 @@ import {
   getActiveAttempt,
   factNaturalKey,
   markSent,
+  restartAttempt,
   __resetQueueForTests,
 } from '../queue';
-import { flushPending, __resetSyncForTests, type SyncApi } from '../sync';
+import { flushPending, flushAll, __resetSyncForTests, type SyncApi } from '../sync';
 
 const QUEST = 'mystery-fortress-v1';
 const SNAP = 'snap-v1';
@@ -163,5 +164,82 @@ describe('flushPending', () => {
     expect(api.calls.createAttempt).toBe(1);
     expect(api.calls.appendFacts).toBe(1);
     expect(r1).toBe(r2); // both callers observe the same flush
+  });
+});
+
+describe('flushAll', () => {
+  it('drains a SUPERSEDED attempt whose finish never synced (the stranded-completion fix)', async () => {
+    // Play + complete attempt A but never flush it, then «Начать заново» supersedes
+    // it. flushPending (active-only) would now flush the empty attempt B and leave
+    // A's completion stranded forever — flushAll is what recovers it.
+    const a = await ensureActiveAttempt(QUEST, SNAP);
+    await appendFact(a.attempt_key, fact({ type: 'attempt_completed', step_position: 3 }));
+    await appendFact(a.attempt_key, fact({ type: 'completion_bonus', step_position: 3, coins_delta: 5 }));
+    await restartAttempt(QUEST, SNAP); // A → superseded, B → active (empty)
+
+    // The active-only flush ignores A entirely.
+    const activeOnly = stubApi();
+    await flushPending({ questId: QUEST, playerId: PLAYER, api: activeOnly });
+    expect(activeOnly.calls.appendFacts).toBe(0);
+    expect(await getPendingFacts(a.attempt_key)).toHaveLength(2); // still stranded
+
+    // flushAll sweeps every attempt and drains A.
+    const api = stubApi();
+    await flushAll({ playerId: PLAYER, api });
+    expect(api.calls.createAttempt).toBe(1); // registered A
+    expect(api.calls.appendFacts).toBe(1);
+    expect(await getPendingFacts(a.attempt_key)).toHaveLength(0);
+  });
+
+  it('flushes every quest that has pending facts and skips the clean ones', async () => {
+    const a1 = await ensureActiveAttempt('q1', SNAP);
+    await appendFact(a1.attempt_key, fact());
+    const a2 = await ensureActiveAttempt('q2', SNAP);
+    await appendFact(a2.attempt_key, fact({ type: 'gift_claimed', step_position: 2, coins_delta: 5 }));
+    // q3 exists but has nothing pending → no POST for it.
+    await ensureActiveAttempt('q3', SNAP);
+
+    const api = stubApi();
+    await flushAll({ playerId: PLAYER, api });
+    expect(api.calls.createAttempt).toBe(2);
+    expect(api.calls.appendFacts).toBe(2);
+    expect(await getPendingFacts(a1.attempt_key)).toHaveLength(0);
+    expect(await getPendingFacts(a2.attempt_key)).toHaveLength(0);
+  });
+
+  it('is best-effort: one unrecoverable attempt does not block the others', async () => {
+    const good = await ensureActiveAttempt('q-good', SNAP);
+    await appendFact(good.attempt_key, fact());
+    const bad = await ensureActiveAttempt('q-bad', SNAP);
+    await appendFact(bad.attempt_key, fact());
+
+    const api = stubApi();
+    // q-bad can neither register nor checkout → its flush rejects; q-good still syncs.
+    api.createAttempt = vi.fn(async (body: { quest_id: string }) => {
+      if (body.quest_id === 'q-bad') throw new Error('API 403 /api/attempts: no grant');
+      api.calls.createAttempt += 1;
+      return { attempt_id: `srv-${api.calls.createAttempt}`, snapshot_id: SNAP };
+    });
+    api.checkout = vi.fn(async (body: { quest_id: string }) => {
+      if (body.quest_id === 'q-bad') throw new Error('API 402 /api/checkout: payment failed');
+      api.calls.checkout += 1;
+      return {};
+    });
+
+    await expect(flushAll({ playerId: PLAYER, api })).resolves.toBeUndefined();
+    expect(await getPendingFacts(good.attempt_key)).toHaveLength(0); // good synced
+    expect(await getPendingFacts(bad.attempt_key)).toHaveLength(1); // bad left pending, retry-safe
+  });
+
+  it('no-ops cleanly when there is nothing pending anywhere', async () => {
+    const a = await ensureActiveAttempt(QUEST, SNAP);
+    const f = fact();
+    await appendFact(a.attempt_key, f);
+    await markSent(a.attempt_key, [factNaturalKey(f)]);
+
+    const api = stubApi();
+    await flushAll({ playerId: PLAYER, api });
+    expect(api.calls.appendFacts).toBe(0);
+    expect(api.calls.createAttempt).toBe(0);
   });
 });
