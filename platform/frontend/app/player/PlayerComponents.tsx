@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import type { BalanceNotice, AdvanceOffer, Fact } from '../../lib/shared-model';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.
@@ -188,8 +187,6 @@ export interface StepCopy {
   exit?: string;
   reset?: string;
   sound?: string;
-  online?: string;
-  offline?: string;
   hintTitle?: string;
   hintBody?: (cost: number) => string;
   hintYes?: (cost: number) => string;
@@ -559,112 +556,6 @@ export function CatalogScreen({ quests, copy, on }: {
   );
 }
 
-/* Баннер состояния синка — 3 состояния с точной копией из design/pwa/screens.jsx */
-export function SyncBanner({ kind, count }: { kind: 'offline' | 'syncing' | 'done'; count?: number }) {
-  if (kind === "offline") {
-    return (
-      <div className="p-syncbar">
-        <span className="dot"></span>Офлайн. Прогресс сохраняется на устройстве
-        {count ? <span className="cnt">{count} событий ждут</span> : null}
-      </div>
-    );
-  }
-  if (kind === "syncing") {
-    return (
-      <div className="p-syncbar p-syncbar--syncing">
-        <span className="dot"></span>Онлайн. Отправляем события…
-        {count ? <span className="cnt">осталось {count}</span> : null}
-      </div>
-    );
-  }
-  return <div className="p-syncbar p-syncbar--done"><span className="dot"></span>Прогресс синхронизирован</div>;
-}
-
-/* Человеческие подписи фактов для шторки «Синхронизация» */
-const FACT_LABELS: Record<Fact['type'], string> = {
-  physical_confirmed: 'Подтверждение на месте',
-  answer_submitted: 'Ответ на задание',
-  gift_claimed: 'Подарок за шаг',
-  hint_purchased: 'Покупка подсказки',
-  completion_bonus: 'Бонус за прохождение',
-  attempt_completed: 'Квест пройден',
-  feedback_reported: 'Сообщение об ошибке',
-  navigator_used: 'Переход в навигатор',
-  quest_rated: 'Оценка квеста',
-};
-
-/* Шторка «Синхронизация»: очередь событий с чипами ждёт/отправлено */
-export function SyncSheet({ facts, isSent, online, onClose }: {
-  facts: Fact[];
-  isSent: (f: Fact) => boolean;
-  online: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <div className="p-menu">
-      <div className="p-menu__head">
-        <span className="p-menu__title">Синхронизация</span>
-        <button className="p-iconbtn" type="button" aria-label="Закрыть" onClick={onClose}><PClose /></button>
-      </div>
-      <div className="p-menu__list">
-        {facts.length === 0 && <p className="p-popup__text" style={{ padding: '14px 2px' }}>Пока нет событий — начните проходить квест.</p>}
-        {facts.map((f, i) => (
-          <div className="sync-row" key={i}>
-            <div className="what">
-              {FACT_LABELS[f.type]}
-              <small>шаг {f.step_position + 1}{f.coins_delta ? ` · ${f.coins_delta > 0 ? '+' : ''}${f.coins_delta} монет` : ''}</small>
-            </div>
-            <span className={"sync-chip " + (isSent(f) ? "sync-chip--sent" : "sync-chip--wait")}>
-              {isSent(f) ? "отправлено" : "ждёт отправки"}
-            </span>
-          </div>
-        ))}
-      </div>
-      <span className={"p-offline-chip" + (online ? "" : " p-offline-chip--off")}>
-        <span className="dot"></span>{online ? "Онлайн · события отправляются автоматически" : "Офлайн · события отправятся автоматически"}
-      </span>
-    </div>
-  );
-}
-
-/* Коррекция 1 (SPEC): «Баланс обновлён» — old → new из diff проекций */
-export function BalanceCorrectionPopup({ notice, onDismiss }: { notice: BalanceNotice; onDismiss: () => void }) {
-  return (
-    <div className="p-overlay" onClick={onDismiss}>
-      <div className="p-popup" onClick={(e) => e.stopPropagation()}>
-        <p className="p-popup__title"><PCoin size={20} />Баланс обновлён</p>
-        <p className="p-popup__text">Пока вы были офлайн, на другом устройстве тоже шла игра. Мы объединили события — баланс пересчитан.</p>
-        <div className="fix-balance">
-          <span className="old">{notice.old}</span>
-          <span className="arrow">→</span>
-          <b><PCoin size={20} />{notice.new}</b>
-        </div>
-        <button className="p-btn" type="button" onClick={onDismiss}>Понятно</button>
-      </div>
-    </div>
-  );
-}
-
-/* Коррекция 2 (SPEC): попытка продвинулась на другом устройстве.
-   offer.*_step — индекс последнего ПРОЙДЕННОГО шага (0-based, -1 = ничего);
-   текущий шаг для игрока = пройденный + 1, в подписи 1-based — отсюда +2. */
-export function AdvanceOfferPopup({ offer, onAccept, onStay }: {
-  offer: AdvanceOffer;
-  onAccept: () => void;
-  onStay: () => void;
-}) {
-  return (
-    <div className="p-overlay" onClick={onStay}>
-      <div className="p-popup" onClick={(e) => e.stopPropagation()}>
-        <p className="p-popup__title">Попытка продвинулась</p>
-        <p className="p-popup__text">На другом устройстве эта попытка ушла дальше. Шаги не теряются — события объединены.</p>
-        <button className="p-btn" type="button" onClick={onAccept}>Продолжить с шага {offer.server_step + 2}</button>
-        <button className="p-btn p-btn--ghost" type="button" onClick={onStay}>Остаться на шаге {offer.local_step + 2}</button>
-      </div>
-    </div>
-  );
-}
-
 /* Overlays and toasts per design/player/components.jsx (lifted for full PWA flows) */
 export function CoinToast({ amount, narrative, copy }: { amount: number; narrative?: string; copy?: StepCopy }) {
   return (
@@ -697,16 +588,14 @@ export function HintPopup({ step, copy, on }: {
 export interface MenuState {
   pos: number;
   total: number;
+  /** The global coin wallet (== top bar == profile). */
   coins: number;
-  online: boolean;
   sound: boolean;
-  pendingCount?: number;
 }
 
 export interface MenuHandlers {
   close?: () => void;
   feedback?: () => void;
-  sync?: () => void;
   exit?: () => void;
   reset?: () => void;
   sound?: () => void;
@@ -733,13 +622,9 @@ export function MenuOverlay({ copy, st, on }: {
       <div className="p-menu__list">
         <button className="p-menu__item" type="button" onClick={h.sound}>{copy?.sound || "Звук"}<span className="spacer"></span><span className="val">{state.sound ? "вкл" : "выкл"}</span></button>
         <button className="p-menu__item" type="button" onClick={h.feedback}><PWarn size={16} />{copy?.feedback || "Сообщить об ошибке"}</button>
-        <button className="p-menu__item" type="button" onClick={h.sync}>Синхронизация<span className="spacer"></span><span className="val">{state.pendingCount ?? 0} событий</span></button>
         <button className="p-menu__item" type="button" onClick={h.exit}>{copy?.exit || "Выйти из квеста"}</button>
         <button className="p-menu__item p-menu__item--danger" type="button" onClick={h.reset}>{copy?.reset || "Сбросить прогресс"}</button>
       </div>
-      <span className={"p-offline-chip" + (state.online ? "" : " p-offline-chip--off")}>
-        <span className="dot"></span>{state.online ? (copy?.online || "Онлайн · прогресс синхронизирован") : (copy?.offline || "Офлайн · события сохраняются локально")}
-      </span>
     </div>
   );
 }

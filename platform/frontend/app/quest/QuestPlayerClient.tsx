@@ -2,15 +2,14 @@
 
 import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Fact, GameStep, QuestSnapshot, SyncCorrections } from '../../lib/shared-model';
+import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
 import {
   isAnswerCorrect,
-  projectBalance,
   projectState,
   shouldOfferHint,
-  deriveSyncCorrections,
   latestRating,
 } from '../../lib/shared-model';
+import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
 import { toDesignStep } from '../../lib/design-step';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { nextQuestsForCatalog } from '../../lib/catalog';
@@ -30,9 +29,8 @@ import { StartGate } from './StartGate';
 import { coinChime } from './sound';
 import { useOnline } from './useOnline';
 import {
-  PlayerFrame, StepView, TopBar, SyncBanner, CoinToast, PCheck,
+  PlayerFrame, StepView, TopBar, CoinToast, PCheck,
   HintPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
-  SyncSheet, BalanceCorrectionPopup, AdvanceOfferPopup,
 } from '../player/PlayerComponents';
 
 /** RU copy, classic tone — shared with the constructor preview/test player. */
@@ -40,7 +38,6 @@ import { PLAYER_COPY as COPY } from '../../lib/player-copy';
 
 const SOUND_PREF_KEY = 'geohod-player-sound:v1';
 const TOAST_MS = 1900;
-const SYNCED_BANNER_MS = 2400;
 
 /** Elapsed attempt time as the design's h:mm stat (e.g. «1:24»). */
 function formatElapsed(createdAt: string | null): string {
@@ -56,12 +53,8 @@ interface PlayerState {
   /* Local attempt identity from the IndexedDB queue (server id lives there too). */
   attemptKey: string | null;
   attemptCreatedAt: string | null;
-  isSyncing: boolean;
-  /** Briefly true after a successful flush — drives the «синхронизировано» banner. */
-  justSynced: boolean;
-  /* The two SPEC corrections, derived client-side after sync (popups). */
-  corrections: SyncCorrections | null;
-  /* Per-fact queue status mirror (natural key → status) — chips/pending counts. */
+  /* Per-fact queue status mirror (natural key → status). Internal only: it drives
+     the debounced silent flush (pending → 0 ends the loop); never rendered. */
   queueStatus: Record<string, 'pending' | 'sent'>;
   /* Start gate (SPEC): shown when an in-progress attempt was hydrated. */
   showStartGate: boolean;
@@ -85,11 +78,6 @@ type PlayerAction =
       showStartGate: boolean;
     }
   | { type: 'dismissStartGate' }
-  | { type: 'setSyncing'; v: boolean }
-  | { type: 'setJustSynced'; v: boolean }
-  | { type: 'setCorrections'; corrections: SyncCorrections | null }
-  | { type: 'dismissBalanceNotice' }
-  | { type: 'resolveAdvanceOffer' }
   | { type: 'setQueueStatus'; status: Record<string, 'pending' | 'sent'> }
   | { type: 'offerHint'; pos: number | null }
   | { type: 'setToast'; toast: PlayerState['toast'] };
@@ -99,9 +87,6 @@ const initialState: PlayerState = {
   stepIdx: 0,
   attemptKey: null,
   attemptCreatedAt: null,
-  isSyncing: false,
-  justSynced: false,
-  corrections: null,
   queueStatus: {},
   showStartGate: false,
   hintOfferPos: null,
@@ -139,20 +124,6 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
       };
     case 'dismissStartGate':
       return { ...state, showStartGate: false };
-    case 'setSyncing':
-      return { ...state, isSyncing: action.v };
-    case 'setJustSynced':
-      return { ...state, justSynced: action.v };
-    case 'setCorrections':
-      return { ...state, corrections: action.corrections };
-    case 'dismissBalanceNotice':
-      return state.corrections
-        ? { ...state, corrections: { ...state.corrections, balanceNotice: undefined } }
-        : state;
-    case 'resolveAdvanceOffer':
-      return state.corrections
-        ? { ...state, corrections: { ...state.corrections, advanceOffer: undefined } }
-        : state;
     case 'setQueueStatus':
       return { ...state, queueStatus: action.status };
     case 'offerHint':
@@ -179,9 +150,19 @@ export default function QuestPlayerClient({
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const {
-    facts, stepIdx, attemptKey, attemptCreatedAt, isSyncing, justSynced,
-    corrections, queueStatus, showStartGate, hintOfferPos, toast,
+    facts, stepIdx, attemptKey, attemptCreatedAt,
+    queueStatus, showStartGate, hintOfferPos, toast,
   } = state;
+
+  // SPEC (blueprint/SPEC.md §Coins): there is exactly ONE balance — the player's
+  // global, cross-quest coin wallet (the fold of every CoinFact on this device).
+  // It is shown identically in the top bar, the quest menu and the profile, so the
+  // number never disagrees with itself. `priorLogs` holds every OTHER attempt; the
+  // active attempt's LIVE facts are folded on top so the wallet moves as the player
+  // earns and spends. foldLocalPlayerStats dedups the completion bonus once-per-quest
+  // exactly as the server does, so replaying a quest never re-credits the bonus and
+  // the wallet never "jumps" or needs a correction popup.
+  const [priorLogs, setPriorLogs] = useState<AttemptLog[]>([]);
 
   // Guards the mount hydration to exactly one execution. `restartAttempt` is a
   // multi-step DB mutation, so letting StrictMode's setup→cleanup→setup run it
@@ -190,9 +171,22 @@ export default function QuestPlayerClient({
   const didHydrateRef = useRef(false);
 
   const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
-  const bal = projectBalance(facts);
   const proj = projectState(facts);
-  /** Facts the server has not acknowledged yet — banner badge + menu + sheet chips. */
+
+  // The global coin wallet: prior attempts (all quests) + this attempt's live facts,
+  // bonus-deduped once per quest. Shown in the top bar and menu (== profile).
+  const walletBalance = useMemo(
+    () => foldLocalPlayerStats([...priorLogs, { quest_id: questId, facts }]).balance,
+    [priorLogs, questId, facts]
+  );
+  // Coins THIS playthrough actually added to the wallet (wallet now − wallet before
+  // this attempt). On a first clear it's the full haul; on a replay it excludes the
+  // already-earned completion bonus, so the finale never claims coins the wallet did
+  // not receive.
+  const priorWallet = useMemo(() => foldLocalPlayerStats(priorLogs).balance, [priorLogs]);
+  const runEarned = walletBalance - priorWallet;
+
+  /** Pending (unsynced) fact count — internal only: gates the debounced silent flush. */
   const pendingCount = Object.values(queueStatus).filter((s) => s === 'pending').length;
 
   const displaySteps = useMemo(() => steps.map(toDesignStep), [steps]);
@@ -207,7 +201,6 @@ export default function QuestPlayerClient({
     note: '',
     menuOpen: false,
     feedbackOpen: false,
-    syncSheetOpen: false,
     feedbackText: '',
     rating: 0,
     /** Post-finale catalog («Продолжите путешествие») shown after «что дальше». */
@@ -487,28 +480,18 @@ export default function QuestPlayerClient({
     dispatch({ type: 'setQueueStatus', status: Object.fromEntries(rows.map((r) => [r.key, r.status])) });
   }, []);
 
-  // Flush: upload the queue's pending facts idempotently (lib/sync owns attempt
-  // registration + single-flight), then derive the two SPEC corrections by diffing
-  // the pre-flush local projection against the authoritative one. On error
-  // everything stays pending (client authoritative), retry-safe.
+  // Silent background flush: upload the queue's pending facts idempotently (lib/sync
+  // owns attempt registration + single-flight), then re-mirror per-fact queue status
+  // so the debounced loop ends once everything is sent. Sync is invisible to the
+  // player by design — no banners, no «баланс пересчитан» popups, no correction
+  // prompts. On error everything stays pending (client authoritative), retry-safe.
   const runFlush = useCallback(async () => {
     if (!online) return; // real connectivity gates every flush trigger
-    dispatch({ type: 'setSyncing', v: true });
     try {
       const result = await flushPending({ questId, playerId: currentPlayerId(), api });
-      if (result) {
-        const derived = deriveSyncCorrections(result.localBefore, result.authoritative);
-        if (derived.balanceNotice || derived.advanceOffer) {
-          dispatch({ type: 'setCorrections', corrections: derived });
-        }
-        if (attemptKey) await refreshQueueStatus(attemptKey);
-        dispatch({ type: 'setJustSynced', v: true });
-        setTimeout(() => dispatch({ type: 'setJustSynced', v: false }), SYNCED_BANNER_MS);
-      }
+      if (result && attemptKey) await refreshQueueStatus(attemptKey);
     } catch (err) {
       console.warn('sync failed — facts stay pending (local authoritative)', err);
-    } finally {
-      dispatch({ type: 'setSyncing', v: false });
     }
   }, [online, questId, attemptKey, refreshQueueStatus]);
 
@@ -550,6 +533,19 @@ export default function QuestPlayerClient({
     if (!attemptKey) return;
     void runFlush();
   }, [attemptKey, runFlush]);
+
+  // Load the prior slice of the cross-quest wallet (every attempt except the active
+  // one). Refires whenever the active attempt changes — including «пройти заново»,
+  // which supersedes the old attempt: it then folds into `priorLogs` so the wallet
+  // continues from its real value instead of resetting to 0.
+  useEffect(() => {
+    if (!attemptKey) return;
+    let alive = true;
+    gatherOtherAttemptLogs(attemptKey)
+      .then((logs) => { if (alive) setPriorLogs(logs); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [attemptKey]);
 
   // Flush shortly after new facts appear. Completion, the completion bonus, the
   // final gift and the finale rating all land as facts, and nothing else pushes
@@ -599,7 +595,6 @@ export default function QuestPlayerClient({
   }
 
   const pos = currentStep.position ?? stepIdx;
-  const bannerKind = !online ? 'offline' : isSyncing ? 'syncing' : justSynced ? 'done' : null;
   const questMeta = {
     title: snapshot.name,
     city: 'Нови Сад',
@@ -622,7 +617,7 @@ export default function QuestPlayerClient({
         answer: ui.answer,
         note: ui.note,
         rating: ui.rating || latestRating(facts),
-        coinsEarned: bal,
+        coinsEarned: runEarned,
         time: formatElapsed(attemptCreatedAt),
         allowNote: currentDisplayStep.allowNote,
       }}
@@ -676,12 +671,11 @@ export default function QuestPlayerClient({
         <TopBar
           pos={pos + 1}
           total={displaySteps.length}
-          coins={bal}
+          coins={walletBalance}
           onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
         />
       )}
       <div className="p-scroll">{body}</div>
-      {bannerKind && <SyncBanner kind={bannerKind} count={pendingCount} />}
       {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
       {ui.shareToast && (
         <div className="p-toast" role="status"><PCheck size={18} /><span>{COPY.shareCopied || 'Ссылка скопирована'}</span></div>
@@ -698,40 +692,14 @@ export default function QuestPlayerClient({
         <MenuOverlay
           quest={questMeta}
           copy={COPY}
-          st={{ pos: stepIdx + 1, total: displaySteps.length, coins: bal, online, sound: ui.soundOn, pendingCount }}
+          st={{ pos: stepIdx + 1, total: displaySteps.length, coins: walletBalance, sound: ui.soundOn }}
           on={{
             close: closeMenu,
             feedback: () => setUi((u) => ({ ...u, menuOpen: false, feedbackOpen: true })),
-            sync: () => { setUi((u) => ({ ...u, menuOpen: false, syncSheetOpen: true })); void runFlush(); },
             exit: () => router.push('/my-quests'),
             reset: () => { closeMenu(); handleReplay(); },
             sound: toggleSound,
           }}
-        />
-      )}
-      {ui.syncSheetOpen && (
-        <SyncSheet
-          facts={facts}
-          isSent={(f) => queueStatus[factNaturalKey(f)] === 'sent'}
-          online={online}
-          onClose={() => setUi((u) => ({ ...u, syncSheetOpen: false }))}
-        />
-      )}
-      {corrections?.balanceNotice && (
-        <BalanceCorrectionPopup
-          notice={corrections.balanceNotice}
-          onDismiss={() => dispatch({ type: 'dismissBalanceNotice' })}
-        />
-      )}
-      {!corrections?.balanceNotice && corrections?.advanceOffer && (
-        <AdvanceOfferPopup
-          offer={corrections.advanceOffer}
-          onAccept={() => {
-            const target = Math.min(corrections.advanceOffer!.server_step + 1, steps.length - 1);
-            dispatch({ type: 'advance', to: target });
-            dispatch({ type: 'resolveAdvanceOffer' });
-          }}
-          onStay={() => dispatch({ type: 'resolveAdvanceOffer' })}
         />
       )}
       {ui.feedbackOpen && (
