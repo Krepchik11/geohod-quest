@@ -137,6 +137,65 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Extract a `Bearer <token>` value from the Authorization header when present and
+/// well-formed. Returns None for a missing/malformed header (the caller decides the
+/// fallback) — unlike [`resolve_player`] it never errors on a missing header.
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|raw| raw.strip_prefix("Bearer "))
+        .map(str::to_string)
+}
+
+/// The identity authorized to act on the admin user-management surface. `player_id`
+/// is `Some` for a session-admin (the acting account) and `None` for the shared
+/// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
+/// from changing their own role while leaving the ops path unrestricted.
+struct AdminActor {
+    player_id: Option<String>,
+}
+
+/// Authorize an admin user-management request. Two accepted credentials:
+///
+/// 1. The shared `ADMIN_TOKEN` in `X-Admin-Token` — the ops/bootstrap path that
+///    promotes the first admin (and recovers if every admin is demoted). It carries
+///    no identity, so it is exempt from the self-change guard.
+/// 2. A `Bearer` session whose account has role `admin` — the user-facing path the
+///    admin page uses once an admin exists.
+///
+/// Every other caller (anonymous, non-admin account, bad/expired token) gets a
+/// single opaque 403 that never reveals which credential was tried or missing.
+async fn require_admin_actor(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AdminActor, AppError> {
+    if let Some(expected) = state.config.admin_token.as_deref() {
+        let provided = headers
+            .get("x-admin-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        if !provided.is_empty() && provided == expected {
+            return Ok(AdminActor { player_id: None });
+        }
+    }
+    if let Some(token) = bearer_token(headers) {
+        if let Some(player_id) = state.auth.get_session(&token).await? {
+            let is_admin = state
+                .auth
+                .get_player(&player_id)
+                .await?
+                .is_some_and(|a| a.role == auth::ROLE_ADMIN);
+            if is_admin {
+                return Ok(AdminActor {
+                    player_id: Some(player_id),
+                });
+            }
+        }
+    }
+    Err(AppError::Forbidden("admin access required".into()))
+}
+
 /// Health check response for probes and tests.
 #[derive(serde::Serialize)]
 struct HealthResponse {
@@ -166,6 +225,11 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/admin/versions/{snapshot_id}/feedbacks",
             get(get_version_feedbacks_handler),
+        )
+        .route("/api/admin/users", get(list_users_handler))
+        .route(
+            "/api/admin/users/{player_id}/role",
+            post(set_user_role_handler),
         )
         .route("/api/migrate/legacy", post(run_migration_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
@@ -550,6 +614,8 @@ struct AuthResponse {
     player_id: String,
     email: String,
     display_name: Option<String>,
+    /// Access role (admin/editor/player) — drives the admin-surface nav/gate client-side.
+    role: String,
     token: String,
 }
 
@@ -575,6 +641,7 @@ async fn register_handler(
         player_id: account.player_id,
         email: account.email,
         display_name: account.display_name,
+        role: account.role,
         token,
     }))
 }
@@ -602,6 +669,7 @@ async fn login_handler(
         player_id: record.account.player_id,
         email: record.account.email,
         display_name: record.account.display_name,
+        role: record.account.role,
         token,
     }))
 }
@@ -618,13 +686,79 @@ async fn get_me_handler(
     Ok(Json(match account {
         Some(a) => serde_json::json!({
             "player_id": a.player_id, "registered": true,
-            "email": a.email, "display_name": a.display_name,
+            "email": a.email, "display_name": a.display_name, "role": a.role,
         }),
         None => serde_json::json!({
             "player_id": player_id, "registered": false,
-            "email": null, "display_name": null,
+            "email": null, "display_name": null, "role": null,
         }),
     }))
+}
+
+/// One registered account as served by the admin user list (admin-users spec).
+/// Carries the public identity, role and registration time — never the password
+/// hash or session tokens. The backend does not model telegram/phone, so the UI
+/// renders contact fields present-only and simply omits the ones it has no data for.
+#[derive(serde::Serialize)]
+struct AdminUserWire {
+    player_id: String,
+    email: String,
+    display_name: Option<String>,
+    role: String,
+    created_at: u64,
+}
+
+impl From<auth::PlayerAccount> for AdminUserWire {
+    fn from(a: auth::PlayerAccount) -> Self {
+        Self {
+            player_id: a.player_id,
+            email: a.email,
+            display_name: a.display_name,
+            role: a.role,
+            created_at: a.created_at,
+        }
+    }
+}
+
+/// Body for POST /api/admin/users/{player_id}/role.
+#[derive(serde::Deserialize)]
+struct SetRoleRequest {
+    role: String,
+}
+
+/// Admin user list: every registered account, newest registration first. Admin-gated
+/// (session-admin or the shared `ADMIN_TOKEN`). Anonymous devices have no account row,
+/// so only real accounts appear — bounded by the number of registrations.
+async fn list_users_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminUserWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let users = state.auth.list_players().await?;
+    Ok(Json(users.into_iter().map(AdminUserWire::from).collect()))
+}
+
+/// Assign a role to a registered account. Admin-gated, with three guards:
+///   * an unknown role value → 400 ([`auth::validate_role`]);
+///   * a session-admin changing THEIR OWN role → 409 (prevents accidental
+///     self-lockout; the shared-secret ops path has no "self" and is exempt, so it
+///     can still recover any state);
+///   * an unknown/anonymous id → 404 (only registered accounts have a role).
+async fn set_user_role_handler(
+    State(state): State<AppState>,
+    Path(player_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetRoleRequest>,
+) -> Result<Json<AdminUserWire>, AppError> {
+    let actor = require_admin_actor(&state, &headers).await?;
+    auth::validate_role(&req.role)?;
+    if actor.player_id.as_deref() == Some(player_id.as_str()) {
+        return Err(AppError::Conflict(
+            "an admin cannot change their own role".into(),
+        ));
+    }
+    let updated = state.auth.set_role(&player_id, &req.role).await?;
+    Ok(Json(updated.into()))
 }
 
 /// Cross-attempt player statistics: storage gathers the logs, the pure
@@ -917,6 +1051,16 @@ mod tests {
             &app,
             "/api/migrate/legacy",
             json!({"key": "k"}),
+            &[("x-admin-token", "anything")],
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        // The user-management surface fails closed too: with ADMIN_TOKEN unset the
+        // shared-secret header is inert, and there is no admin session to fall back
+        // on, so listing is forbidden.
+        let (st, _) = get_json_h(
+            &app,
+            "/api/admin/users",
             &[("x-admin-token", "anything")],
         )
         .await;
@@ -1685,6 +1829,94 @@ mod tests {
         assert_eq!(st, StatusCode::UNAUTHORIZED);
     }
 
+    /// Admin user management (admin-users spec): the dual authorizer (shared secret
+    /// vs session-admin), listing without secret leakage, role assignment, and the
+    /// anti-lockout + validation guards. Uses `.find` rather than length/index so it
+    /// tolerates the shared, pre-populated Postgres database in `pg_full_suite`.
+    async fn scenario_admin_users(app: &Router, ids: &Ids) {
+        let admin_hdr = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Two fresh accounts; both default to role `player`.
+        let alice = ids.player.clone();
+        let bob = format!("{}-bob", ids.player);
+        let (alice_email, alice_token) = register(app, &alice).await;
+        let (_, bob_token) = register(app, &bob).await;
+        let alice_bearer = format!("Bearer {alice_token}");
+        let bob_bearer = format!("Bearer {bob_token}");
+
+        // /me carries the role; a fresh account is a player.
+        let (st, me) =
+            get_json_h(app, "/api/players/me", &[("authorization", &alice_bearer)]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(me["role"], "player");
+
+        // The list is admin-gated: anonymous and plain-player sessions are refused.
+        let (st, _) = get_json(app, "/api/admin/users").await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "anonymous cannot list users");
+        let (st, _) =
+            get_json_h(app, "/api/admin/users", &[("authorization", &bob_bearer)]).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "a player session cannot list users");
+
+        // The shared secret lists accounts (ops/bootstrap path) and leaks no secret.
+        let (st, list) = get_json_h(app, "/api/admin/users", &admin_hdr).await;
+        assert_eq!(st, StatusCode::OK);
+        let users = list.as_array().expect("users array");
+        let alice_row = users
+            .iter()
+            .find(|u| u["player_id"] == alice.as_str())
+            .expect("alice present in list");
+        assert_eq!(alice_row["role"], "player");
+        assert_eq!(alice_row["email"], alice_email.as_str());
+        assert!(alice_row.get("password_hash").is_none(), "no hash leak");
+        assert!(alice_row.get("token").is_none(), "no token leak");
+
+        // Bootstrap: promote Alice to admin via the shared secret.
+        let role_uri = |p: &str| format!("/api/admin/users/{p}/role");
+        let (st, updated) =
+            post_json_h(app, &role_uri(&alice), json!({"role": "admin"}), &admin_hdr).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(updated["role"], "admin");
+
+        // Alice's session is now an admin actor: she can list and assign roles.
+        let (st, _) =
+            get_json_h(app, "/api/admin/users", &[("authorization", &alice_bearer)]).await;
+        assert_eq!(st, StatusCode::OK, "admin session can list");
+        let admin_session = [("authorization", alice_bearer.as_str())];
+        let (st, ub) =
+            post_json_h(app, &role_uri(&bob), json!({"role": "editor"}), &admin_session).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(ub["role"], "editor");
+        let (_, me_b) =
+            get_json_h(app, "/api/players/me", &[("authorization", &bob_bearer)]).await;
+        assert_eq!(me_b["role"], "editor", "bob sees his new role");
+
+        // Anti-lockout: a session-admin cannot change their OWN role...
+        let (st, _) =
+            post_json_h(app, &role_uri(&alice), json!({"role": "player"}), &admin_session).await;
+        assert_eq!(
+            st,
+            StatusCode::CONFLICT,
+            "an admin cannot self-demote via a session"
+        );
+        // ...but the shared-secret ops path can (the recovery path has no "self").
+        let (st, _) =
+            post_json_h(app, &role_uri(&alice), json!({"role": "player"}), &admin_hdr).await;
+        assert_eq!(st, StatusCode::OK, "ops path may change any role");
+
+        // Validation + existence guards.
+        let (st, _) =
+            post_json_h(app, &role_uri(&bob), json!({"role": "superuser"}), &admin_hdr).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "unknown role rejected");
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/users/ghost-unregistered/role",
+            json!({"role": "player"}),
+            &admin_hdr,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "unknown account rejected");
+    }
+
     async fn scenario_player_stats(app: &Router, ids: &Ids) {
         // Quest A: completed with gift +5 and completion bonus +5.
         let attempt_a = grant_publish_attempt(app, ids).await;
@@ -1866,6 +2098,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_user_management_list_and_roles() {
+        scenario_admin_users(&test_app(), &Ids::new("users")).await;
+    }
+
+    #[tokio::test]
     async fn bad_payload_rejected_with_4xx() {
         scenario_bad_payload(&test_app(), &Ids::new("bad")).await;
     }
@@ -1957,6 +2194,7 @@ mod tests {
         scenario_bundle_gated_by_grant(&app, &Ids::new(&format!("bundle-{run}"))).await;
         scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
+        scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
         scenario_bad_payload(&app, &Ids::new(&format!("bad-{run}"))).await;
         scenario_migration_idempotent(&app, &format!("legacy:{run}")).await;
         scenario_auth_register_login(&app, &Ids::new(&format!("auth-{run}"))).await;
