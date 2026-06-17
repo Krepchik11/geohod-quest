@@ -195,7 +195,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
       {overlay === 'menu' ? (
         <MenuOverlay
           copy={PLAYER_COPY}
-          st={{ pos: pos + 1, total, coins, sound, online: true, pendingCount: 0 }}
+          st={{ pos: pos + 1, total, coins, sound }}
           on={{
             close: () => setOverlay(null),
             sound: () => setSound((s) => !s),
