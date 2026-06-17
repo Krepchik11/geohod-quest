@@ -4,7 +4,7 @@ import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { getSession, subscribeSession } from '../lib/identity';
 import { logoutAndReset } from '../lib/session-actions';
-import { hasAdminToken } from '../lib/api';
+import { api, hasAdminToken } from '../lib/api';
 import { canEditQuests, isAdmin } from '../lib/roles';
 
 /**
@@ -28,6 +28,39 @@ export default function SiteHeader() {
   // SSR snapshot is null (anonymous) — useSyncExternalStore reconciles to the real
   // session on the client without a hydration mismatch.
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
+
+  // The role stored in the session is a snapshot from login and can be STALE — e.g.
+  // you registered (default role player) and were then promoted to admin/editor via
+  // the ops token, so the menu would never reveal the admin/editor links until a
+  // re-login. Re-fetch the authoritative role from /api/players/me so role changes
+  // surface immediately. The result is keyed by the session token it belongs to, so
+  // it is ignored after a logout / account switch (no cross-account leak) and no
+  // synchronous setState is needed in the effect body.
+  const [fetched, setFetched] = useState<{ token: string; role: string | null } | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const token = session.token;
+    void api
+      .me()
+      .then((me) => {
+        if (!cancelled) setFetched({ token, role: me.role });
+      })
+      .catch(() => {
+        /* offline / transient: keep using the session-snapshot role */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  // Authoritative role once /me resolves for THIS session; the login-time session
+  // snapshot (possibly stale) is the instant, offline-safe fallback.
+  const role = session
+    ? fetched && fetched.token === session.token
+      ? fetched.role
+      : session.role
+    : undefined;
 
   // Single document listener closes whichever popover is open (click-outside).
   useEffect(() => {
@@ -105,13 +138,13 @@ export default function SiteHeader() {
               authorization regardless, so a stale link can only ever lead to a clean
               "no access" screen, never real access. The admin-token path admits an
               operator build before any admin/editor account exists. */}
-          {(isAdmin(session?.role) || hasAdminToken()) && (
+          {(isAdmin(role) || hasAdminToken()) && (
             <Link href="/admin" role="menuitem">админка</Link>
           )}
           {session ? (
             <>
               {/* Quest editor — editors and admins only (authoring capability). */}
-              {(canEditQuests(session.role) || hasAdminToken()) && (
+              {(canEditQuests(role) || hasAdminToken()) && (
                 <Link href="/quest-editor" role="menuitem">редактор</Link>
               )}
               <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
