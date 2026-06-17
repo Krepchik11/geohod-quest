@@ -107,6 +107,21 @@ export async function getActiveAttempt(questId: string): Promise<AttemptRow | nu
   return rows.find((r) => r.status === 'active') ?? null;
 }
 
+/** One attempt row by its client key (fresh read of server_attempt_id etc.), or null. */
+export async function getAttempt(attemptKey: string): Promise<AttemptRow | null> {
+  return (await (await db()).get('attempts', attemptKey)) ?? null;
+}
+
+/**
+ * Every attempt across all quests — active AND superseded. The flush-all sweep
+ * (lib/sync.flushAll) needs the full set so facts stranded on a superseded
+ * attempt (e.g. a completed run replaced by «Начать заново» before its
+ * completion ever synced) still reach the server.
+ */
+export async function listAttempts(): Promise<AttemptRow[]> {
+  return (await db()).getAll('attempts');
+}
+
 /** Get-or-create the active attempt (attempts are born offline, no network needed). */
 export async function ensureActiveAttempt(questId: string, snapshotId: string): Promise<AttemptRow> {
   const existing = await getActiveAttempt(questId);
@@ -259,6 +274,29 @@ export async function getLatestBundleForQuest(questId: string): Promise<BundleRo
 /** All downloaded bundles (My Quests download states). */
 export async function listBundles(): Promise<BundleRow[]> {
   return (await db()).getAll('bundles');
+}
+
+// ---------- device reset ----------
+
+/**
+ * Wipe ALL offline play state on this device — attempts, the fact log, and
+ * downloaded bundles. Used by logout (lib/session-actions): rotating the device
+ * id makes the device a fresh anonymous visitor, but the previous account's
+ * attempts/facts would otherwise linger and be mis-attributed to the new id on
+ * the next sync, and its downloaded bundles would let the rotated device replay
+ * paid quests offline with no grant. Clearing makes the rotation honest. The
+ * account keeps everything that already synced; re-login restores it from the
+ * server.
+ */
+export async function clearLocalPlay(): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['attempts', 'facts', 'bundles'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('attempts').clear(),
+    tx.objectStore('facts').clear(),
+    tx.objectStore('bundles').clear(),
+  ]);
+  await tx.done;
 }
 
 // ---------- legacy localStorage migration ----------

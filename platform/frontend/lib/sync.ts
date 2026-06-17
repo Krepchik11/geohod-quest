@@ -2,10 +2,19 @@
  * Flush controller — moves pending facts from the IndexedDB queue to the server.
  *
  * Owns the attempt-registration handshake (client attempt_key → server_attempt_id,
- * with the checkout-on-refusal fallback) and the single-flight guarantee: the
- * `online` event, app start, and the manual button can all fire concurrently, and
- * two concurrent registrations would create two server attempts (POST /api/attempts
- * is not idempotent). Concurrent callers therefore share one in-flight flush.
+ * with the checkout-on-refusal fallback) and the single-flight guarantee, now keyed
+ * by attempt_key (the unit that maps 1:1 to a server attempt): the `online` event,
+ * app start, the manual button, and the whole-device sweep can all fire concurrently,
+ * and two concurrent registrations would create two server attempts (POST /api/attempts
+ * is not idempotent). Concurrent callers for the same attempt therefore share one
+ * in-flight flush.
+ *
+ * Two entry points share that core:
+ *  - flushPending(questId): the active attempt only — used by the player, returns the
+ *    FlushResult so it can derive the SPEC sync corrections.
+ *  - flushAll(): every attempt on the device incl. superseded ones — used on app/
+ *    profile load to drain facts that were never synced (completion stranded on an
+ *    attempt that was replaced by «Начать заново», or appended after the last flush).
  *
  * Corrections stay out of here on purpose: the component derives the two SPEC
  * notices via deriveSyncCorrections(localBefore, authoritative) — no stored
@@ -13,7 +22,16 @@
  */
 import type { Fact, ProjectedState } from './shared-model';
 import { projectState } from './shared-model';
-import { getActiveAttempt, getFacts, getPendingFacts, markSent, setServerAttemptId } from './queue';
+import {
+  getActiveAttempt,
+  getAttempt,
+  getFacts,
+  getPendingFacts,
+  listAttempts,
+  markSent,
+  setServerAttemptId,
+  type AttemptRow,
+} from './queue';
 
 /** The api surface the flush needs — injected so tests can stub it. */
 export interface SyncApi {
@@ -36,6 +54,7 @@ interface AppendFactsResponse {
   projected: { balance: number; completed_steps: number[]; revealed_hints: number[] };
 }
 
+/** Single-flight keyed by attempt_key — see module doc. */
 const inflight = new Map<string, Promise<FlushResult | null>>();
 
 /** Test hook: forget in-flight flushes. */
@@ -67,25 +86,29 @@ async function ensureRegistered(
 }
 
 /**
- * Flush the active attempt's pending facts. Returns null when there is no
- * attempt or nothing pending; rejects (leaving everything pending) on failure.
- * Concurrent calls for the same quest share one flush and one result.
+ * Flush ONE attempt's pending facts to the server. Returns null when nothing is
+ * pending; rejects (leaving everything pending) on failure. Single-flight by
+ * attempt_key so the player's flush, the back-online flush and the whole-device
+ * sweep never double-register the same attempt.
+ *
+ * `server_attempt_id` is re-read inside the flight (not trusted from the passed
+ * row), so a row snapshot taken before a prior flush bound the id can never cause
+ * a duplicate registration.
  */
-export function flushPending(opts: { questId: string; playerId: string; api: SyncApi }): Promise<FlushResult | null> {
-  const existing = inflight.get(opts.questId);
+function flushAttempt(attempt: AttemptRow, playerId: string, api: SyncApi): Promise<FlushResult | null> {
+  const existing = inflight.get(attempt.attempt_key);
   if (existing) return existing;
 
   const run = (async (): Promise<FlushResult | null> => {
-    const attempt = await getActiveAttempt(opts.questId);
-    if (!attempt) return null;
     const pending = await getPendingFacts(attempt.attempt_key);
     if (pending.length === 0) return null;
 
     const localBefore = projectState((await getFacts(attempt.attempt_key)).map((r) => r.fact));
-    const body = { player_id: opts.playerId, quest_id: opts.questId };
-    const serverId = await ensureRegistered(attempt.attempt_key, body, opts.api, attempt.server_attempt_id);
+    const body = { player_id: playerId, quest_id: attempt.quest_id };
+    const boundId = (await getAttempt(attempt.attempt_key))?.server_attempt_id;
+    const serverId = await ensureRegistered(attempt.attempt_key, body, api, boundId);
 
-    const resp = (await opts.api.appendFacts(serverId, pending.map((r) => r.fact))) as AppendFactsResponse;
+    const resp = (await api.appendFacts(serverId, pending.map((r) => r.fact))) as AppendFactsResponse;
     // A successful POST means every fact in the batch is on the server.
     await markSent(attempt.attempt_key, pending.map((r) => r.key));
 
@@ -98,8 +121,41 @@ export function flushPending(opts: { questId: string; playerId: string; api: Syn
         revealedHints: resp.projected.revealed_hints,
       },
     };
-  })().finally(() => inflight.delete(opts.questId));
+  })().finally(() => inflight.delete(attempt.attempt_key));
 
-  inflight.set(opts.questId, run);
+  inflight.set(attempt.attempt_key, run);
   return run;
+}
+
+/**
+ * Flush the active attempt's pending facts. Returns null when there is no
+ * attempt or nothing pending; rejects (leaving everything pending) on failure.
+ * Concurrent calls for the same quest share one flush and one result.
+ */
+export async function flushPending(opts: {
+  questId: string;
+  playerId: string;
+  api: SyncApi;
+}): Promise<FlushResult | null> {
+  const attempt = await getActiveAttempt(opts.questId);
+  if (!attempt) return null;
+  return flushAttempt(attempt, opts.playerId, opts.api);
+}
+
+/**
+ * Drain EVERY attempt on the device — active and superseded — that still has
+ * pending facts. Best-effort: one attempt's failure (no grant recoverable,
+ * offline, etc.) is swallowed so the rest still sync. This is what makes the
+ * profile reflect reality: a completion that never synced (because nothing
+ * triggered a flush after it, or because «Начать заново» superseded its attempt
+ * first) is recovered here on the next online app/profile load, under whatever
+ * identity is current (anonymous device id, or the account that adopted it after
+ * registration). Idempotent — already-sent facts and the once-per-quest
+ * completion bonus are absorbed server-side on replay.
+ */
+export async function flushAll(opts: { playerId: string; api: SyncApi }): Promise<void> {
+  const attempts = await listAttempts();
+  await Promise.all(
+    attempts.map((a) => flushAttempt(a, opts.playerId, opts.api).catch(() => null))
+  );
 }

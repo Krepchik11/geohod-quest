@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { getSession, subscribeSession, logout } from '../lib/identity';
+import { getSession, subscribeSession } from '../lib/identity';
+import { logoutAndReset } from '../lib/session-actions';
 import { hasAdminToken } from '../lib/api';
 
 /**
@@ -49,9 +50,12 @@ export default function SiteHeader() {
 
   const handleLogout = () => {
     setMenuOpen(false);
-    logout(); // clears the session AND rotates the device id (un-bricks anonymous use)
-    // Full navigation home so every island re-reads the fresh anonymous identity.
-    window.location.href = '/';
+    // Flush pending facts, clear the session + rotate the device id (un-bricks
+    // anonymous use), and wipe local play — then full-navigate home so every island
+    // re-reads the fresh anonymous identity.
+    void logoutAndReset().finally(() => {
+      window.location.href = '/';
+    });
   };
 
   return (
