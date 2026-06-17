@@ -66,6 +66,26 @@ export interface GrantWire {
   source_ref: string | null;
 }
 
+/**
+ * Error thrown for every non-2xx API response. Carries the numeric HTTP `status`
+ * so callers can tell an auth failure (401/403) apart from a real outage instead
+ * of mislabeling a 401 as "сервер недоступен". The message preserves the legacy
+ * `API <status> <path>: <body>` format so existing substring/regex consumers
+ * (e.g. BundleGate's httpStatus) keep working unchanged.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly path: string;
+  readonly body: string;
+  constructor(status: number, path: string, body: string) {
+    super(`API ${status} ${path}: ${body}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.path = path;
+    this.body = body;
+  }
+}
+
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const url = path.startsWith('http') ? path : `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
   const res = await fetch(url, {
@@ -80,7 +100,7 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`API ${res.status} ${path}: ${text || res.statusText}`);
+    throw new ApiError(res.status, path, text || res.statusText);
   }
   if (res.status === 204) return {} as T;
   return res.json() as Promise<T>;
@@ -143,5 +163,3 @@ export const api = {
       grants_count: number;
     }>('/api/players/me/stats'),
 };
-
-export type ApiError = Error;
