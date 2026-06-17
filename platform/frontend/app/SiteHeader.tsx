@@ -1,11 +1,18 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import { getSession, subscribeSession, logout } from '../lib/identity';
 
 /**
  * SiteHeader — visual + behavior port from the design site header.
  * Client state: user dropdown + (mobile) nav drawer, both click-outside close.
+ *
+ * Session-aware: subscribes to the shared identity store so the user menu reflects
+ * login state live. Anonymous visitors get a single «войти / регистрация» entry;
+ * logged-in users get profile + editor + a REAL «выйти» that clears the session
+ * and rotates the device id (see lib/identity.clearSession). The old menu had a
+ * dead «выход» link that only navigated to /auth and never logged anyone out.
  *
  * Mobile: the desktop inline nav cannot fit a phone, so below 768px a
  * .nav-toggle hamburger (styled in styles/responsive.css) reveals the nav as
@@ -15,6 +22,9 @@ import Link from 'next/link';
 export default function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  // SSR snapshot is null (anonymous) — useSyncExternalStore reconciles to the real
+  // session on the client without a hydration mismatch.
+  const session = useSyncExternalStore(subscribeSession, getSession, () => null);
 
   // Single document listener closes whichever popover is open (click-outside).
   useEffect(() => {
@@ -34,6 +44,13 @@ export default function SiteHeader() {
     e.stopPropagation();
     setMenuOpen(false);
     setNavOpen(v => !v);
+  };
+
+  const handleLogout = () => {
+    setMenuOpen(false);
+    logout(); // clears the session AND rotates the device id (un-bricks anonymous use)
+    // Full navigation home so every island re-reads the fresh anonymous identity.
+    window.location.href = '/';
   };
 
   return (
@@ -77,8 +94,14 @@ export default function SiteHeader() {
         </button>
         <div className="user-menu__dropdown" role="menu">
           <Link href="/profile" role="menuitem">мой профиль</Link>
-          <Link href="/quest-editor" role="menuitem">редактор</Link>
-          <Link href="/auth" role="menuitem">выход</Link>
+          {session ? (
+            <>
+              <Link href="/quest-editor" role="menuitem">редактор</Link>
+              <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
+            </>
+          ) : (
+            <Link href="/auth" role="menuitem">войти / регистрация</Link>
+          )}
         </div>
       </div>
     </header>

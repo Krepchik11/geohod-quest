@@ -160,8 +160,9 @@ body.site { min-width:1240px; }
 .user-icon .head, .user-icon .body { background:var(--ic) no-repeat center/contain; }
 .user-menu__dropdown { position:absolute; right:0; top:56px; min-width:120px; padding:14px 16px; background:var(--white); border-radius:var(--r-ui); box-shadow:var(--shadow-pop); display:none; flex-direction:column; gap:12px; z-index:30; }
 .user-menu.is-open .user-menu__dropdown { display:flex; }
-.user-menu__dropdown a { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--navy); }
-.user-menu__dropdown a:hover { color:var(--blue); }
+.user-menu__dropdown a, .user-menu__dropdown button { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--navy); }
+.user-menu__dropdown button { background:none; border:0; padding:0; margin:0; text-align:left; cursor:pointer; }
+.user-menu__dropdown a:hover, .user-menu__dropdown button:hover { color:var(--blue); }
 
 .hero { position:relative; height:480px; background:center/cover no-repeat; }
 .hero::before { content:""; position:absolute; inset:0; background:rgba(26,43,72,.05); }

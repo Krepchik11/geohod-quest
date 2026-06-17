@@ -1,18 +1,19 @@
 'use client';
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../SiteHeader';
-import { api } from '../../lib/api';
-import { projectBalance, type Fact } from '../../lib/shared-model';
+import { api, ApiError } from '../../lib/api';
 
 /**
  * «Мой профиль» — structure and RU copy ported from design/myquests/screens.jsx
- * (ProfilePage). Game tiles are LIVE from /api/players/me/stats (cross-attempt
- * server fold: signed balance, rating display-floored at 0 per SPEC, quests
- * completed); user data from /api/players/me (email when registered, anonymous
- * label otherwise). When the backend is unreachable the tiles fall back to the
- * local fact-log fold, clearly labeled (player-stats spec).
+ * (ProfilePage). Tiles are LIVE from /api/players/me/stats (cross-attempt server
+ * fold: signed balance, rating display-floored at 0 per SPEC, quests completed);
+ * user data from /api/players/me (email when registered, anonymous label
+ * otherwise). Completed-quest ids are mapped to display titles via the published
+ * catalog. On failure the page shows an explicit degraded state — distinguishing
+ * an expired session (auth) from a genuine outage (network) — instead of the old
+ * misleading "офлайн-данные" fallback that read a hardcoded single-quest key.
  */
 
 interface LiveStats {
@@ -32,57 +33,44 @@ interface Me {
 
 type ProfileData =
   | { source: 'loading' }
-  | { source: 'live'; me: Me; stats: LiveStats }
-  | { source: 'local-fallback' };
-
-const EMPTY_FACTS: Fact[] = [];
-let cachedRaw: string | null = null;
-let cachedFacts: Fact[] = EMPTY_FACTS;
-
-function readLocalFacts(): Fact[] {
-  try {
-    const raw = localStorage.getItem('quest-player-mystery-fortress-v1');
-    if (raw === cachedRaw) return cachedFacts;
-    cachedRaw = raw;
-    cachedFacts = raw ? ((JSON.parse(raw).facts as Fact[]) ?? EMPTY_FACTS) : EMPTY_FACTS;
-    return cachedFacts;
-  } catch {
-    return EMPTY_FACTS;
-  }
-}
-
-function subscribeStorage(cb: () => void) {
-  window.addEventListener('storage', cb);
-  return () => window.removeEventListener('storage', cb);
-}
+  | { source: 'live'; me: Me; stats: LiveStats; titles: Record<string, string> }
+  | { source: 'error'; kind: 'auth' | 'network' };
 
 export default function ProfilePage() {
   const [data, setData] = useState<ProfileData>({ source: 'loading' });
-  const localFacts = useSyncExternalStore(subscribeStorage, readLocalFacts, () => EMPTY_FACTS);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.me(), api.myStats()])
-      .then(([me, stats]) => {
-        if (!cancelled) setData({ source: 'live', me, stats });
-      })
-      .catch(() => {
-        if (!cancelled) setData({ source: 'local-fallback' });
-      });
+    void (async () => {
+      try {
+        const [me, stats] = await Promise.all([api.me(), api.myStats()]);
+        // Best-effort id → title map so completed quests render their names, not
+        // raw ids. A catalog failure just falls back to showing the id.
+        let titles: Record<string, string> = {};
+        try {
+          const quests = await api.listQuests();
+          titles = Object.fromEntries(quests.map((q) => [q.quest_id, q.name]));
+        } catch {
+          /* keep raw ids */
+        }
+        if (!cancelled) setData({ source: 'live', me, stats, titles });
+      } catch (err) {
+        if (cancelled) return;
+        const status = err instanceof ApiError ? err.status : null;
+        setData({ source: 'error', kind: status === 401 || status === 403 ? 'auth' : 'network' });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   const live = data.source === 'live' ? data : null;
-  const balance = live ? live.stats.balance : projectBalance(localFacts);
+  const authError = data.source === 'error' && data.kind === 'auth';
+  const balance = live ? live.stats.balance : 0;
   const rating = Math.max(balance, 0);
-  const completed = live
-    ? live.stats.quests_completed
-    : localFacts.some((f) => f.type === 'attempt_completed')
-      ? 1
-      : 0;
-  const completedIds = live ? live.stats.completed_quest_ids : completed > 0 ? ['Тайна крепости'] : [];
+  const completed = live ? live.stats.quests_completed : 0;
+  const completedIds = live ? live.stats.completed_quest_ids : [];
 
   const identityLabel = live?.me.registered
     ? (live.me.display_name ?? live.me.email ?? '')
@@ -94,9 +82,11 @@ export default function ProfilePage() {
       <SiteHeader />
       <main className="co-wrap">
         <h2 className="co-title">Мой профиль</h2>
-        {data.source === 'local-fallback' && (
+        {data.source === 'error' && (
           <p className="pf-note" style={{ color: '#B45309' }}>
-            офлайн-данные с этого устройства — сервер недоступен
+            {data.kind === 'auth'
+              ? 'Сессия устарела — войдите снова, чтобы увидеть свой профиль.'
+              : 'Не удалось связаться с сервером — попробуйте позже.'}
           </p>
         )}
         <div className="pf-grid">
@@ -109,7 +99,9 @@ export default function ProfilePage() {
               <span>
                 {live?.me.registered
                   ? 'зарегистрирован'
-                  : <>анонимный · <Link className="s-link" href="/auth">зарегистрироваться</Link></>}
+                  : authError
+                    ? <Link className="s-link" href="/auth">войти</Link>
+                    : <>анонимный · <Link className="s-link" href="/auth">зарегистрироваться</Link></>}
               </span>
             </div>
             <div className="co-divider" />
@@ -129,7 +121,7 @@ export default function ProfilePage() {
             {completedIds.length > 0 ? (
               completedIds.map((id) => (
                 <div className="pf-row" key={id}>
-                  <span>{id}</span>
+                  <span>{live?.titles[id] ?? id}</span>
                   <span className="mq-stars">{Array.from({ length: 5 }, (_, i) => <span className="st" key={i} />)}</span>
                 </div>
               ))

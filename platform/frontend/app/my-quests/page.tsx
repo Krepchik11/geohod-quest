@@ -182,18 +182,32 @@ function MqActions({ q }: { q: MqRow }) {
   return <div className="mq-actions"><Link className="s-btn" href={open}>Начать</Link></div>;
 }
 
-/** Pure data composition — server lists × local queue/bundles, fallback on failure. */
+/**
+ * Pure data composition — server lists × local queue/bundles. The catalog and
+ * grants load independently: only a CATALOG failure (GET /api/quests, public)
+ * shows the labeled demo fallback. If grants alone fail, the collection is simply
+ * empty (live, no owned quests) rather than masquerading as "сервер недоступен".
+ */
 async function loadCollection(): Promise<Collection> {
+  let quests: PublishedQuestWire[];
   try {
-    const [quests, grants] = await Promise.all([api.listQuests(), api.listGrants()]);
-    const playerId = currentPlayerId();
-    const ownedIds = new Set(grants.filter((g) => g.player_id === playerId).map((g) => g.quest_id));
-    const owned = quests.filter((q) => ownedIds.has(q.quest_id));
-    const rows = await Promise.all(owned.map(composeRow));
-    return { source: 'live', rows };
+    quests = await api.listQuests();
   } catch {
     return { source: 'demo-fallback', rows: DEMO_FALLBACK_ROWS };
   }
+  let ownedIds = new Set<string>();
+  try {
+    const grants = await api.listGrants();
+    const playerId = currentPlayerId();
+    ownedIds = new Set(grants.filter((g) => g.player_id === playerId).map((g) => g.quest_id));
+  } catch {
+    // Grants unavailable (transient auth/network): show an empty owned collection,
+    // not demo rows — the catalog itself loaded fine.
+    ownedIds = new Set();
+  }
+  const owned = quests.filter((q) => ownedIds.has(q.quest_id));
+  const rows = await Promise.all(owned.map(composeRow));
+  return { source: 'live', rows };
 }
 
 export default function MyQuestsPage() {
