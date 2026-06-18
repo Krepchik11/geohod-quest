@@ -44,7 +44,8 @@ use facts::{Fact, MigrationResult, ProjectedState};
 use grants::{AccessGrant, GrantSource};
 use payments::{MockPaymentProvider, PaymentOutcome, PaymentProvider};
 use store::{
-    AttemptMeta, AuthStores, FactStores, GrantStores, InMemoryAuthStore, InMemoryFactStore,
+    AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
+    FactStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore, InMemoryFactStore,
     InMemoryGrantStore, PublishedMeta,
 };
 
@@ -55,6 +56,8 @@ struct AppState {
     store: FactStores,
     grants: GrantStores,
     auth: AuthStores,
+    /// Authoring-side quest registry (drafts + lifecycle) behind the constructor.
+    constructor: ConstructorStores,
     payments: Arc<dyn PaymentProvider>,
 }
 
@@ -64,6 +67,9 @@ fn in_memory_state(config: AppConfig) -> AppState {
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
         grants: GrantStores::InMemory(Arc::new(Mutex::new(InMemoryGrantStore::new()))),
         auth: AuthStores::InMemory(Arc::new(Mutex::new(InMemoryAuthStore::new()))),
+        constructor: ConstructorStores::InMemory(Arc::new(Mutex::new(
+            InMemoryConstructorStore::new(),
+        ))),
         payments: Arc::new(MockPaymentProvider),
     }
 }
@@ -257,6 +263,28 @@ fn build_router(state: AppState) -> Router {
         .route("/api/quests", get(list_quests_handler))
         .route("/api/quests/publish", post(publish_quest_handler))
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
+        // Constructor dashboard (authoring-side; require_editor). All mutations are
+        // POST — the router/CORS surface is GET+POST only by design.
+        .route(
+            "/api/constructor/quests",
+            get(list_constructor_quests_handler).post(create_constructor_quest_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}",
+            get(get_constructor_quest_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}/save",
+            post(save_constructor_quest_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}/status",
+            post(set_constructor_status_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}/delete",
+            post(delete_constructor_quest_handler),
+        )
         .route("/api/checkout", post(checkout_handler))
         .route("/api/grants", get(list_grants_handler))
         .route(
@@ -518,8 +546,251 @@ async fn publish_quest_handler(
         .grants
         .register_published(&req.quest_id, meta, req.snapshot)
         .await?;
+    // Reflect the publish in the constructor lifecycle: a quest tracked by the
+    // dashboard flips to 'published'. Best-effort — a quest published straight
+    // through the API (e.g. a seeded demo) simply has no constructor row.
+    state
+        .constructor
+        .set_status(&req.quest_id, store::CTOR_STATUS_PUBLISHED, store::now_secs())
+        .await?;
     Ok(Json(
         serde_json::json!({ "status": "published", "quest_id": req.quest_id }),
+    ))
+}
+
+// ============ Constructor dashboard ============
+//
+// The authoring registry behind /quest-editor. Every endpoint is editor-gated
+// (require_editor: an editor/admin session or the ops token). Completions
+// ("прохождения") are derived per quest from the fact log — never stored on the
+// constructor row — so the metric stays a pure projection.
+
+/// One dashboard list row.
+#[derive(serde::Serialize)]
+struct ConstructorQuestWire {
+    quest_id: String,
+    name: String,
+    /// Display label of the author (denormalized at creation).
+    author: String,
+    author_id: String,
+    status: String,
+    steps: u32,
+    /// Distinct players who completed this quest (derived from the fact log).
+    completed: usize,
+    cover: Option<String>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+/// A single quest with its full editable body (for opening in the builder).
+#[derive(serde::Serialize)]
+struct ConstructorQuestFullWire {
+    quest_id: String,
+    name: String,
+    author: String,
+    author_id: String,
+    status: String,
+    steps: u32,
+    completed: usize,
+    cover: Option<String>,
+    created_at: u64,
+    updated_at: u64,
+    body: serde_json::Value,
+}
+
+fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWire {
+    ConstructorQuestWire {
+        quest_id: s.quest_id,
+        name: s.name,
+        author: s.author_name,
+        author_id: s.author_id,
+        status: s.status,
+        steps: s.steps_count,
+        completed,
+        cover: s.cover,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+    }
+}
+
+/// The acting editor's (id, display label) for author attribution. A Bearer
+/// session resolves to the real account; the ops-token path (no "self") is
+/// labeled generically and keyed by the claimed device id.
+async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+    if let Some(account) = session_account(state, headers).await? {
+        let name = account
+            .display_name
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(account.email);
+        return Ok((account.player_id, name));
+    }
+    let claimed = claimed_from_headers(headers);
+    let id = if claimed.is_empty() {
+        "ops".to_string()
+    } else {
+        claimed
+    };
+    Ok((id, "Оператор".to_string()))
+}
+
+async fn list_constructor_quests_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ConstructorQuestWire>>, AppError> {
+    require_editor(&state, &headers).await?;
+    let summaries = state.constructor.list_summaries().await?;
+    let completions = state.store.completions_by_quest().await?;
+    Ok(Json(
+        summaries
+            .into_iter()
+            .map(|s| {
+                let c = completions.get(&s.quest_id).copied().unwrap_or(0);
+                ctor_wire(s, c)
+            })
+            .collect(),
+    ))
+}
+
+async fn get_constructor_quest_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<ConstructorQuestFullWire>, AppError> {
+    require_editor(&state, &headers).await?;
+    let q = state
+        .constructor
+        .get(&quest_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+    let completed = state
+        .store
+        .completions_by_quest()
+        .await?
+        .get(&q.quest_id)
+        .copied()
+        .unwrap_or(0);
+    Ok(Json(ConstructorQuestFullWire {
+        quest_id: q.quest_id,
+        name: q.name,
+        author: q.author_name,
+        author_id: q.author_id,
+        status: q.status,
+        steps: q.steps_count,
+        completed,
+        cover: q.cover,
+        created_at: q.created_at,
+        updated_at: q.updated_at,
+        body: q.body,
+    }))
+}
+
+/// Body for POST /api/constructor/quests. The client mints the id (the same id
+/// publish later binds), so it is required here.
+#[derive(serde::Deserialize)]
+struct CreateConstructorQuestRequest {
+    quest_id: String,
+    name: String,
+    cover: Option<String>,
+    steps_count: u32,
+    body: serde_json::Value,
+}
+
+async fn create_constructor_quest_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateConstructorQuestRequest>,
+) -> Result<Json<ConstructorQuestWire>, AppError> {
+    require_editor(&state, &headers).await?;
+    if req.quest_id.trim().is_empty() {
+        return Err(AppError::BadRequest("quest_id is required".into()));
+    }
+    let (author_id, author_name) = acting_author(&state, &headers).await?;
+    let now = store::now_secs();
+    let quest = ConstructorQuest {
+        quest_id: req.quest_id,
+        author_id,
+        author_name,
+        name: req.name,
+        status: store::CTOR_STATUS_DRAFT.to_string(),
+        cover: req.cover,
+        steps_count: req.steps_count,
+        created_at: now,
+        updated_at: now,
+        body: req.body,
+    };
+    let summary = state.constructor.create(quest).await?;
+    Ok(Json(ctor_wire(summary, 0)))
+}
+
+/// Body for POST /api/constructor/quests/{id}/save (autosave).
+#[derive(serde::Deserialize)]
+struct SaveConstructorQuestRequest {
+    name: String,
+    cover: Option<String>,
+    steps_count: u32,
+    body: serde_json::Value,
+}
+
+async fn save_constructor_quest_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SaveConstructorQuestRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_editor(&state, &headers).await?;
+    let now = store::now_secs();
+    let s = state
+        .constructor
+        .save_body(&quest_id, &req.name, req.cover, req.steps_count, req.body, now)
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "status": "saved", "quest_id": s.quest_id, "updated_at": s.updated_at }),
+    ))
+}
+
+/// Body for POST /api/constructor/quests/{id}/status.
+#[derive(serde::Deserialize)]
+struct SetConstructorStatusRequest {
+    status: String,
+}
+
+async fn set_constructor_status_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetConstructorStatusRequest>,
+) -> Result<Json<ConstructorQuestWire>, AppError> {
+    require_editor(&state, &headers).await?;
+    store::validate_ctor_status(&req.status)?;
+    let now = store::now_secs();
+    let updated = state
+        .constructor
+        .set_status(&quest_id, &req.status, now)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+    let completed = state
+        .store
+        .completions_by_quest()
+        .await?
+        .get(&updated.quest_id)
+        .copied()
+        .unwrap_or(0);
+    Ok(Json(ctor_wire(updated, completed)))
+}
+
+async fn delete_constructor_quest_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, AppError> {
+    require_editor(&state, &headers).await?;
+    if !state.constructor.delete(&quest_id).await? {
+        return Err(AppError::NotFound(format!(
+            "constructor quest '{quest_id}' not found"
+        )));
+    }
+    Ok(Json(
+        serde_json::json!({ "status": "deleted", "quest_id": quest_id }),
     ))
 }
 
@@ -877,6 +1148,122 @@ async fn seed_demo_quests(grants: &GrantStores) -> Result<(), AppError> {
     Ok(())
 }
 
+/// One demo constructor quest: design-faithful list metadata (name/author/status/
+/// step count) so the dashboard looks populated in dev, plus a number of seeded
+/// completions recorded through the real bonus path.
+struct DemoCtorQuest {
+    quest_id: &'static str,
+    name: &'static str,
+    author_id: &'static str,
+    author_name: &'static str,
+    status: &'static str,
+    city: &'static str,
+    steps: u32,
+    completions: u32,
+}
+
+const DEMO_CTOR_QUESTS: &[DemoCtorQuest] = &[
+    DemoCtorQuest { quest_id: "q-ironia",  name: "Ирония судьбы",                                   author_id: "seed:sergey", author_name: "Сергей Шестак", status: store::CTOR_STATUS_PUBLISHED, city: "Нови Сад",        steps: 8, completions: 27 },
+    DemoCtorQuest { quest_id: "q-podzem",  name: "Подземелья Петроварадина",                        author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_PUBLISHED, city: "Нови Сад",        steps: 4, completions: 12 },
+    DemoCtorQuest { quest_id: "q-stambul", name: "Стамбул через перо: город в сердцах писателей",   author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_TEST,      city: "Стамбул",         steps: 5, completions: 8 },
+    DemoCtorQuest { quest_id: "q-krepost", name: "Тайна крепости",                                  author_id: "seed:sergey", author_name: "Сергей Шестак", status: store::CTOR_STATUS_DRAFT,     city: "Петроварадин",    steps: 3, completions: 0 },
+    DemoCtorQuest { quest_id: "q-baron",   name: "Чёрный барон: тайны старого порта",               author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_PUBLISHED, city: "Котор",           steps: 9, completions: 41 },
+    DemoCtorQuest { quest_id: "q-legend",  name: "Легенды Петроградки",                             author_id: "seed:mikhail", author_name: "Михаил Гром",  status: store::CTOR_STATUS_DRAFT,     city: "Санкт-Петербург", steps: 6, completions: 0 },
+];
+
+/// Build a minimal-but-valid CtorQuest body (start → filler → congrats) matching
+/// the frontend authoring shape, so a seeded quest opens and renders in the
+/// builder. Step count is truthful (equals `steps`).
+fn demo_ctor_step(id: &str, template: &str, name: &str) -> serde_json::Value {
+    // Precompute control-flow values: `json!` mis-reads an `if` in value position.
+    let kicker = if template == "start" { "Городской квест" } else { "" };
+    let title = if template == "congrats" { "Квест пройден!" } else { "" };
+    serde_json::json!({
+        "id": id,
+        "template": template,
+        "name": name,
+        "text": "",
+        "kicker": kicker,
+        "title": title,
+        "prompt": "",
+        "place": "",
+        "action": { "desc": "", "confirmLabel": "Я на месте" },
+        "allowNote": false,
+        "images": {},
+        "video": null,
+        "acceptable": [],
+        "gift": { "on": false, "coins": 5, "narrative": "" },
+        "hint": { "on": false, "cost": 5, "text": "" },
+        "nav": { "on": false, "lat": "", "lng": "", "label": "" }
+    })
+}
+
+fn demo_ctor_body(q: &DemoCtorQuest) -> serde_json::Value {
+    let total = q.steps.max(2);
+    let mut steps = vec![demo_ctor_step(
+        &format!("{}-s0", q.quest_id),
+        "start",
+        "Первый экран",
+    )];
+    for i in 1..(total - 1) {
+        steps.push(demo_ctor_step(
+            &format!("{}-s{}", q.quest_id, i),
+            "continue",
+            &format!("Страница {i}"),
+        ));
+    }
+    steps.push(demo_ctor_step(
+        &format!("{}-s{}", q.quest_id, total - 1),
+        "congrats",
+        "Поздравление",
+    ));
+    serde_json::json!({
+        "id": q.quest_id,
+        "meta": { "title": q.name, "city": q.city, "duration": "", "cover": null, "desc": "", "price": 0 },
+        "steps": steps,
+        "versions": [],
+        "lastSaved": null
+    })
+}
+
+/// Seed the constructor dashboard once (only when its registry is empty), so a
+/// fresh dev environment opens onto a populated, design-faithful list. Completions
+/// are recorded through the real bonus path, so the dashboard's "прохождения"
+/// column is computed, not faked.
+async fn seed_demo_constructor_quests(
+    constructor: &ConstructorStores,
+    store: &FactStores,
+) -> Result<(), AppError> {
+    if !constructor.is_empty().await? {
+        return Ok(());
+    }
+    let base = store::now_secs();
+    for (i, q) in DEMO_CTOR_QUESTS.iter().enumerate() {
+        // Descending created_at preserves the design's list order (newest first).
+        let created = base.saturating_sub(i as u64 * 86_400);
+        constructor
+            .insert_if_absent(ConstructorQuest {
+                quest_id: q.quest_id.to_string(),
+                author_id: q.author_id.to_string(),
+                author_name: q.author_name.to_string(),
+                name: q.name.to_string(),
+                status: q.status.to_string(),
+                cover: None,
+                steps_count: q.steps,
+                created_at: created,
+                updated_at: created,
+                body: demo_ctor_body(q),
+            })
+            .await?;
+        for n in 0..q.completions {
+            store
+                .seed_completion(&format!("seed-finisher:{}:{}", q.quest_id, n), q.quest_id)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
@@ -907,7 +1294,8 @@ async fn main() -> anyhow::Result<()> {
                 config: config.clone(),
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
                 grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-                auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool)),
+                auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
+                constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
                 payments: Arc::new(MockPaymentProvider),
             }
         }
@@ -921,6 +1309,9 @@ async fn main() -> anyhow::Result<()> {
 
     if let Err(e) = seed_demo_quests(&state.grants).await {
         tracing::warn!(error = ?e, "demo quest seeding failed (continuing)");
+    }
+    if let Err(e) = seed_demo_constructor_quests(&state.constructor, &state.store).await {
+        tracing::warn!(error = ?e, "demo constructor seeding failed (continuing)");
     }
 
     tracing::info!(addr = %config.addr, version = %config.version, "starting geohod-backend");
@@ -2308,6 +2699,125 @@ mod tests {
         );
     }
 
+    // ---- Constructor dashboard --------------------------------------------
+
+    /// Editor gate: the ops token authorizes every constructor endpoint; a
+    /// caller with neither a session nor the token gets 403.
+    #[tokio::test]
+    async fn constructor_requires_editor() {
+        let app = test_app();
+        let (st, _) = get_json(&app, "/api/constructor/quests").await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "anonymous is forbidden");
+        let (st, _) =
+            get_json_h(&app, "/api/constructor/quests", &[("x-admin-token", TEST_ADMIN_TOKEN)]).await;
+        assert_eq!(st, StatusCode::OK, "ops token authorizes the editor surface");
+    }
+
+    /// Full CRUD lifecycle: create → list → get(body) → save → status → publish
+    /// flips status → delete. Asserts the derived `completed` count too.
+    #[tokio::test]
+    async fn constructor_full_lifecycle() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Empty to start.
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list.as_array().expect("array").len(), 0);
+
+        // Create.
+        let body = json!({
+            "quest_id": "q-test",
+            "name": "Тестовый квест",
+            "cover": null,
+            "steps_count": 2,
+            "body": { "id": "q-test", "meta": { "title": "Тестовый квест" }, "steps": [1, 2], "versions": [] }
+        });
+        let (st, created) =
+            post_json_h(&app, "/api/constructor/quests", body, &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["status"], "draft");
+        assert_eq!(created["steps"], 2);
+        assert_eq!(created["completed"], 0);
+        assert_eq!(created["author"], "Оператор", "ops path is labeled generically");
+
+        // List shows it.
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list.as_array().expect("array").len(), 1);
+        assert_eq!(list[0]["quest_id"], "q-test");
+
+        // Get returns the full body.
+        let (st, full) =
+            get_json_h(&app, "/api/constructor/quests/q-test", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(full["body"]["steps"].as_array().expect("steps").len(), 2);
+
+        // Save updates name + step count.
+        let save = json!({
+            "name": "Переименован",
+            "cover": "cover.png",
+            "steps_count": 5,
+            "body": { "id": "q-test", "steps": [1, 2, 3, 4, 5] }
+        });
+        let (st, _) =
+            post_json_h(&app, "/api/constructor/quests/q-test/save", save, &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list[0]["name"], "Переименован");
+        assert_eq!(list[0]["steps"], 5);
+
+        // Status: bad value rejected, good value applied.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "live" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, updated) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(updated["status"], "test");
+
+        // Publishing the same quest_id flips the constructor status to published.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": "q-test",
+                "name": "Переименован",
+                "template_summary": "2 steps",
+                "snapshot_version": 1,
+                "snapshot": { "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list[0]["status"], "published", "publish flips lifecycle");
+
+        // Delete.
+        let (st, _) =
+            post_json_h(&app, "/api/constructor/quests/q-test/delete", json!({}), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/delete",
+            json!({}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "second delete is 404");
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list.as_array().expect("array").len(), 0);
+    }
+
     // === Postgres backend: full scenario suite + durability. Self-skips without
     // === DATABASE_URL (zero-infra dev/CI stays green); run `docker compose up -d`
     // === and set DATABASE_URL (see backend/.env.example) to execute.
@@ -2322,7 +2832,8 @@ mod tests {
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-            auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool)),
+            auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
+            constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
             payments: Arc::new(MockPaymentProvider),
         })
     }
