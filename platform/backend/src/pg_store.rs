@@ -338,8 +338,16 @@ fn published_from_row(row: &sqlx::postgres::PgRow) -> Result<PublishedMeta, AppE
         template_summary: row.try_get("template_summary").map_err(internal)?,
         snapshot_version: version as u32,
         snapshot_id: row.try_get("snapshot_id").map_err(internal)?,
+        city: row.try_get("city").map_err(internal)?,
+        duration: row.try_get("duration").map_err(internal)?,
+        price: row.try_get("price").map_err(internal)?,
     })
 }
+
+/// Published-quest columns selected wherever a [`PublishedMeta`] is read (kept in
+/// one place so list/get/bundle stay in sync with [`published_from_row`]).
+const PUBLISHED_COLS: &str =
+    "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price";
 
 impl PgGrantStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -399,10 +407,9 @@ impl PgGrantStore {
 
     /// See [`crate::store::InMemoryGrantStore::list_published`].
     pub async fn list_published(&self) -> Result<Vec<PublishedMeta>, AppError> {
-        let rows = sqlx::query(
-            "SELECT quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id
-             FROM published_quests ORDER BY quest_id",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT {PUBLISHED_COLS} FROM published_quests ORDER BY quest_id"
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(internal)?;
@@ -411,10 +418,9 @@ impl PgGrantStore {
 
     /// See [`crate::store::InMemoryGrantStore::get_published`].
     pub async fn get_published(&self, quest_id: &str) -> Result<Option<PublishedMeta>, AppError> {
-        let row = sqlx::query(
-            "SELECT quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id
-             FROM published_quests WHERE quest_id = $1",
-        )
+        let row = sqlx::query(&format!(
+            "SELECT {PUBLISHED_COLS} FROM published_quests WHERE quest_id = $1"
+        ))
         .bind(quest_id)
         .fetch_optional(&self.pool)
         .await
@@ -477,14 +483,18 @@ impl PgGrantStore {
 
         sqlx::query(
             "INSERT INTO published_quests
-                 (quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id)
-             VALUES ($1, $2, $3, $4, $5, $6)
+                 (quest_id, name, primary_comic, template_summary, snapshot_version,
+                  snapshot_id, city, duration, price)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (quest_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  primary_comic = EXCLUDED.primary_comic,
                  template_summary = EXCLUDED.template_summary,
                  snapshot_version = EXCLUDED.snapshot_version,
-                 snapshot_id = EXCLUDED.snapshot_id",
+                 snapshot_id = EXCLUDED.snapshot_id,
+                 city = EXCLUDED.city,
+                 duration = EXCLUDED.duration,
+                 price = EXCLUDED.price",
         )
         .bind(quest_id)
         .bind(&meta.name)
@@ -492,6 +502,9 @@ impl PgGrantStore {
         .bind(&meta.template_summary)
         .bind(meta.snapshot_version as i32)
         .bind(&meta.snapshot_id)
+        .bind(&meta.city)
+        .bind(&meta.duration)
+        .bind(meta.price)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
@@ -530,7 +543,7 @@ impl PgGrantStore {
     ) -> Result<Option<(PublishedMeta, Option<serde_json::Value>)>, AppError> {
         let row = sqlx::query(
             "SELECT p.quest_id, p.name, p.primary_comic, p.template_summary,
-                    p.snapshot_version, p.snapshot_id, s.data
+                    p.snapshot_version, p.snapshot_id, p.city, p.duration, p.price, s.data
              FROM published_quests p
              JOIN snapshots s ON s.snapshot_id = p.snapshot_id
              WHERE p.quest_id = $1",
@@ -767,13 +780,19 @@ impl PgConstructorStore {
         Ok(quest.summary())
     }
 
-    /// See [`crate::store::InMemoryConstructorStore::list_summaries`].
-    pub async fn list_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+    /// See [`crate::store::InMemoryConstructorStore::list_summaries_for_author`].
+    /// Scoped by `author_id` (the `idx_ctor_quests_author` index serves this) so the
+    /// dashboard can never return another author's quests.
+    pub async fn list_summaries_for_author(
+        &self,
+        author_id: &str,
+    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
         let sql = format!(
             "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
-             ORDER BY created_at DESC, quest_id ASC"
+             WHERE author_id = $1 ORDER BY created_at DESC, quest_id ASC"
         );
         let rows = sqlx::query(&sql)
+            .bind(author_id)
             .fetch_all(&self.pool)
             .await
             .map_err(internal)?;

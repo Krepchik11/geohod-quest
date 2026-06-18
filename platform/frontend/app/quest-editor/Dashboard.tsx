@@ -100,29 +100,24 @@ export default function Dashboard({
   actions,
 }: DashboardProps) {
   const [search, setSearch] = useState('');
-  const [authorFilter, setAuthorFilter] = useState('Все');
   const [statusFilter, setStatusFilter] = useState('Все');
   const [profileOpen, setProfileOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ConstructorQuestWire | null>(null);
 
-  const authorOptions = useMemo(
-    () => ['Все', ...Array.from(new Set(quests.map((q) => q.author)))],
-    [quests],
-  );
-
+  // The dashboard is a personal workspace: the server returns ONLY the acting
+  // author's quests, so there is no author filter (it could only ever pick
+  // "yourself"). Search + status are the meaningful filters.
   const filtered = useMemo(() => {
     const q0 = search.trim().toLowerCase();
     return quests.filter(
       (q) =>
-        (authorFilter === 'Все' || q.author === authorFilter) &&
         (statusFilter === 'Все' || STATUS_LABEL[q.status] === statusFilter) &&
         (q0 === '' || q.name.toLowerCase().includes(q0) || q.author.toLowerCase().includes(q0)),
     );
-  }, [quests, search, authorFilter, statusFilter]);
+  }, [quests, search, statusFilter]);
 
   const clearFilters = () => {
     setSearch('');
-    setAuthorFilter('Все');
     setStatusFilter('Все');
   };
 
@@ -211,21 +206,6 @@ export default function Dashboard({
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Название или автор…"
               />
-            </div>
-          </div>
-          <div className="qcd-field">
-            <label>Автор</label>
-            <div className="qcd-field__wrap">
-              <select
-                className="qcd-select"
-                value={authorFilter}
-                onChange={(e) => setAuthorFilter(e.target.value)}
-              >
-                {authorOptions.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-              <span className="qcd-chevron"><ChevronDown /></span>
             </div>
           </div>
           <div className="qcd-field">

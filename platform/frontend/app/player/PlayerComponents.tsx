@@ -302,10 +302,12 @@ export function StepView({ step, quest, copy, st, on }: {
         <p className="p-kicker">{step.text}</p>
         <Flourish />
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
-        <div className="p-meta">
-          <span><PPin />{quest?.city || "Нови Сад"}</span>
-          <span><PClock />{quest?.duration || "1.5 часа"}</span>
-        </div>
+        {(quest?.city || quest?.duration) && (
+          <div className="p-meta">
+            {quest?.city && <span><PPin />{quest.city}</span>}
+            {quest?.duration && <span><PClock />{quest.duration}</span>}
+          </div>
+        )}
         <div className="p-actions">
           <button className="p-btn p-btn--solid" onClick={h.next || noop}>{copy?.start || "начать квест"}</button>
         </div>

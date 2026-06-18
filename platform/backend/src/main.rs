@@ -518,6 +518,14 @@ struct PublishRequest {
     snapshot_id: Option<String>,
     /// Full frozen snapshot JSON (stored per version, immutable once set).
     snapshot: Option<serde_json::Value>,
+    /// Real store-card fields the constructor collects; surfaced in the catalog so
+    /// no card has to fabricate them. All optional (a blank field stays absent).
+    #[serde(default)]
+    city: Option<String>,
+    #[serde(default)]
+    duration: Option<String>,
+    #[serde(default)]
+    price: Option<i64>,
 }
 
 async fn publish_quest_handler(
@@ -541,6 +549,11 @@ async fn publish_quest_handler(
         template_summary: req.template_summary,
         snapshot_version: version,
         snapshot_id,
+        // Normalize blank-string meta to None so the catalog omits the field
+        // instead of rendering an empty pin/clock.
+        city: req.city.filter(|s| !s.trim().is_empty()),
+        duration: req.duration.filter(|s| !s.trim().is_empty()),
+        price: req.price,
     };
     state
         .grants
@@ -633,12 +646,44 @@ async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String,
     Ok((id, "Оператор".to_string()))
 }
 
+/// Fetch a constructor quest the caller is allowed to act on, or 404.
+///
+/// Authoring is editor-gated (capability) AND author-scoped (ownership): the
+/// dashboard is a personal workspace, so a quest the caller did not author is
+/// indistinguishable from one that does not exist — the same opaque 404, never a
+/// signal that another author's quest exists. `author_id` is immutable (there is
+/// no quest-transfer), so the fetched quest can be reused for the follow-up
+/// mutation with no TOCTOU ownership gap. This is the single chokepoint every
+/// per-quest constructor handler routes through, so author scoping is structural
+/// rather than re-derived (and forgettable) at each call site.
+async fn require_owned_constructor_quest(
+    state: &AppState,
+    headers: &HeaderMap,
+    quest_id: &str,
+) -> Result<ConstructorQuest, AppError> {
+    require_editor(state, headers).await?;
+    let (author_id, _) = acting_author(state, headers).await?;
+    state
+        .constructor
+        .get(quest_id)
+        .await?
+        .filter(|q| q.author_id == author_id)
+        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
+}
+
 async fn list_constructor_quests_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<ConstructorQuestWire>>, AppError> {
     require_editor(&state, &headers).await?;
-    let summaries = state.constructor.list_summaries().await?;
+    // Personal workspace: list ONLY the acting author's quests (the reported bug
+    // was every editor/admin seeing everyone's). acting_author is the same id
+    // creation stamps, so an author always sees exactly what they made.
+    let (author_id, _) = acting_author(&state, &headers).await?;
+    let summaries = state
+        .constructor
+        .list_summaries_for_author(&author_id)
+        .await?;
     let completions = state.store.completions_by_quest().await?;
     Ok(Json(
         summaries
@@ -656,12 +701,7 @@ async fn get_constructor_quest_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<ConstructorQuestFullWire>, AppError> {
-    require_editor(&state, &headers).await?;
-    let q = state
-        .constructor
-        .get(&quest_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+    let q = require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     let completed = state
         .store
         .completions_by_quest()
@@ -737,7 +777,7 @@ async fn save_constructor_quest_handler(
     headers: HeaderMap,
     Json(req): Json<SaveConstructorQuestRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_editor(&state, &headers).await?;
+    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     let now = store::now_secs();
     let s = state
         .constructor
@@ -760,7 +800,7 @@ async fn set_constructor_status_handler(
     headers: HeaderMap,
     Json(req): Json<SetConstructorStatusRequest>,
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
-    require_editor(&state, &headers).await?;
+    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     store::validate_ctor_status(&req.status)?;
     let now = store::now_secs();
     let updated = state
@@ -783,7 +823,7 @@ async fn delete_constructor_quest_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_editor(&state, &headers).await?;
+    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     if !state.constructor.delete(&quest_id).await? {
         return Err(AppError::NotFound(format!(
             "constructor quest '{quest_id}' not found"
@@ -827,10 +867,35 @@ async fn get_bundle_handler(
     })))
 }
 
+/// Marketplace catalog row: the stored [`PublishedMeta`] plus the live aggregate
+/// rating. The rating is a pure projection of the current published version's
+/// finale `quest_rated` facts (never stored), so a freshly published quest reports
+/// `rating_count: 0` and the client shows "no ratings yet" instead of a fake score.
+#[derive(serde::Serialize)]
+struct CatalogQuest {
+    #[serde(flatten)]
+    meta: PublishedMeta,
+    rating_avg: f64,
+    rating_count: usize,
+}
+
 async fn list_quests_handler(
     State(state): State<AppState>,
-) -> Result<Json<Vec<PublishedMeta>>, AppError> {
-    Ok(Json(state.grants.list_published().await?))
+) -> Result<Json<Vec<CatalogQuest>>, AppError> {
+    let published = state.grants.list_published().await?;
+    let mut out = Vec::with_capacity(published.len());
+    for meta in published {
+        // Aggregate ratings for the version on sale (the published snapshot),
+        // reusing the same projector the author dashboard's version-stats use.
+        // grants_count does not affect the rating fields, so pass 0.
+        let stats = state.store.get_version_stats(&meta.snapshot_id, 0).await?;
+        out.push(CatalogQuest {
+            meta,
+            rating_avg: stats.rating_avg,
+            rating_count: stats.rating_count,
+        });
+    }
+    Ok(Json(out))
 }
 
 /// Grants for the resolved caller ONLY. Previously returned every player's
@@ -1718,17 +1783,27 @@ mod tests {
             app,
             ids,
             json!({"quest_id": ids.quest, "name": "Q", "primary_comic": "comic-q",
-                   "template_summary": "demo", "snapshot_version": 1, "snapshot_id": ids.snap1}),
+                   "template_summary": "demo", "snapshot_version": 1, "snapshot_id": ids.snap1,
+                   "city": "Нови Сад", "duration": "1.5 часа", "price": 300}),
         )
         .await;
         let (_, list) = get_json(app, "/api/quests").await;
-        assert!(
-            list.as_array()
-                .expect("list")
-                .iter()
-                .any(|m| m["quest_id"] == ids.quest.as_str()
-                    && m["snapshot_id"] == ids.snap1.as_str())
-        );
+        let row = list
+            .as_array()
+            .expect("list")
+            .iter()
+            .find(|m| m["quest_id"] == ids.quest.as_str() && m["snapshot_id"] == ids.snap1.as_str())
+            .expect("published quest is listed")
+            .clone();
+        // Real store-card meta the constructor collected flows into the catalog —
+        // the card never has to fabricate city/duration/price.
+        assert_eq!(row["city"], "Нови Сад");
+        assert_eq!(row["duration"], "1.5 часа");
+        assert_eq!(row["price"], 300);
+        // A freshly published quest has no ratings yet — reported honestly as zero,
+        // not a fake "5 (2 отзыва)". (Pure projection of finale facts.)
+        assert_eq!(row["rating_count"], 0);
+        assert_eq!(row["rating_avg"], 0.0);
 
         // /api/grants is caller-scoped: anonymous callers must claim an id, and
         // the response contains ONLY that player's grants (no cross-player leak).
@@ -2637,6 +2712,69 @@ mod tests {
         assert_eq!(list.as_array().expect("array").len(), 0);
     }
 
+    /// Author scoping (the reported bug: an admin/editor saw EVERY author's quests
+    /// in the constructor). The dashboard is a personal workspace, so two distinct
+    /// authors — here two ops-token callers separated only by their device id —
+    /// each see ONLY their own quest, and neither can get/save/restatus/delete the
+    /// other's by id. Cross-author access is a 404 (existence hidden), not a 403,
+    /// so the API never reveals that another author's quest exists.
+    #[tokio::test]
+    async fn constructor_is_author_scoped() {
+        let app = test_app();
+        let a: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", "dev-a")];
+        let b: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", "dev-b")];
+
+        let mk = |id: &str, name: &str| {
+            json!({
+                "quest_id": id, "name": name, "cover": null, "steps_count": 2,
+                "body": { "id": id, "meta": { "title": name }, "steps": [1, 2], "versions": [] }
+            })
+        };
+        let (st, _) = post_json_h(&app, "/api/constructor/quests", mk("q-a", "Квест А"), &a).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(&app, "/api/constructor/quests", mk("q-b", "Квест Б"), &b).await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Each author's list contains ONLY their own quest.
+        let (_, la) = get_json_h(&app, "/api/constructor/quests", &a).await;
+        let la = la.as_array().expect("array");
+        assert_eq!(la.len(), 1, "A sees only their own quest");
+        assert_eq!(la[0]["quest_id"], "q-a");
+        let (_, lb) = get_json_h(&app, "/api/constructor/quests", &b).await;
+        let lb = lb.as_array().expect("array");
+        assert_eq!(lb.len(), 1, "B sees only their own quest");
+        assert_eq!(lb[0]["quest_id"], "q-b");
+
+        // B cannot read / save / restatus / delete A's quest — every per-quest
+        // route 404s for a non-owner.
+        let (st, _) = get_json_h(&app, "/api/constructor/quests/q-a", &b).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "cannot get another author's quest");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-a/save",
+            json!({ "name": "захват", "cover": null, "steps_count": 1, "body": {} }),
+            &b,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "cannot save another author's quest");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-a/status",
+            json!({ "status": "published" }),
+            &b,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "cannot restatus another author's quest");
+        let (st, _) =
+            post_json_h(&app, "/api/constructor/quests/q-a/delete", json!({}), &b).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "cannot delete another author's quest");
+
+        // A's quest survived every B attempt, unchanged, and A still owns it.
+        let (st, full) = get_json_h(&app, "/api/constructor/quests/q-a", &a).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(full["name"], "Квест А", "A's quest is untouched by B's attempts");
+    }
+
     /// The store (/api/quests) shows ONLY published quests: a freshly created
     /// constructor draft is absent until publish, then present under the SAME id.
     /// Proves there is no path from an unpublished draft into the marketplace and
@@ -2777,6 +2915,42 @@ mod tests {
                 .iter()
                 .any(|q| q["quest_id"] == qid.as_str())
         );
+
+        // --- Author scoping on real SQL (the `WHERE author_id` clause) ---
+        // A second author (ops token + a distinct device id) is invisible to the
+        // first: the foreign quest never appears in the "ops" list, and the foreign
+        // author cannot fetch the "ops" author's quest (404 — existence hidden).
+        let dev_id = format!("dev-citest-{run}");
+        let dev: [(&str, &str); 2] =
+            [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", dev_id.as_str())];
+        let other_qid = format!("q-citest-other-{run}");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": other_qid.clone(), "name": "CI other", "cover": null, "steps_count": 1,
+                "body": { "id": other_qid.clone(), "meta": { "title": "CI other" }, "steps": [1], "versions": [] }
+            }),
+            &dev,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, ops_list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert!(
+            ops_list
+                .as_array()
+                .expect("arr")
+                .iter()
+                .all(|q| q["quest_id"] != other_qid.as_str()),
+            "another author's quest must not appear in the ops list"
+        );
+        let (st, _) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &dev).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "cross-author get is hidden on SQL");
+        // Clean up the foreign quest (shared-DB hygiene).
+        let (st, _) =
+            post_json_h(&app, &format!("/api/constructor/quests/{other_qid}/delete"), json!({}), &dev)
+                .await;
+        assert_eq!(st, StatusCode::OK);
 
         // get returns the full body
         let (st, full) =

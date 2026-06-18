@@ -98,6 +98,12 @@ export interface QuestSnapshot {
   snapshot_version: number;
   steps: GameStep[];
   notes?: string;
+  /** Author's store-card city, frozen into the snapshot so the player shows the
+   *  real place instead of a hardcoded default. Optional: snapshots published
+   *  before this field carry no city and the player simply omits it. */
+  city?: string;
+  /** Author's store-card duration label, frozen alongside `city`. */
+  duration?: string;
 }
 
 export interface Fact {

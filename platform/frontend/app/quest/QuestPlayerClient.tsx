@@ -615,10 +615,14 @@ export default function QuestPlayerClient({
   }
 
   const pos = currentStep.position ?? stepIdx;
+  // City/duration are the author's real values frozen into the snapshot at publish
+  // (undefined for snapshots published before the field existed — the player then
+  // simply omits them rather than showing a hardcoded place). completionBonus is the
+  // canonical +5 (SPEC), not quest-specific data.
   const questMeta = {
     title: snapshot.name,
-    city: 'Нови Сад',
-    duration: '90 минут',
+    city: snapshot.city,
+    duration: snapshot.duration,
     completionBonus: 5,
   };
   const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
