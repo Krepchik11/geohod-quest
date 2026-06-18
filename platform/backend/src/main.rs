@@ -1090,180 +1090,6 @@ async fn get_my_stats_handler(
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
 }
 
-/// A demo quest embedded at compile time and seeded at startup so a fresh dev
-/// server has real published quests with frozen snapshot content.
-struct DemoQuest {
-    quest_id: &'static str,
-    name: &'static str,
-    template_summary: &'static str,
-    snapshot_id: &'static str,
-    primary_comic: Option<&'static str>,
-    snapshot_json: &'static str,
-}
-
-const DEMO_QUESTS: &[DemoQuest] = &[
-    DemoQuest {
-        quest_id: "mystery-fortress-v1",
-        name: "Mystery of the Fortress",
-        template_summary: "4 steps incl. answer task with gift at 2",
-        snapshot_id: "golden-mystery-fortress-v1",
-        primary_comic: Some("comic-fortress"),
-        snapshot_json: include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../goldens/golden-mystery-fortress-v1.json"
-        )),
-    },
-    DemoQuest {
-        quest_id: "ironia-sudby",
-        name: "Ирония судьбы: по следам исторических личностей",
-        template_summary: "8 шагов · все 7 шаблонов · Нови Сад",
-        snapshot_id: "golden-ironia-sudby-v1",
-        primary_comic: Some("/assets/img/quest-card.png"),
-        snapshot_json: include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../goldens/golden-ironia-sudby-v1.json"
-        )),
-    },
-];
-
-async fn seed_demo_quests(grants: &GrantStores) -> Result<(), AppError> {
-    for quest in DEMO_QUESTS {
-        let snapshot: serde_json::Value =
-            serde_json::from_str(quest.snapshot_json).map_err(|e| AppError::Internal(e.into()))?;
-        grants
-            .register_published(
-                quest.quest_id,
-                PublishedMeta {
-                    quest_id: quest.quest_id.into(),
-                    name: quest.name.into(),
-                    primary_comic: quest.primary_comic.map(Into::into),
-                    template_summary: quest.template_summary.into(),
-                    snapshot_version: 1,
-                    snapshot_id: quest.snapshot_id.into(),
-                },
-                Some(snapshot),
-            )
-            .await?;
-    }
-    Ok(())
-}
-
-/// One demo constructor quest: design-faithful list metadata (name/author/status/
-/// step count) so the dashboard looks populated in dev, plus a number of seeded
-/// completions recorded through the real bonus path.
-struct DemoCtorQuest {
-    quest_id: &'static str,
-    name: &'static str,
-    author_id: &'static str,
-    author_name: &'static str,
-    status: &'static str,
-    city: &'static str,
-    steps: u32,
-    completions: u32,
-}
-
-const DEMO_CTOR_QUESTS: &[DemoCtorQuest] = &[
-    DemoCtorQuest { quest_id: "q-ironia",  name: "Ирония судьбы",                                   author_id: "seed:sergey", author_name: "Сергей Шестак", status: store::CTOR_STATUS_PUBLISHED, city: "Нови Сад",        steps: 8, completions: 27 },
-    DemoCtorQuest { quest_id: "q-podzem",  name: "Подземелья Петроварадина",                        author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_PUBLISHED, city: "Нови Сад",        steps: 4, completions: 12 },
-    DemoCtorQuest { quest_id: "q-stambul", name: "Стамбул через перо: город в сердцах писателей",   author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_TEST,      city: "Стамбул",         steps: 5, completions: 8 },
-    DemoCtorQuest { quest_id: "q-krepost", name: "Тайна крепости",                                  author_id: "seed:sergey", author_name: "Сергей Шестак", status: store::CTOR_STATUS_DRAFT,     city: "Петроварадин",    steps: 3, completions: 0 },
-    DemoCtorQuest { quest_id: "q-baron",   name: "Чёрный барон: тайны старого порта",               author_id: "seed:olesya", author_name: "Олеся Перлова", status: store::CTOR_STATUS_PUBLISHED, city: "Котор",           steps: 9, completions: 41 },
-    DemoCtorQuest { quest_id: "q-legend",  name: "Легенды Петроградки",                             author_id: "seed:mikhail", author_name: "Михаил Гром",  status: store::CTOR_STATUS_DRAFT,     city: "Санкт-Петербург", steps: 6, completions: 0 },
-];
-
-/// Build a minimal-but-valid CtorQuest body (start → filler → congrats) matching
-/// the frontend authoring shape, so a seeded quest opens and renders in the
-/// builder. Step count is truthful (equals `steps`).
-fn demo_ctor_step(id: &str, template: &str, name: &str) -> serde_json::Value {
-    // Precompute control-flow values: `json!` mis-reads an `if` in value position.
-    let kicker = if template == "start" { "Городской квест" } else { "" };
-    let title = if template == "congrats" { "Квест пройден!" } else { "" };
-    serde_json::json!({
-        "id": id,
-        "template": template,
-        "name": name,
-        "text": "",
-        "kicker": kicker,
-        "title": title,
-        "prompt": "",
-        "place": "",
-        "action": { "desc": "", "confirmLabel": "Я на месте" },
-        "allowNote": false,
-        "images": {},
-        "video": null,
-        "acceptable": [],
-        "gift": { "on": false, "coins": 5, "narrative": "" },
-        "hint": { "on": false, "cost": 5, "text": "" },
-        "nav": { "on": false, "lat": "", "lng": "", "label": "" }
-    })
-}
-
-fn demo_ctor_body(q: &DemoCtorQuest) -> serde_json::Value {
-    let total = q.steps.max(2);
-    let mut steps = vec![demo_ctor_step(
-        &format!("{}-s0", q.quest_id),
-        "start",
-        "Первый экран",
-    )];
-    for i in 1..(total - 1) {
-        steps.push(demo_ctor_step(
-            &format!("{}-s{}", q.quest_id, i),
-            "continue",
-            &format!("Страница {i}"),
-        ));
-    }
-    steps.push(demo_ctor_step(
-        &format!("{}-s{}", q.quest_id, total - 1),
-        "congrats",
-        "Поздравление",
-    ));
-    serde_json::json!({
-        "id": q.quest_id,
-        "meta": { "title": q.name, "city": q.city, "duration": "", "cover": null, "desc": "", "price": 0 },
-        "steps": steps,
-        "versions": [],
-        "lastSaved": null
-    })
-}
-
-/// Seed the constructor dashboard once (only when its registry is empty), so a
-/// fresh dev environment opens onto a populated, design-faithful list. Completions
-/// are recorded through the real bonus path, so the dashboard's "прохождения"
-/// column is computed, not faked.
-async fn seed_demo_constructor_quests(
-    constructor: &ConstructorStores,
-    store: &FactStores,
-) -> Result<(), AppError> {
-    if !constructor.is_empty().await? {
-        return Ok(());
-    }
-    let base = store::now_secs();
-    for (i, q) in DEMO_CTOR_QUESTS.iter().enumerate() {
-        // Descending created_at preserves the design's list order (newest first).
-        let created = base.saturating_sub(i as u64 * 86_400);
-        constructor
-            .insert_if_absent(ConstructorQuest {
-                quest_id: q.quest_id.to_string(),
-                author_id: q.author_id.to_string(),
-                author_name: q.author_name.to_string(),
-                name: q.name.to_string(),
-                status: q.status.to_string(),
-                cover: None,
-                steps_count: q.steps,
-                created_at: created,
-                updated_at: created,
-                body: demo_ctor_body(q),
-            })
-            .await?;
-        for n in 0..q.completions {
-            store
-                .seed_completion(&format!("seed-finisher:{}:{}", q.quest_id, n), q.quest_id)
-                .await?;
-        }
-    }
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
@@ -1306,13 +1132,6 @@ async fn main() -> anyhow::Result<()> {
             in_memory_state(config.clone())
         }
     };
-
-    if let Err(e) = seed_demo_quests(&state.grants).await {
-        tracing::warn!(error = ?e, "demo quest seeding failed (continuing)");
-    }
-    if let Err(e) = seed_demo_constructor_quests(&state.constructor, &state.store).await {
-        tracing::warn!(error = ?e, "demo constructor seeding failed (continuing)");
-    }
 
     tracing::info!(addr = %config.addr, version = %config.version, "starting geohod-backend");
 
@@ -2816,6 +2635,79 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND, "second delete is 404");
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
         assert_eq!(list.as_array().expect("array").len(), 0);
+    }
+
+    /// The store (/api/quests) shows ONLY published quests: a freshly created
+    /// constructor draft is absent until publish, then present under the SAME id.
+    /// Proves there is no path from an unpublished draft into the marketplace and
+    /// that no mock data pre-populates either surface.
+    #[tokio::test]
+    async fn unpublished_constructor_draft_absent_from_store_until_published() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Nothing is seeded: both surfaces start empty.
+        let (_, store) = get_json(&app, "/api/quests").await;
+        assert_eq!(store.as_array().expect("array").len(), 0, "no seeded store quests");
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list.as_array().expect("array").len(), 0, "no seeded constructor quests");
+
+        // Create a constructor draft.
+        post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-real",
+                "name": "Настоящий квест",
+                "cover": null,
+                "steps_count": 2,
+                "body": { "id": "q-real", "meta": { "title": "Настоящий квест" }, "steps": [1, 2], "versions": [] }
+            }),
+            &admin,
+        )
+        .await;
+
+        // It is in the constructor list…
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert!(list.as_array().expect("array").iter().any(|q| q["quest_id"] == "q-real"));
+        // …but NOT in the store — an unpublished draft is never buyable/playable.
+        let (_, store) = get_json(&app, "/api/quests").await;
+        assert_eq!(
+            store.as_array().expect("array").len(),
+            0,
+            "an unpublished draft must not appear in the store"
+        );
+
+        // Publish it.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": "q-real",
+                "name": "Настоящий квест",
+                "template_summary": "2 steps",
+                "snapshot_version": 1,
+                "snapshot": { "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // The SAME id now appears in the store, and the constructor shows it published.
+        let (_, store) = get_json(&app, "/api/quests").await;
+        assert!(
+            store.as_array().expect("array").iter().any(|q| q["quest_id"] == "q-real"),
+            "a published quest appears in the store under its constructor id"
+        );
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        let row = list
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|q| q["quest_id"] == "q-real")
+            .expect("present");
+        assert_eq!(row["status"], "published");
     }
 
     // === Postgres backend: full scenario suite + durability. Self-skips without

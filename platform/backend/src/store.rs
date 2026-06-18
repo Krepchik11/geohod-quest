@@ -265,24 +265,6 @@ impl InMemoryFactStore {
         }
         sets.into_iter().map(|(q, s)| (q, s.len())).collect()
     }
-
-    /// Seed one completed playthrough (a distinct player completing `quest_id`) —
-    /// demo data so the dashboard shows real, non-zero completions through the
-    /// same projection real play uses. Idempotent per (player, quest): a second
-    /// call is absorbed by the completion-bonus rule.
-    pub fn seed_completion(&mut self, player_id: &str, quest_id: &str) {
-        let meta = self.create_attempt(player_id, quest_id, "seed");
-        let fact = Fact {
-            kind: FactKind::CompletionBonus,
-            step_position: 0,
-            submitted_value: None,
-            local_is_correct: true,
-            coins_delta: 5,
-            note: None,
-            device_id: format!("seed:{player_id}"),
-        };
-        self.append_idempotent(&meta.attempt_id, vec![fact]);
-    }
 }
 
 /// Published quest metadata surfaced by the constructor's publish for the
@@ -616,17 +598,6 @@ impl FactStores {
             Self::Postgres(pg) => pg.completions_by_quest().await,
         }
     }
-
-    /// See [`InMemoryFactStore::seed_completion`].
-    pub async fn seed_completion(&self, player_id: &str, quest_id: &str) -> Result<(), AppError> {
-        match self {
-            Self::InMemory(m) => {
-                Self::lock_inmem(m)?.seed_completion(player_id, quest_id);
-                Ok(())
-            }
-            Self::Postgres(pg) => pg.seed_completion(player_id, quest_id).await,
-        }
-    }
 }
 
 /// Identity storage backend (see [`FactStores`] for the pattern).
@@ -899,11 +870,6 @@ impl InMemoryConstructorStore {
         Self::default()
     }
 
-    /// True when no quest exists yet — the seed-once gate.
-    pub fn is_empty(&self) -> bool {
-        self.quests.is_empty()
-    }
-
     /// Insert a new quest; rejects a duplicate id (409).
     pub fn create(&mut self, quest: ConstructorQuest) -> Result<ConstructorQuestSummary, AppError> {
         if self.quests.contains_key(&quest.quest_id) {
@@ -915,11 +881,6 @@ impl InMemoryConstructorStore {
         let summary = quest.summary();
         self.quests.insert(quest.quest_id.clone(), quest);
         Ok(summary)
-    }
-
-    /// Insert only if absent (seed path — idempotent, never errors on conflict).
-    pub fn insert_if_absent(&mut self, quest: ConstructorQuest) {
-        self.quests.entry(quest.quest_id.clone()).or_insert(quest);
     }
 
     /// All quests as list rows, newest first (ties by id for a stable order).
@@ -994,14 +955,6 @@ impl ConstructorStores {
             .map_err(|e| AppError::Internal(anyhow::anyhow!("constructor lock poisoned: {e}")))
     }
 
-    /// See [`InMemoryConstructorStore::is_empty`].
-    pub async fn is_empty(&self) -> Result<bool, AppError> {
-        match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.is_empty()),
-            Self::Postgres(pg) => pg.is_empty().await,
-        }
-    }
-
     /// See [`InMemoryConstructorStore::create`].
     pub async fn create(
         &self,
@@ -1010,17 +963,6 @@ impl ConstructorStores {
         match self {
             Self::InMemory(m) => Self::lock_inmem(m)?.create(quest),
             Self::Postgres(pg) => pg.create(quest).await,
-        }
-    }
-
-    /// See [`InMemoryConstructorStore::insert_if_absent`].
-    pub async fn insert_if_absent(&self, quest: ConstructorQuest) -> Result<(), AppError> {
-        match self {
-            Self::InMemory(m) => {
-                Self::lock_inmem(m)?.insert_if_absent(quest);
-                Ok(())
-            }
-            Self::Postgres(pg) => pg.insert_if_absent(quest).await,
         }
     }
 
@@ -1369,10 +1311,9 @@ mod constructor_tests {
     #[test]
     fn create_lists_newest_first_and_rejects_duplicate() {
         let mut s = InMemoryConstructorStore::new();
-        assert!(s.is_empty());
+        assert!(s.list_summaries().is_empty());
         s.create(quest("q-old", "Old", 100)).expect("create old");
         s.create(quest("q-new", "New", 200)).expect("create new");
-        assert!(!s.is_empty());
 
         let list = s.list_summaries();
         assert_eq!(list.len(), 2);
@@ -1435,14 +1376,32 @@ mod constructor_tests {
 
     #[test]
     fn completions_count_distinct_finishers_per_quest() {
+        // Completions flow through the real append path (a CompletionBonus fact),
+        // not any seed helper — the dashboard metric is a pure projection of facts.
+        fn complete(s: &mut InMemoryFactStore, player: &str, quest: &str) {
+            let m = s.create_attempt(player, quest, "snap");
+            s.append_idempotent(
+                &m.attempt_id,
+                vec![Fact {
+                    kind: FactKind::CompletionBonus,
+                    step_position: 0,
+                    submitted_value: None,
+                    local_is_correct: true,
+                    coins_delta: 5,
+                    note: None,
+                    device_id: format!("{player}-dev"),
+                }],
+            );
+        }
+
         let mut s = InMemoryFactStore::new();
-        // Two distinct players complete quest-a; one of them also "completes" again
-        // on a fresh attempt (bonus is once-ever, so still one distinct finisher).
-        s.seed_completion("p1", "quest-a");
-        s.seed_completion("p2", "quest-a");
-        s.seed_completion("p1", "quest-a");
+        // Two distinct players complete quest-a; one of them replays on a fresh
+        // attempt (bonus is once-ever, so still one distinct finisher).
+        complete(&mut s, "p1", "quest-a");
+        complete(&mut s, "p2", "quest-a");
+        complete(&mut s, "p1", "quest-a");
         // One player completes quest-b.
-        s.seed_completion("p3", "quest-b");
+        complete(&mut s, "p3", "quest-b");
         // An attempt with no completion fact contributes nothing.
         s.create_attempt("p9", "quest-a", "snap");
 
