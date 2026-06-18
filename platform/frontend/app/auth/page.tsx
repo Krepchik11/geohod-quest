@@ -134,7 +134,7 @@ export default function AuthPage() {
           </div>
 
           <input
-            className="s-input"
+            className="input"
             style={{ width: '100%', marginBottom: 8 }}
             type="email"
             placeholder="Email"
@@ -143,7 +143,7 @@ export default function AuthPage() {
             onChange={(e) => setEmail(e.target.value)}
           />
           <input
-            className="s-input"
+            className="input"
             style={{ width: '100%', marginBottom: 8 }}
             type="password"
             placeholder="Пароль (минимум 8 символов)"

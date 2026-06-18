@@ -1,7 +1,16 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
-import "./globals.css";
+import "./globals.css"; // canonical design system (primitives live here)
+// DEPRECATION GUARD — harmonization Phase 1 Option A (frontend-harmonization-guide.md §3).
+// Every stylesheet below is imported globally, so any route can reach any class; that global
+// reach is the structural enabler of UI drift. The duplicate primitives in commerce.css (.s-*)
+// and admin-ctor.css (.adm-*) are DEPRECATED — use the canonical primitives in globals.css
+// (.btn/.btn--outline/.btn--block, .input/.input--error/.input-error-text, .link, .btn-ui/--sm,
+// .field-ui/--sm/--wide, .textarea-ui, .panel) instead. `npm run lint:ds` fails on any new
+// .s-*/.adm-* className. Do NOT delete the duplicate CSS blocks yet (Phase 1 Option B) — only
+// after every route migrates and lint:ds is green. .p-* (player), .au-* (admin-users) and the
+// unique layout classes are intentional systems, NOT deprecated.
 import "./styles/player-paper.css";
 import "./styles/commerce.css";
 import "./styles/myquests.css";

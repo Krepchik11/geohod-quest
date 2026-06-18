@@ -28,58 +28,6 @@
   color: var(--navy-display);
 }
 
-/* ---------- Шапка ---------- */
-.s-head {
-  flex: none;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 24px 48px;
-}
-.s-logo { display: flex; align-items: center; gap: 10px; }
-.s-logo .mark { width: 34px; height: 30px; background: url("/assets/icons/logo-mark--navy.svg") no-repeat center / contain; }
-.s-logo .text { width: 60px; height: 32px; background: url("/assets/icons/logo-text--navy.svg") no-repeat center / contain; }
-.s-nav { display: flex; gap: 28px; }
-.s-nav a { font-family: var(--font-display); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--navy-display); text-decoration: none; white-space: nowrap; }
-.s-nav a:hover, .s-nav a.active { color: var(--blue); }
-.s-head__right { display: flex; align-items: center; gap: 16px; }
-.s-avatar {
-  width: 48px; height: 48px; border-radius: 50%;
-  border: 1px solid var(--border);
-  position: relative; flex: none;
-}
-/* Геометрия фигуры: иконка 24×24 в центре аватара 48 (проценты — масштабируется на моб. 36px) */
-.s-avatar .head { position: absolute; left: 41.5%; top: 29%; width: 17%; height: 19%; background: url("/assets/icons/ic-user-head--navy.svg") no-repeat center / contain; }
-.s-avatar .body { position: absolute; left: 33.5%; top: 53%; width: 33%; height: 18%; background: url("/assets/icons/ic-user-body--navy.svg") no-repeat center / contain; }
-
-/* ---------- Кнопки ---------- */
-.s-btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  height: 52px; padding: 0 36px;
-  border-radius: 26px; border: none; cursor: pointer;
-  background: var(--blue); color: #fff;
-  font: 700 14px/1 'Inter', sans-serif;
-  transition: filter .12s ease, transform .12s ease;
-  text-decoration: none;
-}
-.s-btn:hover { filter: brightness(1.08); }
-.s-btn--dark { background: var(--dark); }
-.s-btn--outline { background: transparent; color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
-.s-btn--outline:hover { background: rgba(59,113,254,.06); filter: none; }
-.s-btn--block { width: 100%; }
-.s-btn:disabled { background: var(--border); color: var(--gray); cursor: default; filter: none; }
-.s-link { background: none; border: none; padding: 0; color: var(--blue); font: 400 13px/1.4 'Inter', sans-serif; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-
-/* ---------- Карточки и поля ---------- */
-.s-card { background: #fff; border-radius: 18px; box-shadow: var(--shadow-card); }
-.s-input {
-  width: 100%; height: 50px; padding: 0 16px;
-  border: 1px solid var(--border); border-radius: 10px;
-  font: 400 14px/1 'Inter', sans-serif; color: var(--navy);
-  outline: none; transition: border-color .12s ease;
-}
-.s-input:focus { border-color: var(--blue); }
-.s-input::placeholder { color: rgba(26,43,72,.5); }
-.s-input--error { border-color: var(--pink); }
-.s-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--pink); margin-top: 6px; }
 
 /* ---------- Чекаут ---------- */
 .co-wrap { flex: 1; padding: 8px 140px 64px; }
@@ -120,15 +68,12 @@
 .co-total b { font-size: 24px; font-weight: 700; }
 .co-total .was { font-size: 14px; color: var(--gray); text-decoration: line-through; margin-right: 8px; font-weight: 400; }
 .co-coupon { display: flex; gap: 8px; }
-.co-coupon .s-input { flex: 1; }
-.co-coupon .s-btn { height: 50px; padding: 0 22px; border-radius: 10px; }
 .co-applied {
   display: flex; align-items: center; justify-content: space-between;
   padding: 11px 14px; border-radius: 10px;
   background: rgba(31,138,91,.08); color: var(--green);
   font-size: 13px; font-weight: 600;
 }
-.co-applied .s-link { color: var(--green); font-size: 12px; }
 .co-pays { display: flex; align-items: center; gap: 10px; }
 .co-pays .note { font-size: 12px; color: var(--gray); margin-right: auto; }
 .co-pays img, .co-pays .pay { height: 22px; }
