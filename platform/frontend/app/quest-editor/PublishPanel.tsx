@@ -60,8 +60,8 @@ function PublishModal({ nextN, size, onCancel, onConfirm }: {
         </ul>
         <p className="note">Бандл версии {nextN} (~{size}) соберётся и станет доступен для скачивания сразу после публикации.</p>
         <div className="row">
-          <button className="adm-btn adm-btn--outline" type="button" onClick={onCancel}>Отмена</button>
-          <button className="adm-btn" type="button" onClick={onConfirm}>Опубликовать v{nextN}</button>
+          <button className="btn-ui btn-ui--outline" type="button" onClick={onCancel}>Отмена</button>
+          <button className="btn-ui" type="button" onClick={onConfirm}>Опубликовать v{nextN}</button>
         </div>
       </div>
     </div>
@@ -104,13 +104,13 @@ export function PublishPanel({ quest, gates, justPublished, publishError, publis
             <div className={'gate-row ' + g.st} key={i}>
               <span className="st">{g.st === 'ok' ? '✓' : g.st === 'err' ? '✗' : '!'}</span>
               <span>{g.text}</span>
-              {g.pageId ? <button className="adm-btn adm-btn--sm adm-btn--outline fix" type="button" onClick={() => onFix(g.pageId!)}>Исправить</button> : null}
+              {g.pageId ? <button className="btn-ui btn-ui--sm btn-ui--outline fix" type="button" onClick={() => onFix(g.pageId!)}>Исправить</button> : null}
             </div>
           ))}
         </div>
         <div className="gate-sum">
           <span className="est">Оценка бандла: ~{gates.sizeLabel} · {quest.steps.length} {plural(quest.steps.length, 'страница', 'страницы', 'страниц')} · {gates.imgs} изобр. · {gates.vids} видео · цель ≤ 5 МБ</span>
-          <button className="adm-btn" type="button" disabled={errN > 0 || publishing} onClick={() => setModal(true)}>
+          <button className="btn-ui" type="button" disabled={errN > 0 || publishing} onClick={() => setModal(true)}>
             {publishing
               ? 'Публикуем…'
               : errN > 0

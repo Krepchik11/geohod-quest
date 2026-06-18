@@ -17,7 +17,7 @@
 .mq-row__meta .ic { width: 12px; height: 12px; background: center / contain no-repeat; }
 .mq-state { flex: none; width: 210px; display: flex; flex-direction: column; gap: 8px; }
 .mq-actions { flex: none; display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 178px; }
-.mq-actions .s-btn { height: 46px; padding: 0 24px; font-size: 13px; }
+.mq-actions .btn { height: 46px; padding: 0 24px; font-size: 13px; } /* repointed: inner control migrated to canonical (harmonization §5) */
 
 /* Бейджи статуса попытки */
 .mq-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
@@ -33,7 +33,7 @@
 /* Статус офлайн-загрузки */
 .mq-dl { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--gray); }
 .mq-dl--ready { color: var(--green); }
-.mq-dl .s-link { font-size: 11.5px; }
+.mq-dl .link { font-size: 11.5px; } /* repointed: inner control migrated to canonical (harmonization §5) */
 .mq-version {
   margin-top: 2px; padding: 8px 12px; border-radius: 8px;
   background: rgba(59,113,254,.07); font-size: 11.5px; color: var(--navy); line-height: 1.45;
@@ -70,7 +70,6 @@
 .mqm-card__body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .mqm-card__body h3 { margin: 0; font-size: 14.5px; font-weight: 700; line-height: 1.3; }
 .mqm-card__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.mqm-card__foot .s-btn { height: 44px; padding: 0 26px; font-size: 13px; }
 
 /* Старт-гейт и загрузка */
 .sg-body { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 8px 16px 20px; }

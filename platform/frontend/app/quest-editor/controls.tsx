@@ -39,7 +39,7 @@ export function WspDanger({ label, confirmLabel, onConfirm }: { label: string; c
   }, [armed]);
   return (
     <button
-      className="adm-btn adm-btn--danger adm-btn--sm"
+      className="btn-ui btn-ui--ghost-danger btn-ui--sm"
       type="button"
       onClick={() => {
         if (armed) {

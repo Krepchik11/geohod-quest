@@ -124,7 +124,7 @@ function MqDl({ q, stage, onDownload }: { q: MqRow; stage: DownloadStage | null;
   }
   return (
     <span className="mq-dl">
-      <button className="s-link" type="button" onClick={onDownload}>Скачать для офлайна</button>
+      <button className="link" type="button" onClick={onDownload}>Скачать для офлайна</button>
     </span>
   );
 }
@@ -169,17 +169,17 @@ function MqActions({ q }: { q: MqRow }) {
   if (q.state === 'progress') {
     return (
       <div className="mq-actions">
-        <Link className="s-btn" href={open}>Продолжить</Link>
-        <Link className="s-btn s-btn--outline" href={open}>Начать заново</Link>
+        <Link className="btn" href={open}>Продолжить</Link>
+        <Link className="btn btn--outline" href={open}>Начать заново</Link>
       </div>
     );
   }
   if (q.state === 'done') {
     // A completed quest reopens on its finale; ?restart=1 tells the player to
     // supersede that attempt and start a fresh run from step 0 (coins are kept).
-    return <div className="mq-actions"><Link className="s-btn" href={`${open}?restart=1`}>Пройти заново</Link></div>;
+    return <div className="mq-actions"><Link className="btn" href={`${open}?restart=1`}>Пройти заново</Link></div>;
   }
-  return <div className="mq-actions"><Link className="s-btn" href={open}>Начать</Link></div>;
+  return <div className="mq-actions"><Link className="btn" href={open}>Начать</Link></div>;
 }
 
 /**
@@ -256,16 +256,16 @@ export default function MyQuestsPage() {
         {collection.source === 'loading' ? (
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>
         ) : rows.length === 0 ? (
-          <div className="s-card mq-empty" style={{ marginTop: 24 }}>
+          <div className="card mq-empty" style={{ marginTop: 24 }}>
             <div className="ic-ring">?</div>
             <h3>Пока ни одного квеста</h3>
             <p>Выберите квест в магазине — после покупки или получения он появится здесь и останется навсегда.</p>
-            <Link className="s-btn" href="/">В магазин квестов</Link>
+            <Link className="btn" href="/">В магазин квестов</Link>
           </div>
         ) : (
           <div className="mq-list">
             {rows.map((q) => (
-              <div className="s-card mq-row" key={q.quest_id}>
+              <div className="card mq-row" key={q.quest_id}>
                 <div
                   className="mq-row__photo"
                   style={{ backgroundImage: q.photo ? `url(${q.photo})` : undefined, backgroundColor: q.photo ? undefined : 'var(--navy)' }}
@@ -279,7 +279,7 @@ export default function MyQuestsPage() {
                   {q.updateAvailable && (
                     <div className="mq-version">
                       Доступно обновление.{' '}
-                      <button className="s-link" type="button" onClick={() => void handleDownload(q.quest_id)}>Обновить</button>
+                      <button className="link" type="button" onClick={() => void handleDownload(q.quest_id)}>Обновить</button>
                     </div>
                   )}
                 </div>

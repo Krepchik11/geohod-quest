@@ -5,13 +5,15 @@
 .wsp { min-height: 100vh; background: var(--bg); }
 .wsp a { cursor: pointer; }
 
-/* Контролы компактнее канвасной админки */
-.wsp .adm-input, .wsp .adm-select { height: 48px; font-size: 14px; width: 100%; font-weight: 400; }
-.wsp .adm-input--sm { width: 130px; }
-.wsp .adm-btn { min-width: 0; height: 48px; font-size: 14px; padding: 0 20px; }
-.wsp .adm-btn--sm { height: 38px; font-size: 13px; padding: 0 14px; }
+/* Контролы компактнее канвасной админки — repointed to canonical primitives (harmonization §4);
+   .adm-label kept (not in the §4 swap set). These overrides MUST track the className rename or
+   the workspace controls fall back to the larger base .field-ui/.btn-ui geometry. */
+.wsp .field-ui { height: 48px; font-size: 14px; width: 100%; font-weight: 400; }
+.wsp .field-ui--sm { width: 130px; }
+.wsp .btn-ui { min-width: 0; height: 48px; font-size: 14px; padding: 0 20px; }
+.wsp .btn-ui--sm { height: 38px; font-size: 13px; padding: 0 14px; }
 .wsp .adm-label { font-size: 13.5px; margin-bottom: 6px; }
-.wsp .adm-textarea { min-height: 96px; font-size: 14px; }
+.wsp .textarea-ui { min-height: 96px; font-size: 14px; }
 .wsp .ed-block { border: 1px solid #EDEFF3; }
 .wsp .ed-form { gap: 18px; margin-top: 0; }
 
