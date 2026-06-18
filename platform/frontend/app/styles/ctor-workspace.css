@@ -33,27 +33,11 @@
 .wsp-save { font-size: 12px; color: var(--gray); background: var(--bg); border-radius: 8px; padding: 7px 10px; white-space: nowrap; }
 .wsp-save.failed { color: var(--pink); background: rgba(231,90,124,.1); font-weight: 600; }
 
-/* ---------- Список квестов ---------- */
-.wsp-list { width: 1040px; max-width: calc(100vw - 48px); margin: 0 auto; padding: 36px 0 80px; flex: 1; }
-.wsp-listhead { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; }
-.wsp-listhead h2 { font-weight: 500; font-size: 26px; margin: 0; }
-.wsp-listhead .cnt { font-size: 13px; color: var(--gray); }
-.wsp-qrow { display: flex; align-items: center; gap: 18px; padding: 16px 20px; background: #fff; border-radius: 16px; cursor: pointer; border: 1px solid transparent; }
-.wsp-qrow + .wsp-qrow { margin-top: 12px; }
-.wsp-qrow:hover { border-color: rgba(59,113,254,.4); box-shadow: 0 4px 16px rgba(0,15,8,.06); }
-.wsp-qrow .cover { flex: none; width: 84px; height: 56px; border-radius: 10px; object-fit: cover; background: var(--bg); }
-.wsp-qrow .cover-ph { flex: none; width: 84px; height: 56px; border-radius: 10px; background: var(--bg); display: grid; place-items: center; font-size: 10px; color: var(--gray); }
-.wsp-qrow .body { flex: 1; min-width: 0; }
-.wsp-qrow .ttl { font-size: 16px; font-weight: 600; }
-.wsp-qrow .meta { font-size: 12.5px; color: var(--gray); margin-top: 3px; }
-.wsp-qrow .chips { display: flex; gap: 8px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
-.wsp-empty { background: #fff; border-radius: 16px; padding: 48px; text-align: center; color: var(--gray); font-size: 14px; display: flex; flex-direction: column; gap: 16px; align-items: center; }
-
+/* ---------- Чипы билдера ---------- */
+/* Список созданных квестов переехал в Dashboard (.qcd-*); здесь остаётся только
+   чип-счётчик ошибок гейтов, который рисует Builder в рельсе/шапке. */
 .wsp-chip { font: 600 11px/1 'Inter', sans-serif; padding: 6px 10px; border-radius: 10px; white-space: nowrap; }
-.wsp-chip.live { color: var(--green); background: rgba(31,138,91,.1); }
-.wsp-chip.draft { color: var(--amber); background: rgba(183,121,31,.1); }
 .wsp-chip.err { color: var(--pink); background: rgba(231,90,124,.12); }
-.wsp-chip.mut { color: var(--gray); background: var(--bg); }
 
 /* ---------- Билдер: три панели ---------- */
 .wsp-builder { display: grid; grid-template-columns: 296px minmax(0, 1fr) 396px; height: calc(100vh - 64px); }

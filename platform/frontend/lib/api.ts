@@ -74,6 +74,41 @@ export interface PublishedQuestWire {
   snapshot_id: string;
 }
 
+/** Editorial lifecycle of a constructor quest (mirrors backend CTOR_STATUS_*). */
+export type CtorStatus = 'draft' | 'test' | 'published';
+
+/** One constructor dashboard row (mirrors backend ConstructorQuestWire). */
+export interface ConstructorQuestWire {
+  quest_id: string;
+  name: string;
+  /** Author display label (denormalized at creation). */
+  author: string;
+  author_id: string;
+  status: CtorStatus;
+  /** Page count. */
+  steps: number;
+  /** Distinct players who completed the quest ("прохождения"; derived from facts). */
+  completed: number;
+  cover: string | null;
+  /** Unix seconds. */
+  created_at: number;
+  updated_at: number;
+}
+
+/** A constructor quest WITH its full editable body — returned by GET one (for the
+ *  builder to open). `body` is the opaque CtorQuest JSON the server round-trips. */
+export interface ConstructorQuestFullWire extends ConstructorQuestWire {
+  body: unknown;
+}
+
+/** Create/save payload: the denormalized list fields + the full opaque body. */
+export interface ConstructorQuestUpsert {
+  name: string;
+  cover: string | null;
+  steps_count: number;
+  body: unknown;
+}
+
 /** AccessGrant as served by GET /api/grants. */
 export interface GrantWire {
   player_id: string;
@@ -181,6 +216,39 @@ export const api = {
   // Published + grants (for cabinet/market live)
   listQuests: () => apiFetch<PublishedQuestWire[]>('/api/quests'),
   listGrants: () => apiFetch<GrantWire[]>('/api/grants'),
+
+  // Constructor dashboard (editor-gated, like publish). adminHeaders() forwards the
+  // ops token so an operator build (NEXT_PUBLIC_ADMIN_TOKEN) reaches the surface
+  // before any editor account exists — and so dev (anonymous + ops token) works;
+  // an editor's Bearer session (always sent via authHeaders) is the public path.
+  listConstructorQuests: () =>
+    apiFetch<ConstructorQuestWire[]>('/api/constructor/quests', { headers: adminHeaders() }),
+  getConstructorQuest: (id: string) =>
+    apiFetch<ConstructorQuestFullWire>(`/api/constructor/quests/${encodeURIComponent(id)}`, {
+      headers: adminHeaders(),
+    }),
+  createConstructorQuest: (body: ConstructorQuestUpsert & { quest_id: string }) =>
+    apiFetch<ConstructorQuestWire>('/api/constructor/quests', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  saveConstructorQuest: (id: string, body: ConstructorQuestUpsert) =>
+    apiFetch<{ status: string; quest_id: string; updated_at: number }>(
+      `/api/constructor/quests/${encodeURIComponent(id)}/save`,
+      { method: 'POST', headers: adminHeaders(), body: JSON.stringify(body) },
+    ),
+  setConstructorStatus: (id: string, status: CtorStatus) =>
+    apiFetch<ConstructorQuestWire>(`/api/constructor/quests/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ status }),
+    }),
+  deleteConstructorQuest: (id: string) =>
+    apiFetch<{ status: string; quest_id: string }>(
+      `/api/constructor/quests/${encodeURIComponent(id)}/delete`,
+      { method: 'POST', headers: adminHeaders(), body: '{}' },
+    ),
 
   // Identity (player-identity spec): registration attaches email+password to the
   // caller's EXISTING anonymous player id (id never changes); login returns the

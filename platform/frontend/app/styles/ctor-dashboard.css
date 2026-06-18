@@ -1,0 +1,245 @@
+/* GEOHOD QUEST — конструктор-дашборд (главная страница конструктора).
+   Точный порт дизайна «Quest Constructor Dashboard.dc.html» (claude.ai/design).
+   Один акцент (#3b71fe = --blue), шрифт Inter; собственная страница (НЕ .admin/.wsp).
+   Префикс .qcd-* — изолирует от primitives и не задевает lint:ds. */
+
+.qcd-root {
+  min-height: 100vh;
+  background: #f7f8fa;
+  padding-bottom: 96px;
+  color: #1a2b48;
+  font-family: var(--font-body), "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.qcd-root *,
+.qcd-root *::before,
+.qcd-root *::after { box-sizing: border-box; }
+
+@keyframes qcdBgIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes qcdCardIn { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes qcdSkel { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
+@keyframes qcdToast { from { opacity: 0; transform: translate(-50%, 14px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---------- Шапка: на главную (слева) · заголовок (центр) · профиль (справа) ---------- */
+.qcd-header {
+  height: 88px; display: flex; align-items: center; justify-content: center;
+  position: relative; border-bottom: 1px solid #ebedf1; background: #fff;
+}
+.qcd-home {
+  position: absolute; left: 40px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; letter-spacing: .6px; color: var(--blue);
+  cursor: pointer; background: none; border: 0;
+}
+.qcd-home:hover { opacity: .7; }
+.qcd-brand { display: flex; align-items: center; gap: 12px; }
+.qcd-brand__mark {
+  width: 30px; height: 30px; border-radius: 9px; background: var(--blue);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.qcd-brand__name { font-size: 19px; font-weight: 700; letter-spacing: .2px; color: #15151a; }
+
+.qcd-profile { position: absolute; right: 40px; top: 50%; transform: translateY(-50%); }
+.qcd-profile__btn {
+  width: 48px; height: 48px; border-radius: 12px; border: 1px solid #e2e5ea; background: #f3f5f8;
+  display: flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s;
+}
+.qcd-profile__btn:hover { border-color: #c8cdd6; background: #eef0f4; }
+.qcd-menu {
+  position: absolute; right: 0; top: 58px; z-index: 40; background: #fff;
+  border: 1px solid #ebedf1; border-radius: 12px; box-shadow: 0 14px 40px rgba(26,43,72,.16);
+  padding: 7px 0; width: 200px;
+}
+.qcd-menu__head { padding: 6px 16px 9px; border-bottom: 1px solid #f1f2f5; margin-bottom: 5px; }
+.qcd-menu__name { font-size: 14px; font-weight: 700; color: #1a2b48; }
+.qcd-menu__role { font-size: 12px; color: #9098a6; margin-top: 2px; }
+.qcd-menu__item {
+  display: block; width: 100%; text-align: left; padding: 10px 18px;
+  font-size: 14px; font-weight: 500; color: #1a2b48; cursor: pointer; background: none; border: 0;
+}
+.qcd-menu__item:hover { background: #f5f7fb; }
+.qcd-clickaway { position: fixed; inset: 0; z-index: 35; }
+
+/* ---------- Основная колонка ---------- */
+.qcd-main { max-width: 1180px; margin: 0 auto; padding: 52px 40px 0; }
+
+.qcd-welcome-title {
+  text-align: center; font-family: var(--font-serif), "Prata", serif;
+  font-size: 42px; line-height: 1.1; color: #15151a; font-weight: 400;
+}
+.qcd-welcome-text {
+  text-align: center; font-size: 17px; line-height: 1.6; color: #5b6373;
+  margin: 18px auto 0; max-width: 560px;
+}
+.qcd-create-wrap { display: flex; justify-content: center; margin-top: 36px; }
+.qcd-create {
+  display: inline-flex; align-items: center; gap: 11px; background: var(--blue); color: #fff;
+  font-size: 17px; font-weight: 600; padding: 19px 40px; border: 0; border-radius: 14px;
+  box-shadow: 0 12px 26px rgba(59,113,254,.32); transition: background .15s;
+}
+.qcd-create:hover { background: #2e5fe3; }
+
+/* ---------- Фильтры ---------- */
+.qcd-filters {
+  background: #fff; border: 1px solid #edeef2; border-radius: 16px;
+  box-shadow: 0 6px 22px rgba(26,43,72,.05); padding: 22px 24px; margin-top: 54px;
+  display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 20px; align-items: end;
+}
+.qcd-field label {
+  display: block; font-size: 12px; font-weight: 600; letter-spacing: .4px;
+  color: #83858c; margin-bottom: 9px; text-transform: uppercase;
+}
+.qcd-field__wrap { position: relative; }
+.qcd-search-icon { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.qcd-input {
+  width: 100%; height: 52px; border: 1px solid #d7dbe2; border-radius: 11px;
+  padding: 0 16px 0 44px; font-size: 15px; color: #1a2b48; outline: none; background: #fff;
+  transition: border-color .15s, box-shadow .15s;
+}
+.qcd-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(59,113,254,.32); }
+.qcd-select {
+  width: 100%; height: 52px; border: 1px solid #d7dbe2; border-radius: 11px;
+  padding: 0 40px 0 16px; font-size: 15px; color: #1a2b48; background: #fff; outline: none;
+  cursor: pointer; -webkit-appearance: none; appearance: none; transition: border-color .15s;
+}
+.qcd-select:focus { border-color: var(--blue); }
+.qcd-chevron { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+/* ---------- Заголовок секции ---------- */
+.qcd-sechead {
+  display: flex; align-items: baseline; justify-content: space-between; margin: 46px 0 18px;
+}
+.qcd-sechead h2 { font-size: 27px; font-weight: 700; color: #15151a; }
+.qcd-sechead__count { font-size: 14px; color: #83858c; }
+
+/* ---------- Карточка-список ---------- */
+.qcd-listcard {
+  background: #fff; border: 1px solid #edeef1; border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(26,43,72,.05); padding: 8px 26px;
+}
+.qcd-row {
+  display: grid; grid-template-columns: 64px 1fr 168px auto; align-items: center; gap: 22px;
+  padding: 20px 4px; border-bottom: 1px solid #f0f1f4;
+}
+.qcd-row:last-child { border-bottom: 0; }
+.qcd-thumb {
+  width: 64px; height: 52px; border-radius: 9px; display: flex; align-items: center;
+  justify-content: center; overflow: hidden; flex: none;
+}
+.qcd-thumb span { font-family: var(--font-serif), "Prata", serif; font-size: 22px; color: rgba(255,255,255,.92); }
+.qcd-row__body { min-width: 0; }
+.qcd-row__name {
+  font-size: 16px; font-weight: 600; color: #1a2b48; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.qcd-row__meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px;
+  font-size: 13px; color: #9098a6;
+}
+.qcd-row__meta span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* статус-селект в строке */
+.qcd-status { position: relative; }
+.qcd-status__dot {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  width: 8px; height: 8px; border-radius: 50%; pointer-events: none;
+}
+.qcd-status select {
+  width: 100%; height: 46px; border: 0; border-radius: 10px; padding: 0 34px 0 30px;
+  font-size: 14px; font-weight: 600; outline: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.qcd-status__chevron { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+/* действия */
+.qcd-actions { display: flex; align-items: center; gap: 9px; }
+.qcd-btn-edit {
+  height: 46px; padding: 0 20px; background: var(--blue); color: #fff; font-size: 14px;
+  font-weight: 600; border: 0; border-radius: 10px; white-space: nowrap; transition: background .15s;
+}
+.qcd-btn-edit:hover { background: #2e5fe3; }
+.qcd-btn-run {
+  height: 46px; padding: 0 18px; background: #fff; color: var(--blue); font-size: 14px;
+  font-weight: 600; border: 1.5px solid var(--blue); border-radius: 10px; white-space: nowrap; transition: background .15s;
+}
+.qcd-btn-run:hover { background: #eff4ff; }
+.qcd-iconbtn {
+  width: 46px; height: 46px; border: 1px solid #d7dbe2; border-radius: 10px; background: #fff;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: border-color .15s, background .15s;
+}
+.qcd-iconbtn:hover { border-color: var(--blue); background: #eff4ff; }
+.qcd-iconbtn--danger { border-color: #f3d4dc; }
+.qcd-iconbtn--danger:hover { border-color: #e75a7c; background: #fdeef2; }
+
+/* ---------- Состояния (загрузка / пусто / ничего не найдено) ---------- */
+.qcd-skelrow {
+  display: flex; align-items: center; gap: 22px; padding: 22px 4px; border-bottom: 1px solid #f0f1f4;
+}
+.qcd-skel { background: #eef0f4; border-radius: 6px; animation: qcdSkel 1.3s ease-in-out infinite; }
+
+.qcd-empty { background: #fff; border: 1px solid #edeef1; border-radius: 20px; padding: 76px 30px; text-align: center; }
+.qcd-empty__icon {
+  width: 72px; height: 72px; border-radius: 18px; background: #eff4ff;
+  display: flex; align-items: center; justify-content: center; margin: 0 auto;
+}
+.qcd-empty__title { font-size: 20px; font-weight: 700; color: #1a2b48; margin-top: 22px; }
+.qcd-empty__text { font-size: 15px; line-height: 1.6; color: #83858c; margin: 10px auto 0; max-width: 420px; }
+.qcd-empty__btn {
+  margin-top: 24px; display: inline-flex; align-items: center; gap: 9px; background: var(--blue);
+  color: #fff; font-size: 15px; font-weight: 600; padding: 14px 28px; border: 0; border-radius: 12px; transition: background .15s;
+}
+.qcd-empty__btn:hover { background: #2e5fe3; }
+.qcd-empty__clear {
+  margin-top: 22px; background: #fff; color: var(--blue); font-size: 15px; font-weight: 600;
+  padding: 12px 28px; border: 1.5px solid var(--blue); border-radius: 11px; transition: background .15s;
+}
+.qcd-empty__clear:hover { background: #eff4ff; }
+
+/* ---------- Модалка удаления ---------- */
+.qcd-ovl {
+  position: fixed; inset: 0; z-index: 80; background: rgba(20,24,33,.5);
+  display: flex; align-items: center; justify-content: center; padding: 30px; animation: qcdBgIn .2s ease;
+}
+.qcd-modal {
+  background: #fff; border-radius: 20px; width: 460px; max-width: 100%; padding: 34px 34px 28px;
+  box-shadow: 0 30px 80px rgba(20,24,33,.4); animation: qcdCardIn .25s ease;
+}
+.qcd-modal__icon {
+  width: 56px; height: 56px; border-radius: 16px; background: #fdeef2;
+  display: flex; align-items: center; justify-content: center;
+}
+.qcd-modal h3 { font-size: 21px; font-weight: 700; color: #15151a; margin-top: 20px; }
+.qcd-modal p { font-size: 15px; line-height: 1.6; color: #5b6373; margin-top: 10px; }
+.qcd-modal__row { display: flex; gap: 12px; margin-top: 26px; }
+.qcd-modal__cancel {
+  flex: 1; height: 50px; background: #fff; color: #1a2b48; font-size: 15px; font-weight: 600;
+  border: 1.5px solid #d7dbe2; border-radius: 12px; transition: background .15s;
+}
+.qcd-modal__cancel:hover { background: #f5f7fb; }
+.qcd-modal__confirm {
+  flex: 1; height: 50px; background: #e75a7c; color: #fff; font-size: 15px; font-weight: 600;
+  border: 0; border-radius: 12px; transition: background .15s;
+}
+.qcd-modal__confirm:hover { background: #d8456a; }
+.qcd-modal__confirm:disabled { opacity: .6; cursor: default; }
+
+/* ---------- Тост ---------- */
+.qcd-toast {
+  position: fixed; left: 50%; bottom: 36px; z-index: 90; background: #15151a; color: #fff;
+  font-size: 14px; font-weight: 500; padding: 14px 24px; border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.3); animation: qcdToast .25s ease;
+}
+.qcd-error-banner {
+  background: rgba(231,90,124,.08); color: #c0395c; border: 1px solid rgba(231,90,124,.25);
+  border-radius: 12px; padding: 14px 18px; font-size: 14px; font-weight: 600; margin-top: 24px;
+}
+
+/* ---------- Адаптив (десктоп-инструмент, но не ломаемся на узких) ---------- */
+@media (max-width: 880px) {
+  .qcd-home { left: 16px; }
+  .qcd-profile { right: 16px; }
+  .qcd-main { padding: 36px 16px 0; }
+  .qcd-filters { grid-template-columns: 1fr; gap: 14px; }
+  .qcd-row { grid-template-columns: 1fr; gap: 12px; }
+  .qcd-actions { flex-wrap: wrap; }
+}
