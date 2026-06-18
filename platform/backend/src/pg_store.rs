@@ -263,21 +263,6 @@ impl PgFactStore {
         Ok(out)
     }
 
-    /// See [`crate::store::InMemoryFactStore::seed_completion`]. The completion
-    /// metric reads `bonus_awards`, so a demo completion is one idempotent row
-    /// there (the same table real play's completion bonus writes).
-    pub async fn seed_completion(&self, player_id: &str, quest_id: &str) -> Result<(), AppError> {
-        sqlx::query(
-            "INSERT INTO bonus_awards (player_id, quest_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        )
-        .bind(player_id)
-        .bind(quest_id)
-        .execute(&self.pool)
-        .await
-        .map_err(internal)?;
-        Ok(())
-    }
-
     /// See [`crate::store::InMemoryFactStore::run_legacy_migration`].
     pub async fn run_legacy_migration(
         &self,
@@ -747,16 +732,6 @@ impl PgConstructorStore {
         Self { pool }
     }
 
-    /// See [`crate::store::InMemoryConstructorStore::is_empty`].
-    pub async fn is_empty(&self) -> Result<bool, AppError> {
-        let row = sqlx::query("SELECT COUNT(*) AS n FROM constructor_quests")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(internal)?;
-        let n: i64 = row.try_get("n").map_err(internal)?;
-        Ok(n == 0)
-    }
-
     /// See [`crate::store::InMemoryConstructorStore::create`]. A conflicting id
     /// affects zero rows (ON CONFLICT DO NOTHING) and maps to 409.
     pub async fn create(
@@ -790,30 +765,6 @@ impl PgConstructorStore {
             )));
         }
         Ok(quest.summary())
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::insert_if_absent`].
-    pub async fn insert_if_absent(&self, quest: ConstructorQuest) -> Result<(), AppError> {
-        sqlx::query(
-            "INSERT INTO constructor_quests
-                (quest_id, author_id, author_name, name, status, cover, steps_count, body, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             ON CONFLICT DO NOTHING",
-        )
-        .bind(&quest.quest_id)
-        .bind(&quest.author_id)
-        .bind(&quest.author_name)
-        .bind(&quest.name)
-        .bind(&quest.status)
-        .bind(&quest.cover)
-        .bind(quest.steps_count as i32)
-        .bind(&quest.body)
-        .bind(quest.created_at as i64)
-        .bind(quest.updated_at as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(internal)?;
-        Ok(())
     }
 
     /// See [`crate::store::InMemoryConstructorStore::list_summaries`].
