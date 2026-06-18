@@ -2,7 +2,7 @@
 
 Clean, minimal source tree containing **only** the production project files for the GeoQuest quest platform.
 
-- **backend/** — Rust 1.96 + Axum 0.8 HTTP API (facts, snapshots, grants, bundles later)
+- **backend/** — Rust 1.96 + Axum 0.8 HTTP API: event-sourced facts, frozen snapshots, access grants, bundles, identity/roles; in-memory or PostgreSQL storage (selected by `DATABASE_URL`)
 - **frontend/** — Next.js 16.2 + React 19 (RSC-first, PWA player, marketplace, internal constructor)
 - Root orchestration for install, dev, build, test, lint across parts.
 
@@ -19,8 +19,8 @@ Clean, minimal source tree containing **only** the production project files for 
 - TDD, SOLID, DRY, KISS, YAGNI
 - Highest readability and maintainability
 - Full adherence to:
-  - [agents/rust.md](../../agents/rust.md) (no `.unwrap()` in prod paths, `thiserror` + `anyhow`, tracing not println, doc comments, `cargo fmt` + `clippy -D warnings`, tests, 4-space, meaningful names, etc.)
-  - [agents/react.md](../../agents/react.md) (eliminate waterfalls at the source, RSC composition, module-level hoisting where appropriate, avoid barrel abuse, narrow effects, explicit conditionals, etc.)
+  - [agents/rust.md](../agents/rust.md) (no `.unwrap()` in prod paths, `thiserror` + `anyhow`, tracing not println, doc comments, `cargo fmt` + `clippy -D warnings`, tests, 4-space, meaningful names, etc.)
+  - [agents/react.md](../agents/react.md) (eliminate waterfalls at the source, RSC composition, module-level hoisting where appropriate, avoid barrel abuse, narrow effects, explicit conditionals, etc.)
 - Backend: layered (config, errors, router/state), graceful shutdown, timeout + trace + cors middleware, structured logs.
 - Frontend: pure RSC by default, no premature client components or global mutable state, small focused pieces.
 
@@ -71,28 +71,29 @@ After changes to Rust: always run `cargo fmt`, `cargo clippy -- -D warnings`, `c
 - Recorded MVP cuts: no email confirmation/password reset/rate limiting/token expiry; login does not merge a device's local anonymous progress into the account.
 - E2E: `node e2e-identity.mjs` (servers on :8080/:3000) covers anonymous buy → play → register → cross-device login → enforcement; `node e2e-player-check.mjs` covers the production player (access gate, all 7 templates on «Ирония судьбы», 2nd-wrong hint popup, real offline banner, no debug chrome).
 
-See `../blueprint/TECH.md`, `../blueprint/SPEC.md`, `../blueprint/PLAN.md`, and `../blueprint/CONCEPT.md` for the non-negotiable model (event-sourced facts, client-validated snapshots, frozen supporting values, 4 templates, etc.). Historical supporting material (including prior business docs and analyses) is archived in `../old-knowledgebase/`.
+See `../blueprint/TECH.md`, `../blueprint/SPEC.md`, `../blueprint/PLAN.md`, and `../blueprint/CONCEPT.md` for the non-negotiable model (event-sourced facts, client-validated snapshots, frozen supporting values, 7 page templates, etc.). Historical supporting material (including prior business docs and analyses) is archived in `../old-knowledgebase/`.
 
 ## Project layout (current)
 
 ```
 platform/
-├── .gitignore
 ├── package.json          # npm workspaces root + orchestration scripts
 ├── README.md
+├── goldens/              # frozen demo snapshots + shared parity fixtures (parity/)
 ├── backend/
-│   ├── Cargo.toml
-│   ├── rust-toolchain.toml
+│   ├── Cargo.toml · rust-toolchain.toml
+│   ├── migrations/       # sqlx Postgres migrations (run at startup)
 │   └── src/
-│       ├── main.rs       # Axum server, router, health, graceful shutdown, tests
+│       ├── main.rs       # Axum server: router, handlers, auth gates, graceful shutdown, integration tests
 │       ├── config.rs     # env-driven AppConfig (no unwraps)
-│       └── errors.rs     # thiserror + IntoResponse, structured errors only
-└── frontend/
-    ├── app/
-    │   ├── layout.tsx    # RSC root, Geist fonts (hoisted), lang=ru, metadata
-    │   └── page.tsx      # Pure RSC landing reflecting 3 components
-    ├── next.config.ts
-    └── ...
+│       ├── errors.rs     # thiserror + IntoResponse, structured errors only
+│       ├── auth.rs       # identity primitives (argon2, session tokens, roles)
+│       ├── facts.rs      # the event vocabulary + pure deterministic projectors
+│       ├── grants.rs     # lifetime access-grant model (idempotent by player+quest)
+│       ├── payments.rs   # PaymentProvider seam (always-approving mock)
+│       ├── store.rs      # store dispatch + in-memory backend (the executable spec)
+│       └── pg_store.rs   # PostgreSQL backend (mirrors in-memory exactly)
+└── frontend/             # see frontend/README.md for its app/ + lib/ layout
 ```
 
 ## Adding future packages (when needed)
@@ -121,11 +122,14 @@ Current change example: `openspec status --change initial-project-setup`
 
 The authoritative source of truth for *what* to build and the recommended steps to start development is `../blueprint/` (especially PLAN.md). All prior exploratory material has been moved to `../old-knowledgebase/`.
 
-## Verification performed at creation time
+## Quality gates (every change)
 
-- `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` — all green.
-- `npm run build` (frontend) — clean static generation, TypeScript happy.
-- All edits passed adversarial review against the two agent guideline files + KISS/YAGNI (no DB, no over-extracted crates, no client components on landing, no barrel imports introduced, etc.).
+- Backend: `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` — all green.
+  The integration suite runs the same scenarios against both storage backends; the
+  PostgreSQL pass self-skips without `DATABASE_URL` (see `backend/.env.example`).
+- Frontend: `npm test` (vitest), `npm run build`, `npm run lint` — TypeScript strict, clean.
+- Every edit is held to the two agent guideline files + KISS/YAGNI: no over-extracted
+  crates, no premature client components, no barrel imports.
 
 ## License / contribution
 

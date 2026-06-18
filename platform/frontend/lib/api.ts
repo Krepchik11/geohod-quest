@@ -1,14 +1,11 @@
 /**
- * Central API client (YAGNI simple, robust per constraints).
- * Uses NEXT_PUBLIC_API_URL (recommended when using custom ports) || http://localhost:8080 fallback.
- * 
- * For your custom ports setup:
- *   PORT=8087 npm run dev:backend
- *   NEXT_PUBLIC_API_URL=http://localhost:8087 PORT=8089 npm run dev:frontend
+ * Central API client. Every backend request goes through `apiFetch`, which attaches
+ * the identity headers (Bearer for a registered session, X-Player-Id for an anonymous
+ * device — see lib/identity) and normalizes non-2xx responses into `ApiError`
+ * carrying the HTTP status.
  *
- * The NEXT_PUBLIC_ prefix makes the value available in the browser bundle.
- *
- * All calls go through here. Idempotent where backend supports.
+ * The base URL is NEXT_PUBLIC_API_URL, inlined into the browser bundle at build time
+ * (see `resolveApiBase` for the production-safety guard against the localhost fallback).
  */
 
 import { authHeaders, type Session } from './identity';

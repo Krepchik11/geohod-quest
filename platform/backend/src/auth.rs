@@ -91,11 +91,14 @@ pub fn verify_password(stored_hash: &str, password: &str) -> bool {
 
 /// Opaque session token: 32 random bytes, hex-encoded (revocable server-side).
 pub fn generate_token() -> String {
+    const HEX: [u8; 16] = *b"0123456789abcdef";
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
+    // Single 64-byte allocation; push nibbles directly (no per-byte `format!` String).
     let mut out = String::with_capacity(64);
     for b in bytes {
-        out.push_str(&format!("{b:02x}"));
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
     }
     out
 }

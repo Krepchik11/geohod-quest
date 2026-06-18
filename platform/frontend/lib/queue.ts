@@ -271,11 +271,6 @@ export async function getLatestBundleForQuest(questId: string): Promise<BundleRo
   return rows.reduce((best, r) => (r.version > best.version ? r : best));
 }
 
-/** All downloaded bundles (My Quests download states). */
-export async function listBundles(): Promise<BundleRow[]> {
-  return (await db()).getAll('bundles');
-}
-
 // ---------- device reset ----------
 
 /**

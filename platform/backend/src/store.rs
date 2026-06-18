@@ -33,6 +33,39 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Current UTC time as an RFC3339 string (e.g. `"2026-06-18T12:34:56Z"`).
+///
+/// This is the impure clock read the pure grant helper injects, so an audit
+/// timestamp is a real instant — matching the TypeScript reference
+/// (`new Date().toISOString()`). Formatted from [`now_secs`] without a date crate
+/// (see [`rfc3339_from_unix`]) to keep the dependency surface minimal.
+pub fn now_rfc3339() -> String {
+    rfc3339_from_unix(now_secs())
+}
+
+/// Format Unix seconds as a UTC RFC3339 timestamp. Pure and total.
+///
+/// Uses Howard Hinnant's civil-from-days algorithm (epoch shifted to 0000-03-01
+/// so leap days fall at the end of the era), which is exact for every day in the
+/// proleptic Gregorian calendar.
+fn rfc3339_from_unix(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let tod = secs % 86_400;
+    let (hour, minute, second) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097); // day-of-era [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day-of-year (Mar 1 = 0)
+    let mp = (5 * doy + 2) / 153; // month shifted (Mar = 0) [0, 11]
+    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = yoe + era * 400 + i64::from(month <= 2);
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
 /// Registry entry for one attempt: who plays which quest on which frozen snapshot.
 /// The snapshot binding is set once at creation and never changes (version freeze).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,8 +285,14 @@ impl InMemoryGrantStore {
     ) -> (AccessGrant, bool) {
         let key = (player.to_string(), quest.to_string());
         let existing = self.grants.get(&key).cloned();
-        let (grant, created) =
-            create_grant_idemp(existing.as_ref(), player, quest, source, source_ref);
+        let (grant, created) = create_grant_idemp(
+            existing.as_ref(),
+            player,
+            quest,
+            source,
+            source_ref,
+            now_rfc3339(),
+        );
         if created {
             self.grants.insert(key, grant.clone());
         }
@@ -742,6 +781,17 @@ mod tests {
         let mut s = InMemoryFactStore::new();
         let meta = s.create_attempt("player-1", quest, "snap-v1");
         (s, meta)
+    }
+
+    #[test]
+    fn rfc3339_formats_known_unix_instants() {
+        // Anchors verifiable by hand: epoch, one day later, one (non-leap) year
+        // later, and the well-known 10^9 instant — the last only lands correctly
+        // if the 2000 leap day is counted, so it exercises the calendar math.
+        assert_eq!(rfc3339_from_unix(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339_from_unix(86_400), "1970-01-02T00:00:00Z");
+        assert_eq!(rfc3339_from_unix(31_536_000), "1971-01-01T00:00:00Z");
+        assert_eq!(rfc3339_from_unix(1_000_000_000), "2001-09-09T01:46:40Z");
     }
 
     #[test]
