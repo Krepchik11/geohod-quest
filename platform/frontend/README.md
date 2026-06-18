@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GeoQuest frontend (Next.js 16 · React 19)
 
-## Getting Started
+The marketplace, the offline-capable PWA quest player, and the internal quest
+constructor. App Router, RSC-first; client components only where interactivity or
+local persistence demands them.
 
-First, run the development server:
+> **Read [`AGENTS.md`](./AGENTS.md) first.** This is Next.js 16 — APIs and
+> conventions differ from older versions. Check `node_modules/next/dist/docs/`
+> before using a Next API you're unsure about.
+
+## Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev        # dev server (http://localhost:3000)
+npm run build      # production build
+npm test           # vitest run (the pure model + projector suite)
+npm run lint       # eslint (next config)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The backend base URL is `NEXT_PUBLIC_API_URL` (inlined into the bundle at build
+time; falls back to `http://localhost:8080` only in dev — a production build with
+it unset throws, see `lib/api.ts`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Layout
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/
+  page.tsx            landing + marketplace (#shop)
+  quest/              the production player (offline PWA): BundleGate → StartGate → QuestPlayerClient
+  player/             presentational player components (paper frame, step views)
+  quest-editor/       the constructor (editor-gated): Workspace → Builder → PageEditor → PublishPanel
+  admin/              user/role management (admin-gated)
+  auth/ profile/ my-quests/   account + library
+  SiteHeader.tsx      role-aware nav
+lib/
+  shared-model.ts     wire types + pure projectors (projectState/projectBalance) — MUST match the Rust fold
+  constructor-model.ts editor model + publish gates
+  queue.ts            IndexedDB fact queue (offline append-only log + bundles)
+  sync.ts             flush controller (single-flight, attempt registration)
+  identity.ts         anonymous-first device id + session (who is playing)
+  api.ts              the single API client (attaches identity, normalizes errors)
+  roles.ts            capability predicates (admin ⊃ editor ⊃ player)
+```
 
-## Learn More
+## How it fits together
 
-To learn more about Next.js, take a look at the following resources:
+- **Identity** (`lib/identity.ts`): the device mints `dev:<uuid>` and plays offline
+  with no round-trip. Registration attaches an account to that same id (zero
+  migration); a session swaps in the account id. `authHeaders()` sends `Bearer` for
+  a session, `X-Player-Id` for an anonymous device.
+- **Offline play** (`lib/queue.ts` + `lib/sync.ts`): facts append to IndexedDB
+  immediately (write-through); `sync.flush*` drains pending facts to the server when
+  online, single-flight per attempt. The reducer in `QuestPlayerClient` is the UI
+  source of truth; the queue is durable persistence.
+- **Parity**: the projectors in `lib/shared-model.ts` mirror the Rust backend fold
+  exactly. The shared fixtures in `../goldens/parity/` are executed by both this
+  suite (`lib/__tests__/parity.test.ts`) and the backend's — one-sided drift fails a
+  suite.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [`../README.md`](../README.md) for the monorepo and [`../../blueprint/`](../../blueprint/)
+for the canonical product spec (CONCEPT / SPEC / TECH / PLAN).

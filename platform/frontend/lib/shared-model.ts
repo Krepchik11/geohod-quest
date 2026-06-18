@@ -1,8 +1,11 @@
 /**
- * Technology-agnostic shared model for GeoQuest (mirrors blueprint/SPEC.md + goldens-clean structure exactly).
- * Used for TDD goldens, pure functions, and future slices (constructor, player, etc.).
- * RU-focused per v1 constraints. All amounts frozen in snapshots.
- * See goldens-clean/README.md for population rules and iteration history.
+ * Technology-agnostic shared model for GeoQuest, mirroring blueprint/SPEC.md.
+ *
+ * Home of the wire types (QuestSnapshot, GameStep, Fact, AccessGrant) and the pure
+ * deterministic projectors (projectState/projectBalance/latestRating). The
+ * projectors MUST match the Rust backend fold for identical input — the shared
+ * fixtures in platform/goldens/parity/ are executed by both this suite and the
+ * backend's. All coin amounts are frozen in the snapshot at publish time.
  */
 
 export interface RichContent {
@@ -80,11 +83,10 @@ export interface Supporting {
 export interface GameStep {
   position: number | null;
   template: 'start' | 'video' | 'task_no' | 'task_answer' | 'continue' | 'route_video' | 'congrats';
-  // Aligned to new SPEC: content for rich text, media with images/video.
-  // Kept rich_content alias for existing goldens/ctor during transition (YAGNI full refactor yet).
-  // Full production will use content + media.images per design/player/components.jsx.
-  content?: Record<string, unknown>; // new SPEC shape
-  rich_content: RichContent; // compat
+  /** Structured rich-text shape (SPEC). `rich_content` is the rendered-by-the-player
+   *  alias both the goldens and the constructor currently populate. */
+  content?: Record<string, unknown>;
+  rich_content: RichContent;
   media: Media;
   completion: Completion;
   supporting?: Supporting;
@@ -152,14 +154,10 @@ export function loadPlaythroughGolden(data: unknown): PlaythroughGolden {
 }
 
 /**
- * Pure isAnswerCorrect: exact client matching (basic membership/contains after trim+lower).
- * Single source of truth for ctor Test match + player validation.
- * Matches blueprint locked decisions (simple version; advanced norm deferred).
- */
-/**
- * Pure isAnswerCorrect — VERBATIM from design/player/matcher.js and new SPEC.
- * Single source (ctor test box + player submit + goldens + bundle validator).
- * Exact membership after trim+toLower (no includes, no extra norm).
+ * Exact answer matching: membership in the acceptable list after trim + lowercase
+ * (no substring, no fuzzy normalization — per the locked SPEC decision). The single
+ * source of truth shared by the constructor's test box, the player's submit, the
+ * goldens, and the bundle validator. Mirrors design/player/matcher.js.
  */
 export function isAnswerCorrect(submitted: string, acceptable: string[] | null | undefined): boolean {
   const norm = (s: string) => String(s).trim().toLowerCase();
@@ -198,9 +196,8 @@ export function validateForPublish(draft: unknown): { errors: string[]; warnings
   return { errors, warnings, estBundleMB: 0 /* stub; real in bundle packer */ };
 }
 
-/** Pure serialize: produces frozen snapshot shape for publish/bundle (per SPEC). */
+/** Pure serialize: deep-clone a draft into the frozen snapshot shape for publish. */
 export function serializeToSnapshot(draft: unknown): QuestSnapshot {
-  // Basic freeze + shape; real would deep clone + integrity hash
   const d = draft as { steps?: unknown; golden_id?: string; name?: string; snapshot_version?: number };
   if (!d?.steps) throw new Error('Invalid draft for serialize');
   return {
@@ -212,7 +209,7 @@ export function serializeToSnapshot(draft: unknown): QuestSnapshot {
   } as QuestSnapshot;
 }
 
-/** Deterministic projectBalance: sum signed coins_delta from facts (per TECH). */
+/** Deterministic balance: plain signed sum of coins_delta. May be negative (SPEC). */
 export function projectBalance(facts: Fact[]): number {
   return facts.reduce((bal, f) => bal + (f.coins_delta || 0), 0);
 }
@@ -323,11 +320,9 @@ export function deriveSyncCorrections(local: ProjectedState, authoritative: Proj
 }
 
 /**
- * AccessGrant: lifetime idempotent source-audited record (per PLAN/SPEC/TECH Commerce + marketplace-grants spec).
- * Key for idemp/lifetime: (player_id, quest_id) -- source is audit only (first wins on concurrent/double).
- * Survives versions; required before attempt (or free flag).
- * Used 100% for listing/owned (via snapshots) + post-grant facts/attempt eligibility (via facts projectors + this).
- * YAGNI: no persistent store here (in-mem backend mirrors); stub for TDD goldens first.
+ * A lifetime ownership record (the client mirror of the backend AccessGrant): one
+ * player's access to one quest. Idempotent by (player_id, quest_id) — source is
+ * audit-only, first wins. Survives version publishes and gates attempt creation.
  */
 export interface AccessGrant {
   player_id: string;
@@ -338,10 +333,9 @@ export interface AccessGrant {
 }
 
 /**
- * createGrantIdemp (pure, deterministic): create or return existing for (player,quest).
- * Checks (player,quest) match (ignore source for key per design reconciliation to lifetime one).
- * Returns existing (source preserved from first) or new with now ISO granted_at + passed source.
- * Pure, no side effects, deterministic. 100% reuse for marketplace listing/owned + post-grant eligibility.
+ * Pure idempotent grant decision mirroring the backend helper: return the existing
+ * grant for (player, quest) unchanged (first source preserved), else a new one
+ * stamped with the current ISO timestamp. Deterministic and side-effect-free.
  */
 export function createGrantIdemp(existing: AccessGrant | null, player: string, quest: string, source: AccessGrant['source']): {grant: AccessGrant; created: boolean} {
   if (existing && existing.player_id === player && existing.quest_id === quest) {
