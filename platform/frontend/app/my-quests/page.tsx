@@ -12,8 +12,8 @@ import { currentPlayerId } from '../../lib/identity';
 /**
  * «Мои квесты» — live collection (P4): published quests × grants × local
  * queue (attempt state) × bundles store (download state). Structure, classes
- * and RU copy per design/myquests/screens.jsx; design demo rows remain only
- * as a clearly-labeled fallback when the backend is unreachable.
+ * and RU copy per design/myquests/screens.jsx. 100% live data: an unreachable
+ * catalog shows an honest error, never fabricated demo rows.
  *
  * Player-facing copy (UX): the player only cares "can I play this offline?".
  * Bundle size, "скачан/работает офлайн" wording, and quest version numbers are
@@ -24,8 +24,8 @@ import { currentPlayerId } from '../../lib/identity';
 interface MqRow {
   quest_id: string;
   title: string;
-  city: string;
-  duration: string;
+  city: string | null;
+  duration: string | null;
   photo: string | null;
   state: 'new' | 'progress' | 'done';
   pos?: number;
@@ -41,19 +41,7 @@ interface MqRow {
 type Collection =
   | { source: 'loading' }
   | { source: 'live'; rows: MqRow[] }
-  | { source: 'demo-fallback'; rows: MqRow[] };
-
-/** Design fixture rows — shown ONLY when the backend is unreachable, labeled. */
-const DEMO_FALLBACK_ROWS: MqRow[] = [
-  {
-    quest_id: 'mystery-fortress-v1',
-    title: 'Тайна крепости (демо)',
-    city: 'Нови Сад', duration: '2 часа',
-    photo: null,
-    state: 'new', version: 1, publishedSnapshotId: '',
-    bundle: null, updateAvailable: false,
-  },
-];
+  | { source: 'error' };
 
 function formatDate(iso: string | undefined): string {
   if (!iso) return '';
@@ -77,8 +65,9 @@ async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
   return {
     quest_id: meta.quest_id,
     title: meta.name,
-    city: 'Нови Сад',
-    duration: '2 часа',
+    // Real author values from the catalog; null simply hides that meta item.
+    city: meta.city,
+    duration: meta.duration,
     // primary_comic is a media token today (e.g. "comic-fortress"), a path only later
     photo: meta.primary_comic?.startsWith('/') ? meta.primary_comic : null,
     state,
@@ -95,11 +84,12 @@ async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
   };
 }
 
-function MqMeta({ city, duration }: { city: string; duration: string }) {
+function MqMeta({ city, duration }: { city: string | null; duration: string | null }) {
+  if (!city && !duration) return null;
   return (
     <p className="mq-row__meta">
-      <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-pin--navy.svg)' }} />{city}</span>
-      <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-clock-ring--navy.svg)' }} />{duration}</span>
+      {city && <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-pin--navy.svg)' }} />{city}</span>}
+      {duration && <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-clock-ring--navy.svg)' }} />{duration}</span>}
     </p>
   );
 }
@@ -193,7 +183,7 @@ async function loadCollection(): Promise<Collection> {
   try {
     quests = await api.listQuests();
   } catch {
-    return { source: 'demo-fallback', rows: DEMO_FALLBACK_ROWS };
+    return { source: 'error' };
   }
   let ownedIds = new Set<string>();
   try {
@@ -238,7 +228,7 @@ export default function MyQuestsPage() {
     }
   }, []);
 
-  const rows = collection.source === 'loading' ? [] : collection.rows;
+  const rows = collection.source === 'live' ? collection.rows : [];
 
   return (
     <div className="site min-h-screen" style={{ background: '#fff', display: 'flex', flexDirection: 'column' }}>
@@ -247,14 +237,12 @@ export default function MyQuestsPage() {
         <h2 className="co-title">Мои квесты</h2>
         <p className="co-sub">Все купленные и полученные квесты. Доступ бессрочный — проходите когда удобно.</p>
 
-        {collection.source === 'demo-fallback' && (
-          <p className="mq-sub" style={{ color: '#B45309' }}>
-            демо-данные — сервер недоступен, реальная коллекция появится после подключения
-          </p>
-        )}
-
         {collection.source === 'loading' ? (
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>
+        ) : collection.source === 'error' ? (
+          <p className="mq-sub" style={{ marginTop: 24, color: '#B45309' }}>
+            Не удалось загрузить коллекцию — проверьте подключение и обновите страницу.
+          </p>
         ) : rows.length === 0 ? (
           <div className="card mq-empty" style={{ marginTop: 24 }}>
             <div className="ic-ring">?</div>

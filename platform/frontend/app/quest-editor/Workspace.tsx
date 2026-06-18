@@ -333,6 +333,11 @@ export default function Workspace() {
         snapshot_version: snapshot.snapshot_version,
         snapshot_id: `${active.id}-v${snapshot.snapshot_version}`,
         snapshot,
+        // Real store-card fields the author set in Settings → the catalog shows
+        // these instead of fabricating city/duration/price.
+        city: active.meta.city,
+        duration: active.meta.duration,
+        price: active.meta.price,
       });
       const sizeLabel = computeGates(active).sizeLabel;
       patchQuest((q) => ({

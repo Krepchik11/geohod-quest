@@ -18,6 +18,11 @@ const wire = (
   template_summary: '',
   snapshot_version: 1,
   snapshot_id: `${quest_id}-v1`,
+  city: null,
+  duration: null,
+  price: null,
+  rating_avg: 0,
+  rating_count: 0,
 });
 
 describe('nextQuestsForCatalog (post-finale catalog selection)', () => {

@@ -64,7 +64,11 @@ export interface AdminUserWire {
   created_at: number;
 }
 
-/** Published quest meta as served by GET /api/quests (mirrors backend PublishedMeta). */
+/** Published quest meta as served by GET /api/quests (mirrors backend CatalogQuest:
+ *  the stored PublishedMeta + the live aggregate rating). `city`/`duration`/`price`
+ *  are the author's real store-card fields (null when left blank / unset); the store
+ *  card shows exactly these, never fabricated values. `rating_count === 0` means
+ *  "no ratings yet" — shown honestly rather than as a number. */
 export interface PublishedQuestWire {
   quest_id: string;
   name: string;
@@ -72,6 +76,14 @@ export interface PublishedQuestWire {
   template_summary: string;
   snapshot_version: number;
   snapshot_id: string;
+  city: string | null;
+  duration: string | null;
+  /** Whole rubles; 0 is an explicitly free quest, null is unset (legacy). */
+  price: number | null;
+  /** Mean finale rating (1–5) of the published version; 0.0 when unrated. */
+  rating_avg: number;
+  /** Number of attempts that left a finale rating. */
+  rating_count: number;
 }
 
 /** Editorial lifecycle of a constructor quest (mirrors backend CTOR_STATUS_*). */

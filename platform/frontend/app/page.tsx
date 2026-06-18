@@ -9,7 +9,9 @@ import { currentPlayerId } from '../lib/identity';
 /**
  * Landing — exact design/site/Главная.html (HANDOFF first source + user "design ... first source of page style").
  * Uses .site + .container + hero/quest-card/features/footer exact classes + copy + composite .ic + assets.
- * 1 dynamic card from golden for TDD fidelity; others per design. Buy wires to existing grant (env later).
+ * The store grid is 100% live: every card is a real published quest from GET
+ * /api/quests, and every field (city/duration/price/rating) is the author's real
+ * data — never a demo card or fabricated value. Buy wires to the grant endpoint.
  * SiteHeader small client island for dropdown (exact js/site.js behavior).
  */
 export type PublishedQuest = {
@@ -32,21 +34,34 @@ function coverUrl(primaryComic?: string | null): string {
   return `url('${isImageRef ? v : CARD_PLACEHOLDER}')`;
 }
 
-/** Design demo card — rendered ONLY when the backend is unreachable (labeled). */
-const DEMO_MARKET_CARD: PublishedQuestWire = {
-  quest_id: 'mystery-fortress-v1',
-  name: 'Ирония Судьбы: по следам исторических личностей',
-  primary_comic: null,
-  template_summary: 'демо',
-  snapshot_version: 1,
-  snapshot_id: 'golden-mystery-fortress-v1',
-};
+/** Russian plural for оценка (rating). */
+function ratingPlural(n: number): string {
+  const m = n % 10;
+  const h = n % 100;
+  if (m === 1 && h !== 11) return 'оценка';
+  if (m >= 2 && m <= 4 && (h < 12 || h > 14)) return 'оценки';
+  return 'оценок';
+}
+
+/** One-decimal rating without a trailing ".0" (5 → "5", 4.5 → "4.5"). */
+function fmtRating(avg: number): string {
+  return (Math.round(avg * 10) / 10).toString();
+}
+
+/** Price chip text: a real number of rubles, "Бесплатно" for 0, or "" when unset. */
+function priceLabel(price: number | null): string {
+  if (price == null) return '';
+  return price === 0 ? 'Бесплатно' : `${price} ₽`;
+}
 
 export default function GeoQuestHome() {
   // Live marketplace: ALL published quests from the backend, owned state from
-  // grants for the CURRENT identity (anonymous device or account). The static
-  // design cards below remain only as a labeled fallback when unreachable.
+  // grants for the CURRENT identity (anonymous device or account). `market` is the
+  // loaded list, or null on a catalog FAILURE; `marketLoading` keeps the initial
+  // (not-yet-resolved) render distinct from a failure, so loading never flashes the
+  // error message.
   const [market, setMarket] = useState<PublishedQuestWire[] | null>(null);
+  const [marketLoading, setMarketLoading] = useState(true);
   const [owned, setOwned] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<string>('');
 
@@ -59,7 +74,8 @@ export default function GeoQuestHome() {
     let cancelled = false;
     api.listQuests()
       .then((quests) => { if (!cancelled) setMarket(quests); })
-      .catch(() => { if (!cancelled) setMarket(null); });
+      .catch(() => { if (!cancelled) setMarket(null); })
+      .finally(() => { if (!cancelled) setMarketLoading(false); });
     api.listGrants()
       .then((grants) => {
         if (cancelled) return;
@@ -135,47 +151,70 @@ export default function GeoQuestHome() {
         </div>
       </section>
 
-      {/* магазин + .quest-grid (design card layout) — LIVE published quests with
-          per-quest buy (mock payment) and owned state; static demo card only as
-          a labeled fallback when the backend is unreachable */}
+      {/* магазин + .quest-grid (design card layout) — 100% LIVE published quests.
+          No demo card and no fabricated fields: an unreachable catalog shows an
+          honest error, an empty catalog an honest "скоро", and each card renders
+          ONLY the author's real city/duration/price/rating. */}
       <section className="container" id="shop" style={{ paddingTop: 90 }} data-screen-label="Главная — магазин квестов">
         <h2 className="section-title display">магазин квестов</h2>
-        {market === null && (
-          <p style={{ textAlign: 'center', marginTop: 24, fontSize: 13, color: '#B45309' }}>
-            демо-карточка — сервер недоступен, живой магазин появится после подключения
+        {marketLoading ? (
+          <p style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: '#6b7280' }}>
+            Загружаем магазин…
           </p>
-        )}
-        <div className="quest-grid" style={{ marginTop: 48 }}>
-          {(market ?? [DEMO_MARKET_CARD]).map((q) => {
-            const playUrl = `/quest/${encodeURIComponent(q.quest_id)}`;
-            const isOwned = !!owned[q.quest_id];
-            return (
-              <article className="quest-card card" key={q.quest_id}>
-                <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: coverUrl(q.primary_comic) }}>
-                  <span className="qmark">?</span>
-                  <img className="author" src="/assets/img/avatar-author.jpg" alt="Автор квеста" />
-                </a>
-                <div className="quest-card__body">
-                  <p className="quest-card__meta">
-                    <span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} /></span>Нови Сад, Сербия
-                    <span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-clock-ring--navy.svg')" } as React.CSSProperties} /></span>1.5 часа
-                  </p>
-                  <h3 className="quest-card__title"><a href={playUrl}>{q.name}</a></h3>
-                  <p className="rating quest-card__rating"><span className="ic" /><b>5</b><span className="muted">(2 отзыва)</span></p>
-                  <hr className="quest-card__divider" />
-                  <div className="quest-card__footer">
-                    <span className="quest-card__price">{isOwned ? 'Куплен' : '300 ₽'}</span>
-                    {isOwned ? (
-                      <a className="btn" href={playUrl}>Пройти</a>
-                    ) : (
-                      <button className="btn" onClick={() => handleBuy(q.quest_id)}>Купить</button>
+        ) : market === null ? (
+          <p style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: '#B45309' }}>
+            Не удалось загрузить магазин — проверьте подключение и обновите страницу.
+          </p>
+        ) : market.length === 0 ? (
+          <p style={{ textAlign: 'center', marginTop: 48, fontSize: 14, color: '#6b7280' }}>
+            Скоро здесь появятся квесты.
+          </p>
+        ) : (
+          <div className="quest-grid" style={{ marginTop: 48 }}>
+            {market.map((q) => {
+              const playUrl = `/quest/${encodeURIComponent(q.quest_id)}`;
+              const isOwned = !!owned[q.quest_id];
+              const free = q.price === 0;
+              return (
+                <article className="quest-card card" key={q.quest_id}>
+                  <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: coverUrl(q.primary_comic) }}>
+                    <span className="qmark">?</span>
+                  </a>
+                  <div className="quest-card__body">
+                    {(q.city || q.duration) && (
+                      <p className="quest-card__meta">
+                        {q.city && (
+                          <><span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} /></span>{q.city}</>
+                        )}
+                        {q.duration && (
+                          <><span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-clock-ring--navy.svg')" } as React.CSSProperties} /></span>{q.duration}</>
+                        )}
+                      </p>
                     )}
+                    <h3 className="quest-card__title"><a href={playUrl}>{q.name}</a></h3>
+                    {q.rating_count > 0 ? (
+                      <p className="rating quest-card__rating">
+                        <span className="ic" /><b>{fmtRating(q.rating_avg)}</b>
+                        <span className="muted">({q.rating_count}&nbsp;{ratingPlural(q.rating_count)})</span>
+                      </p>
+                    ) : (
+                      <p className="rating quest-card__rating"><span className="muted">Нет оценок</span></p>
+                    )}
+                    <hr className="quest-card__divider" />
+                    <div className="quest-card__footer">
+                      <span className="quest-card__price">{isOwned ? 'Куплен' : priceLabel(q.price)}</span>
+                      {isOwned ? (
+                        <a className="btn" href={playUrl}>Пройти</a>
+                      ) : (
+                        <button className="btn" onClick={() => handleBuy(q.quest_id)}>{free ? 'Получить' : 'Купить'}</button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
         {status && <p style={{ textAlign: 'center', marginTop: 24, fontSize: 13 }}>{status}</p>}
       </section>
 

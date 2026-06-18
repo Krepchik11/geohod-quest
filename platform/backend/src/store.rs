@@ -269,6 +269,10 @@ impl InMemoryFactStore {
 
 /// Published quest metadata surfaced by the constructor's publish for the
 /// marketplace list and for binding new attempts to the latest snapshot.
+///
+/// `city`/`duration`/`price` are the author's real store-card fields (collected
+/// in the constructor settings); they are optional so quests published before the
+/// metadata migration simply omit them rather than show fabricated values.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PublishedMeta {
     pub quest_id: String,
@@ -278,6 +282,15 @@ pub struct PublishedMeta {
     pub snapshot_version: u32,
     /// Frozen snapshot identifier new attempts bind to (e.g. "golden-mystery-fortress-v1").
     pub snapshot_id: String,
+    /// Store-card city (e.g. "Нови Сад"); None when the author left it blank.
+    #[serde(default)]
+    pub city: Option<String>,
+    /// Store-card duration label (e.g. "1.5 часа"); None when blank.
+    #[serde(default)]
+    pub duration: Option<String>,
+    /// Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
+    #[serde(default)]
+    pub price: Option<i64>,
 }
 
 /// In-memory grants + published-quest store. `snapshots` holds the frozen snapshot
@@ -883,9 +896,18 @@ impl InMemoryConstructorStore {
         Ok(summary)
     }
 
-    /// All quests as list rows, newest first (ties by id for a stable order).
-    pub fn list_summaries(&self) -> Vec<ConstructorQuestSummary> {
-        let mut v: Vec<_> = self.quests.values().map(|q| q.summary()).collect();
+    /// One author's quests as list rows, newest first (ties by id for a stable
+    /// order). The dashboard is a personal workspace: an editor/admin sees only
+    /// the quests they authored, never anyone else's — author scoping is the
+    /// invariant, not a UI filter (a player could otherwise read the list via the
+    /// raw API).
+    pub fn list_summaries_for_author(&self, author_id: &str) -> Vec<ConstructorQuestSummary> {
+        let mut v: Vec<_> = self
+            .quests
+            .values()
+            .filter(|q| q.author_id == author_id)
+            .map(|q| q.summary())
+            .collect();
         v.sort_by(|a, b| a.quest_id.cmp(&b.quest_id));
         v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         v
@@ -966,11 +988,14 @@ impl ConstructorStores {
         }
     }
 
-    /// See [`InMemoryConstructorStore::list_summaries`].
-    pub async fn list_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+    /// See [`InMemoryConstructorStore::list_summaries_for_author`].
+    pub async fn list_summaries_for_author(
+        &self,
+        author_id: &str,
+    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_summaries()),
-            Self::Postgres(pg) => pg.list_summaries().await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_summaries_for_author(author_id)),
+            Self::Postgres(pg) => pg.list_summaries_for_author(author_id).await,
         }
     }
 
@@ -1242,6 +1267,9 @@ mod grant_tests {
             template_summary: "7 steps".into(),
             snapshot_version: version,
             snapshot_id: snapshot_id.into(),
+            city: None,
+            duration: None,
+            price: None,
         }
     }
 
@@ -1311,11 +1339,11 @@ mod constructor_tests {
     #[test]
     fn create_lists_newest_first_and_rejects_duplicate() {
         let mut s = InMemoryConstructorStore::new();
-        assert!(s.list_summaries().is_empty());
+        assert!(s.list_summaries_for_author("seed:a").is_empty());
         s.create(quest("q-old", "Old", 100)).expect("create old");
         s.create(quest("q-new", "New", 200)).expect("create new");
 
-        let list = s.list_summaries();
+        let list = s.list_summaries_for_author("seed:a");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].quest_id, "q-new", "newest created_at first");
         assert_eq!(list[1].quest_id, "q-old");
@@ -1323,6 +1351,32 @@ mod constructor_tests {
         assert!(
             s.create(quest("q-old", "Dup", 300)).is_err(),
             "duplicate id rejected"
+        );
+    }
+
+    #[test]
+    fn list_is_scoped_to_the_author() {
+        // The dashboard is per-author: each editor sees ONLY their own quests, so
+        // the list filters by author_id and never leaks another author's drafts.
+        let mut s = InMemoryConstructorStore::new();
+        let mut by_a = quest("q-a", "A's quest", 100);
+        by_a.author_id = "author-a".into();
+        let mut by_b = quest("q-b", "B's quest", 200);
+        by_b.author_id = "author-b".into();
+        s.create(by_a).expect("create a");
+        s.create(by_b).expect("create b");
+
+        let a_list = s.list_summaries_for_author("author-a");
+        assert_eq!(a_list.len(), 1);
+        assert_eq!(a_list[0].quest_id, "q-a");
+
+        let b_list = s.list_summaries_for_author("author-b");
+        assert_eq!(b_list.len(), 1);
+        assert_eq!(b_list[0].quest_id, "q-b");
+
+        assert!(
+            s.list_summaries_for_author("author-c").is_empty(),
+            "a third author sees nothing"
         );
     }
 
