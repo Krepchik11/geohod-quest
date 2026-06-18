@@ -88,25 +88,25 @@ function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: Cto
       <WspBlock title="Карточка квеста" aside="используется «Первым экраном» и магазином">
         <div>
           <label className="adm-label">Название</label>
-          <input className="adm-input" value={m.title} onChange={(e) => set({ title: e.target.value })} />
+          <input className="field-ui" value={m.title} onChange={(e) => set({ title: e.target.value })} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <div>
             <label className="adm-label">Город</label>
-            <input className="adm-input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
+            <input className="field-ui" value={m.city} onChange={(e) => set({ city: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Длительность</label>
-            <input className="adm-input" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
+            <input className="field-ui" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Цена, ₽</label>
-            <input className="adm-input" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
+            <input className="field-ui" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
         <div>
           <label className="adm-label">Описание для магазина</label>
-          <textarea className="adm-textarea" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
+          <textarea className="textarea-ui" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
       </WspBlock>
@@ -145,7 +145,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
       </div>
       {designStep.hint ? <WspToggle on={hintOn} onClick={() => setHintOn(!hintOn)} label="С купленной подсказкой" /> : null}
       {designStep.template === 'task_answer' ? <WspToggle on={wrongOn} onClick={() => setWrongOn(!wrongOn)} label="С ошибкой ответа" /> : null}
-      <button className="adm-btn adm-btn--outline" type="button" style={{ width: '100%' }} onClick={() => onTestFrom(pos)}>▶ Тест с этой страницы</button>
+      <button className="btn-ui btn-ui--outline" type="button" style={{ width: '100%' }} onClick={() => onTestFrom(pos)}>▶ Тест с этой страницы</button>
     </>
   );
 }
@@ -263,8 +263,8 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
             ? quest.lastSaved ? `Черновик сохранён · ${fmtTime(quest.lastSaved)}` : 'Черновик'
             : 'Не сохранено — хранилище переполнено'}
         </span>
-        <button className="adm-btn adm-btn--outline" type="button" onClick={() => actions.onTest(0)}>▶ Тест-игрок</button>
-        <button className="adm-btn" type="button" onClick={() => actions.onSel({ type: 'publish' })}>
+        <button className="btn-ui btn-ui--outline" type="button" onClick={() => actions.onTest(0)}>▶ Тест-игрок</button>
+        <button className="btn-ui" type="button" onClick={() => actions.onSel({ type: 'publish' })}>
           {errN ? `Опубликовать · ${errN} ${plural(errN, 'ошибка', 'ошибки', 'ошибок')}` : 'Опубликовать'}
         </button>
       </WspHeader>
@@ -302,7 +302,7 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
               />
             ))}
           </div>
-          <button className="adm-btn adm-btn--outline adm-btn--sm wsp-addpage" type="button" onClick={() => setPicker(true)}>+ Добавить страницу</button>
+          <button className="btn-ui btn-ui--outline btn-ui--sm wsp-addpage" type="button" onClick={() => setPicker(true)}>+ Добавить страницу</button>
           <div className="wsp-vers">
             {live
               ? <span className="wsp-ver"><b>v{live.n}</b>&nbsp;в магазине · {live.attempts} {plural(live.attempts, 'попытка', 'попытки', 'попыток')}</span>

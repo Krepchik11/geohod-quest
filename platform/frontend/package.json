@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "lint:ds": "! grep -rEn \"className=\\\"[^\\\"]*\\b(s-btn|s-input|s-link|s-card|s-head|s-nav|s-avatar|adm-btn|adm-input|adm-select|adm-textarea|adm-card|adm-head|adm-nav)\\b\" app || (echo 'Deprecated DS class used — use canonical primitive (see frontend-harmonization-guide.md)'; exit 1)",
     "test": "vitest run",
     "test:watch": "vitest"
   },

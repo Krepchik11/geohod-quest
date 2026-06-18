@@ -45,8 +45,8 @@ export function StartGate({
         <div className="co-row"><span className="lbl">Версия квеста</span><span>{version}</span></div>
         <div className="mq-progressline"><i style={{ width: `${Math.round((pos / Math.max(total, 1)) * 100)}%` }} /></div>
       </div>
-      <button className="s-btn s-btn--block" type="button" onClick={onContinue}>Продолжить попытку</button>
-      <button className="s-btn s-btn--outline s-btn--block" type="button" onClick={onRestart}>Начать заново</button>
+      <button className="btn btn--block" type="button" onClick={onContinue}>Продолжить попытку</button>
+      <button className="btn btn--outline btn--block" type="button" onClick={onRestart}>Начать заново</button>
       <p className="pf-note" style={{ textAlign: 'center' }}>
         «Начать заново» сбросит прогресс попытки. Заработанные монеты останутся при вас.
       </p>

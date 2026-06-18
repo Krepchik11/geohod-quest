@@ -87,6 +87,12 @@ h1,h2,h3,p { margin:0; }
 .btn:active { transform:translateY(1px); }
 .btn--dark { background:var(--dark); }
 .btn--dark:hover { background:#000; box-shadow:0 6px 16px rgba(35,35,35,.3); }
+/* harmonization parity (Phase 0): variants/states .s-btn relies on, so later renames don't drop styling */
+.btn--outline { background:var(--white); box-shadow:inset 0 0 0 2px var(--blue); color:var(--blue); }
+.btn--outline:hover { background:#EFF4FF; box-shadow:inset 0 0 0 2px var(--blue); }
+.btn--block { width:100%; }
+.btn:disabled, .btn[disabled] { background:var(--border); color:var(--gray); box-shadow:none; cursor:default; transform:none; }
+.btn:disabled:hover, .btn[disabled]:hover { background:var(--border); box-shadow:none; }
 
 .btn-ui { display:inline-flex; align-items:center; justify-content:center; min-width:166px; height:64px; padding:0 20px; border-radius:var(--r-ui); background:var(--blue); color:var(--white); font-weight:700; font-size:16px; transition:background .15s ease,box-shadow .15s ease,transform .1s ease; }
 .btn-ui:hover { background:#2E5FE3; box-shadow:0 6px 16px rgba(59,113,254,.25); }
@@ -95,18 +101,31 @@ h1,h2,h3,p { margin:0; }
 .btn-ui--outline:hover { background:#EFF4FF; }
 .btn-ui--ghost-danger { background:none; color:var(--pink); min-width:0; }
 .btn-ui--ghost-danger:hover { background:rgba(231,90,124,.08); box-shadow:none; }
+/* harmonization parity (Phase 0): .adm-btn--sm / .adm-btn:disabled equivalents. :disabled follows :hover so it wins the (0,2,0) tie on hovered-disabled */
+.btn-ui--sm { min-width:0; height:44px; font-size:13px; padding:0 18px; border-radius:var(--r-ui); }
+.btn-ui:disabled, .btn-ui[disabled] { background:var(--border); color:var(--gray); box-shadow:none; cursor:default; transform:none; }
 
 .card { background:var(--white); border-radius:var(--r-card); box-shadow:var(--shadow-card); }
+
+/* harmonization parity (Phase 0): link primitive replacing .s-link */
+.link { background:none; border:0; padding:0; color:var(--blue); font:inherit; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.link:hover { color:#2E5FE3; }
 
 .input { width:100%; height:50px; padding:0 16px; border:1px solid var(--border); border-radius:var(--r-input); background:var(--white); font-size:14px; color:var(--navy); outline:none; transition:border-color .15s ease,box-shadow .15s ease; }
 .input::placeholder { color:var(--navy); opacity:.5; }
 .input:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(59,113,254,.15); }
-.input--error { border-color:var(--red); }
+.input--error { border-color:var(--pink); }              /* harmonization (Phase 0): standardize on --pink, the single danger token (was --red) */
+.input-error-text { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--pink); margin-top:6px; }
 
 .field-ui { position:relative; display:flex; align-items:center; width:299px; height:64px; padding:0 32px; border:0; border-radius:var(--r-ui); background:var(--white); box-shadow:inset 0 0 0 2px var(--gray); font-weight:500; font-size:16px; color:var(--ink); outline:none; appearance:none; transition:box-shadow .15s ease; }
 .field-ui:focus, .field-ui:focus-visible { box-shadow:inset 0 0 0 2px var(--blue); }
 select.field-ui { cursor:pointer; padding-right:56px; background:var(--white) url("/assets/icons/c/ic-select-chevron--dark.svg") no-repeat right 24px center; background-size:16px 8px; }
 .select-wrap { position:relative; display:inline-block; }
+/* harmonization parity (Phase 0): .adm-input--wide/--sm and .adm-textarea equivalents (--wide keeps the editor's denser 18px padding) */
+.field-ui--wide { width:100%; padding:0 18px; }
+.field-ui--sm { width:134px; height:48px; padding:0 18px; font-size:14px; }
+.textarea-ui { width:100%; min-height:110px; padding:14px 18px; border:0; border-radius:var(--r-ui); background:var(--white); box-shadow:inset 0 0 0 2px var(--gray); font-weight:400; font-size:15px; color:var(--ink); outline:none; resize:vertical; }
+.textarea-ui:focus { box-shadow:inset 0 0 0 2px var(--blue); }
 
 .stars { display:inline-flex; gap:3.5px; }
 .stars .ic { --ic:url("/assets/icons/c/ic-star-24--gold.svg"); width:24px; height:24px; }
@@ -275,6 +294,8 @@ body.admin { min-width:1240px; background:var(--bg-light); color:var(--ink); }
 .fgroup { display:flex; flex-direction:column; gap:24px; }
 
 .list-card { background:var(--white); border-radius:var(--r-modal); padding:24px 40px; display:flex; flex-direction:column; gap:13px; }
+/* harmonization parity (Phase 0): generic admin surface card replacing .adm-card (keep .list-card for lists) */
+.panel { background:var(--white); border-radius:var(--r-modal); padding:24px 28px; }
 .list-row { display:flex; align-items:center; gap:32px; height:64px; }
 .list-row__name { flex:1; font-weight:500; font-size:16px; min-width:160px; }
 .list-row__num { width:64px; height:64px; flex:none; border-radius:var(--r-ui); background:var(--blue); color:var(--white); display:grid; place-items:center; font-weight:500; font-size:20px; }

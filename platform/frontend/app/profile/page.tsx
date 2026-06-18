@@ -139,7 +139,7 @@ export default function ProfilePage() {
           </p>
         )}
         <div className="pf-grid">
-          <div className="s-card pf-card">
+          <div className="card pf-card">
             <h4>Данные пользователя</h4>
             <div className="pf-row"><span className="lbl">Имя</span><span>{identityLabel}</span></div>
             <div className="pf-row"><span className="lbl">Email</span><span>{emailLabel}</span></div>
@@ -147,11 +147,11 @@ export default function ProfilePage() {
               <span className="lbl">Аккаунт</span>
               <span>
                 {ready?.error === 'auth' ? (
-                  <Link className="s-link" href="/auth">войти снова</Link>
+                  <Link className="link" href="/auth">войти снова</Link>
                 ) : registered ? (
                   'зарегистрирован'
                 ) : (
-                  <>анонимный · <Link className="s-link" href="/auth">зарегистрироваться</Link></>
+                  <>анонимный · <Link className="link" href="/auth">зарегистрироваться</Link></>
                 )}
               </span>
             </div>
@@ -167,7 +167,7 @@ export default function ProfilePage() {
               Рейтинг растёт вместе с монетами и не уходит ниже нуля.
             </p>
           </div>
-          <div className="s-card pf-card">
+          <div className="card pf-card">
             <h4>Пройденные квесты</h4>
             {completedIds.length > 0 ? (
               completedIds.map((id) => (
@@ -181,7 +181,7 @@ export default function ProfilePage() {
                 {data.source === 'loading' ? 'Загружаем профиль…' : 'Пока нет пройденных квестов.'}
               </p>
             )}
-            <Link className="s-btn s-btn--outline" href="/my-quests">Все мои квесты</Link>
+            <Link className="btn btn--outline" href="/my-quests">Все мои квесты</Link>
           </div>
         </div>
       </main>
