@@ -1,0 +1,64 @@
+name: backend-ci
+
+# Quality gate ONLY — this does NOT build or push the deploy image (that is
+# backend-image.yml). Its job is to run the Rust test suite so a regression can
+# never reach a deploy: `cargo build --release` (the image build) compiles the
+# binary WITHOUT the #[cfg(test)] modules, so it cannot catch a broken test or
+# enforce invariants like "no mock data" / "an unpublished draft never reaches
+# the store". This runs `cargo test` against a real Postgres so the in-memory
+# AND PostgreSQL store paths (incl. the constructor SQL + migrations) are both
+# exercised — the in-memory store is the executable spec, Postgres is parity.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "platform/backend/**"
+      - "platform/goldens/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "platform/backend/**"
+      - "platform/goldens/**"
+      - ".github/workflows/backend-ci.yml"
+
+defaults:
+  run:
+    working-directory: platform/backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # The pg_* tests self-skip without DATABASE_URL; providing one makes them run,
+    # validating every PostgreSQL query and all migrations (0001..0006).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geohod
+          POSTGRES_PASSWORD: geohod
+          POSTGRES_DB: geohod
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geohod"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://geohod:geohod@localhost:5432/geohod
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel (1.96.0) + components; rustup honors
+      # it automatically on the first cargo invocation.
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: platform/backend
+
+      - name: Test (in-memory + Postgres parity)
+        run: cargo test --locked
