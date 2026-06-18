@@ -2730,6 +2730,112 @@ mod tests {
         })
     }
 
+    /// Exercises the REAL PgConstructorStore SQL end to end (create/list/get/save/
+    /// status/delete + publish flipping status). Self-skips without DATABASE_URL,
+    /// like pg_full_suite. Run-unique ids tolerate a shared DB and never collide
+    /// with the fixed seed ids the 0006 cleanup targets.
+    #[tokio::test]
+    async fn pg_constructor_lifecycle() {
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_constructor_lifecycle: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let app = pg_app(pool);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let qid = format!("q-citest-{run}");
+
+        // create
+        let (st, created) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": qid.clone(), "name": "CI quest", "cover": null, "steps_count": 2,
+                "body": { "id": qid.clone(), "meta": { "title": "CI quest" }, "steps": [1, 2], "versions": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["status"], "draft");
+
+        // list contains it
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert!(
+            list.as_array()
+                .expect("arr")
+                .iter()
+                .any(|q| q["quest_id"] == qid.as_str())
+        );
+
+        // get returns the full body
+        let (st, full) =
+            get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(full["body"]["steps"].as_array().expect("steps").len(), 2);
+
+        // save updates name + step count
+        let (st, _) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{qid}/save"),
+            json!({
+                "name": "CI renamed", "cover": "c.png", "steps_count": 4,
+                "body": { "id": qid.clone(), "steps": [1, 2, 3, 4] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // status
+        let (st, updated) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{qid}/status"),
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(updated["status"], "test");
+
+        // publish flips the constructor status to published
+        let (st, _) = post_json_h(
+            &app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": qid.clone(), "name": "CI renamed", "template_summary": "2 steps",
+                "snapshot_version": 1, "snapshot_id": format!("{qid}-v1"), "snapshot": { "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, full) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
+        assert_eq!(full["status"], "published");
+
+        // delete
+        let (st, _) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{qid}/delete"),
+            json!({}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
     #[tokio::test]
     async fn pg_full_suite() {
         dotenv().ok();
