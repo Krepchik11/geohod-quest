@@ -148,6 +148,37 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
+/// True when the shared `ADMIN_TOKEN` is configured AND the request presents it in
+/// `X-Admin-Token`. This is the operator/bootstrap credential the admin and editor
+/// gates share; it carries no identity (no "self"), so it is exempt from the
+/// self-change guard. Fails closed when no token is configured.
+fn ops_token_ok(state: &AppState, headers: &HeaderMap) -> bool {
+    let Some(expected) = state.config.admin_token.as_deref() else {
+        return false;
+    };
+    let provided = headers
+        .get("x-admin-token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    !provided.is_empty() && provided == expected
+}
+
+/// The registered account behind a valid `Bearer` session, if any. A missing or
+/// malformed token, an unknown session, and an anonymous id (no account row) all
+/// collapse to `None`, so callers express authorization as a plain role check.
+async fn session_account(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<auth::UserAccount>, AppError> {
+    let Some(token) = bearer_token(headers) else {
+        return Ok(None);
+    };
+    let Some(player_id) = state.auth.get_session(&token).await? else {
+        return Ok(None);
+    };
+    state.auth.get_user(&player_id).await
+}
+
 /// The identity authorized to act on the admin user-management surface. `player_id`
 /// is `Some` for a session-admin (the acting account) and `None` for the shared
 /// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
@@ -170,28 +201,15 @@ async fn require_admin_actor(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<AdminActor, AppError> {
-    if let Some(expected) = state.config.admin_token.as_deref() {
-        let provided = headers
-            .get("x-admin-token")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default();
-        if !provided.is_empty() && provided == expected {
-            return Ok(AdminActor { player_id: None });
-        }
+    if ops_token_ok(state, headers) {
+        return Ok(AdminActor { player_id: None });
     }
-    if let Some(token) = bearer_token(headers) {
-        if let Some(player_id) = state.auth.get_session(&token).await? {
-            let is_admin = state
-                .auth
-                .get_user(&player_id)
-                .await?
-                .is_some_and(|a| a.role == auth::ROLE_ADMIN);
-            if is_admin {
-                return Ok(AdminActor {
-                    player_id: Some(player_id),
-                });
-            }
-        }
+    if let Some(account) = session_account(state, headers).await?
+        && account.role == auth::ROLE_ADMIN
+    {
+        return Ok(AdminActor {
+            player_id: Some(account.player_id),
+        });
     }
     Err(AppError::Forbidden("admin access required".into()))
 }
@@ -208,27 +226,13 @@ async fn require_admin_actor(
 /// NOT bind authorship to the editor (any editor may publish any quest); per-author
 /// ownership remains a separate, tracked follow-up.
 async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    if let Some(expected) = state.config.admin_token.as_deref() {
-        let provided = headers
-            .get("x-admin-token")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default();
-        if !provided.is_empty() && provided == expected {
-            return Ok(());
-        }
+    if ops_token_ok(state, headers) {
+        return Ok(());
     }
-    if let Some(token) = bearer_token(headers) {
-        if let Some(player_id) = state.auth.get_session(&token).await? {
-            let role = state
-                .auth
-                .get_user(&player_id)
-                .await?
-                .map(|a| a.role)
-                .unwrap_or_default();
-            if role == auth::ROLE_EDITOR || role == auth::ROLE_ADMIN {
-                return Ok(());
-            }
-        }
+    if let Some(account) = session_account(state, headers).await?
+        && (account.role == auth::ROLE_EDITOR || account.role == auth::ROLE_ADMIN)
+    {
+        return Ok(());
     }
     Err(AppError::Forbidden("editor access required".into()))
 }
@@ -810,13 +814,8 @@ async fn get_my_stats_handler(
     let claimed = claimed_from_headers(&headers);
     let player_id = resolve_player(&state, &headers, &claimed).await?;
     let logs = state.store.attempt_logs_for_player(&player_id).await?;
-    let grants_count = state
-        .grants
-        .list_all_grants()
-        .await?
-        .iter()
-        .filter(|g| g.player_id == player_id)
-        .count();
+    // Caller-scoped, PK-indexed lookup — never load every player's grants to count one's own.
+    let grants_count = state.grants.grants_for_player(&player_id).await?.len();
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
 }
 

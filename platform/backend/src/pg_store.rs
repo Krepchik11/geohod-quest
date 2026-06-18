@@ -20,7 +20,7 @@ use crate::facts::{
     natural_key, project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
 };
 use crate::grants::{AccessGrant, GrantSource};
-use crate::store::{AttemptMeta, PublishedMeta, now_secs};
+use crate::store::{AttemptMeta, PublishedMeta, now_rfc3339, now_secs};
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
     AppError::Internal(e.into())
@@ -333,7 +333,7 @@ impl PgGrantStore {
         source: GrantSource,
         source_ref: Option<String>,
     ) -> Result<(AccessGrant, bool), AppError> {
-        let granted_at = "2026-06-10T00:00:00Z"; // mirrors the pure helper's deterministic timestamp
+        let granted_at = now_rfc3339(); // real audit instant, mirroring the pure helper
         let inserted = sqlx::query(
             "INSERT INTO access_grants (player_id, quest_id, granted_at, source, source_ref)
              VALUES ($1, $2, $3, $4, $5)

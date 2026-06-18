@@ -1,19 +1,21 @@
-//! Thin grants module (per rust.md + marketplace-grants design mirroring facts.rs pattern).
+//! Access grants: lifetime "this player owns this quest" records (the gate before
+//! attempt creation), mirroring the `facts.rs` split of pure helpers vs. storage.
 //!
-//! Lifetime AccessGrant (idempotent by (player,quest), source-audited for Payment/CouponRedemption/FreeQuest/Admin).
-//! Pure helpers + natural key for store impl. Explicit extension point for persist (like facts).
-//! No side effects in pures; short critical sections in store (InMemoryGrantStore).
-//! YAGNI: in-mem only (documented swap path); stub checkout (no gateway/prices); demo fixed player.
-//! All per PLAN Phase 3 Commerce cuts (no real-money, no recurring, no cart, no external), SPEC/TECH (grant before attempt, idemp source, free identical), prior cycles (goldens fidelity, idemp natural keys, projectors, small enhance).
+//! A grant is idempotent by `(player_id, quest_id)` — at most one per pair, ever.
+//! The `source` (Payment / CouponRedemption / FreeQuest / Admin) and optional
+//! `source_ref` are an audit trail recorded once at creation; a later checkout for
+//! the same pair returns the existing grant unchanged (first source wins). Grants
+//! are bound to the quest, not a snapshot, so they survive version publishes — old
+//! attempts keep their own frozen snapshot via the fact log.
 //!
-//! Strict: 4-space, /// docs on all pub with examples, #[test] AAA, Result for fallible, no .unwrap in prod paths,
-//! derive common (Debug, Clone, PartialEq, Serialize, Deserialize), snake_case where idiomatic.
-//! Clippy -D, fmt clean, cargo test green.
+//! The pure helper here makes the idempotency decision; the store
+//! ([`crate::store::InMemoryGrantStore`]) owns the short critical section and
+//! injects the wall-clock timestamp, keeping this layer deterministic and testable.
 
 use serde::{Deserialize, Serialize};
 
-/// Grant source for audit (recorded at creation; first wins on idemp hit).
-/// Matches TS AccessGrant['source'] + SPEC (Payment | CouponRedemption | FreeQuest | Admin).
+/// How a grant was obtained, recorded for audit at creation (first wins on an
+/// idempotent re-checkout). Mirrors the TypeScript `AccessGrant['source']` union.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GrantSource {
     Payment,
@@ -22,11 +24,11 @@ pub enum GrantSource {
     Admin,
 }
 
-/// Lifetime AccessGrant record (player + quest; idempotent at most one per pair).
-/// granted_at: ISO8601 at create time (first only).
-/// source: audited at creation.
-/// source_ref: optional external (e.g. payment id; null for free/coupon demo).
-/// Survives quest version publishes (grant on quest, not specific snapshot; old attempts via facts manifest).
+/// A lifetime ownership record: one player's access to one quest.
+///
+/// Idempotent at most one per `(player_id, quest_id)`. `granted_at` is an RFC3339
+/// timestamp stamped once at creation; `source` and `source_ref` are the audit
+/// trail (the latter is `None` for free/coupon paths with nothing to reference).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccessGrant {
     pub player_id: String,
@@ -36,44 +38,40 @@ pub struct AccessGrant {
     pub source_ref: Option<String>,
 }
 
-/// Natural key for idemp/lifetime "at most one" (player, quest).
-/// Source not part of key (per design: lifetime buy-once; different source on re-call returns existing preserving first source).
-///
-/// # Arguments
-///
-/// * `g` - &AccessGrant
-///
-/// # Returns
-///
-/// (player_id, quest_id) tuple for HashMap key / exists check.
+/// The idempotency key: `(player_id, quest_id)`. Source is deliberately excluded
+/// — a grant is "buy once, own forever", so a second checkout from a different
+/// source returns the existing grant rather than creating a new one.
 pub fn natural_grant_key(g: &AccessGrant) -> (String, String) {
     (g.player_id.clone(), g.quest_id.clone())
 }
 
-/// Pure idempotent create helper (logic usable by store under lock).
-/// If existing matches key (player,quest), return it (created=false, source from existing).
-/// Else create new with now-ish granted_at + passed source (source_ref=None for YAGNI demo).
-/// Deterministic given inputs + clock (best-effort now; store may override ts).
+/// Pure idempotent grant decision (the logic the store runs under its lock).
 ///
-/// Mirrors facts append_idempotent natural/semantically_same pattern (DRY).
+/// If `existing` already covers this `(player, quest)`, it is returned unchanged
+/// (`created = false`) so the first source/ref/timestamp are preserved. Otherwise a
+/// new grant is built with the caller-supplied `granted_at` — the store injects the
+/// real clock read ([`crate::store::now_rfc3339`]), keeping this function pure and
+/// deterministic for tests.
 ///
 /// # Arguments
 ///
-/// * `existing` - optional prior grant for this (player,quest) from store snapshot
-/// * `player` - player id (anonymous `dev:<uuid>` or registered account id)
-/// * `quest` - quest id (e.g. "mystery-fortress-v1")
-/// * `source` - source for this creation attempt (ignored for key match)
-/// * `source_ref` - optional audit reference (e.g. mock payment_ref); first wins
+/// * `existing` - the prior grant for this pair, if any (from the store snapshot)
+/// * `player` - player id (anonymous `dev:<uuid>` or a registered account id)
+/// * `quest` - quest id (e.g. `"mystery-fortress-v1"`)
+/// * `source` - audit source for a newly created grant (ignored on an idempotent hit)
+/// * `source_ref` - optional audit reference (e.g. a payment ref); first wins
+/// * `granted_at` - RFC3339 creation timestamp for a newly created grant
 ///
 /// # Returns
 ///
-/// (grant, created) where grant is existing or new; created true only on first.
+/// `(grant, created)` where `created` is true only when a new grant was built.
 pub fn create_grant_idemp(
     existing: Option<&AccessGrant>,
     player: &str,
     quest: &str,
     source: GrantSource,
     source_ref: Option<String>,
+    granted_at: String,
 ) -> (AccessGrant, bool) {
     if let Some(e) = existing
         && e.player_id == player
@@ -81,8 +79,6 @@ pub fn create_grant_idemp(
     {
         return (e.clone(), false);
     }
-    // New: use simple ts (store may use its now_secs for consistency; YAGNI fine for in-mem).
-    let granted_at = "2026-06-10T00:00:00Z".to_string(); // deterministic for tests/replay goldens parity (real would use SystemTime like facts now_secs)
     let grant = AccessGrant {
         player_id: player.to_string(),
         quest_id: quest.to_string(),
@@ -93,8 +89,9 @@ pub fn create_grant_idemp(
     (grant, true)
 }
 
-/// Semantically same for dedup (exact match on key + source + ts + ref for audit).
-/// (YAGNI full now; key + source sufficient for idemp in store.)
+/// Full-record equality for audit dedup: the natural key plus every audited field
+/// (source, timestamp, ref). Not used for idempotency (that is key-only) — kept as
+/// the explicit "are these the same recorded grant" predicate.
 #[allow(dead_code)]
 pub fn semantically_same_grant(a: &AccessGrant, b: &AccessGrant) -> bool {
     natural_grant_key(a) == natural_grant_key(b)
@@ -107,7 +104,9 @@ pub fn semantically_same_grant(a: &AccessGrant, b: &AccessGrant) -> bool {
 mod tests {
     use super::*;
 
-    // Arrange-Act-Assert per rust agents + TDD goldens parity (mirrors facts tests style).
+    /// Fixed timestamp so the idempotency assertions stay deterministic; production
+    /// injects the real clock via [`crate::store::now_rfc3339`].
+    const TS: &str = "2026-06-10T00:00:00Z";
 
     #[test]
     fn grant_idemp_first_creates_second_returns_existing_preserves_source() {
@@ -121,6 +120,7 @@ mod tests {
             quest,
             GrantSource::Payment,
             Some("mock-pay-1".into()),
+            TS.into(),
         );
         // Assert 1
         assert!(created1);
@@ -135,6 +135,7 @@ mod tests {
             quest,
             GrantSource::CouponRedemption,
             None,
+            TS.into(),
         );
         // Assert 2
         assert!(!created2, "idemp hit");
@@ -152,13 +153,15 @@ mod tests {
         let player = "demo";
         let quest = "q";
         // Act coupon 100 (provider bypassed: no payment ref)
-        let (gc, cc) = create_grant_idemp(None, player, quest, GrantSource::CouponRedemption, None);
+        let (gc, cc) =
+            create_grant_idemp(None, player, quest, GrantSource::CouponRedemption, None, TS.into());
         // Assert
         assert!(cc);
         assert_eq!(gc.source, GrantSource::CouponRedemption);
         assert_eq!(gc.source_ref, None);
         // Act free
-        let (gf, cf) = create_grant_idemp(None, player, "free-quest", GrantSource::FreeQuest, None);
+        let (gf, cf) =
+            create_grant_idemp(None, player, "free-quest", GrantSource::FreeQuest, None, TS.into());
         assert!(cf);
         assert_eq!(gf.source, GrantSource::FreeQuest);
         // Identical downstream (same shape, different source only; eligibility same via pure)

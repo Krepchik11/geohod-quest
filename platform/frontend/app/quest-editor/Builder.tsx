@@ -27,15 +27,18 @@ import { WspHeader } from './QuestList';
 
 /* ---------- Мини-превью шаблона настоящими компонентами плеера ---------- */
 
+/** Демо-квест «Ирония судьбы» (все 7 шаблонов) — основа превью пикера. Строится
+ *  один раз на уровне модуля: seedWorkspace() чистая, а пикер рисует 7 превью. */
+const DEMO_QUEST = seedWorkspace().quests[0];
+
 /** Демо-шаги для пикера — из seed-квеста «Ирония судьбы» (все 7 шаблонов). */
 function demoStepFor(template: CtorTemplate): { step: DesignStep; pos: number; total: number } {
-  const demo = seedWorkspace().quests[0];
-  const idx = demo.steps.findIndex((s) => s.template === template);
-  const ctorStep = idx >= 0 ? demo.steps[idx] : demo.steps[0];
+  const idx = DEMO_QUEST.steps.findIndex((s) => s.template === template);
+  const ctorStep = idx >= 0 ? DEMO_QUEST.steps[idx] : DEMO_QUEST.steps[0];
   return {
-    step: toDesignStep(stepToGameStep(ctorStep, demo.meta)),
+    step: toDesignStep(stepToGameStep(ctorStep, DEMO_QUEST.meta)),
     pos: (idx >= 0 ? idx : 0) + 1,
-    total: demo.steps.length,
+    total: DEMO_QUEST.steps.length,
   };
 }
 

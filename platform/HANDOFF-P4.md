@@ -1,5 +1,12 @@
 # P4 Handoff — Real PWA (offline bundle, fact queue, live collection)
 
+> ⚠️ **HISTORICAL (2026-06-11) — kept for context, not current.** P4 shipped (see
+> `frontend/lib/queue.ts`, `sync.ts`, `download.ts`, `app/manifest.ts`). Since then
+> the constructor moved to `app/quest-editor/`, email auth + roles landed, and the
+> commerce/quest-detail/cabinet routes named below were removed. The **canonical
+> spec is `../blueprint/`** (CONCEPT/SPEC/TECH/PLAN) — the `design/uploads/` source
+> table below is superseded. Trust the code and `blueprint/` over this file.
+
 Handoff document for the next Claude Code agent. Read this fully before writing code.
 Date of handoff: 2026-06-11. Phases P1–P3 are complete and archived.
 

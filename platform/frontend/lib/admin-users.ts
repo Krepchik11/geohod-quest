@@ -27,13 +27,6 @@ export const ROLE_LABELS: Record<Role, string> = {
   player: 'игрок',
 };
 
-/** Color tokens for the role badge (background + foreground), from the design. */
-export const ROLE_TONES: Record<Role, { bg: string; fg: string }> = {
-  admin: { bg: '#EAF0FF', fg: '#2B57D6' },
-  editor: { bg: '#E6F3EC', fg: '#1F8A5B' },
-  player: { bg: '#EFEFF2', fg: '#6E7079' },
-};
-
 /** Coerce an arbitrary wire role string to a known Role (unknown → player). */
 export function asRole(role: string | null | undefined): Role {
   return (ROLE_ORDER as string[]).includes(role ?? '') ? (role as Role) : 'player';

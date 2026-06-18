@@ -39,6 +39,25 @@ import { PLAYER_COPY as COPY } from '../../lib/player-copy';
 const SOUND_PREF_KEY = 'geohod-player-sound:v1';
 const TOAST_MS = 1900;
 
+/** Sound preference (default on). `localStorage` throws in private mode / when
+ *  storage is disabled, and a preference must never crash play — so both the read
+ *  (in the lazy reducer init) and the write fail soft. */
+function readSoundOn(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return localStorage.getItem(SOUND_PREF_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+function persistSoundOn(on: boolean): void {
+  try {
+    localStorage.setItem(SOUND_PREF_KEY, on ? 'on' : 'off');
+  } catch {
+    /* best-effort; play continues with the in-memory value */
+  }
+}
+
 /** Elapsed attempt time as the design's h:mm stat (e.g. «1:24»). */
 function formatElapsed(createdAt: string | null): string {
   if (!createdAt) return '0:00';
@@ -207,7 +226,7 @@ export default function QuestPlayerClient({
     showCatalog: false,
     /** «Ссылка скопирована» confirmation after a clipboard share fallback. */
     shareToast: false,
-    soundOn: typeof window === 'undefined' ? true : localStorage.getItem(SOUND_PREF_KEY) !== 'off',
+    soundOn: readSoundOn(),
   }));
 
   // Lazily-loaded list of other published quests for the post-finale catalog
@@ -216,8 +235,9 @@ export default function QuestPlayerClient({
 
   const toggleSound = useCallback(() => {
     setUi((u) => {
-      localStorage.setItem(SOUND_PREF_KEY, u.soundOn ? 'off' : 'on');
-      return { ...u, soundOn: !u.soundOn };
+      const next = !u.soundOn;
+      persistSoundOn(next);
+      return { ...u, soundOn: next };
     });
   }, [setUi]);
 
