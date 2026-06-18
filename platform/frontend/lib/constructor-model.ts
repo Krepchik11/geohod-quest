@@ -201,6 +201,20 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
   };
 }
 
+/**
+ * Deep copy of a quest as a fresh draft: new id, retitled «(копия)», no published
+ * versions, never-saved. Duplication is a client operation (the server stores the
+ * body opaquely), so the copy semantics live in one place next to {@link newQuest}.
+ */
+export function duplicateQuest(src: CtorQuest, newId: string): CtorQuest {
+  const copy: CtorQuest = JSON.parse(JSON.stringify(src));
+  copy.id = newId;
+  copy.meta = { ...copy.meta, title: `${src.meta.title} (копия)` };
+  copy.versions = [];
+  copy.lastSaved = null;
+  return copy;
+}
+
 /* ---------- Гейты публикации (живой пересчёт по черновику) ---------- */
 
 const isTaskTemplate = (t: CtorTemplate) => t === 'task_no' || t === 'task_answer';

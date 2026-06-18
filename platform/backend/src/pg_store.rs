@@ -20,7 +20,9 @@ use crate::facts::{
     natural_key, project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
 };
 use crate::grants::{AccessGrant, GrantSource};
-use crate::store::{AttemptMeta, PublishedMeta, now_rfc3339, now_secs};
+use crate::store::{
+    AttemptMeta, ConstructorQuest, ConstructorQuestSummary, PublishedMeta, now_rfc3339, now_secs,
+};
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
     AppError::Internal(e.into())
@@ -239,6 +241,41 @@ impl PgFactStore {
             out.push((quest_id, facts));
         }
         Ok(out)
+    }
+
+    /// See [`crate::store::InMemoryFactStore::completions_by_quest`]. Counts
+    /// `bonus_awards` rows per quest: each row is one (player, quest) completion
+    /// bonus, so `COUNT(*)` is the distinct-finisher count — matching the
+    /// in-memory backend, which derives the same from the fact log.
+    pub async fn completions_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, usize>, AppError> {
+        let rows = sqlx::query("SELECT quest_id, COUNT(*) AS n FROM bonus_awards GROUP BY quest_id")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let quest_id: String = row.try_get("quest_id").map_err(internal)?;
+            let n: i64 = row.try_get("n").map_err(internal)?;
+            out.insert(quest_id, n.max(0) as usize);
+        }
+        Ok(out)
+    }
+
+    /// See [`crate::store::InMemoryFactStore::seed_completion`]. The completion
+    /// metric reads `bonus_awards`, so a demo completion is one idempotent row
+    /// there (the same table real play's completion bonus writes).
+    pub async fn seed_completion(&self, player_id: &str, quest_id: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO bonus_awards (player_id, quest_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(player_id)
+        .bind(quest_id)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
     }
 
     /// See [`crate::store::InMemoryFactStore::run_legacy_migration`].
@@ -671,5 +708,218 @@ impl PgAuthStore {
             .map_err(internal)?;
         row.map(|r| r.try_get("player_id").map_err(internal))
             .transpose()
+    }
+}
+
+/// Constructor quests (authoring drafts + lifecycle) on PostgreSQL.
+#[derive(Clone, Debug)]
+pub struct PgConstructorStore {
+    pool: PgPool,
+}
+
+/// List columns only (no body) — the dashboard row.
+fn ctor_summary_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<ConstructorQuestSummary, AppError> {
+    let steps_count: i32 = row.try_get("steps_count").map_err(internal)?;
+    let created_at: i64 = row.try_get("created_at").map_err(internal)?;
+    let updated_at: i64 = row.try_get("updated_at").map_err(internal)?;
+    Ok(ConstructorQuestSummary {
+        quest_id: row.try_get("quest_id").map_err(internal)?,
+        author_id: row.try_get("author_id").map_err(internal)?,
+        author_name: row.try_get("author_name").map_err(internal)?,
+        name: row.try_get("name").map_err(internal)?,
+        status: row.try_get("status").map_err(internal)?,
+        cover: row.try_get("cover").map_err(internal)?,
+        steps_count: steps_count.max(0) as u32,
+        created_at: created_at.max(0) as u64,
+        updated_at: updated_at.max(0) as u64,
+    })
+}
+
+/// Columns selected for a summary row (kept in one place so list/save/status agree).
+const CTOR_SUMMARY_COLS: &str =
+    "quest_id, author_id, author_name, name, status, cover, steps_count, created_at, updated_at";
+
+impl PgConstructorStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::is_empty`].
+    pub async fn is_empty(&self) -> Result<bool, AppError> {
+        let row = sqlx::query("SELECT COUNT(*) AS n FROM constructor_quests")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(internal)?;
+        let n: i64 = row.try_get("n").map_err(internal)?;
+        Ok(n == 0)
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::create`]. A conflicting id
+    /// affects zero rows (ON CONFLICT DO NOTHING) and maps to 409.
+    pub async fn create(
+        &self,
+        quest: ConstructorQuest,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        let inserted = sqlx::query(
+            "INSERT INTO constructor_quests
+                (quest_id, author_id, author_name, name, status, cover, steps_count, body, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT DO NOTHING
+             RETURNING quest_id",
+        )
+        .bind(&quest.quest_id)
+        .bind(&quest.author_id)
+        .bind(&quest.author_name)
+        .bind(&quest.name)
+        .bind(&quest.status)
+        .bind(&quest.cover)
+        .bind(quest.steps_count as i32)
+        .bind(&quest.body)
+        .bind(quest.created_at as i64)
+        .bind(quest.updated_at as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        if inserted.is_none() {
+            return Err(AppError::Conflict(format!(
+                "constructor quest '{}' already exists",
+                quest.quest_id
+            )));
+        }
+        Ok(quest.summary())
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::insert_if_absent`].
+    pub async fn insert_if_absent(&self, quest: ConstructorQuest) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO constructor_quests
+                (quest_id, author_id, author_name, name, status, cover, steps_count, body, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&quest.quest_id)
+        .bind(&quest.author_id)
+        .bind(&quest.author_name)
+        .bind(&quest.name)
+        .bind(&quest.status)
+        .bind(&quest.cover)
+        .bind(quest.steps_count as i32)
+        .bind(&quest.body)
+        .bind(quest.created_at as i64)
+        .bind(quest.updated_at as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::list_summaries`].
+    pub async fn list_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
+             ORDER BY created_at DESC, quest_id ASC"
+        );
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter().map(ctor_summary_from_row).collect()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::get`].
+    pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
+        let sql = format!("SELECT {CTOR_SUMMARY_COLS}, body FROM constructor_quests WHERE quest_id = $1");
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        match row {
+            None => Ok(None),
+            Some(row) => {
+                let s = ctor_summary_from_row(&row)?;
+                let body: serde_json::Value = row.try_get("body").map_err(internal)?;
+                Ok(Some(ConstructorQuest {
+                    quest_id: s.quest_id,
+                    author_id: s.author_id,
+                    author_name: s.author_name,
+                    name: s.name,
+                    status: s.status,
+                    cover: s.cover,
+                    steps_count: s.steps_count,
+                    created_at: s.created_at,
+                    updated_at: s.updated_at,
+                    body,
+                }))
+            }
+        }
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::save_body`]. Zero rows updated
+    /// means the id is unknown → 404.
+    pub async fn save_body(
+        &self,
+        quest_id: &str,
+        name: &str,
+        cover: Option<String>,
+        steps_count: u32,
+        body: serde_json::Value,
+        updated_at: u64,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        let sql = format!(
+            "UPDATE constructor_quests \
+             SET name = $2, cover = $3, steps_count = $4, body = $5, updated_at = $6 \
+             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .bind(name)
+            .bind(&cover)
+            .bind(steps_count as i32)
+            .bind(&body)
+            .bind(updated_at as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        match row {
+            Some(r) => ctor_summary_from_row(&r),
+            None => Err(AppError::NotFound(format!(
+                "constructor quest '{quest_id}' not found"
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::set_status`].
+    pub async fn set_status(
+        &self,
+        quest_id: &str,
+        status: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        let sql = format!(
+            "UPDATE constructor_quests SET status = $2, updated_at = $3 \
+             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .bind(status)
+            .bind(updated_at as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::delete`].
+    pub async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
+        let res = sqlx::query("DELETE FROM constructor_quests WHERE quest_id = $1")
+            .bind(quest_id)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
     }
 }

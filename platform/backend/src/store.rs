@@ -11,7 +11,7 @@
 //! at startup. The in-memory implementation is the executable specification for
 //! the SQL one — the same integration scenarios run against both.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use crate::facts::{
     semantically_same,
 };
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
-use crate::pg_store::{PgAuthStore, PgFactStore, PgGrantStore};
+use crate::pg_store::{PgAuthStore, PgConstructorStore, PgFactStore, PgGrantStore};
 
 /// Unix seconds (0 on clock error; informational only).
 pub fn now_secs() -> u64 {
@@ -244,6 +244,44 @@ impl InMemoryFactStore {
                 )
             })
             .collect()
+    }
+
+    /// Distinct players who completed each quest (`quest_id` → count) — the
+    /// "прохождения" metric the constructor dashboard shows. A completion is
+    /// marked by the once-per-(player,quest) `CompletionBonus`; the Postgres
+    /// backend counts `bonus_awards` rows, so both report the same number.
+    pub fn completions_by_quest(&self) -> HashMap<String, usize> {
+        let mut sets: HashMap<String, HashSet<String>> = HashMap::new();
+        for meta in self.attempts.values() {
+            let completed = self
+                .fact_logs
+                .get(&meta.attempt_id)
+                .is_some_and(|log| log.iter().any(|f| f.kind == FactKind::CompletionBonus));
+            if completed {
+                sets.entry(meta.quest_id.clone())
+                    .or_default()
+                    .insert(meta.player_id.clone());
+            }
+        }
+        sets.into_iter().map(|(q, s)| (q, s.len())).collect()
+    }
+
+    /// Seed one completed playthrough (a distinct player completing `quest_id`) —
+    /// demo data so the dashboard shows real, non-zero completions through the
+    /// same projection real play uses. Idempotent per (player, quest): a second
+    /// call is absorbed by the completion-bonus rule.
+    pub fn seed_completion(&mut self, player_id: &str, quest_id: &str) {
+        let meta = self.create_attempt(player_id, quest_id, "seed");
+        let fact = Fact {
+            kind: FactKind::CompletionBonus,
+            step_position: 0,
+            submitted_value: None,
+            local_is_correct: true,
+            coins_delta: 5,
+            note: None,
+            device_id: format!("seed:{player_id}"),
+        };
+        self.append_idempotent(&meta.attempt_id, vec![fact]);
     }
 }
 
@@ -570,6 +608,25 @@ impl FactStores {
             Self::Postgres(pg) => pg.attempt_logs_for_player(player_id).await,
         }
     }
+
+    /// See [`InMemoryFactStore::completions_by_quest`].
+    pub async fn completions_by_quest(&self) -> Result<HashMap<String, usize>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.completions_by_quest()),
+            Self::Postgres(pg) => pg.completions_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryFactStore::seed_completion`].
+    pub async fn seed_completion(&self, player_id: &str, quest_id: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.seed_completion(player_id, quest_id);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.seed_completion(player_id, quest_id).await,
+        }
+    }
 }
 
 /// Identity storage backend (see [`FactStores`] for the pattern).
@@ -757,6 +814,271 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_bundle(quest_id)),
             Self::Postgres(pg) => pg.get_bundle(quest_id).await,
+        }
+    }
+}
+
+/// Editorial lifecycle of a constructor quest — the status the dashboard shows
+/// and edits. `published` is set by the publish flow; `draft`/`test` are
+/// author-chosen. Stored as a plain string, constrained in code
+/// ([`validate_ctor_status`]) and at the DB (a CHECK constraint).
+pub const CTOR_STATUS_DRAFT: &str = "draft";
+pub const CTOR_STATUS_TEST: &str = "test";
+pub const CTOR_STATUS_PUBLISHED: &str = "published";
+pub const CTOR_STATUSES: [&str; 3] = [CTOR_STATUS_DRAFT, CTOR_STATUS_TEST, CTOR_STATUS_PUBLISHED];
+
+/// Reject any status outside the known set (400). Keeps the column honest in the
+/// in-memory store too, where no DB CHECK constraint exists.
+pub fn validate_ctor_status(status: &str) -> Result<(), AppError> {
+    if CTOR_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!(
+            "invalid status '{status}' (expected one of: draft, test, published)"
+        )))
+    }
+}
+
+/// A constructor quest: the full editable authoring `body` (the CtorQuest JSON,
+/// opaque to the backend) plus the denormalized list columns the dashboard reads.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConstructorQuest {
+    pub quest_id: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub name: String,
+    pub status: String,
+    pub cover: Option<String>,
+    pub steps_count: u32,
+    pub created_at: u64,
+    pub updated_at: u64,
+    /// Full editable CtorQuest JSON — the builder's working copy.
+    pub body: serde_json::Value,
+}
+
+/// Dashboard list row — everything in [`ConstructorQuest`] except the (large) body.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConstructorQuestSummary {
+    pub quest_id: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub name: String,
+    pub status: String,
+    pub cover: Option<String>,
+    pub steps_count: u32,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+impl ConstructorQuest {
+    /// Strip the body for the list view.
+    pub fn summary(&self) -> ConstructorQuestSummary {
+        ConstructorQuestSummary {
+            quest_id: self.quest_id.clone(),
+            author_id: self.author_id.clone(),
+            author_name: self.author_name.clone(),
+            name: self.name.clone(),
+            status: self.status.clone(),
+            cover: self.cover.clone(),
+            steps_count: self.steps_count,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+/// In-memory constructor-quest registry (drafts + bodies + lifecycle).
+#[derive(Clone, Debug, Default)]
+pub struct InMemoryConstructorStore {
+    quests: HashMap<String, ConstructorQuest>,
+}
+
+impl InMemoryConstructorStore {
+    /// Create an empty store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// True when no quest exists yet — the seed-once gate.
+    pub fn is_empty(&self) -> bool {
+        self.quests.is_empty()
+    }
+
+    /// Insert a new quest; rejects a duplicate id (409).
+    pub fn create(&mut self, quest: ConstructorQuest) -> Result<ConstructorQuestSummary, AppError> {
+        if self.quests.contains_key(&quest.quest_id) {
+            return Err(AppError::Conflict(format!(
+                "constructor quest '{}' already exists",
+                quest.quest_id
+            )));
+        }
+        let summary = quest.summary();
+        self.quests.insert(quest.quest_id.clone(), quest);
+        Ok(summary)
+    }
+
+    /// Insert only if absent (seed path — idempotent, never errors on conflict).
+    pub fn insert_if_absent(&mut self, quest: ConstructorQuest) {
+        self.quests.entry(quest.quest_id.clone()).or_insert(quest);
+    }
+
+    /// All quests as list rows, newest first (ties by id for a stable order).
+    pub fn list_summaries(&self) -> Vec<ConstructorQuestSummary> {
+        let mut v: Vec<_> = self.quests.values().map(|q| q.summary()).collect();
+        v.sort_by(|a, b| a.quest_id.cmp(&b.quest_id));
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    /// Full quest (with body) by id.
+    pub fn get(&self, quest_id: &str) -> Option<ConstructorQuest> {
+        self.quests.get(quest_id).cloned()
+    }
+
+    /// Replace the editable body + denormalized list fields (autosave). 404 if unknown.
+    pub fn save_body(
+        &mut self,
+        quest_id: &str,
+        name: &str,
+        cover: Option<String>,
+        steps_count: u32,
+        body: serde_json::Value,
+        updated_at: u64,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        let q = self
+            .quests
+            .get_mut(quest_id)
+            .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+        q.name = name.to_string();
+        q.cover = cover;
+        q.steps_count = steps_count;
+        q.body = body;
+        q.updated_at = updated_at;
+        Ok(q.summary())
+    }
+
+    /// Set the lifecycle status; `None` if the quest does not exist (the publish
+    /// flow calls this best-effort for quests that were never constructor-tracked).
+    pub fn set_status(
+        &mut self,
+        quest_id: &str,
+        status: &str,
+        updated_at: u64,
+    ) -> Option<ConstructorQuestSummary> {
+        let q = self.quests.get_mut(quest_id)?;
+        q.status = status.to_string();
+        q.updated_at = updated_at;
+        Some(q.summary())
+    }
+
+    /// Delete a quest; `true` if a row was removed.
+    pub fn delete(&mut self, quest_id: &str) -> bool {
+        self.quests.remove(quest_id).is_some()
+    }
+}
+
+/// Constructor-quest storage backend (see [`FactStores`] for the pattern).
+#[derive(Clone, Debug)]
+pub enum ConstructorStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemoryConstructorStore>>),
+    /// Durable PostgreSQL.
+    Postgres(PgConstructorStore),
+}
+
+impl ConstructorStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemoryConstructorStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryConstructorStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("constructor lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryConstructorStore::is_empty`].
+    pub async fn is_empty(&self) -> Result<bool, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.is_empty()),
+            Self::Postgres(pg) => pg.is_empty().await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::create`].
+    pub async fn create(
+        &self,
+        quest: ConstructorQuest,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.create(quest),
+            Self::Postgres(pg) => pg.create(quest).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::insert_if_absent`].
+    pub async fn insert_if_absent(&self, quest: ConstructorQuest) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.insert_if_absent(quest);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.insert_if_absent(quest).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::list_summaries`].
+    pub async fn list_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_summaries()),
+            Self::Postgres(pg) => pg.list_summaries().await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::get`].
+    pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(quest_id)),
+            Self::Postgres(pg) => pg.get(quest_id).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::save_body`].
+    pub async fn save_body(
+        &self,
+        quest_id: &str,
+        name: &str,
+        cover: Option<String>,
+        steps_count: u32,
+        body: serde_json::Value,
+        updated_at: u64,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.save_body(quest_id, name, cover, steps_count, body, updated_at)
+            }
+            Self::Postgres(pg) => {
+                pg.save_body(quest_id, name, cover, steps_count, body, updated_at)
+                    .await
+            }
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::set_status`].
+    pub async fn set_status(
+        &self,
+        quest_id: &str,
+        status: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.set_status(quest_id, status, updated_at)),
+            Self::Postgres(pg) => pg.set_status(quest_id, status, updated_at).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::delete`].
+    pub async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete(quest_id)),
+            Self::Postgres(pg) => pg.delete(quest_id).await,
         }
     }
 }
@@ -1022,5 +1344,111 @@ mod grant_tests {
                 .len(),
             4
         );
+    }
+}
+
+#[cfg(test)]
+mod constructor_tests {
+    use super::*;
+
+    fn quest(id: &str, name: &str, created: u64) -> ConstructorQuest {
+        ConstructorQuest {
+            quest_id: id.into(),
+            author_id: "seed:a".into(),
+            author_name: "Автор".into(),
+            name: name.into(),
+            status: CTOR_STATUS_DRAFT.into(),
+            cover: None,
+            steps_count: 2,
+            created_at: created,
+            updated_at: created,
+            body: serde_json::json!({ "id": id, "steps": [] }),
+        }
+    }
+
+    #[test]
+    fn create_lists_newest_first_and_rejects_duplicate() {
+        let mut s = InMemoryConstructorStore::new();
+        assert!(s.is_empty());
+        s.create(quest("q-old", "Old", 100)).expect("create old");
+        s.create(quest("q-new", "New", 200)).expect("create new");
+        assert!(!s.is_empty());
+
+        let list = s.list_summaries();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].quest_id, "q-new", "newest created_at first");
+        assert_eq!(list[1].quest_id, "q-old");
+
+        assert!(
+            s.create(quest("q-old", "Dup", 300)).is_err(),
+            "duplicate id rejected"
+        );
+    }
+
+    #[test]
+    fn save_body_updates_list_fields_and_404s_unknown() {
+        let mut s = InMemoryConstructorStore::new();
+        s.create(quest("q1", "Name", 1)).expect("create");
+        let updated = s
+            .save_body(
+                "q1",
+                "Renamed",
+                Some("cover.png".into()),
+                7,
+                serde_json::json!({ "id": "q1", "steps": [1, 2] }),
+                42,
+            )
+            .expect("save");
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.steps_count, 7);
+        assert_eq!(updated.cover.as_deref(), Some("cover.png"));
+        assert_eq!(updated.updated_at, 42);
+        let full = s.get("q1").expect("present");
+        assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
+
+        assert!(s.save_body("ghost", "x", None, 0, serde_json::json!({}), 0).is_err());
+    }
+
+    #[test]
+    fn set_status_and_delete() {
+        let mut s = InMemoryConstructorStore::new();
+        s.create(quest("q1", "Name", 1)).expect("create");
+        let r = s.set_status("q1", CTOR_STATUS_PUBLISHED, 9).expect("known");
+        assert_eq!(r.status, CTOR_STATUS_PUBLISHED);
+        assert_eq!(s.get("q1").expect("present").status, CTOR_STATUS_PUBLISHED);
+        // Unknown quest: None (publish calls this best-effort).
+        assert!(s.set_status("ghost", CTOR_STATUS_PUBLISHED, 9).is_none());
+
+        assert!(s.delete("q1"));
+        assert!(!s.delete("q1"), "second delete is a no-op");
+        assert!(s.get("q1").is_none());
+    }
+
+    #[test]
+    fn status_validation() {
+        assert!(validate_ctor_status("draft").is_ok());
+        assert!(validate_ctor_status("test").is_ok());
+        assert!(validate_ctor_status("published").is_ok());
+        assert!(validate_ctor_status("live").is_err());
+        assert!(validate_ctor_status("").is_err());
+    }
+
+    #[test]
+    fn completions_count_distinct_finishers_per_quest() {
+        let mut s = InMemoryFactStore::new();
+        // Two distinct players complete quest-a; one of them also "completes" again
+        // on a fresh attempt (bonus is once-ever, so still one distinct finisher).
+        s.seed_completion("p1", "quest-a");
+        s.seed_completion("p2", "quest-a");
+        s.seed_completion("p1", "quest-a");
+        // One player completes quest-b.
+        s.seed_completion("p3", "quest-b");
+        // An attempt with no completion fact contributes nothing.
+        s.create_attempt("p9", "quest-a", "snap");
+
+        let by_quest = s.completions_by_quest();
+        assert_eq!(by_quest.get("quest-a").copied(), Some(2));
+        assert_eq!(by_quest.get("quest-b").copied(), Some(1));
+        assert_eq!(by_quest.get("quest-c").copied(), None);
     }
 }
