@@ -6,8 +6,8 @@ import {
   TPL_BY_KEY,
   computeGates,
   fmtTime,
+  newStep,
   plural,
-  seedWorkspace,
   serializeDraft,
   stepToGameStep,
   type CtorQuest,
@@ -27,28 +27,55 @@ import { WspHeader } from './QuestList';
 
 /* ---------- Мини-превью шаблона настоящими компонентами плеера ---------- */
 
-/** Демо-квест «Ирония судьбы» (все 7 шаблонов) — основа превью пикера. Строится
- *  один раз на уровне модуля: seedWorkspace() чистая, а пикер рисует 7 превью. */
-const DEMO_QUEST = seedWorkspace().quests[0];
+/** Нейтральная мета для превью пикера — обобщённый плейсхолдер, НЕ настоящий и не
+ *  выдуманный квест. Показывает форму шаблона, а не чьи-то данные. */
+const PREVIEW_META: CtorQuestMeta = {
+  title: 'Название квеста',
+  city: 'Город',
+  duration: '1–2 часа',
+  cover: '/assets/img/quest-card.png',
+  desc: '',
+  price: 0,
+};
 
-/** Демо-шаги для пикера — из seed-квеста «Ирония судьбы» (все 7 шаблонов). */
-function demoStepFor(template: CtorTemplate): { step: DesignStep; pos: number; total: number } {
-  const idx = DEMO_QUEST.steps.findIndex((s) => s.template === template);
-  const ctorStep = idx >= 0 ? DEMO_QUEST.steps[idx] : DEMO_QUEST.steps[0];
+/** Краткий обобщённый текст-иллюстрация для каждого шаблона: показывает, как
+ *  выглядит страница такого типа, не притворяясь реальным контентом квеста. */
+const PREVIEW_TEXT: Record<CtorTemplate, string> = {
+  start: 'краткое описание квеста',
+  video: 'видео-знакомство с квестом',
+  task_no: 'дойдите до указанной точки и осмотритесь',
+  task_answer: 'рассмотрите место и ответьте на вопрос',
+  continue: 'развитие сюжета между заданиями',
+  route_video: 'видео-навигация до следующей точки',
+  congrats: 'поздравляем с прохождением!',
+};
+
+/** Превью-шаг из ПРЕФИЛЛА самого шаблона (newStep) + нейтральный текст. Без
+ *  seed-квеста: ни одной выдуманной строки контента. */
+function previewStepFor(template: CtorTemplate): { step: DesignStep; pos: number; total: number } {
+  const s = newStep(template);
+  s.text = PREVIEW_TEXT[template];
+  // Задания рисуют комикс — нейтральный плейсхолдер, чтобы рамка выглядела цельной,
+  // не привязываясь ни к какому квесту.
+  if (template === 'task_no' || template === 'task_answer') {
+    s.images = { ...s.images, task: '/assets/img/quest-card.png' };
+  }
+  if (template === 'task_no') s.place = 'адрес точки · 300 м';
+  const idx = CTOR_TEMPLATES.findIndex((t) => t.key === template);
   return {
-    step: toDesignStep(stepToGameStep(ctorStep, DEMO_QUEST.meta)),
+    step: toDesignStep(stepToGameStep(s, PREVIEW_META)),
     pos: (idx >= 0 ? idx : 0) + 1,
-    total: DEMO_QUEST.steps.length,
+    total: CTOR_TEMPLATES.length,
   };
 }
 
 function MiniTemplatePreview({ template }: { template: CtorTemplate }) {
-  const { step, pos, total } = useMemo(() => demoStepFor(template), [template]);
+  const { step, pos, total } = useMemo(() => previewStepFor(template), [template]);
   return (
     <div className="mini">
       <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }}>
-        {template !== 'start' ? <TopBar pos={pos} total={total} coins={8} /> : null}
-        <StepView step={step} quest={{ city: 'Нови Сад', duration: '90 минут' }} copy={PLAYER_COPY} st={{}} on={{}} />
+        {template !== 'start' ? <TopBar pos={pos} total={total} coins={0} /> : null}
+        <StepView step={step} quest={{ city: PREVIEW_META.city, duration: PREVIEW_META.duration }} copy={PLAYER_COPY} st={{}} on={{}} />
       </PlayerFrame>
     </div>
   );
@@ -133,7 +160,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
     <>
       <div className="wsp-phone">
         <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }}>
-          {designStep.template !== 'start' ? <TopBar pos={pos + 1} total={total} coins={8} /> : null}
+          {designStep.template !== 'start' ? <TopBar pos={pos + 1} total={total} coins={0} /> : null}
           <StepView
             step={designStep}
             quest={{ title: quest.meta.title, city: quest.meta.city || '—', duration: quest.meta.duration || '—' }}

@@ -72,14 +72,6 @@ export type CtorSelection =
   | { type: 'publish' }
   | { type: 'page'; id: string };
 
-export interface WorkspaceState {
-  ver: 1;
-  screen: 'list' | 'builder';
-  questId: string | null;
-  sel: CtorSelection | null;
-  quests: CtorQuest[];
-}
-
 export interface GateMessage {
   pageId: string | null;
   text: string;
@@ -372,14 +364,20 @@ export function nextVersionNumber(quest: CtorQuest): number {
   return (quest.versions.length ? Math.max(...quest.versions.map((v) => v.n)) : 0) + 1;
 }
 
-/** Frozen snapshot of the draft — deep-cloned, versioned, positions sealed. */
+/** Frozen snapshot of the draft — deep-cloned, versioned, positions sealed. The
+ *  store-card city/duration are frozen in too (when set), so the player renders the
+ *  real place/duration instead of a hardcoded default. */
 export function serializeDraft(quest: CtorQuest): QuestSnapshot {
   const steps = quest.steps.map((s, i) => ({ ...stepToGameStep(s, quest.meta), position: i }));
+  const city = quest.meta.city.trim();
+  const duration = quest.meta.duration.trim();
   return {
     golden_id: quest.id,
     name: quest.meta.title,
     snapshot_version: nextVersionNumber(quest),
     steps: JSON.parse(JSON.stringify(steps)) as GameStep[],
+    ...(city ? { city } : {}),
+    ...(duration ? { duration } : {}),
   };
 }
 
@@ -423,159 +421,4 @@ export function removeStep(steps: CtorStep[], id: string): { steps: CtorStep[]; 
   if (idx < 0) return { steps, nextSelectedId: null };
   const neighbour = steps[idx + 1] || steps[idx - 1] || null;
   return { steps: steps.filter((s) => s.id !== id), nextSelectedId: neighbour ? neighbour.id : null };
-}
-
-/* ---------- Персистентность (черновики переживают перезагрузку) ---------- */
-
-export const WORKSPACE_KEY = 'gq-ctor2:v1';
-
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-function defaultStorage(): StorageLike | null {
-  return typeof localStorage === 'undefined' ? null : localStorage;
-}
-
-export function loadWorkspace(storage: StorageLike | null = defaultStorage()): WorkspaceState {
-  try {
-    const raw = storage?.getItem(WORKSPACE_KEY);
-    if (raw) {
-      const s = JSON.parse(raw) as WorkspaceState;
-      if (s && s.ver === 1 && Array.isArray(s.quests)) return s;
-    }
-  } catch {
-    /* повреждённое состояние → seed */
-  }
-  return seedWorkspace();
-}
-
-/** @returns false при ошибке записи (квота localStorage) — UI показывает «не сохранено». */
-export function saveWorkspace(state: WorkspaceState, storage: StorageLike | null = defaultStorage()): boolean {
-  try {
-    storage?.setItem(WORKSPACE_KEY, JSON.stringify(state));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* ---------- Демо-данные (из design/ctor2/store.jsx, картинки из /public) ---------- */
-
-const IMG = {
-  task: '/assets/img/church.jpg',
-  character: '/assets/img/avatar-author.jpg',
-  hint: '/assets/img/feature-group.jpg',
-  atmosphere: '/assets/img/hero-main.png',
-  cover: '/assets/img/quest-card.png',
-};
-
-function seedStep(template: CtorTemplate, patch: Partial<CtorStep>): CtorStep {
-  return { ...newStep(template), ...patch };
-}
-
-export function seedWorkspace(): WorkspaceState {
-  const q1: CtorQuest = {
-    id: 'q-ironia',
-    meta: {
-      title: 'Ирония судьбы',
-      city: 'Нови Сад',
-      duration: '90 минут',
-      cover: IMG.cover,
-      desc: 'Городская прогулка по следам исторических личностей: церковные книги, кованые ограды и одно громкое имя в финале.',
-      price: 990,
-    },
-    lastSaved: null,
-    versions: [
-      { n: 3, date: '02.05.2026', pages: 8, size: '4,8 МБ', live: true, attempts: 31 },
-      { n: 2, date: '12.03.2026', pages: 8, size: '4,6 МБ', live: false, attempts: 3 },
-    ],
-    steps: [
-      seedStep('start', { kicker: 'Городской квест', text: 'по следам исторических личностей' }),
-      seedStep('video', {
-        name: 'Приветственное видео',
-        video: { dur: '0:48', label: 'видео-приветствие автора' },
-        text: 'Здравствуйте! Я архивариус Николаевской церкви. Сто лет назад здесь оставил след человек, изменивший наше представление о Вселенной. Готовы пройти по его следам?',
-      }),
-      seedStep('continue', {
-        name: 'Завязка',
-        images: { task: IMG.task },
-        text: '1913 год. Нови Сад. В церковной книге появляется запись о крещении двух мальчиков — Эдуарда и Альберта.\n\nИх мать — сербка Милева Марич. Об отце пока умолчим: вы сами назовёте его имя к концу прогулки.',
-      }),
-      seedStep('task_no', {
-        name: 'Дойти до церкви',
-        images: { task: IMG.task },
-        text: 'Дойдите до Николаевской церкви — самой старой православной церкви города.',
-        place: 'ул. Николаевска порта 2 · 400 м отсюда',
-        action: { desc: 'Найдите кованую ограду у входа и прикоснитесь к холодному металлу — так здоровались с церковью сто лет назад.', confirmLabel: 'Я на месте, нашёл' },
-        allowNote: true,
-        nav: { on: true, lat: '45.2551', lng: '19.8451', label: 'Николаевская церковь' },
-        gift: { on: true, coins: 3, narrative: 'За смелость и точность' },
-      }),
-      seedStep('task_answer', {
-        name: 'Год освящения',
-        images: { task: IMG.task, hint: IMG.hint },
-        text: 'Взгляните на табличку над входом. В каком году храм был освящён после перестройки?',
-        prompt: 'Введите год',
-        acceptable: ['1730', 'в 1730', '1730 год'],
-        gift: { on: true, coins: 5, narrative: 'Острый глаз!' },
-        hint: { on: true, cost: 5, text: 'Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки.' },
-      }),
-      seedStep('route_video', {
-        name: 'Маршрут к парку',
-        video: { dur: '0:31', label: 'видео маршрута до парка' },
-        text: 'Теперь — по Дунавской улице к городскому парку. По пути считайте кофейни: их тут больше, чем фонарей.',
-        nav: { on: true, lat: '45.2552', lng: '19.8489', label: 'Дунавский парк' },
-      }),
-      seedStep('continue', {
-        name: 'Диалог с архивариусом',
-        images: { task: IMG.cover },
-        text: '— Вот, спасибо, удружили! Что там у вас? Так, где у меня книга 1913 года была?\n\nДа тут одна запись всего: «Едуард и Алберт, крштени су по православном обреду…»\n\nПодождите, да их же мать та самая Милева. Ну и дела!',
-      }),
-      seedStep('congrats', {
-        name: 'Поздравление',
-        title: 'Квест пройден!',
-        text: 'Имя отца мальчиков вы уже поняли сами: Альберт Эйнштейн. Ирония судьбы в том, что города, хранящие чьи-то следы, сами становятся частью истории.',
-      }),
-    ],
-  };
-
-  const q2: CtorQuest = {
-    id: 'q-podzem',
-    meta: {
-      title: 'Подземелья Петроварадина',
-      city: 'Нови Сад',
-      duration: '2 часа',
-      cover: IMG.task,
-      desc: 'Крепость над Дунаем и 16 километров галерей под ней. Спускаемся по уровням — от часовой башни до четвёртого подземного.',
-      price: 0,
-    },
-    lastSaved: null,
-    versions: [{ n: 1, date: '20.04.2026', pages: 4, size: '2,3 МБ', live: true, attempts: 12 }],
-    steps: [
-      seedStep('start', { kicker: 'Квест-спуск', text: 'крепость, какой её не показывают туристам' }),
-      seedStep('continue', {
-        name: 'Пролог',
-        images: { task: IMG.task },
-        text: 'Петроварадинскую крепость строили 88 лет. Под ней — четыре уровня галерей, и карта самого нижнего утеряна до сих пор.',
-      }),
-      seedStep('task_answer', {
-        name: 'Часы наоборот',
-        images: { task: IMG.cover },
-        text: 'Посмотрите на часовую башню. Какая стрелка на этих часах длиннее — часовая или минутная?',
-        prompt: 'Введите ответ',
-        acceptable: ['часовая', 'часовая стрелка'],
-        gift: { on: true, coins: 5, narrative: 'Время здесь течёт иначе' },
-        hint: { on: true, cost: 5, text: 'Рыбакам с Дуная важнее видеть часы издалека — минуты им ни к чему.' },
-      }),
-      seedStep('congrats', {
-        name: 'Поздравление',
-        title: 'Квест пройден!',
-        text: 'Часовая длиннее минутной — чтобы время видели с реки. Крепость выдала вам одну из своих тайн; остальные ждут под землёй.',
-      }),
-    ],
-  };
-
-  return { ver: 1, screen: 'list', questId: null, sel: null, quests: [q1, q2] };
 }

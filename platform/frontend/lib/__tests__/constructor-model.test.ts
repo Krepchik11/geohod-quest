@@ -10,15 +10,12 @@ import {
   computeGates,
   duplicateStep,
   insertionIndex,
-  loadWorkspace,
   newQuest,
   newStep,
   nextVersionNumber,
   plural,
   removeStep,
   reorderSteps,
-  saveWorkspace,
-  seedWorkspace,
   serializeDraft,
   stepToGameStep,
   type CtorQuest,
@@ -245,6 +242,21 @@ describe('serializeDraft', () => {
     q.steps[0].text = 'mutated';
     expect(snap.steps[0].rich_content.main_text).not.toBe('mutated');
   });
+
+  it('freezes the real store-card city/duration in (and omits blanks)', () => {
+    // A fresh quest has blank city/duration → the snapshot carries neither, so the
+    // player shows no fabricated place rather than a hardcoded default.
+    const blank = serializeDraft(quest());
+    expect(blank.city).toBeUndefined();
+    expect(blank.duration).toBeUndefined();
+
+    const q = quest();
+    q.meta.city = 'Нови Сад';
+    q.meta.duration = '1.5 часа';
+    const snap = serializeDraft(q);
+    expect(snap.city).toBe('Нови Сад');
+    expect(snap.duration).toBe('1.5 часа');
+  });
 });
 
 describe('structural edits', () => {
@@ -301,47 +313,6 @@ describe('versions', () => {
       { n: 1, date: '', pages: 2, size: '', live: true, attempts: 0 },
     ];
     expect(nextVersionNumber(q)).toBe(4);
-  });
-});
-
-describe('workspace persistence', () => {
-  const memoryStorage = () => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => void map.set(k, v),
-    };
-  };
-
-  it('round-trips state through storage', () => {
-    const storage = memoryStorage();
-    const state = seedWorkspace();
-    state.screen = 'builder';
-    state.questId = state.quests[0].id;
-    expect(saveWorkspace(state, storage)).toBe(true);
-    expect(loadWorkspace(storage)).toEqual(state);
-  });
-
-  it('falls back to the seed on corrupt or version-mismatched data', () => {
-    const storage = memoryStorage();
-    storage.setItem('gq-ctor2:v1', '{broken');
-    expect(loadWorkspace(storage).quests.length).toBeGreaterThan(0);
-    storage.setItem('gq-ctor2:v1', JSON.stringify({ ver: 99, quests: [] }));
-    expect(loadWorkspace(storage).quests.length).toBeGreaterThan(0);
-  });
-
-  it('reports save failure instead of throwing (quota)', () => {
-    const throwing = {
-      getItem: () => null,
-      setItem: () => { throw new Error('QuotaExceededError'); },
-    };
-    expect(saveWorkspace(seedWorkspace(), throwing)).toBe(false);
-  });
-
-  it('seed quests pass the publish gates', () => {
-    for (const q of seedWorkspace().quests) {
-      expect(computeGates(q).errors).toEqual([]);
-    }
   });
 });
 
