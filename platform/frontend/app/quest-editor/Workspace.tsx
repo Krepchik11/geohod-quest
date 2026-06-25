@@ -248,7 +248,17 @@ export default function Workspace() {
       setList((l) => l.map((q) => (q.quest_id === updated.quest_id ? updated : q)));
     } catch (e) {
       setList(prev); // rollback
-      showToast(errMessage(e));
+      // «Тест»/«Опубликован» need a published version first: the backend coherence
+      // guard returns 400 when no frozen snapshot exists. A bare status flip can't
+      // put a quest in the store — publishing is the gated action in the editor — so
+      // open the quest there instead of failing silently. (Delisting to «Проект»
+      // never hits this.)
+      if (e instanceof ApiError && e.status === 400 && status !== 'draft') {
+        showToast('Сначала опубликуйте версию в редакторе — затем выберите статус.');
+        void openQuest(row.quest_id);
+      } else {
+        showToast(errMessage(e));
+      }
     }
   };
 
