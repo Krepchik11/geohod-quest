@@ -954,6 +954,29 @@ impl InMemoryConstructorStore {
         Some(q.summary())
     }
 
+    /// Every author's quests as list rows, newest first (ties by id). The admin
+    /// view: an admin account is the superuser and manages every author's quest in
+    /// any state, so — unlike [`Self::list_summaries_for_author`] — this is NOT
+    /// scoped. Editors and the ops-token path keep the per-author list.
+    pub fn list_all_summaries(&self) -> Vec<ConstructorQuestSummary> {
+        let mut v: Vec<_> = self.quests.values().map(|q| q.summary()).collect();
+        v.sort_by(|a, b| a.quest_id.cmp(&b.quest_id));
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    /// `quest_id` → lifecycle status for every constructor quest. The store catalog
+    /// consults this so marketplace visibility is a function of the AUTHORITATIVE
+    /// status (a single source of truth), not the mere presence of a frozen
+    /// snapshot — a quest the author moved to `test`/`draft` keeps its snapshot
+    /// (still resolvable by direct link, grant-gated) but leaves the store.
+    pub fn statuses_by_quest(&self) -> HashMap<String, String> {
+        self.quests
+            .iter()
+            .map(|(id, q)| (id.clone(), q.status.clone()))
+            .collect()
+    }
+
     /// Delete a quest; `true` if a row was removed.
     pub fn delete(&mut self, quest_id: &str) -> bool {
         self.quests.remove(quest_id).is_some()
@@ -1038,6 +1061,22 @@ impl ConstructorStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.set_status(quest_id, status, updated_at)),
             Self::Postgres(pg) => pg.set_status(quest_id, status, updated_at).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::list_all_summaries`].
+    pub async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_all_summaries()),
+            Self::Postgres(pg) => pg.list_all_summaries().await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::statuses_by_quest`].
+    pub async fn statuses_by_quest(&self) -> Result<HashMap<String, String>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.statuses_by_quest()),
+            Self::Postgres(pg) => pg.statuses_by_quest().await,
         }
     }
 

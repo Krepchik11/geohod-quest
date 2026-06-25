@@ -185,6 +185,20 @@ async fn session_account(
     state.auth.get_user(&player_id).await
 }
 
+/// True when the caller presents a `Bearer` session whose account role is `admin`.
+///
+/// This is the superuser predicate for the constructor surface: an admin manages
+/// every author's quest (list all + open/save/restatus/delete any), in any state.
+/// The shared `ADMIN_TOKEN` ops credential is intentionally NOT admin here — it has
+/// no identity, and the constructor keeps it author-scoped (by device id), so a
+/// bootstrap operator never silently sees every device's drafts; only a real admin
+/// account gets cross-author reach.
+async fn is_admin_session(state: &AppState, headers: &HeaderMap) -> Result<bool, AppError> {
+    Ok(session_account(state, headers)
+        .await?
+        .is_some_and(|a| a.role == auth::ROLE_ADMIN))
+}
+
 /// The identity authorized to act on the admin user-management surface. `player_id`
 /// is `Some` for a session-admin (the acting account) and `None` for the shared
 /// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
@@ -648,14 +662,16 @@ async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String,
 
 /// Fetch a constructor quest the caller is allowed to act on, or 404.
 ///
-/// Authoring is editor-gated (capability) AND author-scoped (ownership): the
-/// dashboard is a personal workspace, so a quest the caller did not author is
+/// Authoring is editor-gated (capability), then ownership-gated: a quest stays the
+/// author's, but an ADMIN is the superuser and may act on any author's quest in any
+/// state (the stated lifecycle: a published quest is "owned by author" yet "can be
+/// edited by admin"). For a non-admin, a quest they did not author is
 /// indistinguishable from one that does not exist — the same opaque 404, never a
 /// signal that another author's quest exists. `author_id` is immutable (there is
 /// no quest-transfer), so the fetched quest can be reused for the follow-up
 /// mutation with no TOCTOU ownership gap. This is the single chokepoint every
-/// per-quest constructor handler routes through, so author scoping is structural
-/// rather than re-derived (and forgettable) at each call site.
+/// per-quest constructor handler routes through, so the owner-or-admin rule is
+/// structural rather than re-derived (and forgettable) at each call site.
 async fn require_owned_constructor_quest(
     state: &AppState,
     headers: &HeaderMap,
@@ -663,11 +679,12 @@ async fn require_owned_constructor_quest(
 ) -> Result<ConstructorQuest, AppError> {
     require_editor(state, headers).await?;
     let (author_id, _) = acting_author(state, headers).await?;
+    let admin = is_admin_session(state, headers).await?;
     state
         .constructor
         .get(quest_id)
         .await?
-        .filter(|q| q.author_id == author_id)
+        .filter(|q| admin || q.author_id == author_id)
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
 }
 
@@ -676,14 +693,19 @@ async fn list_constructor_quests_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<ConstructorQuestWire>>, AppError> {
     require_editor(&state, &headers).await?;
-    // Personal workspace: list ONLY the acting author's quests (the reported bug
-    // was every editor/admin seeing everyone's). acting_author is the same id
-    // creation stamps, so an author always sees exactly what they made.
-    let (author_id, _) = acting_author(&state, &headers).await?;
-    let summaries = state
-        .constructor
-        .list_summaries_for_author(&author_id)
-        .await?;
+    // Editors get a personal workspace: ONLY their own quests (the reported bug was
+    // every editor seeing everyone's). An ADMIN is the superuser and sees every
+    // author's quest so it can manage any of them. acting_author is the same id
+    // creation stamps, so a non-admin always sees exactly what they made.
+    let summaries = if is_admin_session(&state, &headers).await? {
+        state.constructor.list_all_summaries().await?
+    } else {
+        let (author_id, _) = acting_author(&state, &headers).await?;
+        state
+            .constructor
+            .list_summaries_for_author(&author_id)
+            .await?
+    };
     let completions = state.store.completions_by_quest().await?;
     Ok(Json(
         summaries
@@ -883,8 +905,28 @@ async fn list_quests_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<CatalogQuest>>, AppError> {
     let published = state.grants.list_published().await?;
+    // Store visibility is governed by the AUTHORITATIVE lifecycle status
+    // (constructor_quests.status) — the single source of truth — NOT by the mere
+    // presence of a frozen snapshot. The marketplace lists ONLY `published` quests:
+    // a quest the author moved to `test` or `draft` keeps its snapshot (still
+    // resolvable by direct link, grant-gated) but disappears from the store. This is
+    // the root-cause fix for "a test/draft quest still shows in the store": before,
+    // the catalog returned every `published_quests` row regardless of status, so a
+    // publish-then-unpublish left the row (and thus the store card) behind.
+    //
+    // A `published_quests` row with NO constructor row (a quest published straight
+    // through the API, e.g. a legacy/operator publish) has no managed lifecycle and
+    // is treated as published — preserving prior behavior for that path.
+    let statuses = state.constructor.statuses_by_quest().await?;
     let mut out = Vec::with_capacity(published.len());
     for meta in published {
+        let listed = match statuses.get(&meta.quest_id).map(String::as_str) {
+            Some(status) => status == store::CTOR_STATUS_PUBLISHED,
+            None => true,
+        };
+        if !listed {
+            continue;
+        }
         // Aggregate ratings for the version on sale (the published snapshot),
         // reusing the same projector the author dashboard's version-stats use.
         // grants_count does not affect the rating fields, so pass 0.
@@ -1501,6 +1543,48 @@ mod tests {
         format!("Bearer {token}")
     }
 
+    /// A registered ADMIN session (role=admin), promoted via the ops token. Mirrors
+    /// [`editor_bearer`]; used to exercise the admin superuser paths (cross-author
+    /// constructor management). Returns the `Authorization: Bearer <token>` value.
+    async fn admin_bearer(app: &Router, tag: &str) -> String {
+        let id = format!("adm-{tag}");
+        let email = format!("{id}@example.com");
+        let (st, v) = post_json(
+            app,
+            "/api/auth/register",
+            json!({"player_id": id, "email": email, "password": "hunter2hunter2"}),
+        )
+        .await;
+        let token = if st == StatusCode::OK {
+            let (st2, _) = post_json_h(
+                app,
+                &format!("/api/admin/users/{id}/role"),
+                json!({"role": "admin"}),
+                &[("x-admin-token", TEST_ADMIN_TOKEN)],
+            )
+            .await;
+            assert_eq!(st2, StatusCode::OK, "promote admin");
+            v["token"].as_str().expect("token").to_string()
+        } else {
+            let (_, lv) = post_json(
+                app,
+                "/api/auth/login",
+                json!({"email": email, "password": "hunter2hunter2"}),
+            )
+            .await;
+            lv["token"].as_str().expect("token").to_string()
+        };
+        format!("Bearer {token}")
+    }
+
+    /// True if `quest_id` is currently listed in the public store (`GET /api/quests`).
+    async fn store_has(app: &Router, quest_id: &str) -> bool {
+        let (_, list) = get_json(app, "/api/quests").await;
+        list.as_array()
+            .map(|a| a.iter().any(|q| q["quest_id"] == quest_id))
+            .unwrap_or(false)
+    }
+
     /// Publish `body` as an editor (the editor account is derived from `ids.player`).
     /// Replaces bare `post_json(app, "/api/quests/publish", ...)` now that publish is
     /// role-gated by [`require_editor`].
@@ -1820,6 +1904,72 @@ mod tests {
         assert!(
             grants.iter().all(|g| g["player_id"] == ids.player.as_str()),
             "no other player's grants are exposed"
+        );
+    }
+
+    /// Store visibility tracks the AUTHORITATIVE lifecycle status, not the mere
+    /// presence of a frozen snapshot. The reported bug: a quest published and then
+    /// moved back to `test`/`draft` kept showing in the store. Here one
+    /// constructor-tracked quest is published (listed), then walked test → draft →
+    /// published; it leaves the store on every non-published status and returns on
+    /// `published` WITHOUT a re-publish (the frozen snapshot is reused).
+    async fn scenario_store_lists_only_published(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        let auth = [("authorization", bearer.as_str())];
+        let status_url = format!("/api/constructor/quests/{}/status", ids.quest);
+
+        // A constructor draft owned by this editor — not yet in the store.
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": ids.quest, "name": "Q", "cover": null, "steps_count": 1,
+                "body": { "id": ids.quest, "meta": { "title": "Q" }, "steps": [1], "versions": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            !store_has(app, &ids.quest).await,
+            "an unpublished draft is not in the store"
+        );
+
+        // Publish → listed (and the constructor row flips to `published`).
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "snapshot": {"steps": []}}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(store_has(app, &ids.quest).await, "a published quest is listed");
+
+        // → test: leaves the store (the snapshot stays, so it is still resolvable by
+        // direct link — grant-gated — it is simply delisted).
+        let (st, _) = post_json_h(app, &status_url, json!({"status": "test"}), &auth).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            !store_has(app, &ids.quest).await,
+            "a test quest is hidden from the store"
+        );
+
+        // → draft: still hidden.
+        let (st, _) = post_json_h(app, &status_url, json!({"status": "draft"}), &auth).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            !store_has(app, &ids.quest).await,
+            "a draft quest is hidden from the store"
+        );
+
+        // → published again: returns to the store with NO re-publish (the same
+        // frozen snapshot is reused), proving status alone drives visibility.
+        let (st, _) = post_json_h(app, &status_url, json!({"status": "published"}), &auth).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            store_has(app, &ids.quest).await,
+            "re-listing needs only the status flip"
         );
     }
 
@@ -2530,6 +2680,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn store_lists_only_published_quests() {
+        scenario_store_lists_only_published(&test_app(), &Ids::new("vis")).await;
+    }
+
+    #[tokio::test]
     async fn bundle_endpoint_gated_by_grant() {
         scenario_bundle_gated_by_grant(&test_app(), &Ids::new("bundle")).await;
     }
@@ -2773,6 +2928,96 @@ mod tests {
         let (st, full) = get_json_h(&app, "/api/constructor/quests/q-a", &a).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(full["name"], "Квест А", "A's quest is untouched by B's attempts");
+    }
+
+    /// Admin superuser reach over the constructor (the stated model: a published
+    /// quest is "owned by author" yet "can be edited by admin"). Two editors each
+    /// own one quest; an admin SEES BOTH and can open / restatus / delete either,
+    /// while a plain editor still sees and reaches ONLY their own — the regression
+    /// guard that cross-author scoping stays intact for non-admins.
+    #[tokio::test]
+    async fn constructor_admin_manages_any_author_quest() {
+        let app = test_app();
+        let a = editor_bearer(&app, "a").await;
+        let b = editor_bearer(&app, "b").await;
+        let admin = admin_bearer(&app, "x").await;
+        let mk = |id: &str, name: &str| {
+            json!({
+                "quest_id": id, "name": name, "cover": null, "steps_count": 1,
+                "body": { "id": id, "meta": { "title": name }, "steps": [1], "versions": [] }
+            })
+        };
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            mk("q-eda", "A"),
+            &[("authorization", a.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            mk("q-edb", "B"),
+            &[("authorization", b.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A plain editor sees ONLY their own quest (scoping preserved for non-admins).
+        let (_, la) =
+            get_json_h(&app, "/api/constructor/quests", &[("authorization", a.as_str())]).await;
+        let la = la.as_array().expect("array");
+        assert_eq!(la.len(), 1, "an editor sees only their own quests");
+        assert_eq!(la[0]["quest_id"], "q-eda");
+
+        // The admin sees BOTH authors' quests.
+        let (_, all) =
+            get_json_h(&app, "/api/constructor/quests", &[("authorization", admin.as_str())]).await;
+        let all = all.as_array().expect("array");
+        assert!(
+            all.iter().any(|q| q["quest_id"] == "q-eda")
+                && all.iter().any(|q| q["quest_id"] == "q-edb"),
+            "an admin sees every author's quests"
+        );
+
+        // The admin can open, restatus and delete ANOTHER author's quest.
+        let (st, _) = get_json_h(
+            &app,
+            "/api/constructor/quests/q-eda",
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "admin can open any author's quest");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-edb/status",
+            json!({ "status": "test" }),
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "admin can restatus any author's quest");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-eda/delete",
+            json!({}),
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "admin can delete any author's quest");
+
+        // A plain editor still cannot reach another editor's quest (opaque 404).
+        let (st, _) = get_json_h(
+            &app,
+            "/api/constructor/quests/q-edb",
+            &[("authorization", a.as_str())],
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "an editor cannot reach another author's quest"
+        );
     }
 
     /// The store (/api/quests) shows ONLY published quests: a freshly created
@@ -3041,6 +3286,7 @@ mod tests {
         scenario_completion_bonus_once(&app, &Ids::new(&format!("bonus-{run}"))).await;
         scenario_version_freeze(&app, &Ids::new(&format!("freeze-{run}"))).await;
         scenario_checkout_and_publish_list(&app, &Ids::new(&format!("shop-{run}"))).await;
+        scenario_store_lists_only_published(&app, &Ids::new(&format!("vis-{run}"))).await;
         scenario_bundle_gated_by_grant(&app, &Ids::new(&format!("bundle-{run}"))).await;
         scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
