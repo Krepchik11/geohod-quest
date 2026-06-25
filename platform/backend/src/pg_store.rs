@@ -883,6 +883,39 @@ impl PgConstructorStore {
         row.as_ref().map(ctor_summary_from_row).transpose()
     }
 
+    /// See [`crate::store::InMemoryConstructorStore::list_all_summaries`]. The admin
+    /// view: NOT scoped by author (every author's quests), newest-first like the
+    /// per-author list.
+    pub async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
+             ORDER BY created_at DESC, quest_id ASC"
+        );
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter().map(ctor_summary_from_row).collect()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::statuses_by_quest`]. A single
+    /// lightweight scan (quest_id + status only) backing the store-catalog filter.
+    pub async fn statuses_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, AppError> {
+        let rows = sqlx::query("SELECT quest_id, status FROM constructor_quests")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let quest_id: String = row.try_get("quest_id").map_err(internal)?;
+            let status: String = row.try_get("status").map_err(internal)?;
+            out.insert(quest_id, status);
+        }
+        Ok(out)
+    }
+
     /// See [`crate::store::InMemoryConstructorStore::delete`].
     pub async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
         let res = sqlx::query("DELETE FROM constructor_quests WHERE quest_id = $1")
