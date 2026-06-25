@@ -185,20 +185,6 @@ async fn session_account(
     state.auth.get_user(&player_id).await
 }
 
-/// True when the caller presents a `Bearer` session whose account role is `admin`.
-///
-/// This is the superuser predicate for the constructor surface: an admin manages
-/// every author's quest (list all + open/save/restatus/delete any), in any state.
-/// The shared `ADMIN_TOKEN` ops credential is intentionally NOT admin here — it has
-/// no identity, and the constructor keeps it author-scoped (by device id), so a
-/// bootstrap operator never silently sees every device's drafts; only a real admin
-/// account gets cross-author reach.
-async fn is_admin_session(state: &AppState, headers: &HeaderMap) -> Result<bool, AppError> {
-    Ok(session_account(state, headers)
-        .await?
-        .is_some_and(|a| a.role == auth::ROLE_ADMIN))
-}
-
 /// The identity authorized to act on the admin user-management surface. `player_id`
 /// is `Some` for a session-admin (the acting account) and `None` for the shared
 /// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
@@ -640,16 +626,24 @@ fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWi
     }
 }
 
-/// The acting editor's (id, display label) for author attribution. A Bearer
-/// session resolves to the real account; the ops-token path (no "self") is
-/// labeled generically and keyed by the claimed device id.
-async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+/// The acting editor's (id, display label, is_admin) for a constructor request,
+/// resolved from a SINGLE session lookup. A Bearer session resolves to the real
+/// account (admin iff role == admin); the ops-token path (no "self") is labeled
+/// generically, keyed by the claimed device id, and is never admin — the
+/// constructor keeps that bootstrap path author-scoped so an operator never gains
+/// cross-author reach. Callers that also need the admin flag use this directly
+/// instead of a second `session_account` round-trip.
+async fn acting_author_role(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(String, String, bool), AppError> {
     if let Some(account) = session_account(state, headers).await? {
+        let is_admin = account.role == auth::ROLE_ADMIN;
         let name = account
             .display_name
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(account.email);
-        return Ok((account.player_id, name));
+        return Ok((account.player_id, name, is_admin));
     }
     let claimed = claimed_from_headers(headers);
     let id = if claimed.is_empty() {
@@ -657,7 +651,14 @@ async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String,
     } else {
         claimed
     };
-    Ok((id, "Оператор".to_string()))
+    Ok((id, "Оператор".to_string(), false))
+}
+
+/// The acting editor's (id, display label) for author attribution. See
+/// [`acting_author_role`] when the admin flag is also needed.
+async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+    let (id, name, _) = acting_author_role(state, headers).await?;
+    Ok((id, name))
 }
 
 /// Fetch a constructor quest the caller is allowed to act on, or 404.
@@ -678,8 +679,7 @@ async fn require_owned_constructor_quest(
     quest_id: &str,
 ) -> Result<ConstructorQuest, AppError> {
     require_editor(state, headers).await?;
-    let (author_id, _) = acting_author(state, headers).await?;
-    let admin = is_admin_session(state, headers).await?;
+    let (author_id, _, admin) = acting_author_role(state, headers).await?;
     state
         .constructor
         .get(quest_id)
@@ -695,12 +695,12 @@ async fn list_constructor_quests_handler(
     require_editor(&state, &headers).await?;
     // Editors get a personal workspace: ONLY their own quests (the reported bug was
     // every editor seeing everyone's). An ADMIN is the superuser and sees every
-    // author's quest so it can manage any of them. acting_author is the same id
-    // creation stamps, so a non-admin always sees exactly what they made.
-    let summaries = if is_admin_session(&state, &headers).await? {
+    // author's quest so it can manage any of them. The id is the same one creation
+    // stamps, so a non-admin always sees exactly what they made.
+    let (author_id, _, admin) = acting_author_role(&state, &headers).await?;
+    let summaries = if admin {
         state.constructor.list_all_summaries().await?
     } else {
-        let (author_id, _) = acting_author(&state, &headers).await?;
         state
             .constructor
             .list_summaries_for_author(&author_id)
@@ -919,7 +919,6 @@ struct CatalogQuest {
 async fn list_quests_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<CatalogQuest>>, AppError> {
-    let published = state.grants.list_published().await?;
     // Store visibility is governed by the AUTHORITATIVE lifecycle status
     // (constructor_quests.status) — the single source of truth — NOT by the mere
     // presence of a frozen snapshot. The marketplace lists ONLY `published` quests:
@@ -932,14 +931,24 @@ async fn list_quests_handler(
     // A `published_quests` row with NO constructor row (a quest published straight
     // through the API, e.g. a legacy/operator publish) has no managed lifecycle and
     // is treated as published — preserving prior behavior for that path.
-    let statuses = state.constructor.statuses_by_quest().await?;
+    //
+    // The two reads hit different tables with no data dependency, so run them
+    // concurrently.
+    let (published, statuses) = tokio::join!(
+        state.grants.list_published(),
+        state.constructor.statuses_by_quest(),
+    );
+    let published = published?;
+    let statuses = statuses?;
     let mut out = Vec::with_capacity(published.len());
     for meta in published {
-        let listed = match statuses.get(&meta.quest_id).map(String::as_str) {
-            Some(status) => status == store::CTOR_STATUS_PUBLISHED,
-            None => true,
-        };
-        if !listed {
+        // Hidden when the author moved it to `test`/`draft`; listed when `published`
+        // or when there is no constructor row (legacy/direct publish).
+        if statuses
+            .get(&meta.quest_id)
+            .map(String::as_str)
+            .is_some_and(|s| s != store::CTOR_STATUS_PUBLISHED)
+        {
             continue;
         }
         // Aggregate ratings for the version on sale (the published snapshot),
@@ -1523,12 +1532,12 @@ mod tests {
         }
     }
 
-    /// A registered editor session authorized to publish (publish is gated on the
-    /// editor capability). The account is derived from `tag` so the shared Postgres
-    /// suite never collides; a 409 (account already exists from a prior run) falls
-    /// back to login. Returns the `Authorization: Bearer <token>` value.
-    async fn editor_bearer(app: &Router, tag: &str) -> String {
-        let id = format!("ed-{tag}");
+    /// A registered session with `role` (promoted via the ops token), as the
+    /// `Authorization: Bearer <token>` value. The account id is `{prefix}-{tag}`,
+    /// derived from `tag` so the shared Postgres suite never collides; a 409 (account
+    /// already exists from a prior run) falls back to login.
+    async fn role_bearer(app: &Router, prefix: &str, tag: &str, role: &str) -> String {
+        let id = format!("{prefix}-{tag}");
         let email = format!("{id}@example.com");
         let (st, v) = post_json(
             app,
@@ -1540,11 +1549,11 @@ mod tests {
             let (st2, _) = post_json_h(
                 app,
                 &format!("/api/admin/users/{id}/role"),
-                json!({"role": "editor"}),
+                json!({ "role": role }),
                 &[("x-admin-token", TEST_ADMIN_TOKEN)],
             )
             .await;
-            assert_eq!(st2, StatusCode::OK, "promote editor");
+            assert_eq!(st2, StatusCode::OK, "promote {role}");
             v["token"].as_str().expect("token").to_string()
         } else {
             let (_, lv) = post_json(
@@ -1558,38 +1567,16 @@ mod tests {
         format!("Bearer {token}")
     }
 
-    /// A registered ADMIN session (role=admin), promoted via the ops token. Mirrors
-    /// [`editor_bearer`]; used to exercise the admin superuser paths (cross-author
-    /// constructor management). Returns the `Authorization: Bearer <token>` value.
+    /// A registered editor session authorized to publish (publish is gated on the
+    /// editor capability). Returns the `Authorization: Bearer <token>` value.
+    async fn editor_bearer(app: &Router, tag: &str) -> String {
+        role_bearer(app, "ed", tag, "editor").await
+    }
+
+    /// A registered ADMIN session (role=admin), for the admin superuser paths
+    /// (cross-author constructor management). Returns `Authorization: Bearer <token>`.
     async fn admin_bearer(app: &Router, tag: &str) -> String {
-        let id = format!("adm-{tag}");
-        let email = format!("{id}@example.com");
-        let (st, v) = post_json(
-            app,
-            "/api/auth/register",
-            json!({"player_id": id, "email": email, "password": "hunter2hunter2"}),
-        )
-        .await;
-        let token = if st == StatusCode::OK {
-            let (st2, _) = post_json_h(
-                app,
-                &format!("/api/admin/users/{id}/role"),
-                json!({"role": "admin"}),
-                &[("x-admin-token", TEST_ADMIN_TOKEN)],
-            )
-            .await;
-            assert_eq!(st2, StatusCode::OK, "promote admin");
-            v["token"].as_str().expect("token").to_string()
-        } else {
-            let (_, lv) = post_json(
-                app,
-                "/api/auth/login",
-                json!({"email": email, "password": "hunter2hunter2"}),
-            )
-            .await;
-            lv["token"].as_str().expect("token").to_string()
-        };
-        format!("Bearer {token}")
+        role_bearer(app, "adm", tag, "admin").await
     }
 
     /// True if `quest_id` is currently listed in the public store (`GET /api/quests`).

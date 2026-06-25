@@ -780,6 +780,30 @@ impl PgConstructorStore {
         Ok(quest.summary())
     }
 
+    /// Summary rows, newest-first (ties by id), optionally scoped to one author.
+    /// Shared by the per-author dashboard list and the admin (all-authors) list —
+    /// same projection + ordering, only the `WHERE` differs.
+    async fn fetch_summaries(
+        &self,
+        author_id: Option<&str>,
+    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        let where_clause = if author_id.is_some() {
+            "WHERE author_id = $1 "
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
+             {where_clause}ORDER BY created_at DESC, quest_id ASC"
+        );
+        let mut query = sqlx::query(&sql);
+        if let Some(author_id) = author_id {
+            query = query.bind(author_id);
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(internal)?;
+        rows.iter().map(ctor_summary_from_row).collect()
+    }
+
     /// See [`crate::store::InMemoryConstructorStore::list_summaries_for_author`].
     /// Scoped by `author_id` (the `idx_ctor_quests_author` index serves this) so the
     /// dashboard can never return another author's quests.
@@ -787,16 +811,7 @@ impl PgConstructorStore {
         &self,
         author_id: &str,
     ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
-             WHERE author_id = $1 ORDER BY created_at DESC, quest_id ASC"
-        );
-        let rows = sqlx::query(&sql)
-            .bind(author_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.iter().map(ctor_summary_from_row).collect()
+        self.fetch_summaries(Some(author_id)).await
     }
 
     /// See [`crate::store::InMemoryConstructorStore::get`].
@@ -887,15 +902,7 @@ impl PgConstructorStore {
     /// view: NOT scoped by author (every author's quests), newest-first like the
     /// per-author list.
     pub async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
-             ORDER BY created_at DESC, quest_id ASC"
-        );
-        let rows = sqlx::query(&sql)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.iter().map(ctor_summary_from_row).collect()
+        self.fetch_summaries(None).await
     }
 
     /// See [`crate::store::InMemoryConstructorStore::statuses_by_quest`]. A single
