@@ -824,6 +824,21 @@ async fn set_constructor_status_handler(
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
     require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     store::validate_ctor_status(&req.status)?;
+    // Coherence invariant: a quest can be `test` or `published` ONLY once a frozen
+    // snapshot exists (created by the gated Publish in the editor). Without this, a
+    // bare status flip could claim the quest is live while nothing is playable or
+    // sellable — and because the store lists `status == published`, the author would
+    // get a quest stuck at "published but never in the store" (the reported bug).
+    // `draft` (delist / park) is always allowed. publish_quest_handler sets the
+    // status directly AFTER registering the snapshot, so it is unaffected by this.
+    if req.status != store::CTOR_STATUS_DRAFT
+        && state.grants.get_published(&quest_id).await?.is_none()
+    {
+        return Err(AppError::BadRequest(
+            "publish a version in the editor before marking the quest as «test» or «published»"
+                .into(),
+        ));
+    }
     let now = store::now_secs();
     let updated = state
         .constructor
@@ -2814,7 +2829,7 @@ mod tests {
         assert_eq!(list[0]["name"], "Переименован");
         assert_eq!(list[0]["steps"], 5);
 
-        // Status: bad value rejected, good value applied.
+        // Status: an unknown value is rejected.
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-test/status",
@@ -2823,17 +2838,28 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
-        let (st, updated) = post_json_h(
+        // Coherence guard: a quest with no published snapshot cannot be marked
+        // `test`/`published` (otherwise it would claim to be live yet never reach
+        // the store). `draft` is always allowed.
+        let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-test/status",
             json!({ "status": "test" }),
             &admin,
         )
         .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "test needs a published snapshot first");
+        let (st, updated) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "draft" }),
+            &admin,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(updated["status"], "test");
+        assert_eq!(updated["status"], "draft");
 
-        // Publishing the same quest_id flips the constructor status to published.
+        // Publishing the same quest_id creates the snapshot and flips status to published.
         let (st, _) = post_json_h(
             &app,
             "/api/quests/publish",
@@ -2850,6 +2876,18 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
         assert_eq!(list[0]["status"], "published", "publish flips lifecycle");
+
+        // Now that a snapshot exists, the author can move it to `test` (delist) and
+        // back — the guard passes because the frozen snapshot is present.
+        let (st, updated) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "test is allowed once a snapshot exists");
+        assert_eq!(updated["status"], "test");
 
         // Delete.
         let (st, _) =
@@ -2981,7 +3019,7 @@ mod tests {
             "an admin sees every author's quests"
         );
 
-        // The admin can open, restatus and delete ANOTHER author's quest.
+        // The admin can open, EDIT (save body) and delete ANOTHER author's quest.
         let (st, _) = get_json_h(
             &app,
             "/api/constructor/quests/q-eda",
@@ -2991,12 +3029,24 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "admin can open any author's quest");
         let (st, _) = post_json_h(
             &app,
-            "/api/constructor/quests/q-edb/status",
-            json!({ "status": "test" }),
+            "/api/constructor/quests/q-edb/save",
+            json!({
+                "name": "B — отредактирован администратором",
+                "cover": null, "steps_count": 2,
+                "body": { "id": "q-edb", "meta": { "title": "B" }, "steps": [1, 2], "versions": [] }
+            }),
             &[("authorization", admin.as_str())],
         )
         .await;
-        assert_eq!(st, StatusCode::OK, "admin can restatus any author's quest");
+        assert_eq!(st, StatusCode::OK, "admin can edit any author's quest");
+        // The edit persisted on B's quest.
+        let (_, edited) = get_json_h(
+            &app,
+            "/api/constructor/quests/q-edb",
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(edited["name"], "B — отредактирован администратором");
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-eda/delete",
@@ -3018,6 +3068,73 @@ mod tests {
             StatusCode::NOT_FOUND,
             "an editor cannot reach another author's quest"
         );
+    }
+
+    /// The reported regression: an admin creates a quest and publishes it — it MUST
+    /// appear in the store. This pins both halves of the conflation that caused
+    /// "published but not in the store":
+    ///   * the editor publish (`/api/quests/publish`) creates the frozen snapshot,
+    ///     flips status to `published`, and the quest is listed;
+    ///   * a bare status flip to `published`/`test` BEFORE a snapshot exists is
+    ///     rejected by the coherence guard — so the dashboard dropdown can no longer
+    ///     mark a quest "published" without anything to actually sell/play.
+    #[tokio::test]
+    async fn admin_publish_appears_in_store_guarded_by_snapshot() {
+        let app = test_app();
+        let admin = admin_bearer(&app, "pubflow").await;
+        let auth = [("authorization", admin.as_str())];
+
+        // Admin creates a constructor draft.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-pub", "name": "Публикуемый", "cover": null, "steps_count": 1,
+                "body": { "id": "q-pub", "meta": { "title": "Публикуемый" }, "steps": [1], "versions": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A bare status flip to published/test before any snapshot is rejected —
+        // exactly what made a dashboard-only "Опубликован" never reach the store.
+        for s in ["published", "test"] {
+            let (st, _) = post_json_h(
+                &app,
+                "/api/constructor/quests/q-pub/status",
+                json!({ "status": s }),
+                &auth,
+            )
+            .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{s} needs a snapshot first");
+        }
+        assert!(!store_has(&app, "q-pub").await, "absent from the store before publishing");
+
+        // Publishing via the editor path creates the snapshot AND lists it.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": "q-pub", "name": "Публикуемый", "template_summary": "1 step",
+                "snapshot_version": 1, "snapshot": { "steps": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(store_has(&app, "q-pub").await, "a published quest appears in the store");
+
+        // And now the dashboard status toggle works over the existing snapshot.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-pub/status",
+            json!({ "status": "test" }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(!store_has(&app, "q-pub").await, "moving to test delists it");
     }
 
     /// The store (/api/quests) shows ONLY published quests: a freshly created
@@ -3216,18 +3333,18 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
 
-        // status
-        let (st, updated) = post_json_h(
+        // status: the coherence guard rejects test/published before a snapshot
+        // exists (real SQL path for get_published returning None).
+        let (st, _) = post_json_h(
             &app,
             &format!("/api/constructor/quests/{qid}/status"),
             json!({ "status": "test" }),
             &admin,
         )
         .await;
-        assert_eq!(st, StatusCode::OK);
-        assert_eq!(updated["status"], "test");
+        assert_eq!(st, StatusCode::BAD_REQUEST, "test needs a snapshot first");
 
-        // publish flips the constructor status to published
+        // publish creates the snapshot and flips the constructor status to published
         let (st, _) = post_json_h(
             &app,
             "/api/quests/publish",
@@ -3241,6 +3358,17 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (_, full) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
         assert_eq!(full["status"], "published");
+
+        // with a snapshot present, the status toggle now succeeds (SQL get_published Some)
+        let (st, updated) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{qid}/status"),
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(updated["status"], "test");
 
         // delete
         let (st, _) = post_json_h(
