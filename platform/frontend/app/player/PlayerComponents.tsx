@@ -353,6 +353,7 @@ export function StepView({ step, quest, copy, st, on }: {
 
   if (step.template === "task_answer") {
     const val = stateIn.answer || "";
+    const canSubmit = val.trim().length > 0;
     return (
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
@@ -364,18 +365,42 @@ export function StepView({ step, quest, copy, st, on }: {
           </div>
         ) : null}
         {stateIn.wrong ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
-        {/* Non-sticky bar: the input must scroll into view above the mobile
-            keyboard, not stay pinned to the bottom of the dynamic viewport. */}
-        <div className="p-actions p-actions--field">
+        {/* Inline submit: the field and its submit share ONE row, so the browser's
+            native "scroll focused field into view" lifts BOTH above the on-screen
+            keyboard (iOS, which ignores interactiveWidget, included). The <form> +
+            enterKeyHint makes the keyboard's own action key («Отпр.») submit, and
+            native form submission (unlike a manual Enter handler) respects IME
+            composition — it never submits a half-composed value. The row floats to
+            the step bottom via .p-actions' margin-top:auto (see player-paper.css). */}
+        <form
+          className="p-actions p-actions--field"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSubmit && h.submit) h.submit(val);
+          }}
+        >
           <input
             className={"p-input" + (stateIn.wrong ? " p-input--wrong" : "")}
+            name="answer"
             placeholder={step.prompt || "Введите ответ"}
             value={val}
             onChange={(e) => h.answer && h.answer(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && h.submit) h.submit(val); }}
+            enterKeyHint="send"
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label={step.prompt || "Введите ответ"}
           />
-          <button className="p-btn p-btn--solid" type="button" onClick={() => h.submit && h.submit(val)}>{copy?.submit || "Ответить"}</button>
-        </div>
+          <button
+            className="p-submit"
+            type="submit"
+            disabled={!canSubmit}
+            aria-label={copy?.submit || "Ответить"}
+          >
+            <PArrow />
+          </button>
+        </form>
       </div>
     );
   }
