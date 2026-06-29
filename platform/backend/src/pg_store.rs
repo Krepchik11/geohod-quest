@@ -728,16 +728,19 @@ fn ctor_summary_from_row(
         author_name: row.try_get("author_name").map_err(internal)?,
         name: row.try_get("name").map_err(internal)?,
         status: row.try_get("status").map_err(internal)?,
-        cover: row.try_get("cover").map_err(internal)?,
         steps_count: steps_count.max(0) as u32,
         created_at: created_at.max(0) as u64,
         updated_at: updated_at.max(0) as u64,
     })
 }
 
-/// Columns selected for a summary row (kept in one place so list/save/status agree).
+/// Columns selected for a summary row (kept in one place so list/save/status
+/// agree). Deliberately EXCLUDES the heavy `cover` (base64 image) and `body`:
+/// the dashboard list never renders them, so reading the TOASTed cover for every
+/// row was the cause of the multi-second list load. GET-one adds `cover`/`body`
+/// back explicitly because the builder needs the full entity.
 const CTOR_SUMMARY_COLS: &str =
-    "quest_id, author_id, author_name, name, status, cover, steps_count, created_at, updated_at";
+    "quest_id, author_id, author_name, name, status, steps_count, created_at, updated_at";
 
 impl PgConstructorStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -816,7 +819,8 @@ impl PgConstructorStore {
 
     /// See [`crate::store::InMemoryConstructorStore::get`].
     pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        let sql = format!("SELECT {CTOR_SUMMARY_COLS}, body FROM constructor_quests WHERE quest_id = $1");
+        let sql =
+            format!("SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1");
         let row = sqlx::query(&sql)
             .bind(quest_id)
             .fetch_optional(&self.pool)
@@ -833,7 +837,9 @@ impl PgConstructorStore {
                     author_name: s.author_name,
                     name: s.name,
                     status: s.status,
-                    cover: s.cover,
+                    // `cover` is excluded from CTOR_SUMMARY_COLS (list slimming); GET-one
+                    // selects it explicitly above and reads it straight off the row.
+                    cover: row.try_get("cover").map_err(internal)?,
                     steps_count: s.steps_count,
                     created_at: s.created_at,
                     updated_at: s.updated_at,

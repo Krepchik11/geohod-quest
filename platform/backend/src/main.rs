@@ -16,7 +16,7 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::{
     Router,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -250,6 +250,18 @@ struct HealthResponse {
     version: &'static str,
 }
 
+/// Body-size ceiling for the authoring routes that carry a full quest payload —
+/// create/save (the whole editable `body`) and publish (the frozen `snapshot`).
+/// Axum's default extractor limit is 2 MiB, but a single quest legitimately
+/// exceeds that: even a spec-compliant quest near the ≤5 MB bundle target blows
+/// past 2 MiB, and imported legacy quests reach ~13 MB. With media stored INLINE
+/// as base64 (the structural root cause — see the publish/save handlers), that
+/// payload must currently travel in one request, so the cap is raised here.
+/// Scoped to these editor-gated routes only; every other route keeps the 2 MiB
+/// default. The real fix is externalizing media to content-addressed blobs so the
+/// body carries references, not bytes — a separate change.
+const MAX_AUTHORING_BODY_BYTES: usize = 32 * 1024 * 1024;
+
 /// Build the application router (extracted for oneshot testing).
 fn build_router(state: AppState) -> Router {
     Router::new()
@@ -261,13 +273,21 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/attempts/{attempt_id}/state", get(get_state_handler))
         .route("/api/quests", get(list_quests_handler))
-        .route("/api/quests/publish", post(publish_quest_handler))
+        .route(
+            "/api/quests/publish",
+            post(publish_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
+        )
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
         // Constructor dashboard (authoring-side; require_editor). All mutations are
-        // POST — the router/CORS surface is GET+POST only by design.
+        // POST — the router/CORS surface is GET+POST only by design. Create/save
+        // carry the full editable body, so they lift the default 2 MiB body cap
+        // (see MAX_AUTHORING_BODY_BYTES); the GET list/one and the tiny
+        // status/delete bodies keep the default.
         .route(
             "/api/constructor/quests",
-            get(list_constructor_quests_handler).post(create_constructor_quest_handler),
+            get(list_constructor_quests_handler)
+                .post(create_constructor_quest_handler)
+                .layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route(
             "/api/constructor/quests/{quest_id}",
@@ -275,7 +295,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/constructor/quests/{quest_id}/save",
-            post(save_constructor_quest_handler),
+            post(save_constructor_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route(
             "/api/constructor/quests/{quest_id}/status",
@@ -590,7 +610,9 @@ struct ConstructorQuestWire {
     steps: u32,
     /// Distinct players who completed this quest (derived from the fact log).
     completed: usize,
-    cover: Option<String>,
+    // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
+    // cover image, so the base64 cover was dead weight that bloated the list
+    // (megabytes for media-heavy quests). It stays on the GET-one full wire.
     created_at: u64,
     updated_at: u64,
 }
@@ -620,7 +642,6 @@ fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWi
         status: s.status,
         steps: s.steps_count,
         completed,
-        cover: s.cover,
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
