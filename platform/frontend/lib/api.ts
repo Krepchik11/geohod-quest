@@ -101,7 +101,10 @@ export interface ConstructorQuestWire {
   steps: number;
   /** Distinct players who completed the quest ("прохождения"; derived from facts). */
   completed: number;
-  cover: string | null;
+  // No `cover`: the dashboard renders a name-derived thumbnail, so the backend
+  // omits the heavy base64 cover from list rows (it bloated the list to megabytes
+  // for media-heavy quests). The cover is on the full wire below; the builder
+  // reads it from `body.meta.cover` anyway.
   /** Unix seconds. */
   created_at: number;
   updated_at: number;
@@ -111,6 +114,8 @@ export interface ConstructorQuestWire {
  *  builder to open). `body` is the opaque CtorQuest JSON the server round-trips. */
 export interface ConstructorQuestFullWire extends ConstructorQuestWire {
   body: unknown;
+  /** Stored cover image (GET-one only; the list omits it). */
+  cover: string | null;
 }
 
 /** Create/save payload: the denormalized list fields + the full opaque body. */
