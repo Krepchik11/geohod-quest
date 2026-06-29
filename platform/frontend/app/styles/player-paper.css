@@ -256,9 +256,56 @@
   pointer-events: none;
 }
 /* task_answer keeps its input+submit in normal flow (not sticky) so a focused
-   field scrolls above the on-screen keyboard instead of being pinned behind it. */
-.p-actions--field { position: relative; }
+   field scrolls above the on-screen keyboard. The submit shares the field's ROW,
+   so it rides the same native scroll-into-view and is never left behind the
+   keyboard (the iOS failure of the old stacked layout). margin-top:auto is kept
+   from base .p-actions, so the field+submit row still floats to the step bottom
+   exactly as the design's resting state. */
+.p-actions--field {
+  position: relative;
+  flex-direction: row;
+  align-items: stretch;
+}
 .p-actions--field::before { display: none; }
+
+/* Square inline submit — ink-on-paper, stretches to the 54px input height. */
+.p-submit {
+  flex: none;
+  width: 56px;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  background: var(--p-ink);
+  color: var(--p-bg);
+  border: none;
+  border-radius: var(--p-btn-radius);
+  cursor: pointer;
+  transition: background .12s ease, opacity .12s ease, transform .12s ease;
+}
+.p-submit svg { width: 20px; height: 20px; }
+.p-submit:hover { background: #2c1f1f; }
+.p-submit:active { transform: translateY(1px); }
+.p-submit:disabled { opacity: .4; cursor: default; }
+.p-submit:disabled:active { transform: none; }
+
+/* === On-screen keyboard inset (iOS) — published by app/quest/useKeyboardInset.ts.
+   iOS Safari ignores interactiveWidget:'resizes-content', so a sticky action bar
+   or a centered modal sits BEHIND the keyboard. The hook exposes the keyboard's
+   occluded height as --kb-inset; the consumers below offset by it. On Android it
+   stays ~0 (the layout already resized), so they are no-ops. Scoped to the real
+   player frame so the constructor's fixed-size previews are untouched. */
+:root { --kb-inset: 0px; }
+
+/* Lift the STICKY action bars (e.g. task_no's «Я на месте») above the keyboard.
+   The answer step (.p-actions--field) is EXCLUDED: it is position:relative and
+   owns its keyboard handling via the inline-submit row (above), so applying
+   `bottom` would shift the field itself rather than lift a sticky bar. */
+.player-shell .pframe .p-actions:not(.p-actions--field) { bottom: var(--kb-inset); }
+
+/* Keep a centered modal sheet's bottom control (the report sheet's «Отправить»)
+   above the keyboard: the extra bottom padding shifts the centered popup up and
+   gives scroll-end clearance when it is taller than the frame. Base padding 24px. */
+.player-shell .pframe .p-overlay { padding-bottom: calc(24px + var(--kb-inset)); }
 
 /* ---------- Поля ввода ---------- */
 .p-input {
@@ -272,6 +319,8 @@
   outline: none;
   transition: border-color .12s ease;
   box-sizing: border-box;
+  /* Leave a small gap above the keyboard when the field scrolls into view. */
+  scroll-margin-bottom: 16px;
 }
 .p-input:focus { border-color: var(--p-accent); }
 .p-input::placeholder { color: var(--p-muted); }

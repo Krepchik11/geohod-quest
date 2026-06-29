@@ -28,6 +28,7 @@ import { currentPlayerId, getDeviceId } from '../../lib/identity';
 import { StartGate } from './StartGate';
 import { coinChime } from './sound';
 import { useOnline } from './useOnline';
+import { useKeyboardInset } from './useKeyboardInset';
 import {
   PlayerFrame, StepView, TopBar, CoinToast, PCheck,
   HintPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
@@ -166,6 +167,9 @@ export default function QuestPlayerClient({
 }) {
   const router = useRouter();
   const online = useOnline();
+  // Publish the keyboard's occluded height as --kb-inset so the multi-line note
+  // bar and the report sheet stay above the on-screen keyboard on iOS (Part B).
+  useKeyboardInset();
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const {
