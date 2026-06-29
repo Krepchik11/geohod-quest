@@ -840,7 +840,12 @@ pub struct ConstructorQuest {
     pub body: serde_json::Value,
 }
 
-/// Dashboard list row — everything in [`ConstructorQuest`] except the (large) body.
+/// Dashboard list row — everything in [`ConstructorQuest`] except the two HEAVY
+/// columns: the `body` and the `cover`. The dashboard renders a name-derived
+/// thumbnail, never the stored cover image, so shipping each quest's base64
+/// `cover` in the list was pure dead weight — for media-heavy (e.g. imported)
+/// quests that meant megabytes per page load. The cover stays on the full
+/// [`ConstructorQuest`] (GET-one); the list omits it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConstructorQuestSummary {
     pub quest_id: String,
@@ -848,7 +853,6 @@ pub struct ConstructorQuestSummary {
     pub author_name: String,
     pub name: String,
     pub status: String,
-    pub cover: Option<String>,
     pub steps_count: u32,
     pub created_at: u64,
     pub updated_at: u64,
@@ -863,7 +867,6 @@ impl ConstructorQuest {
             author_name: self.author_name.clone(),
             name: self.name.clone(),
             status: self.status.clone(),
-            cover: self.cover.clone(),
             steps_count: self.steps_count,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -1435,9 +1438,10 @@ mod constructor_tests {
             .expect("save");
         assert_eq!(updated.name, "Renamed");
         assert_eq!(updated.steps_count, 7);
-        assert_eq!(updated.cover.as_deref(), Some("cover.png"));
         assert_eq!(updated.updated_at, 42);
         let full = s.get("q1").expect("present");
+        // The cover lives on the full entity, not the (slimmed) list summary.
+        assert_eq!(full.cover.as_deref(), Some("cover.png"));
         assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
 
         assert!(s.save_body("ghost", "x", None, 0, serde_json::json!({}), 0).is_err());

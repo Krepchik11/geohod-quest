@@ -16,7 +16,7 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::{
     Router,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -185,20 +185,6 @@ async fn session_account(
     state.auth.get_user(&player_id).await
 }
 
-/// True when the caller presents a `Bearer` session whose account role is `admin`.
-///
-/// This is the superuser predicate for the constructor surface: an admin manages
-/// every author's quest (list all + open/save/restatus/delete any), in any state.
-/// The shared `ADMIN_TOKEN` ops credential is intentionally NOT admin here — it has
-/// no identity, and the constructor keeps it author-scoped (by device id), so a
-/// bootstrap operator never silently sees every device's drafts; only a real admin
-/// account gets cross-author reach.
-async fn is_admin_session(state: &AppState, headers: &HeaderMap) -> Result<bool, AppError> {
-    Ok(session_account(state, headers)
-        .await?
-        .is_some_and(|a| a.role == auth::ROLE_ADMIN))
-}
-
 /// The identity authorized to act on the admin user-management surface. `player_id`
 /// is `Some` for a session-admin (the acting account) and `None` for the shared
 /// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
@@ -264,6 +250,18 @@ struct HealthResponse {
     version: &'static str,
 }
 
+/// Body-size ceiling for the authoring routes that carry a full quest payload —
+/// create/save (the whole editable `body`) and publish (the frozen `snapshot`).
+/// Axum's default extractor limit is 2 MiB, but a single quest legitimately
+/// exceeds that: even a spec-compliant quest near the ≤5 MB bundle target blows
+/// past 2 MiB, and imported legacy quests reach ~13 MB. With media stored INLINE
+/// as base64 (the structural root cause — see the publish/save handlers), that
+/// payload must currently travel in one request, so the cap is raised here.
+/// Scoped to these editor-gated routes only; every other route keeps the 2 MiB
+/// default. The real fix is externalizing media to content-addressed blobs so the
+/// body carries references, not bytes — a separate change.
+const MAX_AUTHORING_BODY_BYTES: usize = 32 * 1024 * 1024;
+
 /// Build the application router (extracted for oneshot testing).
 fn build_router(state: AppState) -> Router {
     Router::new()
@@ -275,13 +273,21 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/attempts/{attempt_id}/state", get(get_state_handler))
         .route("/api/quests", get(list_quests_handler))
-        .route("/api/quests/publish", post(publish_quest_handler))
+        .route(
+            "/api/quests/publish",
+            post(publish_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
+        )
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
         // Constructor dashboard (authoring-side; require_editor). All mutations are
-        // POST — the router/CORS surface is GET+POST only by design.
+        // POST — the router/CORS surface is GET+POST only by design. Create/save
+        // carry the full editable body, so they lift the default 2 MiB body cap
+        // (see MAX_AUTHORING_BODY_BYTES); the GET list/one and the tiny
+        // status/delete bodies keep the default.
         .route(
             "/api/constructor/quests",
-            get(list_constructor_quests_handler).post(create_constructor_quest_handler),
+            get(list_constructor_quests_handler)
+                .post(create_constructor_quest_handler)
+                .layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route(
             "/api/constructor/quests/{quest_id}",
@@ -289,7 +295,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/constructor/quests/{quest_id}/save",
-            post(save_constructor_quest_handler),
+            post(save_constructor_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route(
             "/api/constructor/quests/{quest_id}/status",
@@ -604,7 +610,9 @@ struct ConstructorQuestWire {
     steps: u32,
     /// Distinct players who completed this quest (derived from the fact log).
     completed: usize,
-    cover: Option<String>,
+    // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
+    // cover image, so the base64 cover was dead weight that bloated the list
+    // (megabytes for media-heavy quests). It stays on the GET-one full wire.
     created_at: u64,
     updated_at: u64,
 }
@@ -634,22 +642,29 @@ fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWi
         status: s.status,
         steps: s.steps_count,
         completed,
-        cover: s.cover,
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
 }
 
-/// The acting editor's (id, display label) for author attribution. A Bearer
-/// session resolves to the real account; the ops-token path (no "self") is
-/// labeled generically and keyed by the claimed device id.
-async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+/// The acting editor's (id, display label, is_admin) for a constructor request,
+/// resolved from a SINGLE session lookup. A Bearer session resolves to the real
+/// account (admin iff role == admin); the ops-token path (no "self") is labeled
+/// generically, keyed by the claimed device id, and is never admin — the
+/// constructor keeps that bootstrap path author-scoped so an operator never gains
+/// cross-author reach. Callers that also need the admin flag use this directly
+/// instead of a second `session_account` round-trip.
+async fn acting_author_role(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(String, String, bool), AppError> {
     if let Some(account) = session_account(state, headers).await? {
+        let is_admin = account.role == auth::ROLE_ADMIN;
         let name = account
             .display_name
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(account.email);
-        return Ok((account.player_id, name));
+        return Ok((account.player_id, name, is_admin));
     }
     let claimed = claimed_from_headers(headers);
     let id = if claimed.is_empty() {
@@ -657,7 +672,14 @@ async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String,
     } else {
         claimed
     };
-    Ok((id, "Оператор".to_string()))
+    Ok((id, "Оператор".to_string(), false))
+}
+
+/// The acting editor's (id, display label) for author attribution. See
+/// [`acting_author_role`] when the admin flag is also needed.
+async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+    let (id, name, _) = acting_author_role(state, headers).await?;
+    Ok((id, name))
 }
 
 /// Fetch a constructor quest the caller is allowed to act on, or 404.
@@ -678,8 +700,7 @@ async fn require_owned_constructor_quest(
     quest_id: &str,
 ) -> Result<ConstructorQuest, AppError> {
     require_editor(state, headers).await?;
-    let (author_id, _) = acting_author(state, headers).await?;
-    let admin = is_admin_session(state, headers).await?;
+    let (author_id, _, admin) = acting_author_role(state, headers).await?;
     state
         .constructor
         .get(quest_id)
@@ -695,12 +716,12 @@ async fn list_constructor_quests_handler(
     require_editor(&state, &headers).await?;
     // Editors get a personal workspace: ONLY their own quests (the reported bug was
     // every editor seeing everyone's). An ADMIN is the superuser and sees every
-    // author's quest so it can manage any of them. acting_author is the same id
-    // creation stamps, so a non-admin always sees exactly what they made.
-    let summaries = if is_admin_session(&state, &headers).await? {
+    // author's quest so it can manage any of them. The id is the same one creation
+    // stamps, so a non-admin always sees exactly what they made.
+    let (author_id, _, admin) = acting_author_role(&state, &headers).await?;
+    let summaries = if admin {
         state.constructor.list_all_summaries().await?
     } else {
-        let (author_id, _) = acting_author(&state, &headers).await?;
         state
             .constructor
             .list_summaries_for_author(&author_id)
@@ -824,6 +845,21 @@ async fn set_constructor_status_handler(
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
     require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     store::validate_ctor_status(&req.status)?;
+    // Coherence invariant: a quest can be `test` or `published` ONLY once a frozen
+    // snapshot exists (created by the gated Publish in the editor). Without this, a
+    // bare status flip could claim the quest is live while nothing is playable or
+    // sellable — and because the store lists `status == published`, the author would
+    // get a quest stuck at "published but never in the store" (the reported bug).
+    // `draft` (delist / park) is always allowed. publish_quest_handler sets the
+    // status directly AFTER registering the snapshot, so it is unaffected by this.
+    if req.status != store::CTOR_STATUS_DRAFT
+        && state.grants.get_published(&quest_id).await?.is_none()
+    {
+        return Err(AppError::BadRequest(
+            "publish a version in the editor before marking the quest as «test» or «published»"
+                .into(),
+        ));
+    }
     let now = store::now_secs();
     let updated = state
         .constructor
@@ -904,7 +940,6 @@ struct CatalogQuest {
 async fn list_quests_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<CatalogQuest>>, AppError> {
-    let published = state.grants.list_published().await?;
     // Store visibility is governed by the AUTHORITATIVE lifecycle status
     // (constructor_quests.status) — the single source of truth — NOT by the mere
     // presence of a frozen snapshot. The marketplace lists ONLY `published` quests:
@@ -917,14 +952,24 @@ async fn list_quests_handler(
     // A `published_quests` row with NO constructor row (a quest published straight
     // through the API, e.g. a legacy/operator publish) has no managed lifecycle and
     // is treated as published — preserving prior behavior for that path.
-    let statuses = state.constructor.statuses_by_quest().await?;
+    //
+    // The two reads hit different tables with no data dependency, so run them
+    // concurrently.
+    let (published, statuses) = tokio::join!(
+        state.grants.list_published(),
+        state.constructor.statuses_by_quest(),
+    );
+    let published = published?;
+    let statuses = statuses?;
     let mut out = Vec::with_capacity(published.len());
     for meta in published {
-        let listed = match statuses.get(&meta.quest_id).map(String::as_str) {
-            Some(status) => status == store::CTOR_STATUS_PUBLISHED,
-            None => true,
-        };
-        if !listed {
+        // Hidden when the author moved it to `test`/`draft`; listed when `published`
+        // or when there is no constructor row (legacy/direct publish).
+        if statuses
+            .get(&meta.quest_id)
+            .map(String::as_str)
+            .is_some_and(|s| s != store::CTOR_STATUS_PUBLISHED)
+        {
             continue;
         }
         // Aggregate ratings for the version on sale (the published snapshot),
@@ -1508,12 +1553,12 @@ mod tests {
         }
     }
 
-    /// A registered editor session authorized to publish (publish is gated on the
-    /// editor capability). The account is derived from `tag` so the shared Postgres
-    /// suite never collides; a 409 (account already exists from a prior run) falls
-    /// back to login. Returns the `Authorization: Bearer <token>` value.
-    async fn editor_bearer(app: &Router, tag: &str) -> String {
-        let id = format!("ed-{tag}");
+    /// A registered session with `role` (promoted via the ops token), as the
+    /// `Authorization: Bearer <token>` value. The account id is `{prefix}-{tag}`,
+    /// derived from `tag` so the shared Postgres suite never collides; a 409 (account
+    /// already exists from a prior run) falls back to login.
+    async fn role_bearer(app: &Router, prefix: &str, tag: &str, role: &str) -> String {
+        let id = format!("{prefix}-{tag}");
         let email = format!("{id}@example.com");
         let (st, v) = post_json(
             app,
@@ -1525,11 +1570,11 @@ mod tests {
             let (st2, _) = post_json_h(
                 app,
                 &format!("/api/admin/users/{id}/role"),
-                json!({"role": "editor"}),
+                json!({ "role": role }),
                 &[("x-admin-token", TEST_ADMIN_TOKEN)],
             )
             .await;
-            assert_eq!(st2, StatusCode::OK, "promote editor");
+            assert_eq!(st2, StatusCode::OK, "promote {role}");
             v["token"].as_str().expect("token").to_string()
         } else {
             let (_, lv) = post_json(
@@ -1543,38 +1588,16 @@ mod tests {
         format!("Bearer {token}")
     }
 
-    /// A registered ADMIN session (role=admin), promoted via the ops token. Mirrors
-    /// [`editor_bearer`]; used to exercise the admin superuser paths (cross-author
-    /// constructor management). Returns the `Authorization: Bearer <token>` value.
+    /// A registered editor session authorized to publish (publish is gated on the
+    /// editor capability). Returns the `Authorization: Bearer <token>` value.
+    async fn editor_bearer(app: &Router, tag: &str) -> String {
+        role_bearer(app, "ed", tag, "editor").await
+    }
+
+    /// A registered ADMIN session (role=admin), for the admin superuser paths
+    /// (cross-author constructor management). Returns `Authorization: Bearer <token>`.
     async fn admin_bearer(app: &Router, tag: &str) -> String {
-        let id = format!("adm-{tag}");
-        let email = format!("{id}@example.com");
-        let (st, v) = post_json(
-            app,
-            "/api/auth/register",
-            json!({"player_id": id, "email": email, "password": "hunter2hunter2"}),
-        )
-        .await;
-        let token = if st == StatusCode::OK {
-            let (st2, _) = post_json_h(
-                app,
-                &format!("/api/admin/users/{id}/role"),
-                json!({"role": "admin"}),
-                &[("x-admin-token", TEST_ADMIN_TOKEN)],
-            )
-            .await;
-            assert_eq!(st2, StatusCode::OK, "promote admin");
-            v["token"].as_str().expect("token").to_string()
-        } else {
-            let (_, lv) = post_json(
-                app,
-                "/api/auth/login",
-                json!({"email": email, "password": "hunter2hunter2"}),
-            )
-            .await;
-            lv["token"].as_str().expect("token").to_string()
-        };
-        format!("Bearer {token}")
+        role_bearer(app, "adm", tag, "admin").await
     }
 
     /// True if `quest_id` is currently listed in the public store (`GET /api/quests`).
@@ -2814,7 +2837,7 @@ mod tests {
         assert_eq!(list[0]["name"], "Переименован");
         assert_eq!(list[0]["steps"], 5);
 
-        // Status: bad value rejected, good value applied.
+        // Status: an unknown value is rejected.
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-test/status",
@@ -2823,17 +2846,28 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
-        let (st, updated) = post_json_h(
+        // Coherence guard: a quest with no published snapshot cannot be marked
+        // `test`/`published` (otherwise it would claim to be live yet never reach
+        // the store). `draft` is always allowed.
+        let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-test/status",
             json!({ "status": "test" }),
             &admin,
         )
         .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "test needs a published snapshot first");
+        let (st, updated) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "draft" }),
+            &admin,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(updated["status"], "test");
+        assert_eq!(updated["status"], "draft");
 
-        // Publishing the same quest_id flips the constructor status to published.
+        // Publishing the same quest_id creates the snapshot and flips status to published.
         let (st, _) = post_json_h(
             &app,
             "/api/quests/publish",
@@ -2850,6 +2884,18 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
         assert_eq!(list[0]["status"], "published", "publish flips lifecycle");
+
+        // Now that a snapshot exists, the author can move it to `test` (delist) and
+        // back — the guard passes because the frozen snapshot is present.
+        let (st, updated) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/status",
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "test is allowed once a snapshot exists");
+        assert_eq!(updated["status"], "test");
 
         // Delete.
         let (st, _) =
@@ -2981,7 +3027,7 @@ mod tests {
             "an admin sees every author's quests"
         );
 
-        // The admin can open, restatus and delete ANOTHER author's quest.
+        // The admin can open, EDIT (save body) and delete ANOTHER author's quest.
         let (st, _) = get_json_h(
             &app,
             "/api/constructor/quests/q-eda",
@@ -2991,12 +3037,24 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "admin can open any author's quest");
         let (st, _) = post_json_h(
             &app,
-            "/api/constructor/quests/q-edb/status",
-            json!({ "status": "test" }),
+            "/api/constructor/quests/q-edb/save",
+            json!({
+                "name": "B — отредактирован администратором",
+                "cover": null, "steps_count": 2,
+                "body": { "id": "q-edb", "meta": { "title": "B" }, "steps": [1, 2], "versions": [] }
+            }),
             &[("authorization", admin.as_str())],
         )
         .await;
-        assert_eq!(st, StatusCode::OK, "admin can restatus any author's quest");
+        assert_eq!(st, StatusCode::OK, "admin can edit any author's quest");
+        // The edit persisted on B's quest.
+        let (_, edited) = get_json_h(
+            &app,
+            "/api/constructor/quests/q-edb",
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(edited["name"], "B — отредактирован администратором");
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-eda/delete",
@@ -3018,6 +3076,73 @@ mod tests {
             StatusCode::NOT_FOUND,
             "an editor cannot reach another author's quest"
         );
+    }
+
+    /// The reported regression: an admin creates a quest and publishes it — it MUST
+    /// appear in the store. This pins both halves of the conflation that caused
+    /// "published but not in the store":
+    ///   * the editor publish (`/api/quests/publish`) creates the frozen snapshot,
+    ///     flips status to `published`, and the quest is listed;
+    ///   * a bare status flip to `published`/`test` BEFORE a snapshot exists is
+    ///     rejected by the coherence guard — so the dashboard dropdown can no longer
+    ///     mark a quest "published" without anything to actually sell/play.
+    #[tokio::test]
+    async fn admin_publish_appears_in_store_guarded_by_snapshot() {
+        let app = test_app();
+        let admin = admin_bearer(&app, "pubflow").await;
+        let auth = [("authorization", admin.as_str())];
+
+        // Admin creates a constructor draft.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-pub", "name": "Публикуемый", "cover": null, "steps_count": 1,
+                "body": { "id": "q-pub", "meta": { "title": "Публикуемый" }, "steps": [1], "versions": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A bare status flip to published/test before any snapshot is rejected —
+        // exactly what made a dashboard-only "Опубликован" never reach the store.
+        for s in ["published", "test"] {
+            let (st, _) = post_json_h(
+                &app,
+                "/api/constructor/quests/q-pub/status",
+                json!({ "status": s }),
+                &auth,
+            )
+            .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{s} needs a snapshot first");
+        }
+        assert!(!store_has(&app, "q-pub").await, "absent from the store before publishing");
+
+        // Publishing via the editor path creates the snapshot AND lists it.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": "q-pub", "name": "Публикуемый", "template_summary": "1 step",
+                "snapshot_version": 1, "snapshot": { "steps": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(store_has(&app, "q-pub").await, "a published quest appears in the store");
+
+        // And now the dashboard status toggle works over the existing snapshot.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-pub/status",
+            json!({ "status": "test" }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(!store_has(&app, "q-pub").await, "moving to test delists it");
     }
 
     /// The store (/api/quests) shows ONLY published quests: a freshly created
@@ -3216,18 +3341,18 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
 
-        // status
-        let (st, updated) = post_json_h(
+        // status: the coherence guard rejects test/published before a snapshot
+        // exists (real SQL path for get_published returning None).
+        let (st, _) = post_json_h(
             &app,
             &format!("/api/constructor/quests/{qid}/status"),
             json!({ "status": "test" }),
             &admin,
         )
         .await;
-        assert_eq!(st, StatusCode::OK);
-        assert_eq!(updated["status"], "test");
+        assert_eq!(st, StatusCode::BAD_REQUEST, "test needs a snapshot first");
 
-        // publish flips the constructor status to published
+        // publish creates the snapshot and flips the constructor status to published
         let (st, _) = post_json_h(
             &app,
             "/api/quests/publish",
@@ -3241,6 +3366,17 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (_, full) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
         assert_eq!(full["status"], "published");
+
+        // with a snapshot present, the status toggle now succeeds (SQL get_published Some)
+        let (st, updated) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{qid}/status"),
+            json!({ "status": "test" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(updated["status"], "test");
 
         // delete
         let (st, _) = post_json_h(

@@ -728,16 +728,19 @@ fn ctor_summary_from_row(
         author_name: row.try_get("author_name").map_err(internal)?,
         name: row.try_get("name").map_err(internal)?,
         status: row.try_get("status").map_err(internal)?,
-        cover: row.try_get("cover").map_err(internal)?,
         steps_count: steps_count.max(0) as u32,
         created_at: created_at.max(0) as u64,
         updated_at: updated_at.max(0) as u64,
     })
 }
 
-/// Columns selected for a summary row (kept in one place so list/save/status agree).
+/// Columns selected for a summary row (kept in one place so list/save/status
+/// agree). Deliberately EXCLUDES the heavy `cover` (base64 image) and `body`:
+/// the dashboard list never renders them, so reading the TOASTed cover for every
+/// row was the cause of the multi-second list load. GET-one adds `cover`/`body`
+/// back explicitly because the builder needs the full entity.
 const CTOR_SUMMARY_COLS: &str =
-    "quest_id, author_id, author_name, name, status, cover, steps_count, created_at, updated_at";
+    "quest_id, author_id, author_name, name, status, steps_count, created_at, updated_at";
 
 impl PgConstructorStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -780,6 +783,30 @@ impl PgConstructorStore {
         Ok(quest.summary())
     }
 
+    /// Summary rows, newest-first (ties by id), optionally scoped to one author.
+    /// Shared by the per-author dashboard list and the admin (all-authors) list —
+    /// same projection + ordering, only the `WHERE` differs.
+    async fn fetch_summaries(
+        &self,
+        author_id: Option<&str>,
+    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        let where_clause = if author_id.is_some() {
+            "WHERE author_id = $1 "
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
+             {where_clause}ORDER BY created_at DESC, quest_id ASC"
+        );
+        let mut query = sqlx::query(&sql);
+        if let Some(author_id) = author_id {
+            query = query.bind(author_id);
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(internal)?;
+        rows.iter().map(ctor_summary_from_row).collect()
+    }
+
     /// See [`crate::store::InMemoryConstructorStore::list_summaries_for_author`].
     /// Scoped by `author_id` (the `idx_ctor_quests_author` index serves this) so the
     /// dashboard can never return another author's quests.
@@ -787,21 +814,13 @@ impl PgConstructorStore {
         &self,
         author_id: &str,
     ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
-             WHERE author_id = $1 ORDER BY created_at DESC, quest_id ASC"
-        );
-        let rows = sqlx::query(&sql)
-            .bind(author_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.iter().map(ctor_summary_from_row).collect()
+        self.fetch_summaries(Some(author_id)).await
     }
 
     /// See [`crate::store::InMemoryConstructorStore::get`].
     pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        let sql = format!("SELECT {CTOR_SUMMARY_COLS}, body FROM constructor_quests WHERE quest_id = $1");
+        let sql =
+            format!("SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1");
         let row = sqlx::query(&sql)
             .bind(quest_id)
             .fetch_optional(&self.pool)
@@ -818,7 +837,9 @@ impl PgConstructorStore {
                     author_name: s.author_name,
                     name: s.name,
                     status: s.status,
-                    cover: s.cover,
+                    // `cover` is excluded from CTOR_SUMMARY_COLS (list slimming); GET-one
+                    // selects it explicitly above and reads it straight off the row.
+                    cover: row.try_get("cover").map_err(internal)?,
                     steps_count: s.steps_count,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
@@ -887,15 +908,7 @@ impl PgConstructorStore {
     /// view: NOT scoped by author (every author's quests), newest-first like the
     /// per-author list.
     pub async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests \
-             ORDER BY created_at DESC, quest_id ASC"
-        );
-        let rows = sqlx::query(&sql)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.iter().map(ctor_summary_from_row).collect()
+        self.fetch_summaries(None).await
     }
 
     /// See [`crate::store::InMemoryConstructorStore::statuses_by_quest`]. A single
