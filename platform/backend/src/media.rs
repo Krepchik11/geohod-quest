@@ -1,0 +1,248 @@
+//! Media (image) storage: content-addressed blobs in Cloudflare R2, with an
+//! in-process fallback for tests and local dev.
+//!
+//! Quest media (cover + per-step comics) used to live as base64 inside the quest
+//! JSON — the structural cause of slow lists and publish 413s. Here it is
+//! externalized: bytes are stored once under their sha256, and the JSON carries a
+//! public URL. The SERVER hashes the bytes, so the content address is
+//! authoritative — a client cannot store bytes-A under the key for bytes-B.
+//!
+//! Mirrors the storage layer's two-variant pattern (in-memory spec + durable
+//! backend), here `MediaStores::{InMemory, R2}`.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
+use sha2::{Digest, Sha256};
+
+use crate::config::MediaConfig;
+use crate::errors::AppError;
+
+/// Reference returned after an upload; stored verbatim in quest JSON.
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct MediaRef {
+    /// Public URL the bytes are served from (`"{public_base}/{hash}"`).
+    pub url: String,
+    /// Lowercase-hex sha256 of the bytes — the object key / content address.
+    pub hash: String,
+    pub content_type: String,
+    pub size: usize,
+}
+
+impl MediaRef {
+    /// Build a ref from a content hash — the `"{public_base}/{hash}"` URL
+    /// convention is owned here so both backends share it.
+    fn new(public_base: &str, hash: String, content_type: &str, size: usize) -> Self {
+        Self {
+            url: format!("{public_base}/{hash}"),
+            hash,
+            content_type: content_type.to_string(),
+            size,
+        }
+    }
+}
+
+/// Stored bytes + their content-type, for the in-process serving route. `bytes`
+/// is `Bytes` (refcounted) so cloning it out from under the store lock is a
+/// refcount bump, not a buffer copy.
+#[derive(Clone)]
+pub struct StoredBlob {
+    pub bytes: Bytes,
+    pub content_type: String,
+}
+
+/// Lowercase-hex sha256 of `bytes` — the universal content-address key (shared
+/// by the import tool by convention, so identical images dedup across sources).
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// In-process content-addressed store (tests + local dev). Bytes are kept in a
+/// map and served back through the API at `GET /api/media/{hash}`.
+pub struct InMemoryMediaStore {
+    items: HashMap<String, StoredBlob>,
+    public_base: String,
+}
+
+impl InMemoryMediaStore {
+    pub fn new(public_base: String) -> Self {
+        Self {
+            items: HashMap::new(),
+            public_base,
+        }
+    }
+
+    fn put(&mut self, bytes: Bytes, content_type: &str) -> MediaRef {
+        let hash = sha256_hex(&bytes);
+        let size = bytes.len();
+        // Content-addressed: identical bytes already present are a no-op.
+        self.items.entry(hash.clone()).or_insert(StoredBlob {
+            bytes,
+            content_type: content_type.to_string(),
+        });
+        MediaRef::new(&self.public_base, hash, content_type, size)
+    }
+
+    fn get(&self, hash: &str) -> Option<StoredBlob> {
+        self.items.get(hash).cloned()
+    }
+}
+
+/// Cloudflare R2 (S3-compatible) content-addressed store.
+pub struct R2MediaStore {
+    bucket: Box<s3::Bucket>,
+    public_base: String,
+}
+
+impl R2MediaStore {
+    pub fn new(
+        account_id: &str,
+        access_key_id: &str,
+        secret_access_key: &str,
+        bucket: &str,
+        public_base: String,
+    ) -> Result<Self, AppError> {
+        let region = s3::Region::Custom {
+            region: "auto".to_string(),
+            endpoint: format!("https://{account_id}.r2.cloudflarestorage.com"),
+        };
+        let credentials = s3::creds::Credentials::new(
+            Some(access_key_id),
+            Some(secret_access_key),
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("R2 credentials: {e}")))?;
+        // Path-style (`endpoint/bucket/key`) — the documented-safe addressing for
+        // R2's account endpoint.
+        let bucket = s3::Bucket::new(bucket, region, credentials)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("R2 bucket init: {e}")))?
+            .with_path_style();
+        Ok(Self {
+            bucket,
+            public_base,
+        })
+    }
+
+    async fn put(&self, bytes: Bytes, content_type: &str) -> Result<MediaRef, AppError> {
+        let hash = sha256_hex(&bytes);
+        let key = format!("/{hash}");
+        let size = bytes.len();
+        // Content-addressed → identical bytes already in the bucket need no
+        // re-upload. HEAD 200 == present; treat anything else as absent and PUT.
+        // (This makes idempotent re-imports/re-saves cheap — they skip the body.)
+        let exists = matches!(self.bucket.head_object(&key).await, Ok((_, 200)));
+        if !exists {
+            let resp = self
+                .bucket
+                .put_object_with_content_type(&key, &bytes, content_type)
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("R2 upload failed: {e}")))?;
+            let code = resp.status_code();
+            if !(200..300).contains(&code) {
+                return Err(AppError::Internal(anyhow::anyhow!(
+                    "R2 upload returned status {code}"
+                )));
+            }
+        }
+        Ok(MediaRef::new(&self.public_base, hash, content_type, size))
+    }
+}
+
+/// Media store selected at startup (mirrors the storage enums). Both variants
+/// wrap their backend in an `Arc` so the per-request `AppState` clone is a
+/// refcount bump, not a deep clone of the store.
+#[derive(Clone)]
+pub enum MediaStores {
+    InMemory(Arc<Mutex<InMemoryMediaStore>>),
+    R2(Arc<R2MediaStore>),
+}
+
+impl MediaStores {
+    /// Build the store the config selects. R2 client init can fail (bad creds);
+    /// the in-process store is infallible.
+    pub fn from_config(cfg: &MediaConfig) -> Result<Self, AppError> {
+        match cfg {
+            MediaConfig::R2 {
+                account_id,
+                access_key_id,
+                secret_access_key,
+                bucket,
+                public_base,
+            } => Ok(Self::R2(Arc::new(R2MediaStore::new(
+                account_id,
+                access_key_id,
+                secret_access_key,
+                bucket,
+                public_base.clone(),
+            )?))),
+            MediaConfig::Local { public_base } => Ok(Self::InMemory(Arc::new(Mutex::new(
+                InMemoryMediaStore::new(public_base.clone()),
+            )))),
+        }
+    }
+
+    fn lock_inmem(
+        m: &Mutex<InMemoryMediaStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryMediaStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("media store lock poisoned: {e}")))
+    }
+
+    /// Store `bytes` content-addressed and return the public reference. Idempotent:
+    /// identical bytes resolve to the same URL and are not re-stored.
+    pub async fn put(&self, bytes: Bytes, content_type: &str) -> Result<MediaRef, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.put(bytes, content_type)),
+            Self::R2(r) => r.put(bytes, content_type).await,
+        }
+    }
+
+    /// Fetch stored bytes for the in-process serving route. R2 media is served
+    /// directly from its public URL, so this is `None` for the R2 backend.
+    pub async fn get(&self, hash: &str) -> Result<Option<StoredBlob>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(hash)),
+            Self::R2(_) => Ok(None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_is_deterministic_and_distinct() {
+        assert_eq!(sha256_hex(b"hello"), sha256_hex(b"hello"));
+        assert_ne!(sha256_hex(b"hello"), sha256_hex(b"world"));
+        // Known vector: sha256("") = e3b0c44298fc1c14...
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn inmem_put_is_content_addressed_and_round_trips() {
+        let mut store = InMemoryMediaStore::new("http://x/api/media".to_string());
+        let r1 = store.put(Bytes::from_static(b"abc"), "image/png");
+        // URL = base/hash; hash = sha256; size = byte length.
+        assert_eq!(r1.url, format!("http://x/api/media/{}", r1.hash));
+        assert_eq!(r1.hash, sha256_hex(b"abc"));
+        assert_eq!(r1.size, 3);
+        // Same bytes -> same ref (dedup); a different content-type doesn't fork it.
+        let r2 = store.put(Bytes::from_static(b"abc"), "image/jpeg");
+        assert_eq!(r1.hash, r2.hash);
+        assert_eq!(store.items.len(), 1);
+        // Round-trips the original bytes + content-type.
+        let blob = store.get(&r1.hash).expect("stored");
+        assert_eq!(blob.bytes.as_ref(), b"abc");
+        assert_eq!(blob.content_type, "image/png");
+        assert!(store.get("deadbeef").is_none());
+    }
+}

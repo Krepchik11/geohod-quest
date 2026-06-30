@@ -7,9 +7,15 @@ edition = "2024"
 anyhow = "1.0.102"
 argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["macros"] }
+bytes = "1"
 dotenvy = "0.15.7"
+hex = "0.4.3"
+# S3-compatible client for Cloudflare R2 media storage (rust-s3; lib name `s3`).
+# rustls(ring) to match sqlx's TLS stack (no native-tls / aws-lc-rs / cmake).
+rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",
     "postgres",

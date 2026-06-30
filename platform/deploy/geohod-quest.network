@@ -1,5 +1,0 @@
-# Quadlet network unit. Private bridge so the API reaches Postgres by container
-# name via netavark DNS. Postgres is NEVER published to the host.
-# Install to: ~/.config/containers/systemd/geohod-quest.network
-[Network]
-NetworkName=geohod-quest

@@ -73,13 +73,15 @@ Artifacts live in `platform/backend/Containerfile`, `platform/deploy/*`, and
 
 ```
 Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API container)
-                                                  │ podman network "geohod-quest"
-                                                  └──> geohod-quest-db:5432 (Postgres container + volume)
+                                                  │
+                                                  └──TLS──> Supabase session pooler
+                                                            aws-0-<region>.pooler.supabase.com:5432
 ```
 
 - **Port 8082** for the API (8080/8081 are already used by app./dev.geohod.ru).
 - API published on **loopback only** — the public reaches it solely via Caddy.
-- Postgres is **not** published to the host; only the API sees it (netavark DNS).
+- The database is **managed Postgres (Supabase)**, reached over the internet (TLS).
+  There is no local DB container on the VPS.
 
 ## Prerequisites
 
@@ -100,21 +102,19 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    `cd platform && podman build -f backend/Containerfile -t localhost/geohod-quest-api:latest .`
    then set `Image=localhost/geohod-quest-api:latest` in the API unit.
 
-2. **Create secrets** (never plaintext env files). Use one strong password in BOTH
-   the DB password and the URL — they must match. Generate it **URL-safe** (hex):
-   the password is embedded in `DATABASE_URL`, so a `/`, `+`, `:`, or `@` (which
-   `openssl rand -base64` produces) corrupts URL parsing — sqlx fails with
-   "invalid port number". `openssl rand -hex` avoids all of them.
+2. **Create secrets** (never plaintext env files).
    ```sh
-   PGPW="$(openssl rand -hex 24)"
-   printf '%s' "$PGPW" | podman secret create geohod-quest-db-password -
-   printf 'postgres://geohod:%s@geohod-quest-db:5432/geohod?sslmode=disable' "$PGPW" \
+   # DATABASE_URL = the Supabase SESSION-mode pooler string (Dashboard -> Connect
+   # -> Session pooler). Use this pooler, NOT the direct db.<ref>.supabase.co host
+   # (IPv6-only) and NOT the :6543 transaction pooler (it breaks sqlx prepared
+   # statements + migration advisory locks). Keep ?sslmode=require. URL-encode any
+   # special char in the password (a raw / + : @ corrupts URL parsing — sqlx then
+   # fails with "invalid port number").
+   printf '%s' 'postgres://postgres.<ref>:<enc-pw>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require' \
      | podman secret create geohod-quest-database-url -
    printf '%s' "$(openssl rand -hex 24)" | podman secret create geohod-quest-admin-token -
    ```
    The admin token must equal the frontend's `NEXT_PUBLIC_ADMIN_TOKEN`.
-   (`POSTGRES_PASSWORD` only applies on first DB init — changing it later requires
-   removing the `geohod-quest-pgdata` volume so Postgres re-initializes.)
 
    `ADMIN_TOKEN` also authorizes the user-management surface (`GET /api/admin/users`,
    `POST /api/admin/users/{id}/role`) behind the `/admin` page. Roles default to
@@ -129,21 +129,28 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    on a public deployment you can leave `NEXT_PUBLIC_ADMIN_TOKEN` unset so the bundle
    carries no secret and access is purely role-based.
 
-3. **Install Quadlet units:**
+3. **Install the Quadlet unit:**
    ```sh
    mkdir -p ~/.config/containers/systemd
-   cp platform/deploy/geohod-quest.network \
-      platform/deploy/geohod-quest-pgdata.volume \
-      platform/deploy/geohod-quest-db.container \
-      platform/deploy/geohod-quest-api.container \
-      ~/.config/containers/systemd/
+   cp platform/deploy/geohod-quest-api.container ~/.config/containers/systemd/
    systemctl --user daemon-reload
-   systemctl --user start geohod-quest-db.service geohod-quest-api.service
+   systemctl --user start geohod-quest-api.service
    ```
-   (Generated service names match the unit filenames.)
+   (Generated service names match the unit filenames. There is no DB unit — the
+   database is Supabase.)
 
 4. **Caddy:** append `platform/deploy/Caddyfile.snippet` to the host Caddyfile and
    reload (`sudo systemctl reload caddy` or `caddy reload`).
+
+5. **Harden Supabase** (one-time, dashboard). The app uses its own auth and talks
+   to Postgres directly, never Supabase's auto-generated Data API — so close that
+   surface:
+   - **Disable the Data API for `public`**: Project Settings → API → remove
+     `public` from the exposed schemas. The backend's pooler connection is
+     unaffected; only the public PostgREST surface is.
+   - The initial migration (`0001_init.sql`) additionally enables RLS
+     (deny-by-default) on every app table as defense in depth. It is a no-op for
+     the app, which connects as the table-owner role (RLS-exempt).
 
 ## Verify
 
@@ -169,7 +176,7 @@ systemctl --user enable --now podman-auto-update.timer    # needs linger (set ab
 ```
 The timer (default daily) re-pulls `:latest` when its digest changed, restarts
 the unit, and **rolls back to the previous image if the new container fails to
-start**. The DB is intentionally NOT labeled, so it is never touched. Inspect:
+start**. Inspect:
 ```sh
 systemctl --user list-timers | grep auto-update
 podman auto-update --dry-run
@@ -198,19 +205,77 @@ podman inspect --format '{{ index .Config.Labels "org.opencontainers.image.revis
 > `systemctl --user daemon-reload` before restarting — Quadlet regenerates the
 > service unit from the file on reload.
 
-## Backups (do this before real users)
+## Media storage (Cloudflare R2)
 
-Postgres data is in the `geohod-quest-pgdata` volume. No backups are configured yet.
-Minimum viable: a cron `pg_dump` to off-box storage, e.g.
-`podman exec geohod-quest-db pg_dump -U geohod geohod | gzip > dump-$(date +%F).sql.gz`.
+Quest images are stored content-addressed (sha256) in an R2 bucket and served to
+players **directly from a custom domain**; the quest JSON only carries URLs. The
+backend uploads on the editor's behalf (`POST /api/media`, editor-gated) and hashes
+the bytes server-side — players never fetch through the API. One-time setup:
+
+1. **Create the bucket** (Cloudflare → R2 → Create bucket), e.g. `geohod-quest-media`.
+
+2. **Bind a custom domain** (bucket → Settings → Public access → Custom Domains →
+   Connect Domain), e.g. `media.quest.geohod.ru`. Cloudflare provisions DNS + TLS
+   and serves objects at `https://media.quest.geohod.ru/<key>`. Leave the `r2.dev`
+   dev URL **disabled** — the custom domain is the only public surface. Access stays
+   gated in practice: the sha256 URLs are unguessable and are only ever handed out
+   inside grant-gated snapshots.
+
+3. **Set bucket CORS** so the PWA can `fetch()` media cross-origin to precache it for
+   offline play (bucket → Settings → CORS policy):
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://app.quest.geohod.ru", "https://*.vercel.app"],
+       "AllowedMethods": ["GET", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 86400
+     }
+   ]
+   ```
+
+4. **Cache immutably** (recommended): content-addressed keys never change, so add a
+   Cloudflare Cache Rule on `media.quest.geohod.ru` with a long Edge + Browser TTL
+   (e.g. 1 year). The CDN layer is the right place for caching policy (the backend
+   intentionally does not set per-object `Cache-Control`).
+
+5. **Create an S3 API token** (R2 → Manage R2 API Tokens → Create, **Object Read &
+   Write**, scoped to the bucket). Record the **Access Key ID** and **Secret Access
+   Key** (the secret is shown once).
+
+6. **Provision on the VPS** — two podman secrets + three identifiers in the unit:
+   ```sh
+   printf '%s' '<ACCESS_KEY_ID>'     | podman secret create geohod-quest-r2-access-key-id -
+   printf '%s' '<SECRET_ACCESS_KEY>' | podman secret create geohod-quest-r2-secret-access-key -
+   ```
+   Then edit `~/.config/containers/systemd/geohod-quest-api.container`: set
+   `R2_ACCOUNT_ID` (your Cloudflare account id), confirm `R2_BUCKET` /
+   `R2_PUBLIC_BASE_URL`, then `systemctl --user daemon-reload && systemctl --user
+   restart geohod-quest-api.service`. The startup log must NOT show the
+   "R2 media storage partially configured" warning (that means a var is missing).
+
+7. **Verify a round-trip** (editor credential = the ops `ADMIN_TOKEN`):
+   ```sh
+   curl -fsS -X POST https://api.quest.geohod.ru/api/media \
+     -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: image/png' \
+     --data-binary @test.png            # -> {"url","hash","content_type","size"}
+   curl -fsSI "https://media.quest.geohod.ru/<hash>"   # -> 200, content-type image/png
+   ```
+
+## Backups
+
+The database is Supabase — **managed backups come with the platform** (frequency
+and retention depend on your plan; Point-in-Time Recovery is a paid add-on). See
+Project → Database → Backups. For an off-platform copy, `pg_dump` over the session
+pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
 
 ## Tracked follow-ups (not blocking first deploy)
 
-- **DB connect retry**: `PgPoolOptions::connect()` fails fast if PG isn't ready yet;
-  `Restart=always` covers it but a bounded retry in `main.rs` removes the crash-loop.
-- **Demo seeding in prod**: `seed_demo_quests` runs every boot and writes demo quests
-  into the prod DB. Gate behind a `SEED_DEMO` env flag before launch.
-- **Backups + secret rotation** as above.
+- **Secret rotation**: rotate the Supabase DB password (then refresh the
+  `geohod-quest-database-url` secret) and the `ADMIN_TOKEN` periodically.
+- **Connection budget**: `DB_MAX_CONNECTIONS` (default 5, set in the API unit)
+  must stay within the Supabase pooler's pool size — raise both together if you
+  add instances or traffic.
 
 ## Frontend cleanup (recommended, not blocking)
 

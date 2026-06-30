@@ -32,6 +32,7 @@ mod config;
 mod errors;
 mod facts;
 mod grants;
+mod media;
 mod payments;
 mod pg_store;
 mod store;
@@ -42,6 +43,7 @@ use config::AppConfig;
 use errors::AppError;
 use facts::{Fact, MigrationResult, ProjectedState};
 use grants::{AccessGrant, GrantSource};
+use media::{MediaRef, MediaStores};
 use payments::{MockPaymentProvider, PaymentOutcome, PaymentProvider};
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
@@ -58,10 +60,12 @@ struct AppState {
     auth: AuthStores,
     /// Authoring-side quest registry (drafts + lifecycle) behind the constructor.
     constructor: ConstructorStores,
+    /// Content-addressed media blobs (Cloudflare R2 in prod; in-process otherwise).
+    media: MediaStores,
     payments: Arc<dyn PaymentProvider>,
 }
 
-fn in_memory_state(config: AppConfig) -> AppState {
+fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     AppState {
         config,
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
@@ -70,6 +74,7 @@ fn in_memory_state(config: AppConfig) -> AppState {
         constructor: ConstructorStores::InMemory(Arc::new(Mutex::new(
             InMemoryConstructorStore::new(),
         ))),
+        media,
         payments: Arc::new(MockPaymentProvider),
     }
 }
@@ -262,6 +267,62 @@ struct HealthResponse {
 /// body carries references, not bytes — a separate change.
 const MAX_AUTHORING_BODY_BYTES: usize = 32 * 1024 * 1024;
 
+/// Body-size ceiling for a single media upload. The client downscales images to
+/// ≤2.5 MB before upload; 10 MiB is a generous ceiling that still rejects abuse.
+const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+
+/// Image content-types accepted for upload (what the editor produces and the
+/// import tool emits). Anything else is rejected before it reaches storage.
+fn is_allowed_media_type(ct: &str) -> bool {
+    matches!(ct, "image/jpeg" | "image/png" | "image/webp" | "image/gif")
+}
+
+/// POST /api/media — upload a quest image (editor-gated). The body is the raw
+/// image bytes and `Content-Type` names the format. The SERVER hashes the bytes
+/// (sha256) and stores them content-addressed in R2 (or the in-process store),
+/// returning the public URL the quest JSON should reference. Idempotent: identical
+/// bytes resolve to the same URL and are not re-stored.
+async fn upload_media_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<MediaRef>, AppError> {
+    require_editor(&state, &headers).await?;
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        // drop any "; charset=…" parameter the client may append (split always
+        // yields ≥1 element, so the unwrap fallback is never taken)
+        .map(|s| s.split(';').next().unwrap_or("").trim().to_string())
+        .unwrap_or_default();
+    if !is_allowed_media_type(&content_type) {
+        return Err(AppError::BadRequest(format!(
+            "unsupported media type '{content_type}' (allowed: jpeg, png, webp, gif)"
+        )));
+    }
+    if body.is_empty() {
+        return Err(AppError::BadRequest("empty media upload".into()));
+    }
+    let media_ref = state.media.put(body, &content_type).await?;
+    Ok(Json(media_ref))
+}
+
+/// GET /api/media/{hash} — serve in-process media (local dev / tests). In
+/// production media is served directly from R2's public URL, so this 404s there.
+async fn get_media_handler(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+) -> Result<axum::response::Response, AppError> {
+    let Some(blob) = state.media.get(&hash).await? else {
+        return Err(AppError::NotFound(format!("media '{hash}' not found")));
+    };
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, blob.content_type)
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(axum::body::Body::from(blob.bytes))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("media response build: {e}")))
+}
+
 /// Build the application router (extracted for oneshot testing).
 fn build_router(state: AppState) -> Router {
     Router::new()
@@ -278,6 +339,13 @@ fn build_router(state: AppState) -> Router {
             post(publish_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
+        // Media: upload (editor-gated, lifts the body cap to a single image) and
+        // the in-process serve route (R2 serves directly in prod; this 404s there).
+        .route(
+            "/api/media",
+            post(upload_media_handler).layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
+        )
+        .route("/api/media/{hash}", get(get_media_handler))
         // Constructor dashboard (authoring-side; require_editor). All mutations are
         // POST — the router/CORS surface is GET+POST only by design. Create/save
         // carry the full editable body, so they lift the default 2 MiB body cap
@@ -1256,24 +1324,69 @@ async fn main() -> anyhow::Result<()> {
 
     let config = AppConfig::from_env().context("failed to load configuration")?;
 
+    // Build the media store once — R2-vs-in-process selection is orthogonal to the
+    // DB backend, so it lives above the DATABASE_URL match and is injected into
+    // whichever branch runs (one fallible init, no per-branch duplication).
+    let media =
+        MediaStores::from_config(&config.media).context("failed to initialize media store")?;
+
     let state = match std::env::var("DATABASE_URL") {
         Ok(url) => {
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(10)
-                .connect(&url)
-                .await
-                .context("failed to connect to DATABASE_URL")?;
+            // Pool size is env-tunable (DB_MAX_CONNECTIONS, default 5). Kept modest
+            // so several app instances stay within a managed pooler's connection
+            // budget (e.g. Supabase's session pooler); raise it for a bigger plan.
+            let max_connections: u32 = std::env::var("DB_MAX_CONNECTIONS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5);
+            // Bounded retry around the eager connect. A remote/managed Postgres can
+            // briefly refuse connections on a cold start or transient blip, and the
+            // migration step below connects immediately. A few backed-off attempts
+            // absorb that instead of exiting and leaning on the supervisor to
+            // crash-loop; a longer outage still falls through to Restart=always.
+            // Options are rebuilt per attempt (connect consumes them).
+            let pool = {
+                let mut attempt: u32 = 1;
+                loop {
+                    let opts = sqlx::postgres::PgPoolOptions::new()
+                        .max_connections(max_connections)
+                        // Recycle pooled connections: a managed pooler (Supabase
+                        // Supavisor) can drop server-side connections under an idle pool.
+                        .acquire_timeout(Duration::from_secs(10))
+                        .idle_timeout(Duration::from_secs(600))
+                        .max_lifetime(Duration::from_secs(1800));
+                    match opts.connect(&url).await {
+                        Ok(pool) => break pool,
+                        Err(e) if attempt < 5 => {
+                            let backoff = Duration::from_secs(u64::from(attempt));
+                            tracing::warn!(
+                                attempt,
+                                error = %e,
+                                "failed to connect to DATABASE_URL; retrying in {}s",
+                                backoff.as_secs()
+                            );
+                            tokio::time::sleep(backoff).await;
+                            attempt += 1;
+                        }
+                        Err(e) => {
+                            return Err(e)
+                                .context("failed to connect to DATABASE_URL after 5 attempts");
+                        }
+                    }
+                }
+            };
             sqlx::migrate!("./migrations")
                 .run(&pool)
                 .await
                 .context("failed to run database migrations")?;
-            tracing::info!("storage: PostgreSQL (migrations up to date)");
+            tracing::info!(max_connections, "storage: PostgreSQL (migrations up to date)");
             AppState {
                 config: config.clone(),
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
                 grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
                 auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
                 constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
+                media,
                 payments: Arc::new(MockPaymentProvider),
             }
         }
@@ -1281,7 +1394,7 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!(
                 "DATABASE_URL not set — using in-memory storage; ALL DATA IS LOST ON RESTART"
             );
-            in_memory_state(config.clone())
+            in_memory_state(config.clone(), media)
         }
     };
 
@@ -1348,22 +1461,38 @@ mod tests {
     /// authenticate (and assert that the wrong/absent token is rejected).
     const TEST_ADMIN_TOKEN: &str = "test-admin-secret";
 
+    /// In-process media config for tests (uploads served via `/api/media/{hash}`).
+    fn test_media_cfg() -> config::MediaConfig {
+        config::MediaConfig::Local {
+            public_base: "http://test.local/api/media".to_string(),
+        }
+    }
+
+    /// Build an in-memory `AppState` for tests — the media store comes from the
+    /// config, mirroring how `main()` builds it once and injects it.
+    fn test_state(config: AppConfig) -> AppState {
+        let media = MediaStores::from_config(&config.media).expect("test media store");
+        in_memory_state(config, media)
+    }
+
     fn test_app() -> Router {
-        build_router(in_memory_state(AppConfig {
+        build_router(test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
             cors_allowed_origins: Vec::new(),
+            media: test_media_cfg(),
         }))
     }
 
     /// Router with NO admin secret configured — admin surfaces must fail closed.
     fn test_app_no_admin() -> Router {
-        build_router(in_memory_state(AppConfig {
+        build_router(test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: None,
             cors_allowed_origins: Vec::new(),
+            media: test_media_cfg(),
         }))
     }
 
@@ -1397,15 +1526,113 @@ mod tests {
         assert!(!origin_allowed(&[], "https://app.geohod.ru"));
     }
 
+    // ---- media upload (content-addressed blobs) ----------------------------
+
+    #[tokio::test]
+    async fn media_upload_round_trips_via_inprocess_store() {
+        let app = test_app();
+        let bytes = vec![137u8, 80, 78, 71, 1, 2, 3, 4]; // arbitrary "image" bytes
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/media")
+                    .header("x-admin-token", TEST_ADMIN_TOKEN) // editor (ops) gate
+                    .header("content-type", "image/png")
+                    .body(Body::from(bytes.clone()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        let hash = media::sha256_hex(&bytes);
+        assert_eq!(v["hash"], hash);
+        assert_eq!(v["size"], bytes.len());
+        assert_eq!(v["content_type"], "image/png");
+        assert_eq!(v["url"], format!("http://test.local/api/media/{hash}"));
+
+        // The in-process serve route returns the exact bytes + content-type.
+        let got = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/media/{hash}"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(got.status(), StatusCode::OK);
+        assert_eq!(got.headers().get("content-type").unwrap(), "image/png");
+        let got_bytes = got.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(got_bytes.as_ref(), bytes.as_slice());
+    }
+
+    #[tokio::test]
+    async fn media_upload_rejects_non_image() {
+        let app = test_app();
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/media")
+                    .header("x-admin-token", TEST_ADMIN_TOKEN)
+                    .header("content-type", "text/plain")
+                    .body(Body::from("not an image"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn media_upload_requires_editor() {
+        let app = test_app();
+        // No editor session and no ops token -> fail closed (403).
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/media")
+                    .header("content-type", "image/png")
+                    .body(Body::from(vec![1u8, 2, 3]))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn media_get_unknown_is_404() {
+        let app = test_app();
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/media/deadbeefdeadbeef")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
     /// With a configured allowlist, a preflight from an allowed origin is
     /// reflected and a foreign origin is not.
     #[tokio::test]
     async fn cors_preflight_reflects_only_allowed_origin() {
-        let app = build_router(in_memory_state(AppConfig {
+        let app = build_router(test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: None,
             cors_allowed_origins: vec!["https://app.geohod.ru".to_string()],
+            media: test_media_cfg(),
         }));
 
         let preflight = |origin: &'static str| {
@@ -3223,17 +3450,20 @@ mod tests {
     // === and set DATABASE_URL (see backend/.env.example) to execute.
 
     fn pg_app(pool: sqlx::PgPool) -> Router {
+        let media_cfg = test_media_cfg();
         build_router(AppState {
             config: AppConfig {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
                 version: "test-pg",
                 admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
                 cors_allowed_origins: Vec::new(),
+                media: media_cfg.clone(),
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
             auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
             constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
+            media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payments: Arc::new(MockPaymentProvider),
         })
     }
