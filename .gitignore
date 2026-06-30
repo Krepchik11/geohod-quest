@@ -5,6 +5,8 @@
 discovery/config/app.env
 .env
 .env.*
+# …but `.env.example` is a committed template (no real secrets), not a secret.
+!.env.example
 
 # Raw data (may contain PII)
 discovery/raw/data-api/**/list_page_*.json
