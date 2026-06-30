@@ -83,9 +83,15 @@ pub enum MediaConfig {
         access_key_id: String,
         secret_access_key: String,
         bucket: String,
-        /// Public base a custom domain serves the bucket from (e.g.
-        /// `https://media.quest.geohod.ru`); refs are `"{public_base}/{hash}"`.
+        /// Public base the bucket is served from; refs are `"{public_base}/{hash}"`.
+        /// With a custom domain that is the domain (e.g. `https://media.quest...`);
+        /// without one it is the API's own serve route (`https://api.../api/media`),
+        /// which streams bytes via `GET /api/media/{hash}`.
         public_base: String,
+        /// Optional S3 endpoint override (`R2_ENDPOINT`). `None` → the account
+        /// endpoint `https://{account_id}.r2.cloudflarestorage.com`. Set only to
+        /// point at a local S3 mock (MinIO) in tests; never set in production.
+        endpoint: Option<String>,
     },
     Local {
         /// Absolute base the in-process store builds refs against, so the browser
@@ -128,6 +134,8 @@ impl MediaConfig {
                 secret_access_key,
                 bucket,
                 public_base: trim(public_base),
+                // Independent of the 5 required vars; absent in production.
+                endpoint: var("R2_ENDPOINT"),
             };
         }
 
