@@ -1,7 +1,8 @@
 /**
- * Image file → data URL for the constructor (real uploads replace the design's
- * «клик ставит демо-файл» mock). Downscales through a canvas so drafts stay
- * within the localStorage quota and the ≤5 МБ bundle target.
+ * Image file → downscaled JPEG Blob for upload to the media store (Cloudflare R2).
+ * Downscales through a canvas (≤1280px, JPEG-82) so uploads stay small; the
+ * constructor stores the returned R2 URL, not the bytes. Replaces the design's
+ * «клик ставит демо-файл» mock.
  */
 
 const MAX_DIMENSION = 1280;
@@ -27,7 +28,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export async function fileToImageDataUrl(file: File): Promise<string> {
+export async function fileToImageBlob(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Нужно изображение PNG или JPG');
   }
@@ -35,18 +36,24 @@ export async function fileToImageDataUrl(file: File): Promise<string> {
   try {
     const img = await loadImage(raw);
     const scale = Math.min(1, MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
-    if (scale === 1 && raw.length <= RAW_LIMIT_BYTES) return raw;
+    // Already within bounds: upload the original file (a Blob) untouched.
+    if (scale === 1 && file.size <= RAW_LIMIT_BYTES) return file;
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('canvas unavailable');
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY),
+    );
+    if (!blob) throw new Error('canvas toBlob failed');
+    return blob;
   } catch {
-    if (raw.length > RAW_LIMIT_BYTES) {
+    // Canvas unavailable / decode failed: fall back to the original file if small enough.
+    if (file.size > RAW_LIMIT_BYTES) {
       throw new Error('Изображение больше 2,5 МБ — сожмите его перед загрузкой');
     }
-    return raw;
+    return file;
   }
 }

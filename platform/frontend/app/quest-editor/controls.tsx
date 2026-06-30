@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { fileToImageDataUrl } from '../../lib/image-file';
+import { fileToImageBlob } from '../../lib/image-file';
+import { api } from '../../lib/api';
 
 /** Shared workspace controls (design/ctor2/page-editor.jsx primitives). */
 
@@ -56,7 +57,7 @@ export function WspDanger({ label, confirmLabel, onConfirm }: { label: string; c
 }
 
 /**
- * Зона изображения с настоящей загрузкой файла (downscale → data URL).
+ * Зона изображения с настоящей загрузкой файла (downscale → upload в R2 → URL).
  * Пустая зона открывает выбор файла; заполненная показывает картинку и ✕.
  */
 export function ImageZone({ src, label, hint, required, width, onChange }: {
@@ -69,14 +70,21 @@ export function ImageZone({ src, label, hint, required, width, onChange }: {
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const pickFile = async (file: File | undefined) => {
     if (!file) return;
+    setError(null);
+    setUploading(true);
     try {
-      setError(null);
-      onChange(await fileToImageDataUrl(file));
+      // Downscale locally, then upload to the media store; store the returned URL.
+      const blob = await fileToImageBlob(file);
+      const { url } = await api.uploadMedia(blob);
+      onChange(url);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -87,10 +95,10 @@ export function ImageZone({ src, label, hint, required, width, onChange }: {
       role="button"
       tabIndex={0}
       aria-label={`Загрузить изображение: ${label}`}
-      onClick={() => { if (!src) inputRef.current?.click(); }}
-      onKeyDown={(e) => { if (!src && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); inputRef.current?.click(); } }}
+      onClick={() => { if (!src && !uploading) inputRef.current?.click(); }}
+      onKeyDown={(e) => { if (!src && !uploading && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); inputRef.current?.click(); } }}
       onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => { e.preventDefault(); void pickFile(e.dataTransfer.files?.[0]); }}
+      onDrop={(e) => { e.preventDefault(); if (!uploading) void pickFile(e.dataTransfer.files?.[0]); }}
     >
       <input
         ref={inputRef}
@@ -114,7 +122,13 @@ export function ImageZone({ src, label, hint, required, width, onChange }: {
       ) : (
         <>
           <b>{label}</b>
-          {error ? <span style={{ color: 'var(--pink)', fontWeight: 600 }}>{error}</span> : (hint || 'PNG/JPG до 1 МБ')}
+          {uploading ? (
+            <span style={{ color: 'var(--navy)', fontWeight: 600 }}>Загрузка…</span>
+          ) : error ? (
+            <span style={{ color: 'var(--pink)', fontWeight: 600 }}>{error}</span>
+          ) : (
+            hint || 'PNG/JPG до 1 МБ'
+          )}
         </>
       )}
     </div>

@@ -7,6 +7,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { getBundle, getLatestBundleForQuest, __resetQueueForTests } from '../queue';
 import { downloadBundle, collectMediaRefs, type DownloadStage } from '../download';
 import { getSnapshot } from '../goldens';
+import type { QuestSnapshot } from '../shared-model';
 
 const QUEST = 'mystery-fortress-v1';
 
@@ -52,10 +53,18 @@ describe('downloadBundle', () => {
 });
 
 describe('collectMediaRefs', () => {
-  it('collects unique same-origin refs from step media', () => {
-    const refs = collectMediaRefs(getSnapshot(QUEST));
-    expect(Array.isArray(refs)).toBe(true);
-    expect(refs.every((r) => r.startsWith('/'))).toBe(true);
-    expect(new Set(refs).size).toBe(refs.length);
+  it('collects unique cross-origin (R2) media URLs, skipping relative + data: refs', () => {
+    const snapshot = {
+      steps: [
+        { media: { task: 'https://media.x/aaa', character: '/assets/local.png' } },
+        { media: { task: 'https://media.x/aaa', hint: 'data:image/jpeg;base64,zzz' } }, // dup + data:
+        { media: { atmosphere: 'https://media.x/bbb' } },
+        { media: {} },
+      ],
+    } as unknown as QuestSnapshot;
+    const refs = collectMediaRefs(snapshot);
+    // R2 URLs only (SWR can't reach them); the `/assets` ref is the shell cache's job
+    // and `data:` is already inline in the JSON. Deduped.
+    expect([...refs].sort()).toEqual(['https://media.x/aaa', 'https://media.x/bbb']);
   });
 });
