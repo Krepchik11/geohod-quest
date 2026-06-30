@@ -1,0 +1,27 @@
+{
+  "name": "@geohod/bubble-import",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "One-shot ETL: bubble.io geoquest -> constructor_quests drafts.",
+  "scripts": {
+    "fetch": "tsx src/fetch.ts",
+    "media": "tsx src/media.ts",
+    "upload": "tsx src/upload.ts",
+    "transform": "tsx src/transform.ts",
+    "report": "tsx src/report.ts",
+    "load": "tsx src/load.ts",
+    "build": "tsx src/transform.ts && tsx src/report.ts && tsx src/load.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "jimp": "0.22.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

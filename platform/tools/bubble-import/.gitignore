@@ -1,0 +1,13 @@
+# Generated artifacts — regenerable from raw/ + code (kept out of git to avoid
+# base64 bloat).
+generated/
+node_modules/
+
+# Downscaled image bytes (~100 MB) are kept OUT of git to keep clones light.
+# raw/*.json and raw/media-map.json (the manifest) ARE committed. Restore the
+# bytes from the backup archive, or re-run `npm run media` while bubble is alive.
+raw/media/
+
+# Never commit the bubble admin token, or the media backup tarball.
+.env
+*.tar.gz
