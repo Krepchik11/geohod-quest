@@ -321,7 +321,18 @@ pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
 
 ## Tracked follow-ups (not blocking first deploy)
 
-- **Secret rotation**: rotate the Supabase DB password (then refresh the
+- **⚠️ REQUIRED — rotate the cutover credentials.** During the 2026-06-30 cutover
+  the Supabase DB password AND the R2 S3 secret access key were pasted into a chat
+  transcript (via `platform/tools/bubble-import/.env`). Both are exposed and MUST be
+  rotated once the import is done:
+  1. Supabase → Project → Database → reset the DB password; recreate the
+     `geohod-quest-database-url` podman secret (URL-encode the new password) and
+     `systemctl --user restart geohod-quest-api.service`.
+  2. Cloudflare → R2 → roll the S3 API token (new Access Key ID + Secret); recreate
+     the `geohod-quest-r2-*` podman secrets and restart.
+  3. Delete the local `platform/tools/bubble-import/.env` (the import is one-shot;
+     it carries both plaintext secrets and is gitignored but not encrypted).
+- **Secret rotation (ongoing)**: rotate the Supabase DB password (then refresh the
   `geohod-quest-database-url` secret) and the `ADMIN_TOKEN` periodically.
 - **Connection budget**: `DB_MAX_CONNECTIONS` (default 5, set in the API unit)
   must stay within the Supabase pooler's pool size — raise both together if you
