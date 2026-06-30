@@ -20,26 +20,43 @@ export interface DownloadApi {
   ): Promise<{ quest_id: string; snapshot_id: string; snapshot_version: number; snapshot: unknown }>;
 }
 
-/** Same-origin media refs present in the snapshot (today: demo image paths). */
+/**
+ * Cross-origin media URLs (Cloudflare R2) referenced by the snapshot — the ones the
+ * service worker's same-origin shell cache can't reach, so they must be explicitly
+ * precached for offline play. Same-origin refs are covered by the SW's shell cache;
+ * inline `data:` URIs (legacy) live in the snapshot JSON and need no caching.
+ */
 export function collectMediaRefs(snapshot: QuestSnapshot): string[] {
   const refs = new Set<string>();
   for (const step of snapshot.steps) {
     for (const ref of [step.media?.task, step.media?.character, step.media?.hint, step.media?.atmosphere]) {
-      if (ref && ref.startsWith('/')) refs.add(ref);
+      if (ref && /^https?:\/\//.test(ref)) refs.add(ref);
     }
   }
   return [...refs];
 }
 
-/** Pre-cache media into the bundle's named Cache; absent Cache API is a no-op. */
+/**
+ * Pre-cache media into the bundle's named Cache so offline play has it. `cache.add`
+ * issues a CORS fetch, so the media host (R2) must allow the app origin via CORS;
+ * failures are logged (not fatal — the JSON still plays online) so a missing CORS
+ * config is diagnosable rather than a silent offline gap. Absent Cache API (private
+ * mode) is a no-op.
+ */
 async function precacheMedia(snapshotId: string, refs: string[]): Promise<void> {
   if (typeof caches === 'undefined' || refs.length === 0) return;
   try {
     const cache = await caches.open(`quest-bundle-${snapshotId}`);
-    // Settled, not all: one missing demo asset must not fail the download.
-    await Promise.allSettled(refs.map((ref) => cache.add(ref)));
+    const results = await Promise.allSettled(refs.map((ref) => cache.add(ref)));
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      console.warn(
+        `precacheMedia: ${failed}/${refs.length} media failed to cache for offline ` +
+          `(snapshot ${snapshotId}) — cross-origin media needs CORS on the media host.`,
+      );
+    }
   } catch {
-    // Cache API unavailable (private mode etc.) — bundle still plays from IndexedDB.
+    // Cache API unavailable (private mode etc.) — bundle still plays online / from IndexedDB.
   }
 }
 

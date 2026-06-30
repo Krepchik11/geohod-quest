@@ -126,6 +126,15 @@ export interface ConstructorQuestUpsert {
   body: unknown;
 }
 
+/** Reference returned by POST /api/media (mirrors backend MediaRef). The quest body
+ *  stores `url`; the bytes live content-addressed in R2 under `hash`. */
+export interface MediaRefWire {
+  url: string;
+  hash: string;
+  content_type: string;
+  size: number;
+}
+
 /** AccessGrant as served by GET /api/grants. */
 export interface GrantWire {
   player_id: string;
@@ -266,6 +275,24 @@ export const api = {
       `/api/constructor/quests/${encodeURIComponent(id)}/delete`,
       { method: 'POST', headers: adminHeaders(), body: '{}' },
     ),
+
+  // Upload a quest image (editor-gated). Sends RAW bytes (not JSON) — apiFetch is
+  // JSON-only, so this does its own fetch — and the backend hashes them (sha256) and
+  // stores them content-addressed in R2, returning the public URL the body
+  // references. An editor's Bearer session (authHeaders) authorizes it; adminHeaders
+  // forwards the ops token for an operator/dev build, like the other constructor calls.
+  uploadMedia: async (blob: Blob): Promise<MediaRefWire> => {
+    const res = await fetch(`${API_BASE}/api/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'image/jpeg', ...authHeaders(), ...adminHeaders() },
+      body: blob,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new ApiError(res.status, '/api/media', text || res.statusText);
+    }
+    return res.json() as Promise<MediaRefWire>;
+  },
 
   // Identity (player-identity spec): registration attaches email+password to the
   // caller's EXISTING anonymous player id (id never changes); login returns the
