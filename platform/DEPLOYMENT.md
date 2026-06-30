@@ -9,13 +9,50 @@ The browser calls the Rust backend **directly** via `NEXT_PUBLIC_API_URL`. There
 no Next.js BFF/proxy and no SSR backend calls. So:
 
 ```
-Browser ──(CORS, cross-origin)──> Rust backend on VPS
-   ▲
-   └── static/PWA assets served by Vercel CDN
+Browser ──(CORS)──> Rust backend (VPS) ──TLS──> Supabase Postgres (session pooler)
+   │  ▲                                   │
+   │  └── PWA assets via Vercel CDN       └── image upload: POST /api/media ──┐
+   │                                                                          ▼
+   └──────────── quest media, read direct ──────────────> Cloudflare R2 (custom domain)
 ```
 
-This means **the backend MUST allow the frontend's origins via CORS** or nothing
-works in production. See "Backend contract" below.
+Storage is managed: **Postgres → Supabase**, **quest media → Cloudflare R2** (the
+backend uploads via `POST /api/media`; browsers read media direct from R2's custom
+domain). **Two CORS surfaces** must be configured or production breaks: the
+**backend** must allow the frontend's origins (see "Backend contract" below), and
+the **R2 bucket** must allow them too, so the PWA can precache media for offline play
+(see "Media storage").
+
+---
+
+## Go-live runbook (first Supabase + R2 cutover)
+
+A first cutover follows this order; each step links to its detailed section. Two
+consistency rules thread through it:
+
+- **`R2_PUBLIC_BASE_URL` is the bucket's custom domain and must be IDENTICAL** every
+  place it appears — the backend API unit AND the import — because media URLs are
+  baked into stored quest JSON at upload time. Changing the domain later means
+  re-uploading / re-importing.
+- **R2 bucket CORS is required for offline play.** Without it the PWA cannot precache
+  the cross-origin media, and offline shows broken images (the download logs a
+  warning).
+
+1. **Supabase** — create the project; the schema applies itself on the backend's
+   first boot (`sqlx::migrate!`). Copy the **session-pooler** URL.
+2. **Cloudflare R2** — create the bucket, bind the custom domain, set bucket CORS,
+   mint an S3 API token (the **Media storage (Cloudflare R2)** section).
+3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys), set the R2
+   identifiers in the API unit (`R2_PUBLIC_BASE_URL` = the step-2 domain), install +
+   start the unit, wire Caddy (the **Backend (VPS · Podman · Caddy)** section).
+4. **Vercel** — set `NEXT_PUBLIC_API_URL`; redeploy. No media env is needed (R2 URLs
+   are self-contained in the quest JSON).
+5. **Import the legacy quests** — `npm run upload` (the SAME `R2_PUBLIC_BASE_URL`) →
+   `npm run build` → psql `load.sql` into Supabase
+   (`platform/tools/bubble-import/README.md`).
+6. **Verify** — `curl https://api.quest.geohod.ru/health`; in the constructor upload an
+   image (it lands in R2) and publish; play the quest; then DevTools → Network →
+   Offline and confirm media still renders (served from the SW's quest-bundle cache).
 
 ---
 
