@@ -244,10 +244,23 @@ podman inspect --format '{{ index .Config.Labels "org.opencontainers.image.revis
 
 ## Media storage (Cloudflare R2)
 
-Quest images are stored content-addressed (sha256) in an R2 bucket and served to
-players **directly from a custom domain**; the quest JSON only carries URLs. The
-backend uploads on the editor's behalf (`POST /api/media`, editor-gated) and hashes
-the bytes server-side — players never fetch through the API. One-time setup:
+Quest images are stored content-addressed (sha256) in an R2 bucket; the quest JSON
+only carries URLs. The backend uploads on the editor's behalf (`POST /api/media`,
+editor-gated) and hashes the bytes server-side.
+
+**Two serving modes** (set `R2_PUBLIC_BASE_URL` accordingly; it bakes into stored
+JSON, so it must be identical in the API unit AND the import):
+
+- **Custom domain** (`https://media.<domain>`) — players read R2 **directly**; needs
+  the zone on Cloudflare + bucket CORS. Steps 1–7 below.
+- **Via the API** (`https://api.<domain>/api/media`) — **no custom domain / no NS
+  change**. The backend streams bytes from R2 at `GET /api/media/{hash}`
+  (`media.rs` R2 `get()`); players read through the API origin. **Skip steps 2–4**
+  (custom domain, cache rule, bucket CORS) — the backend's own `CORS_ALLOWED_ORIGINS`
+  is the single CORS surface. Still do steps 1, 5, 6 (bucket, S3 token, secrets).
+  Tradeoff: media transits the VPS (cacheable, immutable); storage stays in R2.
+
+One-time setup:
 
 1. **Create the bucket** (Cloudflare → R2 → Create bucket), e.g. `geohod-quest-media`.
 

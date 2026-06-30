@@ -104,10 +104,15 @@ impl R2MediaStore {
         secret_access_key: &str,
         bucket: &str,
         public_base: String,
+        endpoint: Option<&str>,
     ) -> Result<Self, AppError> {
         let region = s3::Region::Custom {
             region: "auto".to_string(),
-            endpoint: format!("https://{account_id}.r2.cloudflarestorage.com"),
+            // Default to the account endpoint; an override points at a local S3
+            // mock (MinIO) in tests.
+            endpoint: endpoint
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("https://{account_id}.r2.cloudflarestorage.com")),
         };
         let credentials = s3::creds::Credentials::new(
             Some(access_key_id),
@@ -151,6 +156,38 @@ impl R2MediaStore {
         }
         Ok(MediaRef::new(&self.public_base, hash, content_type, size))
     }
+
+    /// Fetch stored bytes by content hash so the API can serve R2 media through
+    /// its OWN origin (`GET /api/media/{hash}`) when the bucket has no public
+    /// custom domain. A missing key is `Ok(None)`, not an error: with `fail-on-err`
+    /// off (see Cargo.toml) rust-s3 surfaces a 404 as `Ok` carrying that status.
+    async fn get(&self, hash: &str) -> Result<Option<StoredBlob>, AppError> {
+        let key = format!("/{hash}");
+        let resp = self
+            .bucket
+            .get_object(&key)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("R2 get failed: {e}")))?;
+        match resp.status_code() {
+            200 => {
+                // Echo back the content-type we stored on PUT; default defensively.
+                let content_type = resp
+                    .headers()
+                    .into_iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, v)| v)
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                Ok(Some(StoredBlob {
+                    bytes: resp.into_bytes(),
+                    content_type,
+                }))
+            }
+            404 => Ok(None),
+            code => Err(AppError::Internal(anyhow::anyhow!(
+                "R2 get returned status {code}"
+            ))),
+        }
+    }
 }
 
 /// Media store selected at startup (mirrors the storage enums). Both variants
@@ -173,12 +210,14 @@ impl MediaStores {
                 secret_access_key,
                 bucket,
                 public_base,
+                endpoint,
             } => Ok(Self::R2(Arc::new(R2MediaStore::new(
                 account_id,
                 access_key_id,
                 secret_access_key,
                 bucket,
                 public_base.clone(),
+                endpoint.as_deref(),
             )?))),
             MediaConfig::Local { public_base } => Ok(Self::InMemory(Arc::new(Mutex::new(
                 InMemoryMediaStore::new(public_base.clone()),
@@ -202,12 +241,14 @@ impl MediaStores {
         }
     }
 
-    /// Fetch stored bytes for the in-process serving route. R2 media is served
-    /// directly from its public URL, so this is `None` for the R2 backend.
+    /// Fetch stored bytes for the `GET /api/media/{hash}` serve route. Both
+    /// backends serve through this origin: the in-process store from memory, the
+    /// R2 store by fetching the object — so media works without a public bucket
+    /// domain. `None` = no such key (404).
     pub async fn get(&self, hash: &str) -> Result<Option<StoredBlob>, AppError> {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(hash)),
-            Self::R2(_) => Ok(None),
+            Self::R2(r) => r.get(hash).await,
         }
     }
 }
@@ -244,5 +285,65 @@ mod tests {
         assert_eq!(blob.bytes.as_ref(), b"abc");
         assert_eq!(blob.content_type, "image/png");
         assert!(store.get("deadbeef").is_none());
+    }
+
+    /// Round-trips an upload through a real S3 server (MinIO) to prove the R2
+    /// put/get path end-to-end against the actual rust-s3 client — including that
+    /// a missing key is `None` (404) and the stored content-type comes back.
+    ///
+    /// Gated on `R2_TEST_ENDPOINT` so CI without MinIO skips it. Run locally with:
+    ///   podman run -d -p 9000:9000 -e MINIO_ROOT_USER=minioadmin \
+    ///     -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio server /data
+    ///   R2_TEST_ENDPOINT=http://127.0.0.1:9000 cargo test r2_put_then_get
+    #[tokio::test]
+    async fn r2_put_then_get_round_trips_via_s3() {
+        let Ok(endpoint) = std::env::var("R2_TEST_ENDPOINT") else {
+            eprintln!("skipping r2_put_then_get_round_trips_via_s3: set R2_TEST_ENDPOINT (MinIO)");
+            return;
+        };
+        let bucket = "geohod-quest-media-test";
+        // Pre-create the bucket (idempotent: a re-run / existing bucket is ignored).
+        let region = s3::Region::Custom {
+            region: "auto".to_string(),
+            endpoint: endpoint.clone(),
+        };
+        let creds =
+            s3::creds::Credentials::new(Some("minioadmin"), Some("minioadmin"), None, None, None)
+                .unwrap();
+        let _ = s3::Bucket::create_with_path_style(
+            bucket,
+            region,
+            creds,
+            s3::BucketConfiguration::default(),
+        )
+        .await;
+
+        let store = R2MediaStore::new(
+            "minioadmin",
+            "minioadmin",
+            "minioadmin",
+            bucket,
+            "http://example.test/api/media".to_string(),
+            Some(&endpoint),
+        )
+        .unwrap();
+
+        // Missing key -> None (clean 404, not an error).
+        assert!(store.get(&sha256_hex(b"absent")).await.unwrap().is_none());
+
+        // Put -> ref carries the public base + sha256 content address.
+        let png = Bytes::from_static(b"\x89PNG\r\n\x1a\n-fake");
+        let r = store.put(png.clone(), "image/png").await.unwrap();
+        assert_eq!(r.hash, sha256_hex(&png));
+        assert_eq!(r.url, format!("http://example.test/api/media/{}", r.hash));
+
+        // Get -> exact bytes + stored content-type returned.
+        let blob = store
+            .get(&r.hash)
+            .await
+            .unwrap()
+            .expect("present after put");
+        assert_eq!(blob.bytes, png);
+        assert_eq!(blob.content_type, "image/png");
     }
 }

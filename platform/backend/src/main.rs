@@ -307,8 +307,10 @@ async fn upload_media_handler(
     Ok(Json(media_ref))
 }
 
-/// GET /api/media/{hash} — serve in-process media (local dev / tests). In
-/// production media is served directly from R2's public URL, so this 404s there.
+/// GET /api/media/{hash} — serve content-addressed media through the API's own
+/// origin. Backs both stores: the in-process one (local dev / tests) and R2
+/// (fetched from the bucket), so media is served without a public bucket domain.
+/// A custom domain would instead serve R2 directly and this would 404 in prod.
 async fn get_media_handler(
     State(state): State<AppState>,
     Path(hash): Path<String>,
@@ -340,7 +342,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
         // Media: upload (editor-gated, lifts the body cap to a single image) and
-        // the in-process serve route (R2 serves directly in prod; this 404s there).
+        // the serve route (serves in-process AND R2 media through this origin).
         .route(
             "/api/media",
             post(upload_media_handler).layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),

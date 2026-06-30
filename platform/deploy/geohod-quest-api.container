@@ -44,7 +44,12 @@ Secret=geohod-quest-admin-token,type=env,target=ADMIN_TOKEN
 # in-process media (uploads would not survive a restart).
 Environment=R2_ACCOUNT_ID=REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID
 Environment=R2_BUCKET=geohod-quest-media
-Environment=R2_PUBLIC_BASE_URL=https://media.quest.geohod.ru
+# Public base media URLs are built from ("{base}/{hash}"), baked into stored quest
+# JSON. NO custom domain on this deploy: serve R2 through the API's own origin via
+# GET /api/media/{hash} (media.rs R2 get()). MUST be byte-identical here AND in the
+# import env. With a custom domain later, set both to https://media.<domain> and
+# re-import (URLs are baked).
+Environment=R2_PUBLIC_BASE_URL=https://api.quest.geohod.ru/api/media
 Secret=geohod-quest-r2-access-key-id,type=env,target=R2_ACCESS_KEY_ID
 Secret=geohod-quest-r2-secret-access-key,type=env,target=R2_SECRET_ACCESS_KEY
 
