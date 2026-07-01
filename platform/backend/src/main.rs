@@ -991,6 +991,10 @@ async fn get_bundle_handler(
         "quest_id": meta.quest_id,
         "snapshot_id": meta.snapshot_id,
         "snapshot_version": meta.snapshot_version,
+        // Catalog cover (lives in meta, not the frozen snapshot) so the client can
+        // precache it for offline alongside the snapshot's media — same value the
+        // store card resolves, so the precached bytes match what renders.
+        "primary_comic": meta.primary_comic,
         "snapshot": snapshot,
     })))
 }
@@ -2241,6 +2245,7 @@ mod tests {
             app,
             ids,
             json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "primary_comic": "https://api.test/api/media/coverhash",
                    "snapshot_version": 1, "snapshot_id": ids.snap1, "snapshot": snapshot}),
         )
         .await;
@@ -2269,6 +2274,9 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["snapshot_id"], ids.snap1.as_str());
         assert_eq!(body["snapshot"]["golden_id"], ids.snap1.as_str());
+        // The envelope carries the list cover so the client can precache it for offline
+        // (it lives in the catalog meta, not the frozen play snapshot).
+        assert_eq!(body["primary_comic"], "https://api.test/api/media/coverhash");
     }
 
     async fn scenario_snapshot_immutability(app: &Router, ids: &Ids) {

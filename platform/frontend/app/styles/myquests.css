@@ -85,3 +85,11 @@
 .dl-bar i { display: block; height: 100%; border-radius: 4px; background: var(--blue); transition: width .3s ease; }
 .dl-status { display: flex; justify-content: space-between; font-size: 12px; color: var(--gray); }
 .dl-ready { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--green); font-weight: 600; }
+
+/* PWA install affordance (InstallPrompt) — offered on the start_url page. */
+.mq-install { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 16px 0 4px; }
+.mq-install__hint { font-size: 13px; color: var(--navy); opacity: .6; max-width: 380px; }
+.mq-install__sheet { width: 340px; max-width: 100%; padding: 28px 26px; }
+.mq-install__sheet h3 { font-size: 17px; font-weight: 700; margin-bottom: 12px; }
+.mq-install__sheet ol { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--navy); }
+.mq-install__note { font-size: 12.5px; color: var(--navy); opacity: .6; }

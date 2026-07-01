@@ -86,6 +86,18 @@ export interface PublishedQuestWire {
   rating_count: number;
 }
 
+/** The grant-gated bundle envelope returned by `GET /api/quests/{id}/bundle` — the
+ *  frozen snapshot JSON plus its identity. The download flow stores/precaches from it. */
+export interface BundleWire {
+  quest_id: string;
+  snapshot_id: string;
+  snapshot_version: number;
+  /** Catalog cover (`primary_comic`) — lives in the bundle envelope, not the frozen
+   *  snapshot, so the client can precache it for offline alongside the snapshot media. */
+  primary_comic: string | null;
+  snapshot: unknown;
+}
+
 /** Editorial lifecycle of a constructor quest (mirrors backend CTOR_STATUS_*). */
 export type CtorStatus = 'draft' | 'test' | 'published';
 
@@ -211,10 +223,8 @@ export const api = {
   getAttemptState: (attemptId: string) => apiFetch(`/api/attempts/${attemptId}/state`),
 
   // Bundle download primitive: latest frozen snapshot JSON, grant-gated (403 without grant).
-  getBundle: (questId: string, playerId: string) =>
-    apiFetch<{ quest_id: string; snapshot_id: string; snapshot_version: number; snapshot: unknown }>(
-      `/api/quests/${questId}/bundle?player_id=${encodeURIComponent(playerId)}`
-    ),
+  getBundle: (questId: string, playerId: string): Promise<BundleWire> =>
+    apiFetch<BundleWire>(`/api/quests/${questId}/bundle?player_id=${encodeURIComponent(playerId)}`),
 
   appendFacts: (attemptId: string, facts: unknown[]) =>
     apiFetch(`/api/attempts/${attemptId}/facts`, { method: 'POST', body: JSON.stringify({ facts }) }),

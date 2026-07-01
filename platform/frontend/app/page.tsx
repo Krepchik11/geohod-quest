@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from './SiteHeader';
 import { api, type PublishedQuestWire } from '../lib/api';
+import { coverCss } from '../lib/cover';
 import { currentPlayerId } from '../lib/identity';
 
 /**
@@ -20,19 +21,6 @@ export type PublishedQuest = {
   primary_comic?: string | null;
   template_summary: string;
 };
-
-/**
- * Card cover background. `primary_comic` may be a real image (uploaded cover as a
- * data: URL, or an /assets path) OR a bare comic id (e.g. "comic-fortress") that
- * is not loadable as an image — only the former is used; otherwise the design
- * placeholder. Prevents a broken/blank cover from an id-style value.
- */
-const CARD_PLACEHOLDER = '/assets/img/quest-card.png';
-function coverUrl(primaryComic?: string | null): string {
-  const v = primaryComic?.trim();
-  const isImageRef = !!v && (v.startsWith('/') || v.startsWith('data:') || v.startsWith('http'));
-  return `url('${isImageRef ? v : CARD_PLACEHOLDER}')`;
-}
 
 /** Russian plural for оценка (rating). */
 function ratingPlural(n: number): string {
@@ -177,7 +165,7 @@ export default function GeoQuestHome() {
               const free = q.price === 0;
               return (
                 <article className="quest-card card" key={q.quest_id}>
-                  <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: coverUrl(q.primary_comic) }}>
+                  <a className="quest-card__photo" href={playUrl} style={{ backgroundImage: coverCss(q.primary_comic) }}>
                     <span className="qmark">?</span>
                   </a>
                   <div className="quest-card__body">
