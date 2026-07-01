@@ -7,7 +7,9 @@ import { api, type PublishedQuestWire } from '../../lib/api';
 import { projectState } from '../../lib/shared-model';
 import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } from '../../lib/queue';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
+import { coverSrc } from '../../lib/cover';
 import { currentPlayerId } from '../../lib/identity';
+import InstallPrompt from '../components/InstallPrompt';
 
 /**
  * «Мои квесты» — live collection (P4): published quests × grants × local
@@ -68,8 +70,9 @@ async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
     // Real author values from the catalog; null simply hides that meta item.
     city: meta.city,
     duration: meta.duration,
-    // primary_comic is a media token today (e.g. "comic-fortress"), a path only later
-    photo: meta.primary_comic?.startsWith('/') ? meta.primary_comic : null,
+    // primary_comic is a full media URL (post-R2) / path / data: URI / id-token;
+    // coverSrc keeps only real image refs so production https covers render (not blank).
+    photo: coverSrc(meta.primary_comic),
     state,
     pos: attempt ? Math.min(attempt.last_step_idx + 1, total ?? attempt.last_step_idx + 1) : undefined,
     total,
@@ -218,7 +221,7 @@ export default function MyQuestsPage() {
     setDownloads((d) => ({ ...d, [questId]: 'fetching' }));
     try {
       await downloadBundle(questId, currentPlayerId(), api, (stage) =>
-        setDownloads((d) => ({ ...d, [questId]: stage }))
+        setDownloads((d) => ({ ...d, [questId]: stage })),
       );
       setCollection(await loadCollection()); // re-compose (download state + step totals from the bundle)
     } catch (err) {
@@ -236,6 +239,7 @@ export default function MyQuestsPage() {
       <main className="co-wrap">
         <h2 className="co-title">Мои квесты</h2>
         <p className="co-sub">Все купленные и полученные квесты. Доступ бессрочный — проходите когда удобно.</p>
+        <InstallPrompt />
 
         {collection.source === 'loading' ? (
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>

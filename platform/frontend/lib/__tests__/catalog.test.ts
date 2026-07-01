@@ -55,4 +55,9 @@ describe('nextQuestsForCatalog (post-finale catalog selection)', () => {
   it('falls back to "?" for a blank name', () => {
     expect(nextQuestsForCatalog([wire('x', '   ')], 'current')[0].mark).toBe('?');
   });
+
+  it('blanks a non-URL id-token cover so the card draws its monogram, not a broken <img>', () => {
+    const [c] = nextQuestsForCatalog([wire('t', 'Тест', 'comic-fortress')], 'current');
+    expect(c.cover).toBeNull();
+  });
 });
