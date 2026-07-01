@@ -5,6 +5,7 @@
  * pick which quests to invite the player into next.
  */
 import type { PublishedQuestWire } from './api';
+import { coverSrc } from './cover';
 
 /** A quest card on the post-finale catalog. */
 export interface CatalogCard {
@@ -32,7 +33,7 @@ export function nextQuestsForCatalog(
       id: q.quest_id,
       title: q.name,
       mark: monogram(q.name),
-      cover: q.primary_comic,
+      cover: coverSrc(q.primary_comic),
     }));
 }
 
