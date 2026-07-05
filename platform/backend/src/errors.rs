@@ -37,6 +37,10 @@ pub enum AppError {
     /// Unknown resource — e.g. facts for a non-existent attempt. (404)
     #[error("not found: {0}")]
     NotFound(String),
+
+    /// Rate limit exceeded — e.g. the identify email-existence probe. (429)
+    #[error("too many requests: {0}")]
+    TooManyRequests(String),
 }
 
 impl IntoResponse for AppError {
@@ -53,6 +57,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
         };
 
         (status, Json(json!({ "error": message }))).into_response()

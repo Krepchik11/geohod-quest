@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
+import StatusControl from './StatusControl';
 
 /**
  * Конструктор-дашборд — главная страница конструктора. Точный порт дизайна
@@ -20,20 +21,6 @@ const STATUS_LABEL: Record<CtorStatus, string> = {
   test: 'Тест',
   draft: 'Проект',
 };
-/** Порядок статусов в строковом селекте (как в дизайне). */
-const STATUS_ORDER: CtorStatus[] = ['published', 'test', 'draft'];
-const LABEL_TO_STATUS: Record<string, CtorStatus> = {
-  Опубликован: 'published',
-  Тест: 'test',
-  Проект: 'draft',
-};
-
-function statusMeta(s: CtorStatus): { color: string; bg: string; dot: string } {
-  if (s === 'published') return { color: '#1f8a5b', bg: '#e7f4ec', dot: '#1f8a5b' };
-  if (s === 'test') return { color: '#b9791b', bg: '#fbf1df', dot: '#d9961d' };
-  return { color: '#6b7280', bg: '#eef0f3', dot: '#9aa0ab' };
-}
-
 /** Детерминированный градиент-«обложка» по названию (как в дизайне). */
 function thumbBg(name: string): string {
   let h = 0;
@@ -77,6 +64,8 @@ export interface DashboardActions {
   onDuplicate: (q: ConstructorQuestWire) => void;
   onDelete: (q: ConstructorQuestWire) => void;
   onStatusChange: (q: ConstructorQuestWire, status: CtorStatus) => void;
+  /** §9.1: draft→test/published without a snapshot routes into the publish panel. */
+  onOpenPublish: (q: ConstructorQuestWire) => void;
   onLogout: () => void;
 }
 
@@ -179,13 +168,9 @@ export default function Dashboard({
       </header>
 
       <main className="qcd-main">
-        {/* ===== Приветствие ===== */}
-        <h1 className="qcd-welcome-title">Добро пожаловать!</h1>
-        <p className="qcd-welcome-text">
-          Здесь вы создаёте новые квесты и управляете уже созданными — редактируете
-          шаги, запускаете прогон и публикуете в магазин.
-        </p>
-        <div className="qcd-create-wrap">
+        {/* §9.3: заголовок страницы + создание — без Prata-приветствия. */}
+        <div className="qcd-pagehead">
+          <h1 className="qcd-pagehead__title">Ваши квесты</h1>
           <button className="qcd-create" type="button" onClick={actions.onCreate}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
             Создать новый квест
@@ -284,7 +269,6 @@ export default function Dashboard({
         {showList ? (
           <div className="qcd-listcard">
             {filtered.map((q) => {
-              const m = statusMeta(q.status);
               const published = q.status === 'published';
               return (
                 <div className="qcd-row" key={q.quest_id}>
@@ -300,22 +284,11 @@ export default function Dashboard({
                       <span><IconCal />{fmtDate(q.created_at)}</span>
                     </div>
                   </div>
-                  <div className="qcd-status">
-                    <span className="qcd-status__dot" style={{ background: m.dot }} />
-                    <select
-                      value={STATUS_LABEL[q.status]}
-                      title="Изменить статус"
-                      style={{ color: m.color, background: m.bg }}
-                      onChange={(e) => actions.onStatusChange(q, LABEL_TO_STATUS[e.target.value])}
-                    >
-                      {STATUS_ORDER.map((s) => (
-                        <option key={s} value={STATUS_LABEL[s]} style={{ color: '#1a2b48', background: '#fff' }}>
-                          {STATUS_LABEL[s]}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="qcd-status__chevron"><ChevronDown stroke={m.color} /></span>
-                  </div>
+                  <StatusControl
+                    quest={q}
+                    onStatusChange={(status) => actions.onStatusChange(q, status)}
+                    onOpenPublish={() => actions.onOpenPublish(q)}
+                  />
                   <div className="qcd-actions">
                     <button className="qcd-btn-edit" type="button" onClick={() => actions.onEdit(q.quest_id)}>Редактировать</button>
                     <button

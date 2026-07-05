@@ -58,17 +58,18 @@ After changes to Rust: always run `cargo fmt`, `cargo clippy -- -D warnings`, `c
 
 ## Architecture notes (initial)
 
-- Backend surfaces: facts/attempts/state, publish/bundle (frozen snapshots), checkout/grants (mock `PaymentProvider`), admin per-version stats/feedbacks, legacy migration, and identity (`/api/auth/register`, `/api/auth/login`, `/api/players/me`, `/api/players/me/stats`).
-- Frontend: live marketplace (landing `#shop` — all published quests, per-quest buy with mocked payment, owned state), design player (7 templates, paper frame, offline PWA queue + bundles), constructor with publish, my-quests collection, live profile stats, email auth page.
+- Backend surfaces: facts/attempts/state, publish/bundle (frozen snapshots), checkout/grants (mock `PaymentProvider`), public product page (`GET /api/quests/{id}` — description, author, chips, ratings, reviews), admin per-version stats/feedbacks + user management (search/pagination/roles), legacy migration, per-quest PWA icons (cover→192/512 PNG), transactional mail (lettre; `SMTP_URL` or log fallback), and identity v2 (`/api/auth/identify|register|login|recover|reset|confirm`, change-password, display-name, delete-account, `/api/players/me`, `/api/players/me/stats`).
+- Frontend: live marketplace (landing v2 + `/quest/[id]/about` product page with order card, purchase sheet, reviews), design player (7 templates, paper frame, offline PWA queue + bundles, per-quest manifests), constructor with publish + status chip, my-quests collection, live profile stats, email-first auth (`/auth`, `/auth/reset`, `/auth/confirm`), `/privacy` + `/terms`.
 - Shared contracts (OpenAPI / TS types / generated client) will appear under `packages/` only when the first cross-boundary API is designed. Not before.
 
 ## Identity model (player-identity spec)
 
 - **Anonymous-first**: the browser mints a device UUID once (`localStorage['geohod-device-id:v1']`); the player id is `dev:<uuid>`. No registration needed to buy or play; identity exists before any network (offline-first).
-- **Email registration** (`POST /api/auth/register`): attaches email + argon2 password hash to the SAME player id — purchases/coins/facts survive with zero migration. No email confirmation (MVP cut). Login (`POST /api/auth/login`) returns the account id + opaque session token; that device adopts the account.
+- **Email-first flow (auth v2)**: `POST /api/auth/identify` (rate-limited) tells the client whether an email is new or known, so the user never picks the wrong mode. Registration attaches email + argon2 password hash to the SAME player id — purchases/coins/facts survive with zero migration. Login (`POST /api/auth/login`) returns the account id + opaque session token; that device adopts the account.
+- **Recovery & confirmation (auth v2)**: `POST /api/auth/recover` issues a hashed single-use reset token mailed via `src/mailer.rs` (real SMTP when `SMTP_URL` is set, honest log fallback otherwise); `POST /api/auth/reset` consumes it. Email confirmation is soft (`email_confirmed_at`, migration 0003) — a banner nudges, nothing blocks. Account management: change-password, display-name, delete-account (blocked with 409 while the account has published quests).
 - **Two-tier enforcement**: a REGISTERED player id requires `Authorization: Bearer <token>` on player-scoped endpoints (checkout, attempts, bundle, profile/stats); anonymous ids are credentialed by device possession (`X-Player-Id` header — the client sends the right one automatically via `frontend/lib/identity.ts`).
 - **Payments**: `backend/src/payments.rs` — `PaymentProvider` trait with an always-approving `MockPaymentProvider`; the mock `payment_ref` is audited on the grant (`source_ref`). Real provider (YooKassa redirect + webhook) slots in behind the same trait.
-- Recorded MVP cuts: no email confirmation/password reset/rate limiting/token expiry; login does not merge a device's local anonymous progress into the account.
+- Recorded MVP cuts: no token expiry; login does not merge a device's local anonymous progress into the account. (Email confirmation, password reset, and identify rate limiting shipped with auth v2.)
 - E2E: `node e2e-identity.mjs` (servers on :8080/:3000) covers anonymous buy → play → register → cross-device login → enforcement; `node e2e-player-check.mjs` covers the production player (access gate, all 7 templates on «Ирония судьбы», 2nd-wrong hint popup, real offline banner, no debug chrome).
 
 See `../blueprint/TECH.md`, `../blueprint/SPEC.md`, `../blueprint/PLAN.md`, and `../blueprint/CONCEPT.md` for the non-negotiable model (event-sourced facts, client-validated snapshots, frozen supporting values, 7 page templates, etc.). Historical supporting material (including prior business docs and analyses) is archived in `../old-knowledgebase/`.
@@ -90,6 +91,8 @@ platform/
 │       ├── auth.rs       # identity primitives (argon2, session tokens, roles)
 │       ├── facts.rs      # the event vocabulary + pure deterministic projectors
 │       ├── grants.rs     # lifetime access-grant model (idempotent by player+quest)
+│       ├── icons.rs      # per-quest PWA icons: cover → maskable 192/512 PNG
+│       ├── mailer.rs     # transactional mail (lettre SMTP or log fallback)
 │       ├── payments.rs   # PaymentProvider seam (always-approving mock)
 │       ├── store.rs      # store dispatch + in-memory backend (the executable spec)
 │       └── pg_store.rs   # PostgreSQL backend (mirrors in-memory exactly)

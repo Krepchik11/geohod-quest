@@ -42,6 +42,80 @@ pub struct PgFactStore {
 }
 
 impl PgFactStore {
+    /// See [`crate::store::InMemoryFactStore::reviews_for_quest`] — DISTINCT ON
+    /// keeps the last quest_rated per attempt; only rows with text qualify.
+    pub async fn reviews_for_quest(
+        &self,
+        quest_id: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::store::ReviewRow>, AppError> {
+        let rows = sqlx::query(
+            "SELECT last_rated.player_id, last_rated.created_at, last_rated.data
+             FROM (
+                 SELECT DISTINCT ON (f.attempt_id)
+                        a.player_id, a.created_at, f.data
+                 FROM facts f
+                 JOIN attempts a ON a.attempt_id = f.attempt_id
+                 WHERE a.quest_id = $1 AND f.data->>'type' = 'quest_rated'
+                 ORDER BY f.attempt_id, f.seq DESC
+             ) AS last_rated
+             WHERE COALESCE(TRIM(last_rated.data->>'note'), '') <> ''
+             ORDER BY last_rated.created_at DESC
+             LIMIT $2",
+        )
+        .bind(quest_id)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        use sqlx::Row;
+        rows.iter()
+            .map(|r| {
+                let data: serde_json::Value = r.try_get("data").map_err(internal)?;
+                let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+                Ok(crate::store::ReviewRow {
+                    player_id: r.try_get("player_id").map_err(internal)?,
+                    created_at: created_at as u64,
+                    rating: data
+                        .get("submitted_value")
+                        .and_then(|v| v.as_str())
+                        .and_then(|v| v.trim().parse::<i64>().ok())
+                        .unwrap_or(0),
+                    text: data
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .map(|t| t.trim().chars().take(500).collect())
+                        .unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryFactStore::delete_player_data`] — the
+    /// player's attempts + their facts + bonus marks, one transaction.
+    pub async fn delete_player_data(&self, player_id: &str) -> Result<(), AppError> {
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        sqlx::query(
+            "DELETE FROM facts WHERE attempt_id IN (SELECT attempt_id FROM attempts WHERE player_id = $1)",
+        )
+        .bind(player_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        sqlx::query("DELETE FROM bonus_awards WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        sqlx::query("DELETE FROM attempts WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        Ok(())
+    }
+
     /// Wrap an existing pool (migrations are run by the caller at startup).
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -250,10 +324,11 @@ impl PgFactStore {
     pub async fn completions_by_quest(
         &self,
     ) -> Result<std::collections::HashMap<String, usize>, AppError> {
-        let rows = sqlx::query("SELECT quest_id, COUNT(*) AS n FROM bonus_awards GROUP BY quest_id")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
+        let rows =
+            sqlx::query("SELECT quest_id, COUNT(*) AS n FROM bonus_awards GROUP BY quest_id")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?;
         let mut out = std::collections::HashMap::new();
         for row in rows {
             let quest_id: String = row.try_get("quest_id").map_err(internal)?;
@@ -341,13 +416,22 @@ fn published_from_row(row: &sqlx::postgres::PgRow) -> Result<PublishedMeta, AppE
         city: row.try_get("city").map_err(internal)?,
         duration: row.try_get("duration").map_err(internal)?,
         price: row.try_get("price").map_err(internal)?,
+        description: row.try_get("description").map_err(internal)?,
+        pages: row
+            .try_get::<Option<i32>, _>("pages")
+            .map_err(internal)?
+            .map(|v| v as u32),
+        tasks: row
+            .try_get::<Option<i32>, _>("tasks")
+            .map_err(internal)?
+            .map(|v| v as u32),
+        paid_hints: row.try_get("paid_hints").map_err(internal)?,
     })
 }
 
 /// Published-quest columns selected wherever a [`PublishedMeta`] is read (kept in
 /// one place so list/get/bundle stay in sync with [`published_from_row`]).
-const PUBLISHED_COLS: &str =
-    "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price";
+const PUBLISHED_COLS: &str = "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price, description, pages, tasks, paid_hints";
 
 impl PgGrantStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -484,8 +568,8 @@ impl PgGrantStore {
         sqlx::query(
             "INSERT INTO published_quests
                  (quest_id, name, primary_comic, template_summary, snapshot_version,
-                  snapshot_id, city, duration, price)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                  snapshot_id, city, duration, price, description, pages, tasks, paid_hints)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT (quest_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  primary_comic = EXCLUDED.primary_comic,
@@ -494,7 +578,11 @@ impl PgGrantStore {
                  snapshot_id = EXCLUDED.snapshot_id,
                  city = EXCLUDED.city,
                  duration = EXCLUDED.duration,
-                 price = EXCLUDED.price",
+                 price = EXCLUDED.price,
+                 description = EXCLUDED.description,
+                 pages = EXCLUDED.pages,
+                 tasks = EXCLUDED.tasks,
+                 paid_hints = EXCLUDED.paid_hints",
         )
         .bind(quest_id)
         .bind(&meta.name)
@@ -505,6 +593,10 @@ impl PgGrantStore {
         .bind(&meta.city)
         .bind(&meta.duration)
         .bind(meta.price)
+        .bind(&meta.description)
+        .bind(meta.pages.map(|v| v as i32))
+        .bind(meta.tasks.map(|v| v as i32))
+        .bind(meta.paid_hints)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
@@ -521,6 +613,38 @@ impl PgGrantStore {
         .await
         .map_err(internal)?;
         rows.iter().map(grant_from_row).collect()
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::delete_grants_for_player`].
+    pub async fn delete_grants_for_player(&self, player_id: &str) -> Result<usize, AppError> {
+        let res = sqlx::query("DELETE FROM access_grants WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(res.rows_affected() as usize)
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::buyers_by_quest`].
+    pub async fn buyers_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, usize>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, COUNT(DISTINCT player_id) AS n FROM access_grants GROUP BY quest_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        use sqlx::Row;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                (
+                    r.get::<String, _>("quest_id"),
+                    r.get::<i64, _>("n") as usize,
+                )
+            })
+            .collect())
     }
 
     /// See [`crate::store::InMemoryGrantStore::grants_for_player`].
@@ -541,13 +665,19 @@ impl PgGrantStore {
         &self,
         quest_id: &str,
     ) -> Result<Option<(PublishedMeta, Option<serde_json::Value>)>, AppError> {
-        let row = sqlx::query(
-            "SELECT p.quest_id, p.name, p.primary_comic, p.template_summary,
-                    p.snapshot_version, p.snapshot_id, p.city, p.duration, p.price, s.data
+        // Qualify every published column with the join alias so the column list
+        // stays in lockstep with PUBLISHED_COLS/published_from_row.
+        let cols = PUBLISHED_COLS
+            .split(", ")
+            .map(|c| format!("p.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let row = sqlx::query(&format!(
+            "SELECT {cols}, s.data
              FROM published_quests p
              JOIN snapshots s ON s.snapshot_id = p.snapshot_id
-             WHERE p.quest_id = $1",
-        )
+             WHERE p.quest_id = $1"
+        ))
         .bind(quest_id)
         .fetch_optional(&self.pool)
         .await
@@ -571,12 +701,14 @@ pub struct PgAuthStore {
 
 fn account_from_row(row: &sqlx::postgres::PgRow) -> Result<UserAccount, AppError> {
     let created_at: i64 = row.try_get("created_at").map_err(internal)?;
+    let confirmed: Option<i64> = row.try_get("email_confirmed_at").map_err(internal)?;
     Ok(UserAccount {
         player_id: row.try_get("player_id").map_err(internal)?,
         email: row.try_get("email").map_err(internal)?,
         display_name: row.try_get("display_name").map_err(internal)?,
         role: row.try_get("role").map_err(internal)?,
         created_at: created_at as u64,
+        email_confirmed_at: confirmed.map(|v| v as u64),
     })
 }
 
@@ -602,7 +734,7 @@ impl PgAuthStore {
             "INSERT INTO users (player_id, email, password_hash, display_name, created_at)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT DO NOTHING
-             RETURNING player_id, email, display_name, role, created_at",
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
         )
         .bind(player_id)
         .bind(email)
@@ -623,7 +755,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::find_by_email`].
     pub async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
         let row = sqlx::query(
-            "SELECT player_id, email, password_hash, display_name, role, created_at
+            "SELECT player_id, email, password_hash, display_name, role, created_at, email_confirmed_at
              FROM users WHERE email = $1",
         )
         .bind(email)
@@ -642,7 +774,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::get_user`].
     pub async fn get_user(&self, player_id: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
-            "SELECT player_id, email, display_name, role, created_at \
+            "SELECT player_id, email, display_name, role, created_at, email_confirmed_at \
              FROM users WHERE player_id = $1",
         )
         .bind(player_id)
@@ -657,7 +789,7 @@ impl PgAuthStore {
     pub async fn set_role(&self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
         let row = sqlx::query(
             "UPDATE users SET role = $2 WHERE player_id = $1 \
-             RETURNING player_id, email, display_name, role, created_at",
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
         )
         .bind(player_id)
         .bind(role)
@@ -676,7 +808,7 @@ impl PgAuthStore {
     /// created_at index; ties broken by player_id for a stable order.
     pub async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
         let rows = sqlx::query(
-            "SELECT player_id, email, display_name, role, created_at \
+            "SELECT player_id, email, display_name, role, created_at, email_confirmed_at \
              FROM users ORDER BY created_at DESC, player_id ASC",
         )
         .fetch_all(&self.pool)
@@ -695,6 +827,133 @@ impl PgAuthStore {
             .await
             .map_err(internal)?;
         Ok(())
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::set_display_name`].
+    pub async fn set_display_name(
+        &self,
+        player_id: &str,
+        display_name: Option<String>,
+    ) -> Result<UserAccount, AppError> {
+        let row = sqlx::query(
+            "UPDATE users SET display_name = $2 WHERE player_id = $1
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
+        )
+        .bind(player_id)
+        .bind(&display_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match row {
+            Some(r) => account_from_row(&r),
+            None => Err(AppError::NotFound(format!(
+                "no account for player '{player_id}'"
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::set_password`].
+    pub async fn set_password(&self, player_id: &str, password_hash: &str) -> Result<(), AppError> {
+        let res = sqlx::query("UPDATE users SET password_hash = $2 WHERE player_id = $1")
+            .bind(player_id)
+            .bind(password_hash)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        if res.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!(
+                "no account for player '{player_id}'"
+            )));
+        }
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::confirm_email`].
+    pub async fn confirm_email(&self, player_id: &str, at: u64) -> Result<UserAccount, AppError> {
+        let row = sqlx::query(
+            "UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, $2)
+             WHERE player_id = $1
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
+        )
+        .bind(player_id)
+        .bind(at as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match row {
+            Some(r) => account_from_row(&r),
+            None => Err(AppError::NotFound(format!(
+                "no account for player '{player_id}'"
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::create_auth_token`].
+    pub async fn create_auth_token(
+        &self,
+        token_hash: &str,
+        rec: crate::store::AuthTokenRecord,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO auth_tokens (token_hash, player_id, kind, expires_at, used_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(token_hash)
+        .bind(&rec.player_id)
+        .bind(&rec.kind)
+        .bind(rec.expires_at as i64)
+        .bind(rec.used_at.map(|v| v as i64))
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::consume_auth_token`]. The UPDATE
+    /// guards validity in one statement, so concurrent consumers race safely —
+    /// exactly one wins.
+    pub async fn consume_auth_token(
+        &self,
+        token_hash: &str,
+        kind: &str,
+        now: u64,
+    ) -> Result<Option<String>, AppError> {
+        let row = sqlx::query(
+            "UPDATE auth_tokens SET used_at = $3
+             WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at >= $3
+             RETURNING player_id",
+        )
+        .bind(token_hash)
+        .bind(kind)
+        .bind(now as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| r.try_get::<String, _>("player_id").map_err(internal))
+            .transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::delete_user`] — user row,
+    /// sessions and tokens in one transaction.
+    pub async fn delete_user(&self, player_id: &str) -> Result<bool, AppError> {
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        sqlx::query("DELETE FROM sessions WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        sqlx::query("DELETE FROM auth_tokens WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        let res = sqlx::query("DELETE FROM users WHERE player_id = $1")
+            .bind(player_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        Ok(res.rows_affected() > 0)
     }
 
     /// See [`crate::store::InMemoryAuthStore::get_session`].
@@ -716,9 +975,7 @@ pub struct PgConstructorStore {
 }
 
 /// List columns only (no body) — the dashboard row.
-fn ctor_summary_from_row(
-    row: &sqlx::postgres::PgRow,
-) -> Result<ConstructorQuestSummary, AppError> {
+fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuestSummary, AppError> {
     let steps_count: i32 = row.try_get("steps_count").map_err(internal)?;
     let created_at: i64 = row.try_get("created_at").map_err(internal)?;
     let updated_at: i64 = row.try_get("updated_at").map_err(internal)?;
@@ -819,8 +1076,9 @@ impl PgConstructorStore {
 
     /// See [`crate::store::InMemoryConstructorStore::get`].
     pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        let sql =
-            format!("SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1");
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1"
+        );
         let row = sqlx::query(&sql)
             .bind(quest_id)
             .fetch_optional(&self.pool)

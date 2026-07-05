@@ -7,6 +7,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import type { Fact } from '../shared-model';
 import {
+  completedQuestDetails,
   foldLocalPlayerStats,
   gatherLocalAttemptLogs,
   gatherOtherAttemptLogs,
@@ -170,5 +171,32 @@ describe('gatherOtherAttemptLogs (in-play wallet slice)', () => {
     const wallet = foldLocalPlayerStats([...priorLogs, { quest_id: 'q1', facts: liveFacts }]).balance;
     expect(wallet).toBe(11); // 8 + re-earned gift 3; the +5 bonus is deduped once-per-quest
     expect(wallet - priorWallet).toBe(3); // «монет собрано» this run == what the wallet actually gained
+  });
+});
+
+describe('completedQuestDetails (§7.2)', () => {
+  const fact = (type: Fact['type'], value?: string): Fact => ({
+    type, step_position: 0, local_is_correct: true, coins_delta: 0, device_id: 'd',
+    ...(value !== undefined ? { submitted_value: value } : {}),
+  });
+
+  it('reports the completing attempt date and the real latest rating', () => {
+    const details = completedQuestDetails([
+      { quest_id: 'q1', created_at: '2026-06-15T10:00:00Z', facts: [fact('attempt_completed'), fact('quest_rated', '4'), fact('quest_rated', '5')] },
+      { quest_id: 'q2', created_at: '2026-05-02T10:00:00Z', facts: [fact('attempt_completed')] },
+      { quest_id: 'q3', facts: [fact('answer_submitted', 'x')] },
+    ]);
+    expect(details['q1']).toEqual({ quest_id: 'q1', completed_at: '2026-06-15T10:00:00Z', rating: 5 });
+    expect(details['q2'].rating).toBe(0); // честное «без оценки»
+    expect(details['q3']).toBeUndefined();
+  });
+
+  it('a newer completing replay supersedes the older one', () => {
+    const details = completedQuestDetails([
+      { quest_id: 'q', created_at: '2026-01-01T00:00:00Z', facts: [fact('attempt_completed'), fact('quest_rated', '3')] },
+      { quest_id: 'q', created_at: '2026-06-01T00:00:00Z', facts: [fact('attempt_completed'), fact('quest_rated', '4')] },
+    ]);
+    expect(details['q'].rating).toBe(4);
+    expect(details['q'].completed_at).toBe('2026-06-01T00:00:00Z');
   });
 });

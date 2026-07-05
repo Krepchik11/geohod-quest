@@ -153,15 +153,27 @@ mod tests {
         let player = "demo";
         let quest = "q";
         // Act coupon 100 (provider bypassed: no payment ref)
-        let (gc, cc) =
-            create_grant_idemp(None, player, quest, GrantSource::CouponRedemption, None, TS.into());
+        let (gc, cc) = create_grant_idemp(
+            None,
+            player,
+            quest,
+            GrantSource::CouponRedemption,
+            None,
+            TS.into(),
+        );
         // Assert
         assert!(cc);
         assert_eq!(gc.source, GrantSource::CouponRedemption);
         assert_eq!(gc.source_ref, None);
         // Act free
-        let (gf, cf) =
-            create_grant_idemp(None, player, "free-quest", GrantSource::FreeQuest, None, TS.into());
+        let (gf, cf) = create_grant_idemp(
+            None,
+            player,
+            "free-quest",
+            GrantSource::FreeQuest,
+            None,
+            TS.into(),
+        );
         assert!(cf);
         assert_eq!(gf.source, GrantSource::FreeQuest);
         // Identical downstream (same shape, different source only; eligibility same via pure)

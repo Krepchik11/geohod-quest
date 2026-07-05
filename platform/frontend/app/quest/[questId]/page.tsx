@@ -6,6 +6,12 @@ import BundleGate from '../BundleGate';
 // keyboard opens — a focused answer field then scrolls into view above the
 // keyboard. Honored on Android Chrome; iOS keeps its visual-viewport behavior,
 // which the non-sticky answer action bar (.p-actions--field) already accommodates.
+/** §5: the player links the per-quest manifest so installs scope to this quest. */
+export async function generateMetadata({ params }: { params: Promise<{ questId: string }> }) {
+  const { questId } = await params;
+  return { manifest: `/quest/${encodeURIComponent(questId)}/manifest.webmanifest` };
+}
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,

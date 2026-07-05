@@ -25,16 +25,24 @@ it unset throws, see `lib/api.ts`).
 
 ```
 app/
-  page.tsx            landing + marketplace (#shop)
+  page.tsx            landing v2 + marketplace (#shop)
   quest/              the production player (offline PWA): BundleGate → StartGate → QuestPlayerClient
+    [questId]/about/  public product page (order card, purchase sheet, reviews)
+    [questId]/manifest.webmanifest/  quest-scoped PWA manifest (install-per-quest)
   player/             presentational player components (paper frame, step views)
-  quest-editor/       the constructor (editor-gated): Workspace → Builder → PageEditor → PublishPanel
-  admin/              user/role management (admin-gated)
-  auth/ profile/ my-quests/   account + library
+  quest-editor/       the constructor (editor-gated): Workspace → Builder → PageEditor → PublishPanel → StatusControl
+  admin/              user/role management (admin-gated, search + pagination)
+  auth/ profile/ my-quests/   account + library (email-first auth; auth/reset + auth/confirm)
+  privacy/ terms/     legal pages
+  components/         shared UI: ui.tsx (Button/Input), Toaster, TabBar, SiteFooter,
+                      QuestCard, PurchaseSheet, InstallQuestButton (+useInstall)
   SiteHeader.tsx      role-aware nav
 lib/
   shared-model.ts     wire types + pure projectors (projectState/projectBalance) — MUST match the Rust fold
   constructor-model.ts editor model + publish gates
+  storefront.ts       product-page/marketplace presentation model
+  pwa.ts              per-quest install/manifest logic
+  install.ts          install-affordance state machine (installable/ios/hidden)
   queue.ts            IndexedDB fact queue (offline append-only log + bundles)
   sync.ts             flush controller (single-flight, attempt registration)
   identity.ts         anonymous-first device id + session (who is playing)

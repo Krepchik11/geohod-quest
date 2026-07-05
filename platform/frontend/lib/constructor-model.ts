@@ -75,7 +75,12 @@ export type CtorSelection =
 export interface GateMessage {
   pageId: string | null;
   text: string;
+  /** Machine key of the offending control — lets «Исправить →» focus it (§9.2). */
+  field?: GateField;
 }
+
+/** Controls a gate failure can point at inside the page editor / settings. */
+export type GateField = 'comic' | 'answers' | 'nav' | 'hint' | 'cover';
 
 export interface Gates {
   errors: GateMessage[];
@@ -223,8 +228,8 @@ export function computeGates(quest: CtorQuest): Gates {
   const errors: GateMessage[] = [];
   const warnings: GateMessage[] = [];
   const perPage: Gates['perPage'] = {};
-  const add = (pageId: string | null, kind: 'err' | 'warn', text: string) => {
-    (kind === 'err' ? errors : warnings).push({ pageId, text });
+  const add = (pageId: string | null, kind: 'err' | 'warn', text: string, field?: GateField) => {
+    (kind === 'err' ? errors : warnings).push({ pageId, text, field });
     if (pageId) (perPage[pageId] = perPage[pageId] || []).push({ kind, text });
   };
 
@@ -243,21 +248,21 @@ export function computeGates(quest: CtorQuest): Gates {
       add(s.id, 'err', `«${s.name}» — «Первый экран» может быть только первой страницей`);
     }
     if (isTaskTemplate(s.template) && !s.images.task) {
-      add(s.id, 'err', `«${s.name}» — нет комикса «задание»`);
+      add(s.id, 'err', `«${s.name}» — нет комикса «задание»`, 'comic');
     }
     if (s.template === 'task_answer' && !s.acceptable.some((a) => a.trim())) {
-      add(s.id, 'err', `«${s.name}» — список ответов пуст`);
+      add(s.id, 'err', `«${s.name}» — список ответов пуст`, 'answers');
     }
     if (s.nav.on && !hasNumericCoords(s.nav)) {
-      add(s.id, 'err', `«${s.name}» — навигатор включён, координаты не заданы`);
+      add(s.id, 'err', `«${s.name}» — навигатор включён, координаты не заданы`, 'nav');
     }
     if (s.template === 'task_answer' && s.hint.on && !s.hint.text.trim()) {
-      add(s.id, 'warn', `«${s.name}» — подсказка платная, но без текста`);
+      add(s.id, 'warn', `«${s.name}» — подсказка платная, но без текста`, 'hint');
     }
   });
 
   if (!quest.meta.cover) {
-    add(null, 'warn', 'Нет обложки — карточка в магазине и «Первый экран» будут пустыми');
+    add(null, 'warn', 'Нет обложки — карточка в магазине и «Первый экран» будут пустыми', 'cover');
   }
 
   let imgs = 0;

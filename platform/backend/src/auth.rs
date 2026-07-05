@@ -59,6 +59,10 @@ pub struct UserAccount {
     pub role: String,
     /// Unix seconds at registration (0 on clock error; informational only).
     pub created_at: u64,
+    /// Unix seconds when the email was confirmed (§6.3 soft confirmation);
+    /// None until the confirmation link is opened.
+    #[serde(default)]
+    pub email_confirmed_at: Option<u64>,
 }
 
 /// Stored registration record: public account + secret hash (store-layer only).

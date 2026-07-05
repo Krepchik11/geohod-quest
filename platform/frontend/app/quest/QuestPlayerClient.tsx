@@ -226,10 +226,14 @@ export default function QuestPlayerClient({
     feedbackOpen: false,
     feedbackText: '',
     rating: 0,
+    /** §11: optional review text typed on the finale (sent with the rating). */
+    reviewText: '',
     /** Post-finale catalog («Продолжите путешествие») shown after «что дальше». */
     showCatalog: false,
     /** «Ссылка скопирована» confirmation after a clipboard share fallback. */
     shareToast: false,
+    /** §8.4: paper confirm for «Сбросить прогресс» from the menu. */
+    resetConfirm: false,
     soundOn: readSoundOn(),
   }));
 
@@ -436,15 +440,19 @@ export default function QuestPlayerClient({
   // author via admin version-stats. Last-wins + idempotent: re-rating appends a
   // new fact, the same score never re-appends (mirrors latestRating).
   const recordRating = useCallback(
-    (value: number) => {
-      if (value <= 0 || latestRating(facts) === value) return;
+    (value: number, reviewText?: string) => {
+      const text = reviewText?.trim().slice(0, 500) || null;
+      // Re-append when the score OR the text is new (natural-key dedup absorbs
+      // byte-identical repeats server-side).
+      if (value <= 0 || (latestRating(facts) === value && !text)) return;
       appendFact({
         type: 'quest_rated',
         step_position: stepIdx,
         submitted_value: String(value),
         local_is_correct: true,
         coins_delta: 0,
-        note: null,
+        // §11: the optional review rides the same fact as the rating.
+        note: text,
       });
     },
     [facts, stepIdx, appendFact]
@@ -466,7 +474,7 @@ export default function QuestPlayerClient({
   // 4 as the highest-seq fact and mis-recording the score. «отправим» is future
   // tense, so committing on proceed matches the copy too.
   const openCatalog = useCallback(() => {
-    recordRating(ui.rating);
+    recordRating(ui.rating, ui.reviewText);
     setUi((u) => ({ ...u, showCatalog: true }));
     loadCatalog();
   }, [recordRating, ui.rating, loadCatalog, setUi]);
@@ -604,17 +612,19 @@ export default function QuestPlayerClient({
   };
 
   if (showStartGate) {
+    // §8.2: the gate lives INSIDE the paper frame — no site chrome around it.
     return (
-      <StartGate
-        title={snapshot.name}
-        cover={displaySteps[0]?.image || null}
-        createdAt={attemptCreatedAt}
-        pos={Math.min(stepIdx + 1, displaySteps.length)}
-        total={displaySteps.length}
-        version={snapshot.snapshot_version}
-        onContinue={() => dispatch({ type: 'dismissStartGate' })}
-        onRestart={handleReplay}
-      />
+      <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: true }} screenLabel="player-start-gate">
+        <StartGate
+          title={snapshot.name}
+          createdAt={attemptCreatedAt}
+          pos={Math.min(stepIdx + 1, displaySteps.length)}
+          total={displaySteps.length}
+          coins={runEarned}
+          onContinue={() => dispatch({ type: 'dismissStartGate' })}
+          onRestart={handleReplay}
+        />
+      </PlayerFrame>
     );
   }
 
@@ -645,6 +655,7 @@ export default function QuestPlayerClient({
         answer: ui.answer,
         note: ui.note,
         rating: ui.rating || latestRating(facts),
+        reviewText: ui.reviewText,
         coinsEarned: runEarned,
         time: formatElapsed(attemptCreatedAt),
         allowNote: currentDisplayStep.allowNote,
@@ -661,6 +672,7 @@ export default function QuestPlayerClient({
         // Tapping a star only updates local state + shows the inline thanks; the
         // single quest_rated fact is committed with the final value on «что дальше».
         rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
+        reviewText: (v: string) => setUi((u) => ({ ...u, reviewText: v })),
         onward: openCatalog,
         // «пройти заново» restarts from step 0. The tapped rating is intentionally
         // NOT committed here: a quest_rated fact is delivered only via the forward
@@ -696,12 +708,18 @@ export default function QuestPlayerClient({
       screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${pos}`}
     >
       {showTop && (
-        <TopBar
-          pos={pos + 1}
-          total={displaySteps.length}
-          coins={walletBalance}
-          onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
-        />
+        <>
+          <TopBar
+            pos={pos + 1}
+            total={displaySteps.length}
+            coins={walletBalance}
+            onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
+          />
+          {/* §8.3: 2px ink progress — completed/total, visible outside the menu */}
+          <div className="p-progress" aria-hidden>
+            <span style={{ width: `${(proj.completedSteps.length / Math.max(displaySteps.length, 1)) * 100}%` }} />
+          </div>
+        </>
       )}
       <div className="p-scroll">{body}</div>
       {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
@@ -725,10 +743,28 @@ export default function QuestPlayerClient({
             close: closeMenu,
             feedback: () => setUi((u) => ({ ...u, menuOpen: false, feedbackOpen: true })),
             exit: () => router.push('/my-quests'),
-            reset: () => { closeMenu(); handleReplay(); },
+            // §8.4: reset confirms in a paper popup — never fires directly.
+            reset: () => setUi((u) => ({ ...u, menuOpen: false, resetConfirm: true })),
             sound: toggleSound,
           }}
         />
+      )}
+      {ui.resetConfirm && (
+        <div className="p-reset__ovl" onClick={() => setUi((u) => ({ ...u, resetConfirm: false }))}>
+          <div className="p-reset" role="alertdialog" onClick={(e) => e.stopPropagation()}>
+            <p className="p-reset__title">Начать заново?</p>
+            <p className="p-reset__text">Прогресс попытки исчезнет — вернётесь к шагу 1. Заработанные монеты останутся при вас.</p>
+            <button
+              className="sg2__btn"
+              style={{ height: 50, fontSize: 14 }}
+              type="button"
+              onClick={() => { setUi((u) => ({ ...u, resetConfirm: false })); handleReplay(); }}
+            >
+              начать заново
+            </button>
+            <button className="sg2__btn sg2__btn--outline" type="button" onClick={() => setUi((u) => ({ ...u, resetConfirm: false }))}>отмена</button>
+          </div>
+        </div>
       )}
       {ui.feedbackOpen && (
         <FeedbackSheet

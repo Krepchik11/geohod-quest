@@ -42,7 +42,7 @@ consistency rules thread through it:
    first boot (`sqlx::migrate!`). Copy the **session-pooler** URL.
 2. **Cloudflare R2** — create the bucket, bind the custom domain, set bucket CORS,
    mint an S3 API token (the **Media storage (Cloudflare R2)** section).
-3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys), set the R2
+3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys, SMTP url), set the R2
    identifiers in the API unit (`R2_PUBLIC_BASE_URL` = the step-2 domain), install +
    start the unit, wire Caddy (the **Backend (VPS · Podman · Caddy)** section).
 4. **Vercel** — set `NEXT_PUBLIC_API_URL`; redeploy. No media env is needed (R2 URLs
@@ -150,8 +150,19 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    printf '%s' 'postgres://postgres.<ref>:<enc-pw>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require' \
      | podman secret create geohod-quest-database-url -
    printf '%s' "$(openssl rand -hex 24)" | podman secret create geohod-quest-admin-token -
+
+   # SMTP_URL = transactional mail (password reset / email confirmation). The
+   # login AND password ride inside the url — hence a secret, not plain env.
+   # Beget: the login is the full mailbox address, so its @ must be %40; also
+   # URL-encode any : / @ + in the password. Port 465 = implicit TLS (smtps://),
+   # 587 = STARTTLS (smtp://…?tls=required).
+   printf '%s' 'smtps://no-reply%40geohod.ru:<enc-pw>@smtp.beget.com:465' \
+     | podman secret create geohod-quest-smtp-url -
    ```
    The admin token must equal the frontend's `NEXT_PUBLIC_ADMIN_TOKEN`.
+   Without the smtp secret the API logs mails instead of sending them — but the
+   unit references the secret, so either create it or drop that `Secret=` line.
+   `MAIL_FROM` / `FRONTEND_BASE` are plain env in the unit (already set there).
 
    `ADMIN_TOKEN` also authorizes the user-management surface (`GET /api/admin/users`,
    `POST /api/admin/users/{id}/role`) behind the `/admin` page. Roles default to
