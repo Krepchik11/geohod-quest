@@ -5,34 +5,14 @@
    by the app shell (body.site), not this file.
    ============================================================ */
 
-.site {
-  --blue: #3B71FE;
-  --navy: #1A2B48;
-  --navy-display: #122947;
-  --ink: #000F08;
-  --dark: #232323;
-  --pink: #E75A7C;
-  --star: #FFB21D;
-  --bg-light: #F7F8FA;
-  --border: #DEDEDE;
-  --gray: #83858C;
-  --green: #1F8A5B;
-  --shadow-card: 0 12px 12px rgba(0,0,0,.05), 1px 2px 15px rgba(0,0,0,.08);
-  --font-display: 'Jost', sans-serif;
-}
-.display {
-  font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--navy-display);
-}
+/* Tokens live in globals.css (§0 single token layer) — no local re-definitions.
+   The .display primitive is also defined once in globals.css. */
 
 
 /* ---------- Чекаут ---------- */
 .co-wrap { flex: 1; padding: 8px 140px 64px; }
 .co-title { font-size: 20px; font-weight: 700; }
-.co-sub { margin-top: 6px; font-size: 13px; color: var(--gray); }
+.co-sub { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .co-cols { display: grid; grid-template-columns: 1fr 388px; gap: 28px; margin-top: 28px; align-items: start; }
 
 .co-quest { padding: 24px; display: flex; gap: 20px; }
@@ -42,31 +22,31 @@
 }
 .co-quest__photo .qmark { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Prata', serif; font-size: 40px; color: #fff; }
 .co-quest__body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.co-quest__meta { display: flex; gap: 16px; font-size: 12px; color: var(--navy); opacity: .55; }
+.co-quest__meta { display: flex; gap: 16px; font-size: 12px; color: var(--text); opacity: .55; }
 .co-quest__meta span { display: inline-flex; align-items: center; gap: 5px; }
 .co-quest__meta .ic { width: 13px; height: 13px; background: center / contain no-repeat; }
 .co-quest h3 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1.3; }
-.co-quest__author { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--navy); opacity: .6; margin-top: auto; }
+.co-quest__author { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); opacity: .6; margin-top: auto; }
 .co-quest__author img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
 .co-life {
   margin-top: 16px; padding: 14px 18px;
   border: 1px dashed var(--border); border-radius: 12px;
-  font-size: 13px; color: var(--gray);
+  font-size: 13px; color: var(--muted);
   display: flex; gap: 10px; align-items: flex-start;
 }
-.co-life b { color: var(--navy); font-weight: 600; }
+.co-life b { color: var(--text); font-weight: 600; }
 
 .co-order { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
 .co-order h4 { margin: 0; font-size: 16px; font-weight: 700; }
 .co-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
-.co-row .lbl { color: var(--gray); }
+.co-row .lbl { color: var(--muted); }
 .co-row--discount { color: var(--green); }
 .co-row--discount .lbl { color: var(--green); }
 .co-divider { height: 1px; background: var(--border); }
 .co-total { display: flex; justify-content: space-between; align-items: baseline; }
-.co-total .lbl { font-size: 14px; color: var(--gray); }
+.co-total .lbl { font-size: 14px; color: var(--muted); }
 .co-total b { font-size: 24px; font-weight: 700; }
-.co-total .was { font-size: 14px; color: var(--gray); text-decoration: line-through; margin-right: 8px; font-weight: 400; }
+.co-total .was { font-size: 14px; color: var(--muted); text-decoration: line-through; margin-right: 8px; font-weight: 400; }
 .co-coupon { display: flex; gap: 8px; }
 .co-applied {
   display: flex; align-items: center; justify-content: space-between;
@@ -75,18 +55,18 @@
   font-size: 13px; font-weight: 600;
 }
 .co-pays { display: flex; align-items: center; gap: 10px; }
-.co-pays .note { font-size: 12px; color: var(--gray); margin-right: auto; }
+.co-pays .note { font-size: 12px; color: var(--muted); margin-right: auto; }
 .co-pays img, .co-pays .pay { height: 22px; }
-.co-secure { font-size: 12px; color: var(--gray); line-height: 1.5; }
+.co-secure { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
 /* ---------- Результат ---------- */
 .res-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; }
 .res-card { width: 520px; padding: 44px 48px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
 .res-icon { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: rgba(59,113,254,.1); color: var(--blue); }
-.res-icon--fail { background: rgba(231,90,124,.1); color: var(--pink); }
+.res-icon--fail { background: rgba(231,90,124,.1); color: var(--red); }
 .res-card h2 { margin: 0; font-size: 22px; font-weight: 700; }
-.res-card p { margin: 0; font-size: 14px; color: var(--gray); max-width: 360px; }
-.res-details { width: 100%; margin-top: 8px; padding: 16px 20px; border-radius: 12px; background: var(--bg-light); display: flex; flex-direction: column; gap: 8px; }
+.res-card p { margin: 0; font-size: 14px; color: var(--muted); max-width: 360px; }
+.res-details { width: 100%; margin-top: 8px; padding: 16px 20px; border-radius: 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; }
 .res-details .co-row { font-size: 13px; }
 .res-actions { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
 
@@ -95,9 +75,9 @@
   display: flex; gap: 10px; align-items: flex-start;
   padding: 12px 16px; border-radius: 12px;
   background: rgba(59,113,254,.07);
-  font-size: 13px; color: var(--navy);
+  font-size: 13px; color: var(--text);
 }
-.auth-consent { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--gray); }
+.auth-consent { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--muted); }
 .auth-consent input { margin-top: 2px; accent-color: var(--blue); }
 .ic-tg { width: 18px; height: 18px; background: url("/assets/icons/ic-telegram-plane--white.svg") no-repeat center / contain; }
 
@@ -122,3 +102,97 @@
   animation: co-spin .8s linear infinite;
 }
 @keyframes co-spin { to { transform: rotate(360deg); } }
+
+/* ---------- phone reflow (folded from responsive.css, §1.1) ---------- */
+@media (max-width: 1240px) {
+  .co-wrap { padding-left: 40px; padding-right: 40px; }
+}
+@media (max-width: 768px) {
+  .co-wrap { padding: 8px 20px 48px; }
+  .co-cols { grid-template-columns: 1fr; gap: 20px; }
+  .co-quest { flex-wrap: wrap; padding: 18px; gap: 16px; }
+  .co-quest__photo { width: 100%; height: 168px; }
+  .res-wrap { padding: 24px 20px; }
+  .res-card { width: 100%; max-width: 520px; padding: 32px 24px; }
+  .res-actions { width: 100%; }
+}
+@media (max-width: 420px) {
+  .co-wrap { padding-left: 16px; padding-right: 16px; }
+  .co-quest__meta { gap: 12px; }
+}
+
+/* ---------- Product page /quest/[id]/about (§3) ---------- */
+.qp { flex: 1; padding-top: 8px; padding-bottom: 72px; }
+.qp--empty { display: flex; flex-direction: column; align-items: center; gap: 16px; padding-top: 64px; text-align: center; color: var(--muted-2); }
+.qp-crumbs { font-size: 13px; color: var(--muted); }
+.qp-crumbs a { color: var(--blue); }
+.qp-crumbs span { opacity: .6; margin: 0 4px; }
+.qp-grid { display: grid; grid-template-columns: 1fr 380px; gap: 32px; margin-top: 20px; align-items: start; }
+.qp-left { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.qp-cover { height: 360px; border-radius: var(--r-card); background: var(--navy) center/cover no-repeat; }
+.qp-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--text); opacity: .6; }
+.qp-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.qp-meta .ic { width: 14px; height: 14px; }
+.qp-title { margin-top: 14px; font-size: 30px; line-height: 1.25; letter-spacing: .12em; }
+.qp-desc { margin-top: 16px; font-size: 15px; line-height: 1.7; }
+.qp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.qp-chips span { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--border); font-size: 13px; }
+.qp-author { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border: 1px dashed var(--border); border-radius: 14px; }
+.qp-author__avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-family: var(--font-serif); font-size: 20px; }
+.qp-author__body { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: var(--muted-2); line-height: 1.5; }
+.qp-author__body b { color: var(--text); font-size: 15px; }
+.qp-reviews__head { display: flex; align-items: baseline; gap: 14px; }
+.qp-reviews__head h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.qp-reviews__head span { font-size: 13px; color: var(--muted); }
+.qp-reviews__agg { margin-top: 12px; font-size: 15px; }
+.qp-reviews__empty { margin-top: 12px; font-size: 14px; color: var(--muted); }
+.qp-right { position: sticky; top: 24px; }
+.qp-order { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.qp-order__pricerow { display: flex; justify-content: space-between; align-items: baseline; }
+.qp-order__pricerow span { font-size: 14px; color: var(--muted); }
+.qp-order__pricerow b { font-size: 26px; }
+.qp-benefits { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.qp-benefits span { display: flex; gap: 8px; }
+.qp-benefits i { font-style: normal; color: var(--green); }
+.qp-order__caption { margin: 0; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.qp-order__caption a { color: var(--blue); }
+.qp-owned { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 700; color: var(--green); }
+.qp-dl { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--border-2); border-radius: 12px; }
+.qp-dl__spin { border-color: #C9D6F8; border-top-color: var(--blue); }
+.qp-dl__body { flex: 1; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; }
+.qp-dl__bar { display: block; height: 4px; border-radius: 2px; background: #E7EAF0; }
+.qp-dl__bar span { display: block; height: 100%; border-radius: 2px; background: var(--blue); transition: width .3s ease; }
+.qp-dl-done { font-size: 12.5px; font-weight: 600; color: var(--green); }
+.qp-buybar { display: none; }
+@media (max-width: 1024px) {
+  .qp-grid { grid-template-columns: 1fr; }
+  .qp-right { position: static; }
+}
+@media (max-width: 767px) {
+  .qp-cover { height: 240px; }
+  .qp-title { font-size: 21px; }
+  .qp-right { display: none; } /* the sticky buy bar replaces the order card… */
+  .qp--owned-mobile .qp-right { display: block; } /* …but owned state stays visible */
+  .qp-buybar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.96); border-top: 1px solid var(--border-2); padding: 12px 20px calc(24px + env(safe-area-inset-bottom)); }
+  .qp-buybar__price { display: flex; flex-direction: column; }
+  .qp-buybar__price small { font-size: 11px; color: var(--muted); }
+  .qp-buybar__price b { font-size: 20px; }
+  .qp-buybar__btn { flex: 1; }
+  .qp { padding-bottom: 120px; }
+}
+
+/* §5 per-quest install (product page owned card + iOS sheet) */
+.qp-install-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.qp-ios-sheet__head { display: flex; align-items: center; gap: 10px; }
+.qp-ios-sheet__head b { font-size: 14px; }
+.qp-ios-sheet__thumb { flex: none; width: 44px; height: 44px; border-radius: 10px; background: var(--navy) center/cover no-repeat; }
+.qp-ios-sheet__steps { margin: 0; font-size: 13px; line-height: 1.65; color: var(--muted-2); }
+
+/* §11 reviews list on the product page */
+.qp-reviews__list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.qp-review { padding: 16px 20px; background: var(--bg-subtle); border-radius: 14px; }
+.qp-review__head { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.qp-review__stars { color: var(--star); letter-spacing: 2px; }
+.qp-review__stars .is-off { color: #D9DDE4; }
+.qp-review__date { color: var(--muted); }
+.qp-review p { margin: 8px 0 0; font-size: 14px; line-height: 1.6; }

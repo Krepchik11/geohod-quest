@@ -21,9 +21,9 @@ export function WspToggle({ on, onClick, label }: { on: boolean; onClick: () => 
   );
 }
 
-export function WspBlock({ title, aside, children }: { title: string; aside?: string; children: React.ReactNode }) {
+export function WspBlock({ title, aside, gateField, children }: { title: string; aside?: string; gateField?: string; children: React.ReactNode }) {
   return (
-    <div className="ed-block">
+    <div className="ed-block" data-gate-field={gateField}>
       <h4>{title}{aside ? <span className="opt">{aside}</span> : null}</h4>
       {children}
     </div>
@@ -40,7 +40,7 @@ export function WspDanger({ label, confirmLabel, onConfirm }: { label: string; c
   }, [armed]);
   return (
     <button
-      className="btn-ui btn-ui--ghost-danger btn-ui--sm"
+      className="btn btn--danger btn--sm"
       type="button"
       onClick={() => {
         if (armed) {
@@ -123,9 +123,9 @@ export function ImageZone({ src, label, hint, required, width, onChange }: {
         <>
           <b>{label}</b>
           {uploading ? (
-            <span style={{ color: 'var(--navy)', fontWeight: 600 }}>Загрузка…</span>
+            <span style={{ color: 'var(--text)', fontWeight: 600 }}>Загрузка…</span>
           ) : error ? (
-            <span style={{ color: 'var(--pink)', fontWeight: 600 }}>{error}</span>
+            <span style={{ color: 'var(--red)', fontWeight: 600 }}>{error}</span>
           ) : (
             hint || 'PNG/JPG до 1 МБ'
           )}

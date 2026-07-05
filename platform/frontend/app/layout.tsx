@@ -1,16 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
+import TabBar from "./components/TabBar";
+import Toaster from "./components/Toaster";
 import "./globals.css"; // canonical design system (primitives live here)
-// DEPRECATION GUARD — harmonization Phase 1 Option A (frontend-harmonization-guide.md §3).
-// Every stylesheet below is imported globally, so any route can reach any class; that global
-// reach is the structural enabler of UI drift. The duplicate primitives in commerce.css (.s-*)
-// and admin-ctor.css (.adm-*) are DEPRECATED — use the canonical primitives in globals.css
-// (.btn/.btn--outline/.btn--block, .input/.input--error/.input-error-text, .link, .btn-ui/--sm,
-// .field-ui/--sm/--wide, .textarea-ui, .panel) instead. `npm run lint:ds` fails on any new
-// .s-*/.adm-* className. Do NOT delete the duplicate CSS blocks yet (Phase 1 Option B) — only
-// after every route migrates and lint:ds is green. .p-* (player), .au-* (admin-users) and the
-// unique layout classes are intentional systems, NOT deprecated.
+// §0 (v2): one token layer + canonical primitives live in globals.css
+// (.btn + variants/sizes, .input/.textarea, .link, .panel, .card). The legacy
+// duplicate primitive families (.s-*, .adm-*, .btn-ui, .field-ui, .textarea-ui)
+// are deleted; `npm run lint:ds` fails if any of them reappears.
 import "./styles/player-paper.css";
 import "./styles/commerce.css";
 import "./styles/myquests.css";
@@ -18,7 +15,6 @@ import "./styles/admin-ctor.css";
 import "./styles/ctor-workspace.css";
 import "./styles/ctor-dashboard.css";
 import "./styles/admin-users.css";
-import "./styles/responsive.css"; // mobile/tablet adaptation — must stay LAST so its media-query overrides win by source order
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -66,6 +62,9 @@ export default function RootLayout({
           Per react.md: RSC shell thin, no shared mutable state, lang=ru from design. */}
       <body className="min-h-full flex flex-col">
         {children}
+        {/* §1.2: mobile bottom tab bar — self-gates to the three top-level pages */}
+        <TabBar />
+        <Toaster />
         <SwRegister />
       </body>
     </html>

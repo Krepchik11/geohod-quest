@@ -32,6 +32,8 @@ mod config;
 mod errors;
 mod facts;
 mod grants;
+mod icons;
+mod mailer;
 mod media;
 mod payments;
 mod pg_store;
@@ -63,9 +65,14 @@ struct AppState {
     /// Content-addressed media blobs (Cloudflare R2 in prod; in-process otherwise).
     media: MediaStores,
     payments: Arc<dyn PaymentProvider>,
+    /// Transactional mail (§6.2/§6.3) — SMTP in prod, log fallback, recorder in tests.
+    mailer: mailer::Mailer,
+    /// §6.1 identify rate limiter: sliding-window counters keyed by email.
+    identify_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
 }
 
 fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
+    let mailer = mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from);
     AppState {
         config,
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
@@ -76,6 +83,8 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         ))),
         media,
         payments: Arc::new(MockPaymentProvider),
+        mailer,
+        identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
 }
 
@@ -341,6 +350,11 @@ fn build_router(state: AppState) -> Router {
             post(publish_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
+        .route("/api/quests/{quest_id}", get(get_quest_product_handler))
+        .route(
+            "/api/quests/{quest_id}/icons/{icon}",
+            get(get_quest_icon_handler),
+        )
         // Media: upload (editor-gated, lifts the body cap to a single image) and
         // the serve route (serves in-process AND R2 media through this origin).
         .route(
@@ -365,7 +379,8 @@ fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/constructor/quests/{quest_id}/save",
-            post(save_constructor_quest_handler).layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
+            post(save_constructor_quest_handler)
+                .layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route(
             "/api/constructor/quests/{quest_id}/status",
@@ -393,6 +408,14 @@ fn build_router(state: AppState) -> Router {
         .route("/api/migrate/legacy", post(run_migration_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
         .route("/api/auth/register", post(register_handler))
+        .route("/api/auth/identify", post(identify_handler))
+        .route("/api/auth/recover", post(recover_handler))
+        .route("/api/auth/reset", post(reset_password_handler))
+        .route("/api/auth/confirm", post(confirm_email_handler))
+        .route("/api/auth/confirm/resend", post(resend_confirm_handler))
+        .route("/api/auth/change-password", post(change_password_handler))
+        .route("/api/auth/display-name", post(set_display_name_handler))
+        .route("/api/auth/delete-account", post(delete_account_handler))
         .route("/api/auth/login", post(login_handler))
         .route("/api/players/me", get(get_me_handler))
         .route("/api/players/me/stats", get(get_my_stats_handler))
@@ -616,6 +639,39 @@ struct PublishRequest {
     duration: Option<String>,
     #[serde(default)]
     price: Option<i64>,
+    /// Store description shown on the product page (§3.1); blank stays absent.
+    #[serde(default)]
+    description: Option<String>,
+}
+
+/// Content chips for the product page, derived from the frozen snapshot at
+/// publish time: page count, task count (task_no/task_answer templates) and
+/// whether any step sells a paid hint. Tolerates foreign snapshot shapes by
+/// returning None — the UI hides chips it cannot honestly claim.
+fn snapshot_chips(
+    snapshot: Option<&serde_json::Value>,
+) -> (Option<u32>, Option<u32>, Option<bool>) {
+    let Some(steps) = snapshot
+        .and_then(|v| v.get("steps"))
+        .and_then(|v| v.as_array())
+    else {
+        return (None, None, None);
+    };
+    let pages = steps.len() as u32;
+    let tasks = steps
+        .iter()
+        .filter(|st| {
+            st.get("template")
+                .and_then(|t| t.as_str())
+                .is_some_and(|t| t == "task_no" || t == "task_answer")
+        })
+        .count() as u32;
+    let paid_hints = steps.iter().any(|st| {
+        st.get("supporting")
+            .and_then(|sup| sup.get("hint"))
+            .is_some_and(|h| !h.is_null())
+    });
+    (Some(pages), Some(tasks), Some(paid_hints))
 }
 
 async fn publish_quest_handler(
@@ -629,6 +685,7 @@ async fn publish_quest_handler(
     // (which editor owns which quest) remains a tracked follow-up.
     require_editor(&state, &headers).await?;
     let version = req.snapshot_version.unwrap_or(1);
+    let (pages, tasks, paid_hints) = snapshot_chips(req.snapshot.as_ref());
     let snapshot_id = req
         .snapshot_id
         .unwrap_or_else(|| format!("{}-v{}", req.quest_id, version));
@@ -644,6 +701,10 @@ async fn publish_quest_handler(
         city: req.city.filter(|s| !s.trim().is_empty()),
         duration: req.duration.filter(|s| !s.trim().is_empty()),
         price: req.price,
+        description: req.description.filter(|s| !s.trim().is_empty()),
+        pages,
+        tasks,
+        paid_hints,
     };
     state
         .grants
@@ -654,7 +715,11 @@ async fn publish_quest_handler(
     // through the API (e.g. a seeded demo) simply has no constructor row.
     state
         .constructor
-        .set_status(&req.quest_id, store::CTOR_STATUS_PUBLISHED, store::now_secs())
+        .set_status(
+            &req.quest_id,
+            store::CTOR_STATUS_PUBLISHED,
+            store::now_secs(),
+        )
         .await?;
     Ok(Json(
         serde_json::json!({ "status": "published", "quest_id": req.quest_id }),
@@ -680,6 +745,12 @@ struct ConstructorQuestWire {
     steps: u32,
     /// Distinct players who completed this quest (derived from the fact log).
     completed: usize,
+    /// Distinct grant holders — the honest «{N} купивших» for destructive
+    /// status confirms (§9.1). Count only, no identities.
+    buyers: usize,
+    /// Live published snapshot version, if any. None ⇒ the coherence guard will
+    /// reject `test`/`published`, so the UI routes into the publish panel.
+    published_version: Option<u32>,
     // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
     // cover image, so the base64 cover was dead weight that bloated the list
     // (megabytes for media-heavy quests). It stays on the GET-one full wire.
@@ -703,7 +774,12 @@ struct ConstructorQuestFullWire {
     body: serde_json::Value,
 }
 
-fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWire {
+fn ctor_wire(
+    s: ConstructorQuestSummary,
+    completed: usize,
+    buyers: usize,
+    published_version: Option<u32>,
+) -> ConstructorQuestWire {
     ConstructorQuestWire {
         quest_id: s.quest_id,
         name: s.name,
@@ -712,6 +788,8 @@ fn ctor_wire(s: ConstructorQuestSummary, completed: usize) -> ConstructorQuestWi
         status: s.status,
         steps: s.steps_count,
         completed,
+        buyers,
+        published_version,
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
@@ -747,7 +825,10 @@ async fn acting_author_role(
 
 /// The acting editor's (id, display label) for author attribution. See
 /// [`acting_author_role`] when the admin flag is also needed.
-async fn acting_author(state: &AppState, headers: &HeaderMap) -> Result<(String, String), AppError> {
+async fn acting_author(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(String, String), AppError> {
     let (id, name, _) = acting_author_role(state, headers).await?;
     Ok((id, name))
 }
@@ -798,12 +879,22 @@ async fn list_constructor_quests_handler(
             .await?
     };
     let completions = state.store.completions_by_quest().await?;
+    let buyers = state.grants.buyers_by_quest().await?;
+    let published_versions: std::collections::HashMap<String, u32> = state
+        .grants
+        .list_published()
+        .await?
+        .into_iter()
+        .map(|m| (m.quest_id, m.snapshot_version))
+        .collect();
     Ok(Json(
         summaries
             .into_iter()
             .map(|s| {
                 let c = completions.get(&s.quest_id).copied().unwrap_or(0);
-                ctor_wire(s, c)
+                let b = buyers.get(&s.quest_id).copied().unwrap_or(0);
+                let v = published_versions.get(&s.quest_id).copied();
+                ctor_wire(s, c, b, v)
             })
             .collect(),
     ))
@@ -872,7 +963,21 @@ async fn create_constructor_quest_handler(
         body: req.body,
     };
     let summary = state.constructor.create(quest).await?;
-    Ok(Json(ctor_wire(summary, 0)))
+    // A freshly created id can still have a stale published row (re-created id);
+    // report it honestly rather than assuming None.
+    let published_version = state
+        .grants
+        .get_published(&summary.quest_id)
+        .await?
+        .map(|m| m.snapshot_version);
+    let buyers = state
+        .grants
+        .buyers_by_quest()
+        .await?
+        .get(&summary.quest_id)
+        .copied()
+        .unwrap_or(0);
+    Ok(Json(ctor_wire(summary, 0, buyers, published_version)))
 }
 
 /// Body for POST /api/constructor/quests/{id}/save (autosave).
@@ -894,7 +999,14 @@ async fn save_constructor_quest_handler(
     let now = store::now_secs();
     let s = state
         .constructor
-        .save_body(&quest_id, &req.name, req.cover, req.steps_count, req.body, now)
+        .save_body(
+            &quest_id,
+            &req.name,
+            req.cover,
+            req.steps_count,
+            req.body,
+            now,
+        )
         .await?;
     Ok(Json(
         serde_json::json!({ "status": "saved", "quest_id": s.quest_id, "updated_at": s.updated_at }),
@@ -922,9 +1034,12 @@ async fn set_constructor_status_handler(
     // get a quest stuck at "published but never in the store" (the reported bug).
     // `draft` (delist / park) is always allowed. publish_quest_handler sets the
     // status directly AFTER registering the snapshot, so it is unaffected by this.
-    if req.status != store::CTOR_STATUS_DRAFT
-        && state.grants.get_published(&quest_id).await?.is_none()
-    {
+    let published_version = state
+        .grants
+        .get_published(&quest_id)
+        .await?
+        .map(|m| m.snapshot_version);
+    if req.status != store::CTOR_STATUS_DRAFT && published_version.is_none() {
         return Err(AppError::BadRequest(
             "publish a version in the editor before marking the quest as «test» or «published»"
                 .into(),
@@ -943,7 +1058,19 @@ async fn set_constructor_status_handler(
         .get(&updated.quest_id)
         .copied()
         .unwrap_or(0);
-    Ok(Json(ctor_wire(updated, completed)))
+    let buyers = state
+        .grants
+        .buyers_by_quest()
+        .await?
+        .get(&updated.quest_id)
+        .copied()
+        .unwrap_or(0);
+    Ok(Json(ctor_wire(
+        updated,
+        completed,
+        buyers,
+        published_version,
+    )))
 }
 
 async fn delete_constructor_quest_handler(
@@ -1057,6 +1184,157 @@ async fn list_quests_handler(
         });
     }
     Ok(Json(out))
+}
+
+/// Product page payload (§3.1/§12.9): ONLY model data — the published card, the
+/// live rating aggregates, the constructor's store description, author display
+/// name + how many of their quests are on sale, and snapshot-derived content
+/// chips. Visibility matches the catalog: a delisted quest 404s here too.
+#[derive(serde::Serialize)]
+struct ProductPageWire {
+    #[serde(flatten)]
+    meta: PublishedMeta,
+    rating_avg: f64,
+    rating_count: usize,
+    /// Author display label from the constructor row; None for legacy/direct
+    /// publishes that have no constructor lifecycle.
+    author_name: Option<String>,
+    /// How many of this author's quests are currently on sale.
+    author_published_count: u32,
+    /// §11 reviews v1: newest-first, first page of 10.
+    reviews: Vec<ReviewWire>,
+    /// Total ratings that carry text («{M} с отзывом»).
+    reviews_total: usize,
+}
+
+/// §11: one public review — author FIRST NAME only (display name's first word;
+/// anonymous → «Игрок»), never an email; month-precision timestamp client-side.
+#[derive(serde::Serialize)]
+struct ReviewWire {
+    author: String,
+    rating: i64,
+    text: String,
+    created_at: u64,
+}
+
+/// First word of the display name; accounts without one (and anonymous
+/// players) are «Игрок». Emails never leak into reviews.
+fn review_author_label(display_name: Option<&str>) -> String {
+    display_name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.split_whitespace().next())
+        .unwrap_or("Игрок")
+        .to_string()
+}
+
+async fn get_quest_product_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+) -> Result<Json<ProductPageWire>, AppError> {
+    let not_found = || AppError::NotFound(format!("quest '{quest_id}' not found"));
+    let meta = state
+        .grants
+        .get_published(&quest_id)
+        .await?
+        .ok_or_else(not_found)?;
+    // Same visibility rule as the catalog: the authoritative lifecycle status
+    // hides test/draft quests; a missing constructor row means a legacy/direct
+    // publish and stays visible.
+    let ctor = state.constructor.get(&quest_id).await?;
+    if ctor
+        .as_ref()
+        .is_some_and(|q| q.status != store::CTOR_STATUS_PUBLISHED)
+    {
+        return Err(not_found());
+    }
+    let stats = state.store.get_version_stats(&meta.snapshot_id, 0).await?;
+    let (author_name, author_published_count) = match &ctor {
+        None => (None, 0),
+        Some(q) => {
+            let published = state
+                .constructor
+                .list_summaries_for_author(&q.author_id)
+                .await?
+                .into_iter()
+                .filter(|s| s.status == store::CTOR_STATUS_PUBLISHED)
+                .count() as u32;
+            (Some(q.author_name.clone()), published)
+        }
+    };
+    // §11 reviews: last quest_rated WITH text per attempt, newest first.
+    let review_rows = state.store.reviews_for_quest(&quest_id, 1000).await?;
+    let reviews_total = review_rows.len();
+    let mut reviews = Vec::with_capacity(review_rows.len().min(10));
+    for r in review_rows.into_iter().take(10) {
+        let account = state.auth.get_user(&r.player_id).await?;
+        reviews.push(ReviewWire {
+            author: review_author_label(account.and_then(|a| a.display_name).as_deref()),
+            rating: r.rating,
+            text: r.text,
+            created_at: r.created_at,
+        });
+    }
+    Ok(Json(ProductPageWire {
+        meta,
+        rating_avg: stats.rating_avg,
+        rating_count: stats.rating_count,
+        author_name,
+        author_published_count,
+        reviews,
+        reviews_total,
+    }))
+}
+
+/// §5/§12.7 — GET /api/quests/{id}/icons/{192|512}.png: the per-quest PWA
+/// home-screen icon, composed from the published cover (center-crop, maskable
+/// padding on brand navy). Immutable per published version — the manifest keys
+/// the URL with ?v={snapshot_version}, so far-future caching is safe.
+async fn get_quest_icon_handler(
+    State(state): State<AppState>,
+    Path((quest_id, icon)): Path<(String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let size: u32 = match icon.as_str() {
+        "192.png" => 192,
+        "512.png" => 512,
+        _ => return Err(AppError::NotFound(format!("icon '{icon}' not found"))),
+    };
+    let meta = state
+        .grants
+        .get_published(&quest_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("quest '{quest_id}' not found")))?;
+    let cover = meta
+        .primary_comic
+        .as_deref()
+        .ok_or_else(|| AppError::NotFound("quest has no cover".into()))?;
+    let bytes: Vec<u8> = if let Some(data) = icons::cover_data_uri_bytes(cover) {
+        data
+    } else if let Some(hash) = icons::cover_media_hash(cover) {
+        state
+            .media
+            .get(hash)
+            .await?
+            .ok_or_else(|| AppError::NotFound("cover media not found".into()))?
+            .bytes
+            .to_vec()
+    } else {
+        return Err(AppError::NotFound(
+            "cover is not a resolvable media ref".into(),
+        ));
+    };
+    let png = icons::compose_icon(&bytes, size)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("icon compose failed: {e}")))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png".to_string()),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable".to_string(),
+            ),
+        ],
+        png,
+    ))
 }
 
 /// Grants for the resolved caller ONLY. Previously returned every player's
@@ -1178,6 +1456,9 @@ async fn register_handler(
         .auth
         .create_session(&token, &account.player_id)
         .await?;
+    // §6.3 soft confirmation: the account works immediately; the mail is
+    // best-effort and the Profile banner offers a resend.
+    send_confirm_email(&state, &account.player_id, &account.email).await?;
     Ok(Json(AuthResponse {
         player_id: account.player_id,
         email: account.email,
@@ -1215,6 +1496,353 @@ async fn login_handler(
     }))
 }
 
+// ============ Auth v2 (§6/§12.1–5) ============
+
+/// Password-reset link TTL (30 minutes — stated in the «Письмо ушло» copy).
+const RESET_TOKEN_TTL_SECS: u64 = 30 * 60;
+/// Email-confirmation link TTL (7 days — soft confirmation, no urgency).
+const CONFIRM_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
+/// §6.1 identify rate limit: requests per fixed window, per email.
+const IDENTIFY_LIMIT: u32 = 10;
+const IDENTIFY_WINDOW_SECS: u64 = 60;
+
+/// Mint a single-use token, store its sha256, return the RAW token (mail-only).
+async fn issue_auth_token(
+    state: &AppState,
+    player_id: &str,
+    kind: &str,
+    ttl_secs: u64,
+) -> Result<String, AppError> {
+    let token = auth::generate_token();
+    state
+        .auth
+        .create_auth_token(
+            &media::sha256_hex(token.as_bytes()),
+            store::AuthTokenRecord {
+                player_id: player_id.to_string(),
+                kind: kind.to_string(),
+                expires_at: store::now_secs() + ttl_secs,
+                used_at: None,
+            },
+        )
+        .await?;
+    Ok(token)
+}
+
+/// Best-effort transactional mail — a down SMTP must not fail the parent flow.
+async fn send_mail_best_effort(state: &AppState, to: &str, subject: &str, body: &str) {
+    if let Err(e) = state.mailer.send(to, subject, body).await {
+        tracing::error!(to, subject, "transactional mail failed: {e}");
+    }
+}
+
+async fn send_confirm_email(
+    state: &AppState,
+    player_id: &str,
+    email: &str,
+) -> Result<(), AppError> {
+    let token = issue_auth_token(
+        state,
+        player_id,
+        store::TOKEN_KIND_CONFIRM,
+        CONFIRM_TOKEN_TTL_SECS,
+    )
+    .await?;
+    let link = format!("{}/auth/confirm?token={token}", state.config.frontend_base);
+    send_mail_best_effort(
+        state,
+        email,
+        "Подтвердите почту — GEOHOD QUEST",
+        &format!(
+            "Здравствуйте!\n\nПодтвердите почту для аккаунта GEOHOD QUEST — откройте ссылку:\n{link}\n\nЕсли вы не создавали аккаунт, просто игнорируйте это письмо."
+        ),
+    )
+    .await;
+    Ok(())
+}
+
+/// Body for POST /api/auth/identify (§6.1): the email-first step.
+#[derive(serde::Deserialize)]
+struct IdentifyRequest {
+    email: String,
+}
+
+/// §6.1 — does this email have an account? Drives the single-form flow (the
+/// 409 «already registered» class disappears by construction). Rate-limited
+/// per email (fixed window) — it is intentionally an existence oracle for the
+/// form, so it must not become a cheap mass-enumeration endpoint.
+async fn identify_handler(
+    State(state): State<AppState>,
+    Json(req): Json<IdentifyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let email = req.email.trim().to_lowercase();
+    if email.len() < 3 || !email.contains('@') {
+        return Err(AppError::BadRequest("invalid email".into()));
+    }
+    {
+        let now = store::now_secs();
+        let mut lim = state
+            .identify_limiter
+            .lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("limiter poisoned: {e}")))?;
+        let entry = lim.entry(email.clone()).or_insert((now, 0));
+        if now - entry.0 >= IDENTIFY_WINDOW_SECS {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+        if entry.1 > IDENTIFY_LIMIT {
+            return Err(AppError::TooManyRequests(
+                "too many identify attempts — try again in a minute".into(),
+            ));
+        }
+    }
+    let record = state.auth.find_by_email(&email).await?;
+    Ok(Json(serde_json::json!({
+        "exists": record.is_some(),
+        "confirmed": record
+            .map(|r| r.account.email_confirmed_at.is_some())
+            .unwrap_or(false),
+    })))
+}
+
+/// Body for POST /api/auth/recover (§6.2): request a reset link.
+#[derive(serde::Deserialize)]
+struct RecoverRequest {
+    email: String,
+}
+
+/// §6.2 — issue a password-reset link. The response is IDENTICAL whether or
+/// not the email exists (no user enumeration). Reset links are only sent to
+/// CONFIRMED emails; an unconfirmed account gets a fresh confirmation mail
+/// instead (§6.3 — the UI explains this via identify.confirmed).
+async fn recover_handler(
+    State(state): State<AppState>,
+    Json(req): Json<RecoverRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let email = req.email.trim().to_lowercase();
+    if let Some(record) = state.auth.find_by_email(&email).await? {
+        if record.account.email_confirmed_at.is_some() {
+            let token = issue_auth_token(
+                &state,
+                &record.account.player_id,
+                store::TOKEN_KIND_RESET,
+                RESET_TOKEN_TTL_SECS,
+            )
+            .await?;
+            let link = format!("{}/auth/reset?token={token}", state.config.frontend_base);
+            send_mail_best_effort(
+                &state,
+                &email,
+                "Восстановление пароля — GEOHOD QUEST",
+                &format!(
+                    "Здравствуйте!\n\nСсылка для смены пароля (действует 30 минут):\n{link}\n\nЕсли вы не запрашивали смену пароля, просто игнорируйте это письмо."
+                ),
+            )
+            .await;
+        } else {
+            send_confirm_email(&state, &record.account.player_id, &email).await?;
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "status": "sent",
+        "masked": mailer::mask_email(&email),
+    })))
+}
+
+/// Body for POST /api/auth/reset (§6.2): finish recovery with the mailed token.
+#[derive(serde::Deserialize)]
+struct ResetPasswordRequest {
+    token: String,
+    password: String,
+}
+
+/// §6.2 — consume the reset token, set the new password and SIGN IN (the flow
+/// ends with the user in their account, per spec).
+async fn reset_password_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ResetPasswordRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    if req.password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
+    }
+    let player_id = state
+        .auth
+        .consume_auth_token(
+            &media::sha256_hex(req.token.as_bytes()),
+            store::TOKEN_KIND_RESET,
+            store::now_secs(),
+        )
+        .await?
+        .ok_or_else(|| {
+            AppError::BadRequest("ссылка недействительна или устарела — запросите новую".into())
+        })?;
+    state
+        .auth
+        .set_password(&player_id, &auth::hash_password(&req.password)?)
+        .await?;
+    // Opening a valid reset link also proves mailbox ownership (§6.3).
+    let account = state
+        .auth
+        .confirm_email(&player_id, store::now_secs())
+        .await?;
+    let token = auth::generate_token();
+    state.auth.create_session(&token, &player_id).await?;
+    Ok(Json(AuthResponse {
+        player_id: account.player_id,
+        email: account.email,
+        display_name: account.display_name,
+        role: account.role,
+        token,
+    }))
+}
+
+/// Body for POST /api/auth/confirm (§6.3): the mailed confirmation token.
+#[derive(serde::Deserialize)]
+struct ConfirmEmailRequest {
+    token: String,
+}
+
+async fn confirm_email_handler(
+    State(state): State<AppState>,
+    Json(req): Json<ConfirmEmailRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let player_id = state
+        .auth
+        .consume_auth_token(
+            &media::sha256_hex(req.token.as_bytes()),
+            store::TOKEN_KIND_CONFIRM,
+            store::now_secs(),
+        )
+        .await?
+        .ok_or_else(|| {
+            AppError::BadRequest("ссылка недействительна или устарела — запросите новую".into())
+        })?;
+    let account = state
+        .auth
+        .confirm_email(&player_id, store::now_secs())
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "status": "confirmed", "email": account.email }),
+    ))
+}
+
+/// §6.3 — resend the confirmation mail (Profile banner «Ещё раз»). Session-only.
+async fn resend_confirm_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    if account.email_confirmed_at.is_some() {
+        return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
+    }
+    send_confirm_email(&state, &account.player_id, &account.email).await?;
+    Ok(Json(serde_json::json!({ "status": "sent" })))
+}
+
+/// Body for POST /api/auth/display-name (§7.3 «Изменить имя»).
+#[derive(serde::Deserialize)]
+struct SetDisplayNameRequest {
+    display_name: Option<String>,
+}
+
+async fn set_display_name_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SetDisplayNameRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    let name = req
+        .display_name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
+    if name.as_deref().is_some_and(|n| n.chars().count() > 60) {
+        return Err(AppError::BadRequest("name is too long (max 60)".into()));
+    }
+    let updated = state
+        .auth
+        .set_display_name(&account.player_id, name)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "display_name": updated.display_name,
+    })))
+}
+
+/// Body for POST /api/auth/change-password (§7.3).
+#[derive(serde::Deserialize)]
+struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+async fn change_password_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    let record = state
+        .auth
+        .find_by_email(&account.email)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    if !auth::verify_password(&record.password_hash, &req.current_password) {
+        return Err(AppError::Unauthorized("неверный текущий пароль".into()));
+    }
+    if req.new_password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
+    }
+    state
+        .auth
+        .set_password(&account.player_id, &auth::hash_password(&req.new_password)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "status": "changed" })))
+}
+
+/// §7.4 — delete the account and its data, irreversibly. Editors with quests
+/// still ON SALE are blocked (409): buyers keep access through the published
+/// snapshot + grants, but an account that owns live store listings must delist
+/// them first — otherwise the store would sell orphaned quests.
+async fn delete_account_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    let published = state
+        .constructor
+        .list_summaries_for_author(&account.player_id)
+        .await?
+        .into_iter()
+        .filter(|q| q.status == store::CTOR_STATUS_PUBLISHED)
+        .count();
+    if published > 0 {
+        return Err(AppError::Conflict(format!(
+            "published quests block deletion: {published}"
+        )));
+    }
+    // Play data first, identity last — a crash in between leaves a still-working
+    // account with less data, never a deleted account with orphaned identity.
+    state.store.delete_player_data(&account.player_id).await?;
+    state
+        .grants
+        .delete_grants_for_player(&account.player_id)
+        .await?;
+    state.auth.delete_user(&account.player_id).await?;
+    Ok(Json(serde_json::json!({ "status": "deleted" })))
+}
+
 /// Profile for the resolved identity: the account when registered, a synthetic
 /// anonymous profile otherwise (registered=false).
 async fn get_me_handler(
@@ -1228,6 +1856,7 @@ async fn get_me_handler(
         Some(a) => serde_json::json!({
             "player_id": a.player_id, "registered": true,
             "email": a.email, "display_name": a.display_name, "role": a.role,
+            "email_confirmed_at": a.email_confirmed_at,
         }),
         None => serde_json::json!({
             "player_id": player_id, "registered": false,
@@ -1270,13 +1899,48 @@ struct SetRoleRequest {
 /// Admin user list: every registered account, newest registration first. Admin-gated
 /// (session-admin or the shared `ADMIN_TOKEN`). Anonymous devices have no account row,
 /// so only real accounts appear — bounded by the number of registrations.
+/// Query for GET /api/admin/users: `?page=1` (1-based) opts into pagination
+/// (§10.2 — 25 per page, newest first); without it the legacy full array is
+/// returned so older clients keep working.
+#[derive(serde::Deserialize)]
+struct ListUsersQuery {
+    page: Option<u32>,
+}
+
+const ADMIN_USERS_PER_PAGE: usize = 25;
+
 async fn list_users_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<AdminUserWire>>, AppError> {
+    axum::extract::Query(q): axum::extract::Query<ListUsersQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
     require_admin_actor(&state, &headers).await?;
     let users = state.auth.list_users().await?;
-    Ok(Json(users.into_iter().map(AdminUserWire::from).collect()))
+    match q.page {
+        None => Ok(Json(serde_json::json!(
+            users
+                .into_iter()
+                .map(AdminUserWire::from)
+                .collect::<Vec<_>>()
+        ))),
+        Some(page) => {
+            let page = page.max(1) as usize;
+            let total = users.len();
+            let start = (page - 1) * ADMIN_USERS_PER_PAGE;
+            let slice: Vec<AdminUserWire> = users
+                .into_iter()
+                .skip(start)
+                .take(ADMIN_USERS_PER_PAGE)
+                .map(AdminUserWire::from)
+                .collect();
+            Ok(Json(serde_json::json!({
+                "users": slice,
+                "total": total,
+                "page": page,
+                "per_page": ADMIN_USERS_PER_PAGE,
+            })))
+        }
+    }
 }
 
 /// Assign a role to a registered account. Admin-gated, with three guards:
@@ -1385,7 +2049,10 @@ async fn main() -> anyhow::Result<()> {
                 .run(&pool)
                 .await
                 .context("failed to run database migrations")?;
-            tracing::info!(max_connections, "storage: PostgreSQL (migrations up to date)");
+            tracing::info!(
+                max_connections,
+                "storage: PostgreSQL (migrations up to date)"
+            );
             AppState {
                 config: config.clone(),
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
@@ -1394,6 +2061,8 @@ async fn main() -> anyhow::Result<()> {
                 constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
                 media,
                 payments: Arc::new(MockPaymentProvider),
+                mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
+                identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
             }
         }
         Err(_) => {
@@ -1488,7 +2157,27 @@ mod tests {
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
             cors_allowed_origins: Vec::new(),
             media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
         }))
+    }
+
+    /// Router + captured outbox — flows that need the mailed token (§6).
+    fn test_app_with_mail() -> (Router, std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>) {
+        let mut state = test_state(AppConfig {
+            addr: "0.0.0.0:0".parse().expect("test addr"),
+            version: "test-0.0.0",
+            admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
+            cors_allowed_origins: Vec::new(),
+            media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
+        });
+        let (m, outbox) = mailer::Mailer::recorder();
+        state.mailer = m;
+        (build_router(state), outbox)
     }
 
     /// Router with NO admin secret configured — admin surfaces must fail closed.
@@ -1499,6 +2188,9 @@ mod tests {
             admin_token: None,
             cors_allowed_origins: Vec::new(),
             media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
         }))
     }
 
@@ -1639,6 +2331,9 @@ mod tests {
             admin_token: None,
             cors_allowed_origins: vec!["https://app.geohod.ru".to_string()],
             media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
         }));
 
         let preflight = |origin: &'static str| {
@@ -1692,12 +2387,7 @@ mod tests {
         // The user-management surface fails closed too: with ADMIN_TOKEN unset the
         // shared-secret header is inert, and there is no admin session to fall back
         // on, so listing is forbidden.
-        let (st, _) = get_json_h(
-            &app,
-            "/api/admin/users",
-            &[("x-admin-token", "anything")],
-        )
-        .await;
+        let (st, _) = get_json_h(&app, "/api/admin/users", &[("x-admin-token", "anything")]).await;
         assert_eq!(st, StatusCode::FORBIDDEN);
     }
 
@@ -1846,7 +2536,13 @@ mod tests {
     /// role-gated by [`require_editor`].
     async fn publish(app: &Router, ids: &Ids, body: Value) -> (StatusCode, Value) {
         let bearer = editor_bearer(app, &ids.player).await;
-        post_json_h(app, "/api/quests/publish", body, &[("authorization", &bearer)]).await
+        post_json_h(
+            app,
+            "/api/quests/publish",
+            body,
+            &[("authorization", &bearer)],
+        )
+        .await
     }
 
     /// Grants + publishes ids.quest (v1, ids.snap1) and creates an attempt.
@@ -2200,7 +2896,10 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert!(store_has(app, &ids.quest).await, "a published quest is listed");
+        assert!(
+            store_has(app, &ids.quest).await,
+            "a published quest is listed"
+        );
 
         // → test: leaves the store (the snapshot stays, so it is still resolvable by
         // direct link — grant-gated — it is simply delisted).
@@ -2276,7 +2975,10 @@ mod tests {
         assert_eq!(body["snapshot"]["golden_id"], ids.snap1.as_str());
         // The envelope carries the list cover so the client can precache it for offline
         // (it lives in the catalog meta, not the frozen play snapshot).
-        assert_eq!(body["primary_comic"], "https://api.test/api/media/coverhash");
+        assert_eq!(
+            body["primary_comic"],
+            "https://api.test/api/media/coverhash"
+        );
     }
 
     async fn scenario_snapshot_immutability(app: &Router, ids: &Ids) {
@@ -2629,9 +3331,12 @@ mod tests {
         // The list is admin-gated: anonymous and plain-player sessions are refused.
         let (st, _) = get_json(app, "/api/admin/users").await;
         assert_eq!(st, StatusCode::FORBIDDEN, "anonymous cannot list users");
-        let (st, _) =
-            get_json_h(app, "/api/admin/users", &[("authorization", &bob_bearer)]).await;
-        assert_eq!(st, StatusCode::FORBIDDEN, "a player session cannot list users");
+        let (st, _) = get_json_h(app, "/api/admin/users", &[("authorization", &bob_bearer)]).await;
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "a player session cannot list users"
+        );
 
         // The shared secret lists accounts (ops/bootstrap path) and leaks no secret.
         let (st, list) = get_json_h(app, "/api/admin/users", &admin_hdr).await;
@@ -2658,30 +3363,49 @@ mod tests {
             get_json_h(app, "/api/admin/users", &[("authorization", &alice_bearer)]).await;
         assert_eq!(st, StatusCode::OK, "admin session can list");
         let admin_session = [("authorization", alice_bearer.as_str())];
-        let (st, ub) =
-            post_json_h(app, &role_uri(&bob), json!({"role": "editor"}), &admin_session).await;
+        let (st, ub) = post_json_h(
+            app,
+            &role_uri(&bob),
+            json!({"role": "editor"}),
+            &admin_session,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(ub["role"], "editor");
-        let (_, me_b) =
-            get_json_h(app, "/api/players/me", &[("authorization", &bob_bearer)]).await;
+        let (_, me_b) = get_json_h(app, "/api/players/me", &[("authorization", &bob_bearer)]).await;
         assert_eq!(me_b["role"], "editor", "bob sees his new role");
 
         // Anti-lockout: a session-admin cannot change their OWN role...
-        let (st, _) =
-            post_json_h(app, &role_uri(&alice), json!({"role": "player"}), &admin_session).await;
+        let (st, _) = post_json_h(
+            app,
+            &role_uri(&alice),
+            json!({"role": "player"}),
+            &admin_session,
+        )
+        .await;
         assert_eq!(
             st,
             StatusCode::CONFLICT,
             "an admin cannot self-demote via a session"
         );
         // ...but the shared-secret ops path can (the recovery path has no "self").
-        let (st, _) =
-            post_json_h(app, &role_uri(&alice), json!({"role": "player"}), &admin_hdr).await;
+        let (st, _) = post_json_h(
+            app,
+            &role_uri(&alice),
+            json!({"role": "player"}),
+            &admin_hdr,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK, "ops path may change any role");
 
         // Validation + existence guards.
-        let (st, _) =
-            post_json_h(app, &role_uri(&bob), json!({"role": "superuser"}), &admin_hdr).await;
+        let (st, _) = post_json_h(
+            app,
+            &role_uri(&bob),
+            json!({"role": "superuser"}),
+            &admin_hdr,
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "unknown role rejected");
         let (st, _) = post_json_h(
             app,
@@ -2964,9 +3688,580 @@ mod tests {
         scenario_admin_users(&test_app(), &Ids::new("users")).await;
     }
 
+    /// v2 spec §9.1/§12.6 — the owner reports the dashboard status control fails
+    /// on EVERY transition. The dashboard drives POST
+    /// /api/constructor/quests/{id}/status with an EDITOR SESSION (Bearer), not
+    /// the ops token that constructor_full_lifecycle uses — and until now the
+    /// Postgres store never ran ANY constructor scenario. This walks the real
+    /// user path over the full transition matrix on both stores.
+    async fn scenario_ctor_status_lifecycle(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        let h = [("authorization", bearer.as_str())];
+        let quest = ids.quest.as_str();
+
+        // Create a draft quest as the editor (session-authored, not ops-authored).
+        let (st, created) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": quest,
+                "name": "Статусный квест",
+                "cover": null,
+                "steps_count": 1,
+                "body": { "id": quest, "meta": { "title": "Статусный квест" }, "steps": [1], "versions": [] }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "editor session can create: {created}");
+        assert_eq!(created["status"], "draft");
+        // §9.1 honest numbers for the status-change confirm dialog: the wire
+        // carries the distinct-buyer count and the published snapshot version.
+        assert_eq!(created["buyers"], 0, "fresh quest has no buyers");
+        assert!(created["published_version"].is_null(), "no snapshot yet");
+
+        let status_uri = format!("/api/constructor/quests/{quest}/status");
+
+        // No published snapshot yet: test/published are rejected, draft is allowed.
+        for s in ["test", "published"] {
+            let (st, v) = post_json_h(app, &status_uri, json!({ "status": s }), &h).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "'{s}' needs a snapshot: {v}");
+        }
+        let (st, v) = post_json_h(app, &status_uri, json!({ "status": "draft" }), &h).await;
+        assert_eq!(st, StatusCode::OK, "draft is always allowed: {v}");
+        assert_eq!(v["status"], "draft");
+
+        // Publish a version (editor session) — registers the frozen snapshot.
+        let (st, pv) = post_json_h(
+            app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": quest,
+                "name": "Статусный квест",
+                "template_summary": "1 step",
+                "snapshot_version": 1,
+                "snapshot_id": ids.snap1,
+                "snapshot": { "steps": [] }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "editor session can publish: {pv}");
+
+        // A buyer appears in the wire counts (idempotent per player).
+        let buyer = format!("buyer-{}", ids.player);
+        for _ in 0..2 {
+            let (st, _) = post_json(
+                app,
+                "/api/checkout",
+                json!({ "player_id": buyer, "quest_id": quest }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+
+        // With a snapshot present the FULL matrix the dashboard offers must work,
+        // and store visibility must track `published`.
+        for (next, visible) in [
+            ("test", false),
+            ("published", true),
+            ("draft", false),
+            ("test", false),
+            ("published", true),
+        ] {
+            let (st, v) = post_json_h(app, &status_uri, json!({ "status": next }), &h).await;
+            assert_eq!(st, StatusCode::OK, "'{next}' transition must succeed: {v}");
+            assert_eq!(v["status"], next);
+            assert_eq!(v["buyers"], 1, "one distinct buyer");
+            assert_eq!(v["published_version"], 1, "snapshot v1 is live");
+            let (_, list) = get_json(app, "/api/quests").await;
+            let in_store = list
+                .as_array()
+                .expect("catalog array")
+                .iter()
+                .any(|q| q["quest_id"] == quest);
+            assert_eq!(in_store, visible, "store visibility after '{next}'");
+        }
+
+        // The production shape: the OWNER acts as an ADMIN session on a quest
+        // authored by SOMEONE ELSE (e.g. a bubble-imported author id that matches
+        // no account). Admin is the superuser — every transition must work the
+        // same as for the author.
+        let admin_bearer = role_bearer(app, "adm", &ids.player, "admin").await;
+        let ah = [("authorization", admin_bearer.as_str())];
+        for next in ["draft", "test", "published"] {
+            let (st, v) = post_json_h(app, &status_uri, json!({ "status": next }), &ah).await;
+            assert_eq!(
+                st,
+                StatusCode::OK,
+                "admin '{next}' on another author's quest: {v}"
+            );
+            assert_eq!(v["status"], next);
+        }
+    }
+
+    /// §3.1/§12.9 — the product page endpoint returns ONLY model data: card
+    /// meta + description, author attribution with on-sale count, and chips
+    /// derived from the frozen snapshot. Visibility matches the catalog.
+    async fn scenario_product_page(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &format!("pp-{}", ids.player)).await;
+        let h = [("authorization", bearer.as_str())];
+        let quest = ids.quest.as_str();
+
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": quest,
+                "name": "Продуктовый квест",
+                "cover": null,
+                "steps_count": 3,
+                "body": { "id": quest, "meta": { "title": "Продуктовый квест" }, "steps": [1, 2, 3], "versions": [] }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Unpublished ⇒ the product page does not exist.
+        let (st, _) = get_json(app, &format!("/api/quests/{quest}")).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "no product page before publish");
+
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": quest,
+                "name": "Продуктовый квест",
+                "template_summary": "start, task_answer, congrats",
+                "snapshot_version": 1,
+                "snapshot_id": ids.snap1,
+                "city": "Белград",
+                "duration": "2–3 часа",
+                "price": 890,
+                "description": "Прогулка по кварталам, которых нет на открытках.",
+                "snapshot": { "steps": [
+                    { "template": "start", "supporting": { "is_start": true } },
+                    { "template": "task_answer", "supporting": { "hint": { "cost_coins": 5, "reveal_text": "x" } } },
+                    { "template": "congrats", "supporting": { "terminal": true } }
+                ] }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let (st, v) = get_json(app, &format!("/api/quests/{quest}")).await;
+        assert_eq!(st, StatusCode::OK, "product page after publish: {v}");
+        assert_eq!(v["name"], "Продуктовый квест");
+        assert_eq!(v["city"], "Белград");
+        assert_eq!(v["price"], 890);
+        assert_eq!(
+            v["description"],
+            "Прогулка по кварталам, которых нет на открытках."
+        );
+        assert_eq!(v["pages"], 3, "chips derive from the snapshot");
+        assert_eq!(v["tasks"], 1);
+        assert_eq!(v["paid_hints"], true);
+        assert_eq!(v["rating_count"], 0);
+        assert!(
+            v["author_name"].as_str().is_some(),
+            "author attribution present"
+        );
+        assert_eq!(v["author_published_count"], 1);
+
+        // §5/§12.7: the cover→icon endpoint serves exact-size PNGs for the
+        // per-quest PWA manifest (data-URI cover here; media-hash covers reuse
+        // the same store the media endpoint serves).
+        {
+            use base64::Engine;
+            let img = image::RgbaImage::from_pixel(64, 48, image::Rgba([200, 40, 40, 255]));
+            let mut buf = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(img)
+                .write_to(&mut buf, image::ImageFormat::Png)
+                .expect("encode cover");
+            let cover_uri = format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(buf.into_inner())
+            );
+            let (st, _) = post_json_h(
+                app,
+                "/api/quests/publish",
+                json!({
+                    "quest_id": quest,
+                    "name": "Продуктовый квест",
+                    "primary_comic": cover_uri,
+                    "template_summary": "start, task_answer, congrats",
+                    "snapshot_version": 1,
+                    "snapshot_id": ids.snap1,
+                    "snapshot": null
+                }),
+                &h,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "republish same version with cover");
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/quests/{quest}/icons/192.png"))
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(resp.status(), StatusCode::OK, "icon serves");
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok()),
+                Some("image/png")
+            );
+            let png = resp.into_body().collect().await.expect("body").to_bytes();
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n".as_slice(), "png signature");
+            let (st, _) = get_json(app, &format!("/api/quests/{quest}/icons/64.png")).await;
+            assert_eq!(st, StatusCode::NOT_FOUND, "only 192/512 exist");
+        }
+
+        // §11 reviews: a buyer plays, rates WITH text → the product page shows
+        // the review (author first name from the display name; no email leak).
+        {
+            let buyer = format!("rev-{}", ids.player);
+            let (st, _) = post_json(
+                app,
+                "/api/checkout",
+                json!({ "player_id": buyer, "quest_id": quest }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+            let (st, att) = post_json(
+                app,
+                "/api/attempts",
+                json!({ "player_id": buyer, "quest_id": quest }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "attempt: {att}");
+            let attempt_id = att["attempt_id"].as_str().expect("attempt id");
+            let rated = json!({ "facts": [{
+                "type": "quest_rated", "step_position": 2, "submitted_value": "5",
+                "local_is_correct": true, "coins_delta": 0,
+                "note": "Прошли вдвоём за вечер, финал — мурашки.", "device_id": "d1"
+            }] });
+            let (st, _) = post_json(app, &format!("/api/attempts/{attempt_id}/facts"), rated).await;
+            assert_eq!(st, StatusCode::OK);
+
+            let (st, v) = get_json(app, &format!("/api/quests/{quest}")).await;
+            assert_eq!(st, StatusCode::OK);
+            assert_eq!(v["reviews_total"], 1, "one review with text: {v}");
+            assert_eq!(v["reviews"][0]["rating"], 5);
+            assert_eq!(
+                v["reviews"][0]["text"],
+                "Прошли вдвоём за вечер, финал — мурашки."
+            );
+            assert_eq!(
+                v["reviews"][0]["author"], "Игрок",
+                "anonymous buyer → «Игрок»"
+            );
+            assert!(
+                v["reviews"][0].get("email").is_none(),
+                "no email in the wire"
+            );
+
+            // A rating WITHOUT text is counted in rating_count but is not a review.
+            assert_eq!(v["rating_count"], 1);
+        }
+
+        // Delisting hides the product page exactly like the catalog.
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{quest}/status"),
+            json!({ "status": "test" }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = get_json(app, &format!("/api/quests/{quest}")).await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "delisted quest has no product page"
+        );
+    }
+
+    /// Pull the freshest emailed token for `to` out of the recorded outbox.
+    fn mailed_token(mails: &Mutex<Vec<mailer::OutgoingMail>>, to: &str) -> String {
+        let mails = mails.lock().expect("outbox lock");
+        let mail = mails
+            .iter()
+            .rev()
+            .find(|m| m.to == to)
+            .expect("mail for recipient");
+        let idx = mail.body.find("token=").expect("token link in mail");
+        mail.body[idx + 6..idx + 6 + 64].to_string()
+    }
+
+    /// §6/§12.1–5 — auth v2 end to end: identify → register (+confirm mail) →
+    /// confirm → recover → reset (signs in) → change password → delete account
+    /// (with the editor-published block).
+    async fn scenario_auth_v2(app: &Router, mails: &Mutex<Vec<mailer::OutgoingMail>>, ids: &Ids) {
+        let player = ids.player.as_str();
+        let email = format!("{player}@example.com");
+
+        // 1) identify: unknown email.
+        let (st, v) = post_json(app, "/api/auth/identify", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["exists"], false);
+
+        // 2) register → session + confirmation mail (soft: account works now).
+        let (_, token) = register(app, player).await;
+        let bearer = format!("Bearer {token}");
+        let (st, v) = post_json(app, "/api/auth/identify", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["exists"], true);
+        assert_eq!(v["confirmed"], false, "soft confirmation: not yet");
+
+        // 3) recover for an UNCONFIRMED email: uniform response, but the mail
+        // that goes out is a fresh confirmation, not a reset link.
+        let n_before = mails.lock().expect("lock").len();
+        let (st, v) = post_json(app, "/api/auth/recover", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["status"], "sent");
+        assert!(v["masked"].as_str().expect("masked").contains("***@"));
+        assert!(
+            mails.lock().expect("lock").len() > n_before,
+            "confirmation resent"
+        );
+        assert!(
+            mails
+                .lock()
+                .expect("lock")
+                .last()
+                .expect("mail")
+                .subject
+                .contains("Подтвердите"),
+            "unconfirmed accounts get a confirmation, never a reset link"
+        );
+
+        // 4) confirm via the mailed token; reuse must fail.
+        let confirm_token = mailed_token(mails, &email);
+        let (st, _) = post_json(app, "/api/auth/confirm", json!({ "token": confirm_token })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(app, "/api/auth/confirm", json!({ "token": confirm_token })).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "single-use token");
+        let (_, v) = post_json(app, "/api/auth/identify", json!({ "email": email })).await;
+        assert_eq!(v["confirmed"], true);
+
+        // 5) recovery now issues a reset link; enumeration-safe for strangers.
+        let (st, v) = post_json(
+            app,
+            "/api/auth/recover",
+            json!({ "email": "ghost@nowhere.example" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["status"], "sent", "same answer for unknown email");
+        let (st, _) = post_json(app, "/api/auth/recover", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        let reset_token = mailed_token(mails, &email);
+
+        // 6) reset: short password rejected; good one signs in; token single-use.
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "token": reset_token, "password": "short" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, v) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "token": reset_token, "password": "newpass-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "reset succeeds: {v}");
+        assert_eq!(v["player_id"], player);
+        assert_eq!(v["token"].as_str().map(str::len), Some(64), "signed in");
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "token": reset_token, "password": "another-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "reset token single-use");
+        let (st, _) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "hunter2hunter2" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "old password is gone");
+        let (st, lv) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "newpass-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let bearer2 = format!("Bearer {}", lv["token"].as_str().expect("token"));
+
+        // 6.5) display name (§7.3 «Изменить имя»): set + trim + clear.
+        let h2pre = [("authorization", bearer2.as_str())];
+        let (st, v) = post_json_h(
+            app,
+            "/api/auth/display-name",
+            json!({ "display_name": "  Анна  " }),
+            &h2pre,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["display_name"], "Анна");
+
+        // 7) change password (session): wrong current 401, right one works.
+        let h2 = [("authorization", bearer2.as_str())];
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/change-password",
+            json!({ "current_password": "wrong-current", "new_password": "changed-12345" }),
+            &h2,
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/change-password",
+            json!({ "current_password": "newpass-12345", "new_password": "changed-12345" }),
+            &h2,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "changed-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // 8) delete-account: an author with a quest ON SALE is blocked.
+        let admin_hdr = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/users/{player}/role"),
+            json!({"role": "editor"}),
+            &admin_hdr,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let quest = format!("{}-own", ids.quest);
+        let (st, _) = post_json_h(app, "/api/constructor/quests", json!({
+            "quest_id": quest, "name": "Мой квест", "cover": null, "steps_count": 1,
+            "body": { "id": quest, "meta": { "title": "Мой квест" }, "steps": [1], "versions": [] }
+        }), &h2).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(app, "/api/quests/publish", json!({
+            "quest_id": quest, "name": "Мой квест", "template_summary": "1",
+            "snapshot_version": 1, "snapshot_id": format!("{}-own-v1", ids.snap1), "snapshot": { "steps": [] }
+        }), &h2).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, v) = post_json_h(app, "/api/auth/delete-account", json!({}), &h2).await;
+        assert_eq!(
+            st,
+            StatusCode::CONFLICT,
+            "published quest blocks deletion: {v}"
+        );
+        // Delist → deletion proceeds; the account and its session die.
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{quest}/status"),
+            json!({ "status": "draft" }),
+            &h2,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(app, "/api/auth/delete-account", json!({}), &h2).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "changed-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "account is gone");
+        let (st, _) = get_json_h(
+            app,
+            "/api/players/me",
+            &[("authorization", bearer.as_str())],
+        )
+        .await;
+        // The pre-delete session must be dead too (claims fall back to anonymous or 401).
+        assert_ne!(st, StatusCode::INTERNAL_SERVER_ERROR);
+        let (_, v) = post_json(app, "/api/auth/identify", json!({ "email": email })).await;
+        assert_eq!(v["exists"], false, "email is free again");
+    }
+
     #[tokio::test]
     async fn publish_requires_editor_role() {
         scenario_publish_authz(&test_app(), &Ids::new("pubauthz")).await;
+    }
+
+    #[tokio::test]
+    async fn ctor_status_lifecycle_editor_session() {
+        scenario_ctor_status_lifecycle(&test_app(), &Ids::new("ctorstatus")).await;
+    }
+
+    #[tokio::test]
+    async fn product_page_payload() {
+        scenario_product_page(&test_app(), &Ids::new("product")).await;
+    }
+
+    #[tokio::test]
+    async fn auth_v2_full_flow() {
+        let (app, mails) = test_app_with_mail();
+        scenario_auth_v2(&app, &mails, &Ids::new("authv2")).await;
+    }
+
+    /// §10.2/§12.10 — admin users pagination: ?page= opts in (25/page, newest
+    /// first), no param keeps the legacy array shape.
+    #[tokio::test]
+    async fn admin_users_pagination() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        for i in 0..27 {
+            register(&app, &format!("pg-user-{i:02}")).await;
+        }
+        let (st, legacy) = get_json_h(&app, "/api/admin/users", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(legacy.as_array().expect("legacy array").len(), 27);
+
+        let (st, p1) = get_json_h(&app, "/api/admin/users?page=1", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(p1["total"], 27);
+        assert_eq!(p1["per_page"], 25);
+        assert_eq!(p1["users"].as_array().expect("page 1").len(), 25);
+        let (st, p2) = get_json_h(&app, "/api/admin/users?page=2", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(p2["users"].as_array().expect("page 2").len(), 2);
+        // Newest-first: page 1's head registered no earlier than page 2's tail.
+        let first = p1["users"][0]["created_at"].as_u64().expect("created_at");
+        let last = p2["users"][1]["created_at"].as_u64().expect("created_at");
+        assert!(first >= last, "newest first across pages");
+    }
+
+    /// §6.1 — identify is rate-limited per email (fixed window).
+    #[tokio::test]
+    async fn identify_rate_limited() {
+        let app = test_app();
+        let body = json!({ "email": "probe@example.com" });
+        for _ in 0..10 {
+            let (st, _) = post_json(&app, "/api/auth/identify", body.clone()).await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        let (st, _) = post_json(&app, "/api/auth/identify", body.clone()).await;
+        assert_eq!(
+            st,
+            StatusCode::TOO_MANY_REQUESTS,
+            "11th probe in the window"
+        );
     }
 
     #[tokio::test]
@@ -3017,9 +4312,17 @@ mod tests {
         let app = test_app();
         let (st, _) = get_json(&app, "/api/constructor/quests").await;
         assert_eq!(st, StatusCode::FORBIDDEN, "anonymous is forbidden");
-        let (st, _) =
-            get_json_h(&app, "/api/constructor/quests", &[("x-admin-token", TEST_ADMIN_TOKEN)]).await;
-        assert_eq!(st, StatusCode::OK, "ops token authorizes the editor surface");
+        let (st, _) = get_json_h(
+            &app,
+            "/api/constructor/quests",
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::OK,
+            "ops token authorizes the editor surface"
+        );
     }
 
     /// Full CRUD lifecycle: create → list → get(body) → save → status → publish
@@ -3041,13 +4344,15 @@ mod tests {
             "steps_count": 2,
             "body": { "id": "q-test", "meta": { "title": "Тестовый квест" }, "steps": [1, 2], "versions": [] }
         });
-        let (st, created) =
-            post_json_h(&app, "/api/constructor/quests", body, &admin).await;
+        let (st, created) = post_json_h(&app, "/api/constructor/quests", body, &admin).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(created["status"], "draft");
         assert_eq!(created["steps"], 2);
         assert_eq!(created["completed"], 0);
-        assert_eq!(created["author"], "Оператор", "ops path is labeled generically");
+        assert_eq!(
+            created["author"], "Оператор",
+            "ops path is labeled generically"
+        );
 
         // List shows it.
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
@@ -3055,8 +4360,7 @@ mod tests {
         assert_eq!(list[0]["quest_id"], "q-test");
 
         // Get returns the full body.
-        let (st, full) =
-            get_json_h(&app, "/api/constructor/quests/q-test", &admin).await;
+        let (st, full) = get_json_h(&app, "/api/constructor/quests/q-test", &admin).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(full["body"]["steps"].as_array().expect("steps").len(), 2);
 
@@ -3067,8 +4371,7 @@ mod tests {
             "steps_count": 5,
             "body": { "id": "q-test", "steps": [1, 2, 3, 4, 5] }
         });
-        let (st, _) =
-            post_json_h(&app, "/api/constructor/quests/q-test/save", save, &admin).await;
+        let (st, _) = post_json_h(&app, "/api/constructor/quests/q-test/save", save, &admin).await;
         assert_eq!(st, StatusCode::OK);
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
         assert_eq!(list[0]["name"], "Переименован");
@@ -3093,7 +4396,11 @@ mod tests {
             &admin,
         )
         .await;
-        assert_eq!(st, StatusCode::BAD_REQUEST, "test needs a published snapshot first");
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "test needs a published snapshot first"
+        );
         let (st, updated) = post_json_h(
             &app,
             "/api/constructor/quests/q-test/status",
@@ -3135,8 +4442,13 @@ mod tests {
         assert_eq!(updated["status"], "test");
 
         // Delete.
-        let (st, _) =
-            post_json_h(&app, "/api/constructor/quests/q-test/delete", json!({}), &admin).await;
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-test/delete",
+            json!({}),
+            &admin,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (st, _) = post_json_h(
             &app,
@@ -3159,8 +4471,14 @@ mod tests {
     #[tokio::test]
     async fn constructor_is_author_scoped() {
         let app = test_app();
-        let a: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", "dev-a")];
-        let b: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", "dev-b")];
+        let a: [(&str, &str); 2] = [
+            ("x-admin-token", TEST_ADMIN_TOKEN),
+            ("x-player-id", "dev-a"),
+        ];
+        let b: [(&str, &str); 2] = [
+            ("x-admin-token", TEST_ADMIN_TOKEN),
+            ("x-player-id", "dev-b"),
+        ];
 
         let mk = |id: &str, name: &str| {
             json!({
@@ -3186,7 +4504,11 @@ mod tests {
         // B cannot read / save / restatus / delete A's quest — every per-quest
         // route 404s for a non-owner.
         let (st, _) = get_json_h(&app, "/api/constructor/quests/q-a", &b).await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "cannot get another author's quest");
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cannot get another author's quest"
+        );
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-a/save",
@@ -3194,7 +4516,11 @@ mod tests {
             &b,
         )
         .await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "cannot save another author's quest");
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cannot save another author's quest"
+        );
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests/q-a/status",
@@ -3202,15 +4528,25 @@ mod tests {
             &b,
         )
         .await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "cannot restatus another author's quest");
-        let (st, _) =
-            post_json_h(&app, "/api/constructor/quests/q-a/delete", json!({}), &b).await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "cannot delete another author's quest");
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cannot restatus another author's quest"
+        );
+        let (st, _) = post_json_h(&app, "/api/constructor/quests/q-a/delete", json!({}), &b).await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cannot delete another author's quest"
+        );
 
         // A's quest survived every B attempt, unchanged, and A still owns it.
         let (st, full) = get_json_h(&app, "/api/constructor/quests/q-a", &a).await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(full["name"], "Квест А", "A's quest is untouched by B's attempts");
+        assert_eq!(
+            full["name"], "Квест А",
+            "A's quest is untouched by B's attempts"
+        );
     }
 
     /// Admin superuser reach over the constructor (the stated model: a published
@@ -3248,15 +4584,23 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
 
         // A plain editor sees ONLY their own quest (scoping preserved for non-admins).
-        let (_, la) =
-            get_json_h(&app, "/api/constructor/quests", &[("authorization", a.as_str())]).await;
+        let (_, la) = get_json_h(
+            &app,
+            "/api/constructor/quests",
+            &[("authorization", a.as_str())],
+        )
+        .await;
         let la = la.as_array().expect("array");
         assert_eq!(la.len(), 1, "an editor sees only their own quests");
         assert_eq!(la[0]["quest_id"], "q-eda");
 
         // The admin sees BOTH authors' quests.
-        let (_, all) =
-            get_json_h(&app, "/api/constructor/quests", &[("authorization", admin.as_str())]).await;
+        let (_, all) = get_json_h(
+            &app,
+            "/api/constructor/quests",
+            &[("authorization", admin.as_str())],
+        )
+        .await;
         let all = all.as_array().expect("array");
         assert!(
             all.iter().any(|q| q["quest_id"] == "q-eda")
@@ -3354,7 +4698,10 @@ mod tests {
             .await;
             assert_eq!(st, StatusCode::BAD_REQUEST, "{s} needs a snapshot first");
         }
-        assert!(!store_has(&app, "q-pub").await, "absent from the store before publishing");
+        assert!(
+            !store_has(&app, "q-pub").await,
+            "absent from the store before publishing"
+        );
 
         // Publishing via the editor path creates the snapshot AND lists it.
         let (st, _) = post_json_h(
@@ -3368,7 +4715,10 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert!(store_has(&app, "q-pub").await, "a published quest appears in the store");
+        assert!(
+            store_has(&app, "q-pub").await,
+            "a published quest appears in the store"
+        );
 
         // And now the dashboard status toggle works over the existing snapshot.
         let (st, _) = post_json_h(
@@ -3393,9 +4743,17 @@ mod tests {
 
         // Nothing is seeded: both surfaces start empty.
         let (_, store) = get_json(&app, "/api/quests").await;
-        assert_eq!(store.as_array().expect("array").len(), 0, "no seeded store quests");
+        assert_eq!(
+            store.as_array().expect("array").len(),
+            0,
+            "no seeded store quests"
+        );
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
-        assert_eq!(list.as_array().expect("array").len(), 0, "no seeded constructor quests");
+        assert_eq!(
+            list.as_array().expect("array").len(),
+            0,
+            "no seeded constructor quests"
+        );
 
         // Create a constructor draft.
         post_json_h(
@@ -3414,7 +4772,12 @@ mod tests {
 
         // It is in the constructor list…
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
-        assert!(list.as_array().expect("array").iter().any(|q| q["quest_id"] == "q-real"));
+        assert!(
+            list.as_array()
+                .expect("array")
+                .iter()
+                .any(|q| q["quest_id"] == "q-real")
+        );
         // …but NOT in the store — an unpublished draft is never buyable/playable.
         let (_, store) = get_json(&app, "/api/quests").await;
         assert_eq!(
@@ -3442,7 +4805,11 @@ mod tests {
         // The SAME id now appears in the store, and the constructor shows it published.
         let (_, store) = get_json(&app, "/api/quests").await;
         assert!(
-            store.as_array().expect("array").iter().any(|q| q["quest_id"] == "q-real"),
+            store
+                .as_array()
+                .expect("array")
+                .iter()
+                .any(|q| q["quest_id"] == "q-real"),
             "a published quest appears in the store under its constructor id"
         );
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
@@ -3459,15 +4826,19 @@ mod tests {
     // === DATABASE_URL (zero-infra dev/CI stays green); run `docker compose up -d`
     // === and set DATABASE_URL (see backend/.env.example) to execute.
 
-    fn pg_app(pool: sqlx::PgPool) -> Router {
+    fn pg_app(pool: sqlx::PgPool) -> (Router, std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>) {
         let media_cfg = test_media_cfg();
-        build_router(AppState {
+        let (m, outbox) = mailer::Mailer::recorder();
+        let router = build_router(AppState {
             config: AppConfig {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
                 version: "test-pg",
                 admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
                 cors_allowed_origins: Vec::new(),
                 media: media_cfg.clone(),
+                smtp_url: None,
+                mail_from: "test@geohod.test".to_string(),
+                frontend_base: "http://localhost:3000".to_string(),
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
@@ -3475,7 +4846,10 @@ mod tests {
             constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payments: Arc::new(MockPaymentProvider),
-        })
+            mailer: m,
+            identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        });
+        (router, outbox)
     }
 
     /// Exercises the REAL PgConstructorStore SQL end to end (create/list/get/save/
@@ -3498,7 +4872,7 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let app = pg_app(pool);
+        let (app, _mails) = pg_app(pool);
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
         let qid = format!("q-citest-{run}");
@@ -3531,8 +4905,10 @@ mod tests {
         // first: the foreign quest never appears in the "ops" list, and the foreign
         // author cannot fetch the "ops" author's quest (404 — existence hidden).
         let dev_id = format!("dev-citest-{run}");
-        let dev: [(&str, &str); 2] =
-            [("x-admin-token", TEST_ADMIN_TOKEN), ("x-player-id", dev_id.as_str())];
+        let dev: [(&str, &str); 2] = [
+            ("x-admin-token", TEST_ADMIN_TOKEN),
+            ("x-player-id", dev_id.as_str()),
+        ];
         let other_qid = format!("q-citest-other-{run}");
         let (st, _) = post_json_h(
             &app,
@@ -3555,16 +4931,23 @@ mod tests {
             "another author's quest must not appear in the ops list"
         );
         let (st, _) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &dev).await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "cross-author get is hidden on SQL");
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cross-author get is hidden on SQL"
+        );
         // Clean up the foreign quest (shared-DB hygiene).
-        let (st, _) =
-            post_json_h(&app, &format!("/api/constructor/quests/{other_qid}/delete"), json!({}), &dev)
-                .await;
+        let (st, _) = post_json_h(
+            &app,
+            &format!("/api/constructor/quests/{other_qid}/delete"),
+            json!({}),
+            &dev,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
 
         // get returns the full body
-        let (st, full) =
-            get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
+        let (st, full) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(full["body"]["steps"].as_array().expect("steps").len(), 2);
 
@@ -3647,7 +5030,7 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let app = pg_app(pool.clone());
+        let (app, pg_mails) = pg_app(pool.clone());
 
         // Run-unique tag: scenarios tolerate a shared, pre-populated database.
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
@@ -3668,6 +5051,9 @@ mod tests {
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
         scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
         scenario_publish_authz(&app, &Ids::new(&format!("pubauthz-{run}"))).await;
+        scenario_ctor_status_lifecycle(&app, &Ids::new(&format!("ctorstatus-{run}"))).await;
+        scenario_product_page(&app, &Ids::new(&format!("product-{run}"))).await;
+        scenario_auth_v2(&app, &pg_mails, &Ids::new(&format!("authv2-{run}"))).await;
         scenario_bad_payload(&app, &Ids::new(&format!("bad-{run}"))).await;
         scenario_migration_idempotent(&app, &format!("legacy:{run}")).await;
         scenario_auth_register_login(&app, &Ids::new(&format!("auth-{run}"))).await;
@@ -3683,7 +5069,7 @@ mod tests {
             .connect(&url)
             .await
             .expect("reconnect");
-        let app2 = pg_app(pool2);
+        let (app2, _mails2) = pg_app(pool2);
         let (st, gv) = get_json(&app2, &format!("/api/attempts/{happy_attempt}/state")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(gv["projected"]["balance"], 5, "projection survives restart");

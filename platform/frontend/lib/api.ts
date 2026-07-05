@@ -31,7 +31,7 @@ function resolveApiBase(): string {
   return 'http://localhost:8080';
 }
 
-const API_BASE = resolveApiBase();
+export const API_BASE = resolveApiBase();
 
 /**
  * Header carrying the shared admin secret for the gated telemetry endpoints
@@ -86,6 +86,31 @@ export interface PublishedQuestWire {
   rating_count: number;
 }
 
+/** Product page payload (§3.1) — the published card + live rating + author
+ *  attribution + snapshot-derived content chips + the store description. */
+export interface ProductPageWire extends PublishedQuestWire {
+  description: string | null;
+  /** Author display label; null for legacy/direct publishes. */
+  author_name: string | null;
+  /** How many of this author's quests are currently on sale. */
+  author_published_count: number;
+  /** Content chips; null when the version predates chip derivation. */
+  pages: number | null;
+  tasks: number | null;
+  paid_hints: boolean | null;
+  /** §11 reviews v1: newest-first, first 10; total with text for the header. */
+  reviews: ReviewWire[];
+  reviews_total: number;
+}
+
+/** §11: one public review (author first name only, month-precision date). */
+export interface ReviewWire {
+  author: string;
+  rating: number;
+  text: string;
+  created_at: number;
+}
+
 /** The grant-gated bundle envelope returned by `GET /api/quests/{id}/bundle` — the
  *  frozen snapshot JSON plus its identity. The download flow stores/precaches from it. */
 export interface BundleWire {
@@ -113,6 +138,10 @@ export interface ConstructorQuestWire {
   steps: number;
   /** Distinct players who completed the quest ("прохождения"; derived from facts). */
   completed: number;
+  /** Distinct grant holders — the honest «{N} купивших» for destructive confirms (§9.1). */
+  buyers: number;
+  /** Live published snapshot version; null ⇒ test/published need the publish panel first. */
+  published_version: number | null;
   // No `cover`: the dashboard renders a name-derived thumbnail, so the backend
   // omits the heavy base64 cover from list rows (it bloated the list to megabytes
   // for media-heavy quests). The cover is on the full wire below; the builder
@@ -251,6 +280,8 @@ export const api = {
 
   // Published + grants (for cabinet/market live)
   listQuests: () => apiFetch<PublishedQuestWire[]>('/api/quests'),
+  getQuestProduct: (id: string) =>
+    apiFetch<ProductPageWire>(`/api/quests/${encodeURIComponent(id)}`),
   listGrants: () => apiFetch<GrantWire[]>('/api/grants'),
 
   // Constructor dashboard (editor-gated, like publish). adminHeaders() forwards the
@@ -311,6 +342,38 @@ export const api = {
     apiFetch<Session>('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   authLogin: (body: { email: string; password: string }) =>
     apiFetch<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  // Auth v2 (§6): the email-first step + recovery R1 + soft confirmation.
+  authIdentify: (email: string) =>
+    apiFetch<{ exists: boolean; confirmed: boolean }>('/api/auth/identify', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  authRecover: (email: string) =>
+    apiFetch<{ status: string; masked: string }>('/api/auth/recover', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  authResetPassword: (body: { token: string; password: string }) =>
+    apiFetch<Session>('/api/auth/reset', { method: 'POST', body: JSON.stringify(body) }),
+  authConfirmEmail: (token: string) =>
+    apiFetch<{ status: string; email: string }>('/api/auth/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+  authResendConfirm: () =>
+    apiFetch<{ status: string }>('/api/auth/confirm/resend', { method: 'POST', body: '{}' }),
+  authChangePassword: (body: { current_password: string; new_password: string }) =>
+    apiFetch<{ status: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  authSetDisplayName: (displayName: string | null) =>
+    apiFetch<{ status: string; display_name: string | null }>('/api/auth/display-name', {
+      method: 'POST',
+      body: JSON.stringify({ display_name: displayName }),
+    }),
+  authDeleteAccount: () =>
+    apiFetch<{ status: string }>('/api/auth/delete-account', { method: 'POST', body: '{}' }),
   me: () =>
     apiFetch<{
       player_id: string;
@@ -318,6 +381,8 @@ export const api = {
       email: string | null;
       display_name: string | null;
       role: string | null;
+      /** §6.3: unix seconds when the email was confirmed; null/absent until then. */
+      email_confirmed_at?: number | null;
     }>('/api/players/me'),
   myStats: () =>
     apiFetch<{

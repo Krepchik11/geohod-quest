@@ -2,18 +2,14 @@
    design/ctor2/workspace.css. Layers on top of admin-ctor.css:
    the root element carries "admin wsp"; asset urls point to /assets. */
 
-.wsp { min-height: 100vh; background: var(--bg); }
+.wsp { min-height: 100vh; background: var(--bg-subtle); }
 .wsp a { cursor: pointer; }
 
 /* Контролы компактнее канвасной админки — repointed to canonical primitives (harmonization §4);
    .adm-label kept (not in the §4 swap set). These overrides MUST track the className rename or
-   the workspace controls fall back to the larger base .field-ui/.btn-ui geometry. */
-.wsp .field-ui { height: 48px; font-size: 14px; width: 100%; font-weight: 400; }
-.wsp .field-ui--sm { width: 130px; }
-.wsp .btn-ui { min-width: 0; height: 48px; font-size: 14px; padding: 0 20px; }
-.wsp .btn-ui--sm { height: 38px; font-size: 13px; padding: 0 14px; }
+   the workspace controls use the canonical .input/.btn primitives (§0). */
 .wsp .adm-label { font-size: 13.5px; margin-bottom: 6px; }
-.wsp .textarea-ui { min-height: 96px; font-size: 14px; }
+.wsp .textarea { min-height: 96px; font-size: 14px; }
 .wsp .ed-block { border: 1px solid #EDEFF3; }
 .wsp .ed-form { gap: 18px; margin-top: 0; }
 
@@ -26,48 +22,48 @@
 }
 .wsp-top .brand { width: 34px; height: 30px; background: url("/assets/icons/logo-mark--navy.svg") no-repeat center / contain; flex: none; }
 .wsp-top .sp { flex: 1; }
-.wsp-crumbs { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--gray); min-width: 0; }
-.wsp-crumbs a { color: var(--gray); text-decoration: none; }
+.wsp-crumbs { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); min-width: 0; }
+.wsp-crumbs a { color: var(--muted); text-decoration: none; }
 .wsp-crumbs a:hover { color: var(--blue); }
 .wsp-crumbs b { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wsp-save { font-size: 12px; color: var(--gray); background: var(--bg); border-radius: 8px; padding: 7px 10px; white-space: nowrap; }
-.wsp-save.failed { color: var(--pink); background: rgba(231,90,124,.1); font-weight: 600; }
+.wsp-save { font-size: 12px; color: var(--muted); background: var(--bg-subtle); border-radius: 8px; padding: 7px 10px; white-space: nowrap; }
+.wsp-save.failed { color: var(--red); background: rgba(231,90,124,.1); font-weight: 600; }
 
 /* ---------- Чипы билдера ---------- */
 /* Список созданных квестов переехал в Dashboard (.qcd-*); здесь остаётся только
    чип-счётчик ошибок гейтов, который рисует Builder в рельсе/шапке. */
 .wsp-chip { font: 600 11px/1 'Inter', sans-serif; padding: 6px 10px; border-radius: 10px; white-space: nowrap; }
-.wsp-chip.err { color: var(--pink); background: rgba(231,90,124,.12); }
+.wsp-chip.err { color: var(--red); background: rgba(231,90,124,.12); }
 
 /* ---------- Билдер: три панели ---------- */
 .wsp-builder { display: grid; grid-template-columns: 296px minmax(0, 1fr) 396px; height: calc(100vh - 64px); }
 .wsp-rail { background: #fff; border-right: 1px solid #E7E9EE; overflow-y: auto; display: flex; flex-direction: column; padding-bottom: 12px; }
 .wsp-center { overflow-y: auto; padding: 22px 28px 72px; }
 .wsp-preview { border-left: 1px solid #E7E9EE; background: #fff; overflow-y: auto; padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
-.wsp-preview .cap { font-size: 12px; color: var(--gray); text-align: center; margin: 0; }
+.wsp-preview .cap { font-size: 12px; color: var(--muted); text-align: center; margin: 0; }
 .wsp-preview .adm-toggle { font-size: 13px; }
 
 /* Левая панель */
-.wsp-rail h5 { margin: 18px 16px 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--gray); font-weight: 700; }
+.wsp-rail h5 { margin: 18px 16px 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
 .wsp-navitem { display: flex; align-items: center; gap: 10px; padding: 11px 16px; font-size: 14px; cursor: pointer; border-left: 3px solid transparent; }
-.wsp-navitem:hover { background: var(--bg); }
+.wsp-navitem:hover { background: var(--bg-subtle); }
 .wsp-navitem.active { background: rgba(59,113,254,.07); border-left-color: var(--blue); font-weight: 600; }
 .wsp-page { display: flex; align-items: center; gap: 8px; padding: 8px 14px 8px 8px; cursor: pointer; border-left: 3px solid transparent; user-select: none; }
-.wsp-page:hover { background: var(--bg); }
+.wsp-page:hover { background: var(--bg-subtle); }
 .wsp-page.active { background: rgba(59,113,254,.07); border-left-color: var(--blue); }
 .wsp-page.dragover { box-shadow: inset 0 3px 0 var(--blue); }
 .wsp-page .grip { color: #C6C9D2; cursor: grab; font-size: 13px; width: 14px; flex: none; }
-.wsp-page .num { flex: none; width: 24px; height: 24px; border-radius: 6px; background: var(--bg); color: var(--gray); display: grid; place-items: center; font: 700 11px/1 'Inter', sans-serif; }
+.wsp-page .num { flex: none; width: 24px; height: 24px; border-radius: 6px; background: var(--bg-subtle); color: var(--muted); display: grid; place-items: center; font: 700 11px/1 'Inter', sans-serif; }
 .wsp-page.active .num { background: var(--blue); color: #fff; }
 .wsp-page .body { flex: 1; min-width: 0; }
 .wsp-page .nm { display: block; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wsp-page .tp { display: block; font-size: 11px; color: var(--gray); }
+.wsp-page .tp { display: block; font-size: 11px; color: var(--muted); }
 .wsp-page .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .wsp-page .dot.ok { background: var(--green); opacity: .45; }
-.wsp-page .dot.err { background: var(--pink); box-shadow: 0 0 0 3px rgba(231,90,124,.16); }
+.wsp-page .dot.err { background: var(--red); box-shadow: 0 0 0 3px rgba(231,90,124,.16); }
 .wsp-addpage { margin: 10px 16px 4px; }
 .wsp-vers { margin-top: auto; border-top: 1px solid #E7E9EE; padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 8px; }
-.wsp-ver { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--gray); line-height: 1.5; }
+.wsp-ver { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
 .wsp-ver b { color: var(--ink); }
 
 /* Центр: редактор */
@@ -75,17 +71,17 @@
 .wsp-tplchip { font: 600 12px/1 'Inter', sans-serif; color: var(--blue); background: rgba(59,113,254,.1); border-radius: 10px; padding: 9px 12px; white-space: nowrap; }
 .wsp-gatechip { font-size: 12px; font-weight: 700; border-radius: 8px; padding: 7px 10px; white-space: nowrap; }
 .wsp-gatechip.ok { color: var(--green); background: rgba(31,138,91,.1); }
-.wsp-gatechip.err { color: var(--pink); background: rgba(231,90,124,.12); }
-.wsp-pageerrs { background: rgba(231,90,124,.06); border: 1px solid rgba(231,90,124,.25); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--pink); display: flex; flex-direction: column; gap: 6px; }
+.wsp-gatechip.err { color: var(--red); background: rgba(231,90,124,.12); }
+.wsp-pageerrs { background: rgba(231,90,124,.06); border: 1px solid rgba(231,90,124,.25); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--red); display: flex; flex-direction: column; gap: 6px; }
 .wsp-banner { background: rgba(31,138,91,.1); color: var(--green); border-radius: 12px; padding: 13px 16px; font-size: 14px; font-weight: 600; }
-.wsp-error { background: rgba(231,90,124,.08); color: var(--pink); border-radius: 12px; padding: 13px 16px; font-size: 13.5px; font-weight: 600; }
+.wsp-error { background: rgba(231,90,124,.08); color: var(--red); border-radius: 12px; padding: 13px 16px; font-size: 13.5px; font-weight: 600; }
 .wsp-trow { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .wsp-grow { flex: 1; min-width: 200px; }
-.wsp-metacard { display: flex; gap: 14px; align-items: center; background: var(--bg); border-radius: 12px; padding: 12px 14px; font-size: 13px; }
+.wsp-metacard { display: flex; gap: 14px; align-items: center; background: var(--bg-subtle); border-radius: 12px; padding: 12px 14px; font-size: 13px; }
 .wsp-metacard img { width: 64px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; }
-.wsp-metacard .mc-ph { width: 64px; height: 44px; border-radius: 8px; background: #E7E9EE; display: grid; place-items: center; font-size: 9px; color: var(--gray); flex: none; }
+.wsp-metacard .mc-ph { width: 64px; height: 44px; border-radius: 8px; background: #E7E9EE; display: grid; place-items: center; font-size: 9px; color: var(--muted); flex: none; }
 .wsp-metacard .mc-body { flex: 1; min-width: 0; line-height: 1.5; }
-.wsp-metacard .mc-body span { color: var(--gray); }
+.wsp-metacard .mc-body span { color: var(--muted); }
 .wsp-vidzone { position: relative; height: 140px; border-radius: 10px; background: #1F222B; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
 .wsp-vidzone .ic-ring { width: 44px; height: 44px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; }
 .wsp-vidzone .dur { position: absolute; right: 10px; bottom: 8px; font: 600 11px/1 'Inter', sans-serif; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 6px; }
@@ -105,14 +101,14 @@
 /* Пикер шаблонов */
 .wsp-tpick { width: 960px; max-width: calc(100vw - 64px); background: #fff; border-radius: 20px; padding: 28px 32px 32px; max-height: calc(100vh - 64px); overflow-y: auto; }
 .wsp-tpick h3 { margin: 0 0 4px; font-size: 20px; }
-.wsp-tpick .sub { font-size: 13px; color: var(--gray); margin: 0 0 18px; }
+.wsp-tpick .sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
 .wsp-tgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .wsp-tcell { display: flex; flex-direction: column; gap: 8px; cursor: pointer; border-radius: 14px; padding: 10px; border: 2px solid transparent; }
 .wsp-tcell:hover { border-color: var(--blue); background: rgba(59,113,254,.04); }
 .wsp-tcell .frame { position: relative; width: 170px; height: 312px; margin: 0 auto; border-radius: 10px; overflow: hidden; background: #fff; box-shadow: inset 0 0 0 1px #E2E4EA; }
 .wsp-tcell .mini { position: absolute; left: 0; top: 0; width: 360px; height: 740px; transform: scale(0.472) translate(0, -38px); transform-origin: 0 0; pointer-events: none; }
 .wsp-tcell .nm { font-size: 13.5px; font-weight: 600; }
-.wsp-tcell .fl { font-size: 11.5px; color: var(--gray); line-height: 1.45; }
+.wsp-tcell .fl { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
 .wsp-tcell .fl b { color: var(--ink); }
 
 /* ---------- Тест-игрок ---------- */
@@ -133,3 +129,13 @@
   .wsp-builder { grid-template-columns: 264px minmax(0, 1fr) 348px; }
   .wsp-phone { --ps: .82; }
 }
+
+/* §9.2: «Исправить →» flashes the offending block after navigation. */
+.gate-row--fix { width: 100%; background: rgba(231,90,124,.05); border: 1px solid rgba(231,90,124,.35); border-radius: 10px; cursor: pointer; text-align: left; font: inherit; margin: 4px 0; padding: 10px 12px; }
+.gate-row--fix:hover { background: rgba(231,90,124,.09); }
+.gate-row--fix .gate-row__no { color: var(--red); }
+.gate-row--fix .gate-row__go { margin-left: auto; color: var(--blue); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.gate-row--fix.warn { background: rgba(180,83,9,.05); border-color: rgba(180,83,9,.3); }
+.gate-row--fix.warn .gate-row__no { color: var(--amber); }
+@keyframes gate-flash-kf { 0% { box-shadow: 0 0 0 3px rgba(59,113,254,.45); } 100% { box-shadow: 0 0 0 3px rgba(59,113,254,0); } }
+.gate-flash { animation: gate-flash-kf 2.2s ease-out; }

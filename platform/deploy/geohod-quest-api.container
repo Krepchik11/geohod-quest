@@ -52,6 +52,21 @@ Environment=R2_BUCKET=geohod-quest-media
 Environment=R2_PUBLIC_BASE_URL=https://api.quest.geohod.ru/api/media
 Secret=geohod-quest-r2-access-key-id,type=env,target=R2_ACCESS_KEY_ID
 Secret=geohod-quest-r2-secret-access-key,type=env,target=R2_SECRET_ACCESS_KEY
+# Transactional mail (password reset / email confirmation). The FULL smtp url —
+# including login and password — lives in a podman secret because the password
+# is embedded in it. Beget: the login is the whole mailbox address, so its @
+# must be URL-encoded as %40 (likewise any : / @ + in the password). Create it
+# on the VPS with (paste the url, press Enter, Ctrl-D):
+#   podman secret create geohod-quest-smtp-url -
+#   smtps://no-reply%40geohod.ru:<url-encoded-password>@smtp.beget.com:465
+# (or STARTTLS: smtp://no-reply%40geohod.ru:<enc-pw>@smtp.beget.com:587?tls=required)
+# When the secret is absent, mails are logged instead of sent — remove the
+# Secret= line below until the secret exists, or the unit fails to start.
+Secret=geohod-quest-smtp-url,type=env,target=SMTP_URL
+# From header; its mailbox must be one the SMTP account is allowed to send as.
+Environment="MAIL_FROM=GEOHOD QUEST <no-reply@geohod.ru>"
+# Public frontend origin baked into emailed reset/confirm links.
+Environment=FRONTEND_BASE=https://app.quest.geohod.ru
 
 [Service]
 Restart=always

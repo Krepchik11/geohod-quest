@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prata&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:#E9DECC;color:#3E2C2C;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    @keyframes lab-toast{from{transform:translate(-50%,12px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+  </style>
+</helmet>
+<div style="max-width:1040px;margin:0 auto;padding:40px 24px 80px">
+
+  <header style="margin-bottom:26px">
+    <div style="font-family:'Inter';font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#A33B2A">Geohod Quest · Player input</div>
+    <h1 style="font-family:'Prata',serif;font-size:38px;line-height:1.1;margin:10px 0 0;max-width:18ch;text-wrap:balance">Answering without losing the button</h1>
+    <p style="font-size:15.5px;line-height:1.5;color:rgba(62,44,44,.72);max-width:62ch;margin:14px 0 0">When the player taps the answer field, the on‑screen keyboard rises and the «Ответить» button disappears behind it. Below is the live diagnosis, a keyboard simulator, and three ways out — compared under the keyboard, on both platforms.</p>
+  </header>
+
+  <section style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(62,44,44,.16);border:1px solid rgba(62,44,44,.16);border-radius:3px;overflow:hidden;margin-bottom:30px">
+    <div style="background:#FBF1E5;padding:16px 18px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#A33B2A;margin-bottom:7px">The bug</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:rgba(62,44,44,.82)">The submit button is stacked <strong>below</strong> the input in a frame that is <code style="font-family:ui-monospace,monospace;font-size:12px">overflow:hidden</code>. Lift the input above the keyboard and the button goes behind it.</p>
+    </div>
+    <div style="background:#FBF1E5;padding:16px 18px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#A33B2A;margin-bottom:7px">Root cause</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:rgba(62,44,44,.82)"><code style="font-family:ui-monospace,monospace;font-size:12px">interactiveWidget:'resizes-content'</code> is honored on Android, <strong>ignored on iOS</strong>. The layout never resizes for the keyboard, so a control below the field can't survive.</p>
+    </div>
+    <div style="background:#FBF1E5;padding:16px 18px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#A33B2A;margin-bottom:7px">It's a class</div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:rgba(62,44,44,.82)">The same shape hides the «Я на месте» note action and the report sheet's «Отправить». Fix the structure once, not three symptoms.</p>
+    </div>
+  </section>
+
+  <div style="margin-bottom:22px">{{ controls }}</div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:40px;justify-content:center;align-items:flex-start">
+    {{ leftCard }}
+    {{ rightCard }}
+  </div>
+
+  <section style="margin-top:56px">
+    <h2 style="font-family:'Prata',serif;font-size:23px;margin:0 0 18px">How each survives the keyboard</h2>
+    {{ comparison }}
+  </section>
+
+  <section style="margin-top:44px;display:grid;grid-template-columns:1.4fr 1fr;gap:28px;align-items:start">
+    <div style="background:#3E2C2C;color:#FBF1E5;border-radius:4px;padding:24px 26px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#E2A98F;margin-bottom:10px">Recommendation</div>
+      <p style="margin:0 0 12px;font-size:15px;line-height:1.55">Ship <strong style="color:#fff">1a</strong> now. It deletes the root cause — submit no longer lives below the field — with a CSS‑only change plus an <code style="font-family:ui-monospace,monospace;font-size:12.5px;color:#E2A98F">enterKeyHint</code>, and it fixes iOS without the visualViewport edge cases that make <strong style="color:#fff">1b</strong> fragile.</p>
+      <p style="margin:0;font-size:15px;line-height:1.55">Adopt <strong style="color:#fff">1c</strong> as the input <em>system</em> — answer, note and report — where keeping the error and hint in view while typing actually matters. Treat <strong style="color:#fff">1b</strong> as a last resort: the most keyboard‑listener JS for the least gain over 1a.</p>
+    </div>
+    <div style="border:1px solid rgba(62,44,44,.28);border-radius:4px;padding:20px 22px;background:#FBF1E5">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#A33B2A;margin-bottom:12px">The 1a diff, in code</div>
+      <ul style="margin:0;padding-left:18px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.85;color:rgba(62,44,44,.85)">
+        <li>wrap field + submit in a <code>&lt;form onSubmit&gt;</code></li>
+        <li>field + submit on one <code>flex</code> row</li>
+        <li><code>enterKeyHint="send"</code> · <code>inputMode</code></li>
+        <li><code>autoCapitalize/Correct="off"</code></li>
+        <li>guard <code>e.isComposing</code> before submit</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;keyboardHeight&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:270,&quot;min&quot;:230,&quot;max&quot;:330,&quot;step&quot;:5,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Stress test&quot;},&quot;viewportHeight&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:720,&quot;min&quot;:560,&quot;max&quot;:820,&quot;step&quot;:10,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Stress test&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#A33B2A&quot;,&quot;options&quot;:[&quot;#A33B2A&quot;,&quot;#2A6FDB&quot;,&quot;#1F8A5B&quot;,&quot;#7A4FB0&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Look&quot;}}">
+class Component extends DCLogic {
+  state = { platform: 'ios', kbOpen: false, answerState: 'empty', variant: 'a', flash: 0 };
+
+  get H() { return this.props.viewportHeight ?? 720; }
+  get KB() { return this.props.keyboardHeight ?? 270; }
+  get tk() {
+    return {
+      bg: '#FBF1E5', ink: '#3E2C2C', muted: 'rgba(62,44,44,.62)',
+      accent: this.props.accent ?? '#A33B2A', card: '#FFF9F0',
+      line: 'rgba(62,44,44,.28)', coin: '#C99B3F', coinRim: '#8A6A1F',
+    };
+  }
+
+  /* ---- interaction ---- */
+  openKb() { this.setState({ kbOpen: true }); }
+  closeKb() { this.setState({ kbOpen: false }); }
+  doSubmit() { this.setState({ kbOpen: false, flash: Date.now() }); const t = Date.now(); setTimeout(() => this.setState({ flash: 0 }), 1500); }
+
+  /* ---- tiny icons ---- */
+  ico(name, size, color) {
+    const r = React.createElement, t = this.tk; const c = color || t.ink;
+    if (name === 'coin') return r('svg', { width: size, height: size, viewBox: '0 0 20 20' },
+      r('circle', { cx: 10, cy: 10, r: 9, fill: t.coin, stroke: t.coinRim, strokeWidth: 1.6 }),
+      r('circle', { cx: 10, cy: 10, r: 5.4, fill: 'none', stroke: t.coinRim, strokeWidth: 1.2, opacity: .8 }));
+    if (name === 'burger') return r('svg', { width: 20, height: 20, viewBox: '0 0 20 20' },
+      r('rect', { x: 2, y: 4, width: 16, height: 1.8, rx: .9, fill: c }),
+      r('rect', { x: 2, y: 9.1, width: 16, height: 1.8, rx: .9, fill: c }),
+      r('rect', { x: 2, y: 14.2, width: 16, height: 1.8, rx: .9, fill: c }));
+    if (name === 'arrow') return r('svg', { width: size || 18, height: size || 18, viewBox: '0 0 16 16' },
+      r('line', { x1: 2, y1: 8, x2: 12.5, y2: 8, stroke: c, strokeWidth: 1.8, strokeLinecap: 'round' }),
+      r('polyline', { points: '8,3.5 12.5,8 8,12.5', fill: 'none', stroke: c, strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }));
+    if (name === 'warn') return r('svg', { width: size || 14, height: size || 14, viewBox: '0 0 16 16' },
+      r('circle', { cx: 8, cy: 8, r: 7, fill: 'none', stroke: c, strokeWidth: 1.6 }),
+      r('line', { x1: 8, y1: 4.4, x2: 8, y2: 9, stroke: c, strokeWidth: 1.8, strokeLinecap: 'round' }),
+      r('circle', { cx: 8, cy: 11.4, r: 1, fill: c }));
+    if (name === 'check') return r('svg', { width: size || 16, height: size || 16, viewBox: '0 0 16 16' },
+      r('polyline', { points: '2.5,8.5 6.5,12.5 13.5,4', fill: 'none', stroke: c, strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' }));
+    if (name === 'x') return r('svg', { width: size || 16, height: size || 16, viewBox: '0 0 18 18' },
+      r('line', { x1: 4, y1: 4, x2: 14, y2: 14, stroke: c, strokeWidth: 1.8, strokeLinecap: 'round' }),
+      r('line', { x1: 14, y1: 4, x2: 4, y2: 14, stroke: c, strokeWidth: 1.8, strokeLinecap: 'round' }));
+    if (name === 'globe') return r('svg', { width: 18, height: 18, viewBox: '0 0 18 18' },
+      r('circle', { cx: 9, cy: 9, r: 7, fill: 'none', stroke: c, strokeWidth: 1.3 }),
+      r('ellipse', { cx: 9, cy: 9, rx: 3, ry: 7, fill: 'none', stroke: c, strokeWidth: 1.3 }),
+      r('line', { x1: 2, y1: 9, x2: 16, y2: 9, stroke: c, strokeWidth: 1.3 }));
+    return null;
+  }
+
+  /* ---- phone chrome ---- */
+  statusBar() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { position: 'absolute', top: 0, left: 0, right: 0, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', fontSize: 12.5, fontWeight: 600, color: t.ink, zIndex: 6, letterSpacing: '.02em' } },
+      r('span', null, '9:41'),
+      r('span', { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+        r('svg', { width: 17, height: 11, viewBox: '0 0 17 11' }, [3, 7, 11].map((x, i) => r('rect', { key: i, x, y: 8 - i * 2.4, width: 2.4, height: 3 + i * 2.4, rx: .5, fill: t.ink })), r('rect', { key: 'a', x: 14.6, y: 1.4, width: 2.4, height: 7.6, rx: .5, fill: t.ink })),
+        r('svg', { width: 23, height: 12, viewBox: '0 0 23 12' },
+          r('rect', { x: .5, y: .5, width: 19, height: 11, rx: 2.6, fill: 'none', stroke: t.ink, strokeOpacity: .5 }),
+          r('rect', { x: 2, y: 2, width: 14, height: 8, rx: 1.4, fill: t.ink }),
+          r('rect', { x: 20.5, y: 3.6, width: 1.8, height: 4.8, rx: .9, fill: t.ink, fillOpacity: .5 }))));
+  }
+
+  appTopBar() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { position: 'absolute', top: 28, left: 0, right: 0, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', borderBottom: '1px solid ' + t.line, background: t.bg, zIndex: 5 } },
+      r('span', { style: { fontFamily: "'Prata',serif", fontSize: 13, letterSpacing: '.08em', color: t.muted } }, '3 / 7'),
+      r('span', { style: { display: 'flex', alignItems: 'center', gap: 14 } },
+        r('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: 14 } }, this.ico('coin', 18), '24'),
+        r('span', { style: { display: 'inline-flex', width: 36, height: 36, alignItems: 'center', justifyContent: 'center' } }, this.ico('burger', 20))));
+  }
+
+  /* ---- step pieces ---- */
+  mediaPh() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { position: 'relative', height: 200, minHeight: 132, borderRadius: 2, overflow: 'hidden', background: 'repeating-linear-gradient(45deg, rgba(127,127,127,.07) 0 10px, transparent 10px 20px), ' + t.card, boxShadow: '0 0 0 1px ' + t.line, display: 'grid', placeItems: 'center', flex: '0 0 auto' } },
+      r('span', { style: { fontFamily: 'ui-monospace,monospace', fontSize: 11, color: t.muted, letterSpacing: '.04em', border: '1px dashed ' + t.line, padding: '5px 10px', borderRadius: 4, background: t.bg } }, 'комикс-иллюстрация'));
+  }
+  questionText() {
+    const r = React.createElement, t = this.tk;
+    return r('p', { style: { margin: 0, color: t.ink, lineHeight: 1.45, textWrap: 'pretty' } }, 'На фасаде дома № 12 найдите год постройки. Сколько лет зданию в этом году?');
+  }
+  wrongLine() {
+    const r = React.createElement, t = this.tk;
+    return r('p', { style: { margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: t.accent } }, this.ico('warn', 14, t.accent), 'Неверно. Попробуйте ещё раз.');
+  }
+  hintBox() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { border: '1px solid ' + t.coinRim, background: 'color-mix(in oklab, ' + t.coin + ' 14%, ' + t.card + ')', borderRadius: 2, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13.5 } },
+      this.ico('coin', 16),
+      r('div', null, r('b', { style: { fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', display: 'block', marginBottom: 3, color: t.coinRim } }, 'Подсказка'), 'Табличка слева от двери — четыре цифры.'));
+  }
+  wrongChip() {
+    const r = React.createElement, t = this.tk;
+    return r('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: t.accent, fontWeight: 500 } }, this.ico('warn', 13, t.accent), 'Неверно');
+  }
+  hintChip() {
+    const r = React.createElement, t = this.tk;
+    return r('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: t.coinRim, background: 'color-mix(in oklab, ' + t.coin + ' 16%, ' + t.card + ')', border: '1px solid ' + t.coinRim, borderRadius: 2, padding: '4px 8px' } }, this.ico('coin', 13), 'Табличка у двери — 4 цифры');
+  }
+
+  field(opts) {
+    const r = React.createElement, t = this.tk; const o = opts || {};
+    const wrong = o.wrong; const h = o.h || 54;
+    return r('div', {
+      onClick: () => this.openKb(),
+      style: { height: h, padding: '0 16px', borderRadius: 0, border: '2px solid ' + (wrong ? t.accent : (this.state.kbOpen ? t.accent : t.line)), background: t.card, color: t.ink, fontSize: 16, display: 'flex', alignItems: 'center', cursor: 'text', flex: o.flex || 'none', minWidth: 0, boxSizing: 'border-box' },
+    },
+      r('span', { style: { color: t.ink } }, '1947'),
+      this.state.kbOpen ? r('span', { style: { width: 1.5, height: 22, background: t.accent, marginLeft: 1 } }) : null);
+  }
+  submitFull(label) {
+    const r = React.createElement, t = this.tk;
+    return r('div', { onClick: () => this.doSubmit(), style: { height: 56, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: t.ink, color: t.bg, fontFamily: "'Prata',serif", fontSize: 16, letterSpacing: '.03em', cursor: 'pointer' } }, label || 'ответить');
+  }
+  submitSquare() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { onClick: () => this.doSubmit(), style: { width: 56, height: 54, flex: 'none', display: 'grid', placeItems: 'center', background: t.ink, color: t.bg, cursor: 'pointer' } }, this.ico('arrow', 19, t.bg));
+  }
+
+  /* ---- simulated keyboard ---- */
+  kbView() {
+    const r = React.createElement, t = this.tk;
+    const dark = '#aeb3bd', white = '#fff';
+    const key = (label, o) => { o = o || {}; return r('div', { onClick: o.onClick || null, style: { flex: o.flex || '1', display: 'grid', placeItems: 'center', background: o.bg || white, color: o.color || '#1c1c1e', borderRadius: 5, fontSize: o.fs || 16, fontWeight: o.fw || 400, boxShadow: '0 1px 0 rgba(0,0,0,.3)', cursor: 'default', userSelect: 'none', ...(o.style || {}) } }, label); };
+    const row = (kids, extra) => r('div', { style: { display: 'flex', gap: 6, flex: 1, ...(extra || {}) } }, ...kids);
+    const L = s => s.split('').map((ch, i) => key(ch, { key: i }));
+    const r1 = 'йцукенгшщзх', r2 = 'фывапролджэ', r3 = 'ячсмитьбю';
+    return r('div', { key: 'kb', style: { position: 'absolute', left: 0, right: 0, bottom: 0, height: this.KB, background: '#d3d6dc', padding: '0 4px 8px', display: 'flex', flexDirection: 'column', zIndex: 20, boxShadow: '0 -1px 0 rgba(0,0,0,.14)' } },
+      r('div', { style: { height: 40, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-around', fontSize: 14, color: '#3a3a3c' } },
+        r('span', { style: { opacity: .55 } }, '1947'),
+        r('span', { style: { width: 1, height: 22, background: 'rgba(0,0,0,.16)' } }),
+        r('span', { style: { fontWeight: 500 } }, '«1947 год»'),
+        r('span', { style: { width: 1, height: 22, background: 'rgba(0,0,0,.16)' } }),
+        r('span', { style: { opacity: .55 } }, '47')),
+      r('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', gap: 7, paddingTop: 4 } },
+        row(L(r1)),
+        row(L(r2), { padding: '0 14px' }),
+        row([key('⇧', { flex: '1.5', bg: dark, fs: 15 }), ...L(r3), key('⌫', { flex: '1.5', bg: dark, fs: 15 })]),
+        row([
+          key('123', { flex: '1.5', bg: dark, fs: 13 }),
+          key(this.ico('globe', 18, '#1c1c1e'), { flex: '1', bg: dark }),
+          key('пробел', { flex: '5', fs: 14, color: '#3a3a3c' }),
+          key(r('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 } }, 'Отпр.', this.ico('arrow', 15, '#fff')), { flex: '2.2', bg: t.accent, color: '#fff', onClick: () => this.doSubmit() }),
+        ], { flex: 1.15 })));
+  }
+
+  flashToast() {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { position: 'absolute', left: '50%', bottom: 130, transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 9, padding: '11px 18px', borderRadius: 30, background: t.ink, color: t.bg, fontSize: 14, fontWeight: 600, boxShadow: '0 8px 24px rgba(0,0,0,.3)', zIndex: 30, whiteSpace: 'nowrap', animation: 'lab-toast .4s cubic-bezier(.2,.9,.3,1.3)' } }, this.ico('check', 17, t.bg), 'Ответ отправлен');
+  }
+
+  /* ---- the four scenes ---- */
+  sceneContent(variant) {
+    const r = React.createElement, t = this.tk;
+    const open = this.state.kbOpen, plat = this.state.platform, A = this.state.answerState;
+    const H = this.H, KB = this.KB, kbTop = H - KB, CTOP = 80;
+    const showWrong = A !== 'empty', showHint = A === 'hint';
+
+    /* CLOSED resting state for cur / a / c — natural flow, action floated to bottom */
+    if (!open && (variant === 'cur' || variant === 'a' || variant === 'c')) {
+      const inline = variant === 'a';
+      const kids = [this.mediaPh(), this.questionText()];
+      if (showWrong) kids.push(this.wrongLine());
+      if (showHint) kids.push(this.hintBox());
+      kids.push(inline
+        ? r('div', { key: 'z', style: { marginTop: 'auto', paddingBottom: 16, display: 'flex', gap: 8, alignItems: 'stretch' } }, this.field({ flex: '1 1 auto', wrong: showWrong }), this.submitSquare())
+        : r('div', { key: 'z', style: { marginTop: 'auto', paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 } }, this.field({ wrong: showWrong }), this.submitFull('ответить')));
+      return r('div', { style: { position: 'absolute', top: CTOP, left: 0, right: 0, height: H - CTOP, padding: '18px 22px 0', display: 'flex', flexDirection: 'column', gap: 14, overflow: 'hidden', boxSizing: 'border-box' } }, ...kids);
+    }
+
+    /* OPEN state for baseline (cur) and inline (a) — deterministic positions.
+       The keyboard layer (z-20, painted after) covers anything below kbTop, so a
+       control placed under the keyboard is genuinely occluded: that IS the bug. */
+    if (open && (variant === 'cur' || variant === 'a')) {
+      const inline = variant === 'a';
+      const HIN = 54, HBT = 56, GST = 10, GK = 10;
+      const inputTop = (inline || plat === 'ios') ? (kbTop - GK - HIN) : (kbTop - GK - (HIN + GST + HBT));
+      const above = r('div', { key: 'above', style: { position: 'absolute', top: CTOP, left: 0, right: 0, bottom: (H - inputTop + 8), padding: '18px 22px 0', display: 'flex', flexDirection: 'column', gap: 12, justifyContent: 'flex-end', overflow: 'hidden', boxSizing: 'border-box' } },
+        this.questionText(), showWrong ? this.wrongLine() : null, showHint ? this.hintBox() : null);
+      const wrapX = { position: 'absolute', left: 22, right: 22 };
+      let actionEls;
+      if (inline) {
+        actionEls = [r('div', { key: 'row', style: { ...wrapX, top: inputTop, display: 'flex', gap: 8, alignItems: 'stretch' } }, this.field({ flex: '1 1 auto', wrong: showWrong }), this.submitSquare())];
+      } else if (plat === 'ios') {
+        actionEls = [
+          r('div', { key: 'inp', style: { ...wrapX, top: inputTop } }, this.field({ wrong: showWrong })),
+          r('div', { key: 'btn', style: { ...wrapX, top: kbTop } }, this.submitFull('ответить')),
+        ];
+      } else {
+        actionEls = [r('div', { key: 'stk', style: { ...wrapX, top: inputTop, display: 'flex', flexDirection: 'column', gap: GST } }, this.field({ wrong: showWrong }), this.submitFull('ответить'))];
+      }
+      return r(React.Fragment, null, above, ...actionEls);
+    }
+
+    /* 1b — keyboard-tracking docked bar */
+    if (variant === 'b') {
+      const barKids = [];
+      if (open && (showWrong || showHint)) barKids.push(r('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } }, showWrong ? this.wrongChip() : null, showHint ? this.hintChip() : null));
+      barKids.push(r('div', { style: { display: 'flex', gap: 8, alignItems: 'stretch' } }, this.field({ flex: '1 1 auto', wrong: showWrong }), this.submitSquare()));
+      const content = r('div', { style: { position: 'absolute', top: CTOP, left: 0, right: 0, height: (open ? kbTop : H) - CTOP, padding: '18px 22px 0', display: 'flex', flexDirection: 'column', gap: 14, overflow: 'hidden', boxSizing: 'border-box' } },
+        open ? null : this.mediaPh(), this.questionText());
+      const bar = r('div', { style: { position: 'absolute', left: 0, right: 0, bottom: open ? KB : 0, background: t.bg, borderTop: '1px solid ' + t.line, boxShadow: '0 -10px 18px -12px rgba(62,44,44,.4)', padding: '12px 16px 16px', display: 'flex', flexDirection: 'column', gap: 9, zIndex: 8, transition: 'bottom .26s cubic-bezier(.2,.8,.2,1)' } }, ...barKids);
+      return r(React.Fragment, null, content, bar);
+    }
+
+    /* 1c — answer composer (focused mode): the question stays up top for context,
+       and the whole answer dock (chips + field + submit) groups just above the
+       keyboard. The same dock is the pattern for the note and report sheets. */
+    if (variant === 'c' && open) {
+      const chips = (showWrong || showHint) ? r('div', { key: 'chips', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 2 } }, showWrong ? this.wrongChip() : null, showHint ? this.hintChip() : null) : null;
+      return r('div', { style: { position: 'absolute', top: 28, left: 0, right: 0, height: kbTop - 28, background: t.bg, display: 'flex', flexDirection: 'column', zIndex: 9 } },
+        r('div', { style: { height: 52, flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px 0 12px', borderBottom: '1px solid ' + t.line } },
+          r('div', { onClick: () => this.closeKb(), style: { width: 34, height: 34, display: 'grid', placeItems: 'center', cursor: 'pointer' } }, this.ico('x', 17)),
+          r('div', { style: { flex: 1, minWidth: 0, fontFamily: "'Prata',serif", fontSize: 13, letterSpacing: '.06em', textTransform: 'uppercase', color: t.muted } }, 'Ваш ответ'),
+          r('span', { style: { fontFamily: "'Prata',serif", fontSize: 12, color: t.muted, letterSpacing: '.08em' } }, '3 / 7')),
+        r('div', { style: { flex: 1, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' } },
+          r('p', { style: { margin: 0, fontSize: 12, letterSpacing: '.06em', textTransform: 'uppercase', color: t.muted } }, 'Вопрос'),
+          r('p', { style: { margin: 0, color: t.ink, lineHeight: 1.42, fontSize: 15 } }, 'На фасаде дома № 12 найдите год постройки. Сколько лет зданию в этом году?')),
+        r('div', { style: { padding: '12px 22px 16px', flex: 'none', display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid ' + t.line, boxShadow: '0 -10px 18px -12px rgba(62,44,44,.4)' } },
+          chips, this.field({ h: 56, wrong: showWrong }), this.submitFull('ответить')));
+    }
+    return null;
+  }
+
+  phone(variant) {
+    const r = React.createElement, t = this.tk, H = this.H;
+    const composer = variant === 'c' && this.state.kbOpen;
+    const kids = [this.statusBar()];
+    if (!composer) kids.push(this.appTopBar());
+    kids.push(this.sceneContent(variant));
+    if (this.state.kbOpen) kids.push(this.kbView());
+    if (this.state.flash) kids.push(this.flashToast());
+    const screen = r('div', { 'data-screen-label': variant === 'cur' ? 'current' : ('option-1' + variant), style: { position: 'relative', width: 360, height: H, background: t.bg, backgroundImage: 'repeating-linear-gradient(0deg, rgba(62,44,44,.022) 0 1px, transparent 1px 3px)', borderRadius: 26, overflow: 'hidden', color: t.ink, fontFamily: "'Inter',sans-serif", fontSize: 15 } }, ...kids);
+    return r('div', { style: { background: '#211A1A', padding: 8, borderRadius: 34, boxShadow: '0 34px 64px -30px rgba(40,25,20,.62)' } }, screen);
+  }
+
+  /* ---- cards & controls ---- */
+  badge(text, tone) {
+    const r = React.createElement, t = this.tk; const c = tone === 'bad' ? t.accent : t.ink;
+    return r('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: "'Prata',serif", fontSize: 12, letterSpacing: '.14em', textTransform: 'uppercase', color: c } },
+      r('span', { style: { width: 7, height: 7, borderRadius: 9, background: c } }), text);
+  }
+
+  seg(label, opts, value, onPick) {
+    const r = React.createElement, t = this.tk;
+    return r('div', { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+      r('span', { style: { fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.muted } }, label),
+      r('div', { style: { display: 'inline-flex', border: '1.5px solid ' + t.ink, borderRadius: 2, overflow: 'hidden', width: 'fit-content' } },
+        ...opts.map((o, i) => r('div', { key: o.k, onClick: () => onPick(o.k), style: { padding: '9px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer', background: value === o.k ? t.ink : 'transparent', color: value === o.k ? t.bg : t.ink, borderLeft: i ? '1.5px solid ' + t.ink : 'none', whiteSpace: 'nowrap' } }, o.label))));
+  }
+
+  renderVals() {
+    const r = React.createElement, t = this.tk;
+
+    const controls = r('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 26, alignItems: 'flex-end', padding: '18px 20px', background: '#FBF1E5', border: '1px solid ' + t.line, borderRadius: 4 } },
+      this.seg('Platform', [{ k: 'ios', label: 'iOS · visual viewport' }, { k: 'android', label: 'Android · resizes' }], this.state.platform, k => this.setState({ platform: k })),
+      this.seg('Keyboard', [{ k: false, label: 'Down' }, { k: true, label: 'Up' }], this.state.kbOpen, k => this.setState({ kbOpen: k })),
+      this.seg('Answer state', [{ k: 'empty', label: 'Empty' }, { k: 'wrong', label: 'Wrong' }, { k: 'hint', label: 'Wrong + hint' }], this.state.answerState, k => this.setState({ answerState: k })),
+      r('div', { style: { fontSize: 12.5, color: t.muted, paddingBottom: 4, maxWidth: 180, lineHeight: 1.4 } }, 'Tip: tap a field on either phone to raise the keyboard.'));
+
+    const leftCard = r('div', { style: { display: 'flex', flexDirection: 'column', gap: 14, width: 376 } },
+      r('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } }, this.badge('Сейчас · now', 'bad'),
+        r('span', { style: { fontSize: 12, color: t.accent, fontWeight: 600 } }, 'breaks on iOS')),
+      this.phone('cur'),
+      r('p', { style: { margin: 0, fontSize: 13.5, lineHeight: 1.55, color: t.muted, maxWidth: 360 } }, 'Tap the field. On iOS the keyboard lifts the input and pushes «Ответить» behind it — the only way to submit is to dismiss the keyboard and hunt for the button.'));
+
+    const tabs = [{ k: 'a', label: '1a · Inline' }, { k: 'b', label: '1b · Tracking bar' }, { k: 'c', label: '1c · Composer' }];
+    const caps = {
+      a: 'The button shares the field’s row, so it rides the same scroll‑into‑view the browser already performs. The keyboard’s action key becomes «Отпр.». Smallest change, no JS, works on both platforms — this removes the root cause.',
+      b: 'A docked action bar pins itself just above the keyboard via the visualViewport API, independent of page scroll. Precise and always visible — but it’s the most JS, and it must handle iOS keyboard animation and Android’s double‑resize.',
+      c: 'Typing becomes its own mode: the question condenses to one line and the field, submit, and any error/hint dock above the keyboard. One pattern, reused for answers, the «Я на месте» note and the report sheet.',
+    };
+    const rightCard = r('div', { style: { display: 'flex', flexDirection: 'column', gap: 14, width: 376 } },
+      r('div', { style: { display: 'flex', gap: 8 } }, ...tabs.map(tb => r('div', { key: tb.k, onClick: () => this.setState({ variant: tb.k }), style: { padding: '8px 13px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 2, border: '1.5px solid ' + t.ink, background: this.state.variant === tb.k ? t.ink : 'transparent', color: this.state.variant === tb.k ? t.bg : t.ink } }, tb.label))),
+      this.phone(this.state.variant),
+      r('p', { style: { margin: 0, fontSize: 13.5, lineHeight: 1.55, color: t.muted, maxWidth: 360 } }, caps[this.state.variant]));
+
+    /* comparison grid */
+    const cols = ['', 'Current', '1a', '1b', '1c'];
+    const mark = v => v === 'y' ? r('span', { style: { color: '#1F8A5B', fontWeight: 700 } }, '✓') : v === 'n' ? r('span', { style: { color: t.accent, fontWeight: 700 } }, '✗') : v === '~' ? r('span', { style: { color: t.coinRim, fontWeight: 700 } }, '~') : r('span', { style: { color: t.muted } }, v);
+    const rows = [
+      ['iOS — keyboard up', 'n', 'y', 'y', 'y'],
+      ['Android — keyboard up', '~', 'y', 'y', 'y'],
+      ['Error + hint visible while typing', 'n', '~', 'y', 'y'],
+      ['Extra keyboard‑listener JS', 'none', 'none', 'lots', 'some'],
+      ['One pattern for note + report', '—', '~', '~', 'y'],
+    ];
+    const comparison = r('div', { style: { border: '1px solid ' + t.line, borderRadius: 4, overflow: 'hidden' } },
+      r('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', background: t.ink, color: t.bg } },
+        ...cols.map((c, i) => r('div', { key: i, style: { padding: '11px 14px', fontSize: 12, fontWeight: 600, letterSpacing: '.04em', textAlign: i ? 'center' : 'left' } }, c))),
+      ...rows.map((row, ri) => r('div', { key: ri, style: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', background: ri % 2 ? '#FBF1E5' : '#FFF9F0', borderTop: '1px solid ' + t.line } },
+        ...row.map((cell, ci) => r('div', { key: ci, style: { padding: '11px 14px', fontSize: ci ? 14 : 13.5, textAlign: ci ? 'center' : 'left', color: t.ink, fontWeight: ci ? 400 : 500 } }, ci ? mark(cell) : cell)))));
+
+    return { controls, leftCard, rightCard, comparison };
+  }
+}
+</script>
+</body>
+</html>

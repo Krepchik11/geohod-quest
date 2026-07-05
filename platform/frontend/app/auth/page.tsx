@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useCallback, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import Link from 'next/link';
 import SiteHeader from '../SiteHeader';
 import { api } from '../../lib/api';
 import {
@@ -14,86 +15,200 @@ import {
 import { logoutAndReset } from '../../lib/session-actions';
 
 /**
- * Вход / регистрация — email + пароль (owner requirement supersedes the design's
- * Telegram button; card structure, classes and consent checkbox kept per
- * design/auth). Registration is OPTIONAL: anonymous play works on the device id;
- * registering attaches email to the SAME player id, so purchases and coins
- * survive (player-identity spec). No email confirmation. Login on another
- * device adopts the account identity.
+ * Auth v2 (§6.1/§6.2) — ONE email-first form instead of the two-pill toggle.
+ * The server decides the mode: POST /api/auth/identify says whether the email
+ * has an account, then the card shows either «С возвращением!» (login) or
+ * «Создадим аккаунт» (register). The 409 «already registered» class disappears
+ * by construction (a defensive message remains).
+ *
+ * Recovery is R1 (mailed link, §6.2): request → «Письмо ушло» with a resend
+ * cooldown; the link lands on /auth/reset. Registration still attaches the
+ * anonymous player id, so coins and purchases survive — and the form says so.
  */
-type Mode = 'login' | 'register';
+type Step =
+  | { name: 'email' }
+  | { name: 'login'; email: string; confirmed: boolean }
+  | { name: 'register'; email: string }
+  | { name: 'recover'; email: string; confirmed: boolean }
+  | { name: 'recover-sent'; email: string; masked: string };
+
+/** Show/hide toggle for a password field (§6: «Показать» on every field). */
+export function PasswordField({
+  label,
+  value,
+  hint,
+  error,
+  autoComplete,
+  onChange,
+  onEnter,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  error?: React.ReactNode;
+  autoComplete: string;
+  onChange: (v: string) => void;
+  onEnter?: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  return (
+    <label className="af-field">
+      <span className="af-field__label">{label}</span>
+      <span className={`af-field__wrap ${error ? 'is-error' : ''}`}>
+        <input
+          className="af-field__input"
+          type={shown ? 'text' : 'password'}
+          value={value}
+          aria-label={label}
+          autoComplete={autoComplete}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onEnter?.(); }}
+        />
+        <button className="af-field__show" type="button" onClick={() => setShown((v) => !v)}>
+          {shown ? 'Скрыть' : 'Показать'}
+        </button>
+      </span>
+      {hint && !error && <span className="af-field__hint">{hint}</span>}
+      {error && <span className="af-field__error">{error}</span>}
+    </label>
+  );
+}
+
+function EmailChip({ email, onEdit }: { email: string; onEdit: () => void }) {
+  return (
+    <span className="af-chip">
+      {email}
+      <button type="button" onClick={onEdit}>изменить</button>
+    </span>
+  );
+}
+
+/** Resend cooldown for the «Письмо ушло» state (mm:ss). */
+function useCooldown(seconds: number): [number, () => void] {
+  const [left, setLeft] = useState(seconds);
+  useEffect(() => {
+    if (left <= 0) return;
+    const t = setTimeout(() => setLeft((v) => v - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+  return [left, () => setLeft(seconds)];
+}
+
+const RESEND_COOLDOWN_SECS = 60;
 
 export default function AuthPage() {
-  const [mode, setMode] = useState<Mode>('register');
+  const [step, setStep] = useState<Step>({ name: 'email' });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [checked, setChecked] = useState(false);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<React.ReactNode>(null);
   const [loading, setLoading] = useState(false);
   const session: Session | null = useSyncExternalStore(subscribeSession, getSession, () => null);
 
-  // setSession/clearSession notify the shared store themselves, so subscribers
-  // (this page's session view, the header) update without a manual bump.
   const applySession = useCallback((s: Session | null) => {
     if (s) setSession(s);
     else clearSession();
   }, []);
 
-  const submit = async () => {
+  const toEmailStep = () => {
+    setStep({ name: 'email' });
+    setPassword('');
     setError(null);
-    if (mode === 'register' && !checked) {
-      setError('Согласие с политикой обязательно для регистрации');
-      return;
-    }
-    if (!email.trim() || password.length < 8) {
-      setError('Укажите email и пароль не короче 8 символов');
+    setFieldError(null);
+  };
+
+  const identify = async () => {
+    const v = email.trim().toLowerCase();
+    if (v.length < 3 || !v.includes('@')) {
+      setError('Укажите почту — например, anna@gmail.com');
       return;
     }
     setLoading(true);
+    setError(null);
     try {
-      const result =
-        mode === 'register'
-          ? await api.authRegister({ player_id: anonymousPlayerId(), email: email.trim(), password })
-          : await api.authLogin({ email: email.trim(), password });
-      applySession(result);
+      const res = await api.authIdentify(v);
+      setStep(res.exists ? { name: 'login', email: v, confirmed: res.confirmed } : { name: 'register', email: v });
     } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes('409')) setError('Этот email или устройство уже зарегистрированы — попробуйте войти');
-      else if (msg.includes('401')) setError('Неверный email или пароль');
-      else if (msg.includes('400')) setError('Проверьте email и пароль (минимум 8 символов)');
-      else setError('Сервер недоступен — попробуйте позже');
+      const status = (e as { status?: number })?.status;
+      setError(status === 429 ? 'Слишком много попыток — подождите минуту.' : 'Сервер недоступен — попробуйте позже.');
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
-    // Flush, clear+rotate the session, and wipe local play (see session-actions);
-    // clearSession inside it notifies the shared store, flipping this view back to
-    // the login form.
-    void logoutAndReset();
-    setEmail('');
-    setPassword('');
+  const login = async (s: Extract<Step, { name: 'login' }>) => {
+    setLoading(true);
+    setFieldError(null);
+    try {
+      applySession(await api.authLogin({ email: s.email, password }));
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      if (status === 401) {
+        setFieldError(
+          <>Неверный пароль.{' '}
+            <button className="af-inline-link" type="button" onClick={() => setStep({ name: 'recover', email: s.email, confirmed: s.confirmed })}>
+              Восстановить?
+            </button>
+          </>,
+        );
+      } else {
+        setError('Сервер недоступен — попробуйте позже.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const registerAccount = async (s: Extract<Step, { name: 'register' }>) => {
+    if (!consent) {
+      setError('Отметьте согласие с условиями — без него аккаунт создать нельзя.');
+      return;
+    }
+    if (password.length < 8) {
+      setFieldError('Минимум 8 символов');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setFieldError(null);
+    try {
+      applySession(await api.authRegister({ player_id: anonymousPlayerId(), email: s.email, password }));
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      // §6.1.6: this class should be unreachable now — defensive message only.
+      if (status === 409) setError('Эта почта уже занята — вернитесь назад и войдите.');
+      else setError('Сервер недоступен — попробуйте позже.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const recover = async (s: Extract<Step, { name: 'recover' }>) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.authRecover(s.email);
+      setStep({ name: 'recover-sent', email: s.email, masked: res.masked });
+    } catch {
+      setError('Сервер недоступен — попробуйте позже.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (session) {
     return (
-      <div className="site" style={{ background: 'var(--bg-light)' }}>
+      <div className="site" style={{ background: 'var(--bg-subtle)' }}>
         <SiteHeader />
         <div className="auth-wrap">
-          <div className="auth-card card">
-            <div className="auth-title">Вы вошли</div>
-            <p style={{ margin: '12px 0' }}>
-              <b>{session.email}</b>
-              <br />
-              <span style={{ fontSize: 12, opacity: 0.7 }}>
-                Покупки и монеты привязаны к аккаунту — войдите с любого устройства.
-              </span>
-            </p>
+          <div className="af-card card">
+            <h2 className="af-title">Вы вошли</h2>
+            <p className="af-sub"><b>{session.email}</b><br />Покупки и монеты привязаны к аккаунту — войдите с любого устройства.</p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <a className="btn" href="/profile">Мой профиль</a>
-              <a className="btn" href="/my-quests">Мои квесты</a>
-              <button className="btn" type="button" onClick={logout}>Выйти</button>
+              <Link className="btn btn--md" href="/profile">Мой профиль</Link>
+              <Link className="btn btn--md btn--secondary" href="/my-quests">Мои квесты</Link>
+              <button className="btn btn--md btn--quiet" type="button" onClick={() => { void logoutAndReset(); setPassword(''); toEmailStep(); }}>Выйти</button>
             </div>
           </div>
         </div>
@@ -102,71 +217,144 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="site" style={{ background: 'var(--bg-light)' }}>
+    <div className="site" style={{ background: 'var(--bg-subtle)' }}>
       <SiteHeader />
       <div className="auth-wrap">
-        <div className={`auth-card card ${error ? 'show-error' : ''}`}>
-          <button className="auth-card__close" onClick={() => window.history.back()}>✕</button>
-          <div className="auth-title">Вход / регистрация</div>
+        <div className="af-card card">
+          {/* §6.1.5: ✕ always navigates home — never history.back(). */}
+          <Link className="af-close" href="/" aria-label="Закрыть">✕</Link>
 
-          <p style={{ fontSize: 12, opacity: 0.75, margin: '4px 0 12px' }}>
-            Регистрация не обязательна — играть можно анонимно. Аккаунт сохранит покупки
-            и монеты при смене устройства. Email-подтверждение не требуется.
-          </p>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <button
-              className="btn"
-              type="button"
-              style={{ opacity: mode === 'register' ? 1 : 0.55 }}
-              onClick={() => { setMode('register'); setError(null); }}
-            >
-              Регистрация
-            </button>
-            <button
-              className="btn"
-              type="button"
-              style={{ opacity: mode === 'login' ? 1 : 0.55 }}
-              onClick={() => { setMode('login'); setError(null); }}
-            >
-              Вход
-            </button>
-          </div>
-
-          <input
-            className="input"
-            style={{ width: '100%', marginBottom: 8 }}
-            type="email"
-            placeholder="Email"
-            value={email}
-            autoComplete="email"
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            className="input"
-            style={{ width: '100%', marginBottom: 8 }}
-            type="password"
-            placeholder="Пароль (минимум 8 символов)"
-            value={password}
-            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          />
-
-          {mode === 'register' && (
-            <label className="auth-policy" onClick={() => setChecked(!checked)}>
-              <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-              <span className="box" />
-              <span>Я согласен с <a href="#">политикой конфиденциальности</a> и <a href="#">пользовательским соглашением</a></span>
-            </label>
+          {step.name === 'email' && (
+            <>
+              <h2 className="af-title">Вход или регистрация</h2>
+              <p className="af-sub">Аккаунт сохранит покупки, монеты и прогресс при смене устройства.</p>
+              <label className="af-field">
+                <span className="af-field__label">Email</span>
+                <span className="af-field__wrap">
+                  <input
+                    className="af-field__input"
+                    type="email"
+                    value={email}
+                    autoComplete="email"
+                    aria-label="Email"
+                    onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void identify(); }}
+                  />
+                </span>
+              </label>
+              {error && <p className="af-error">{error}</p>}
+              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void identify()}>
+                {loading ? 'Проверяем…' : 'Продолжить'}
+              </button>
+              <p className="af-caption">Играть можно и без аккаунта — вернитесь к этому позже.</p>
+            </>
           )}
-          {error && <div className="auth-error" style={{ display: 'block' }}>{error}</div>}
 
-          <button className="btn" type="button" style={{ width: '100%', marginTop: 12 }} disabled={loading} onClick={() => void submit()}>
-            {loading ? 'Загрузка…' : mode === 'register' ? 'Зарегистрироваться' : 'Войти'}
-          </button>
+          {step.name === 'login' && (
+            <>
+              <h2 className="af-title">С возвращением!</h2>
+              <EmailChip email={step.email} onEdit={toEmailStep} />
+              <PasswordField
+                label="Пароль"
+                value={password}
+                error={fieldError}
+                autoComplete="current-password"
+                onChange={setPassword}
+                onEnter={() => void login(step)}
+              />
+              <button
+                className="af-forgot"
+                type="button"
+                onClick={() => setStep({ name: 'recover', email: step.email, confirmed: step.confirmed })}
+              >
+                Забыли пароль?
+              </button>
+              {error && <p className="af-error">{error}</p>}
+              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void login(step)}>
+                {loading ? 'Входим…' : 'Войти'}
+              </button>
+            </>
+          )}
+
+          {step.name === 'register' && (
+            <>
+              <h2 className="af-title">Создадим аккаунт</h2>
+              <EmailChip email={step.email} onEdit={toEmailStep} />
+              <PasswordField
+                label="Придумайте пароль"
+                value={password}
+                hint="Минимум 8 символов"
+                error={fieldError}
+                autoComplete="new-password"
+                onChange={setPassword}
+                onEnter={() => void registerAccount(step)}
+              />
+              <label className="af-consent">
+                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                <span>
+                  Принимаю <Link href="/terms">пользовательское соглашение</Link> и{' '}
+                  <Link href="/privacy">политику конфиденциальности</Link>
+                </span>
+              </label>
+              {error && <p className="af-error">{error}</p>}
+              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void registerAccount(step)}>
+                {loading ? 'Создаём…' : 'Зарегистрироваться'}
+              </button>
+              <div className="af-note-good">✓ Монеты и покупки этого устройства привяжутся к аккаунту.</div>
+            </>
+          )}
+
+          {step.name === 'recover' && (
+            <>
+              <h2 className="af-title">Восстановление пароля</h2>
+              <p className="af-sub">
+                {step.confirmed
+                  ? 'Пришлём ссылку для смены пароля.'
+                  : 'Почта ещё не подтверждена — сначала отправим письмо-подтверждение, затем восстановление станет доступно.'}
+              </p>
+              <span className="af-chip">{step.email}</span>
+              {error && <p className="af-error">{error}</p>}
+              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void recover(step)}>
+                {loading ? 'Отправляем…' : step.confirmed ? 'Отправить ссылку' : 'Отправить подтверждение'}
+              </button>
+              <button className="af-back" type="button" onClick={() => setStep({ name: 'login', email: step.email, confirmed: step.confirmed })}>
+                ← Назад ко входу
+              </button>
+            </>
+          )}
+
+          {step.name === 'recover-sent' && (
+            <RecoverSent
+              masked={step.masked}
+              onResend={() => void api.authRecover(step.email).catch(() => {})}
+              onBack={toEmailStep}
+            />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function RecoverSent({ masked, onResend, onBack }: { masked: string; onResend: () => void; onBack: () => void }) {
+  const [left, restart] = useCooldown(RESEND_COOLDOWN_SECS);
+  const mm = Math.floor(left / 60);
+  const ss = String(left % 60).padStart(2, '0');
+  return (
+    <div className="af-sent">
+      <span className="af-sent__icon" aria-hidden>✉</span>
+      <b>Письмо ушло</b>
+      <p>Ссылка на {masked} действует 30 минут. Не пришло — проверьте «Спам».</p>
+      {left > 0 ? (
+        <button className="btn btn--quiet btn--sm" type="button" disabled>
+          Отправить ещё раз · {mm}:{ss}
+        </button>
+      ) : (
+        <button className="btn btn--quiet btn--sm" type="button" onClick={() => { onResend(); restart(); }}>
+          Отправить ещё раз
+        </button>
+      )}
+      <button className="af-back" type="button" onClick={onBack}>← Назад ко входу</button>
     </div>
   );
 }

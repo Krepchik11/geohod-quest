@@ -3,24 +3,29 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../SiteHeader';
+import SiteFooter from '../components/SiteFooter';
+import { toast } from '../components/Toaster';
 import { api, type PublishedQuestWire } from '../../lib/api';
-import { projectState } from '../../lib/shared-model';
+import { projectState, latestRating } from '../../lib/shared-model';
 import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } from '../../lib/queue';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
 import { coverSrc } from '../../lib/cover';
 import { currentPlayerId } from '../../lib/identity';
-import InstallPrompt from '../components/InstallPrompt';
 
 /**
- * «Мои квесты» — live collection (P4): published quests × grants × local
- * queue (attempt state) × bundles store (download state). Structure, classes
- * and RU copy per design/myquests/screens.jsx. 100% live data: an unreachable
- * catalog shows an honest error, never fabricated demo rows.
+ * «Мои квесты» v2 (SPEC §4 / My Quests v2.dc.html) — live collection:
+ * published quests × grants × local queue (attempt state) × bundles store
+ * (download state). 100% live data.
  *
- * Player-facing copy (UX): the player only cares "can I play this offline?".
- * Bundle size, "скачан/работает офлайн" wording, and quest version numbers are
- * implementation details — they are NOT shown. Offline-ready collapses to a
- * single "Доступно офлайн" marker; the update prompt is version-number-free.
+ * §4.1: ONE honest CTA per row — «Продолжить» / «Начать» / «Пройти заново».
+ * Restart lives only in the player's start gate (context + «монеты останутся»).
+ * §4.2: offline is a visible quiet-pill button → progress in the same slot →
+ * «⭳ офлайн» cover badge; failures toast with «Повторить» (alert() is banned).
+ * §4.4: no install affordance here at all — the global install lives in
+ * Profile; each quest installs from its own product page, whose quest-scoped
+ * manifest makes the browser prompt for THAT quest's app. A list-side link
+ * can't do better: prompt() needs transient user activation, which navigation
+ * destroys, and installed-state is undetectable across manifest scopes.
  */
 
 interface MqRow {
@@ -33,6 +38,8 @@ interface MqRow {
   pos?: number;
   total?: number;
   attemptDate?: string;
+  /** The player's own finale rating (1–5), 0 = none. */
+  myRating: number;
   version: number;
   publishedSnapshotId: string;
   bundle: BundleRow | null;
@@ -45,9 +52,17 @@ type Collection =
   | { source: 'live'; rows: MqRow[] }
   | { source: 'error' };
 
-function formatDate(iso: string | undefined): string {
+/** §4.1 (2.3): dates carry the year — «28.06.2026». */
+export function formatDate(iso: string | undefined): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/** §4.1: the one honest CTA per state. */
+export function ctaFor(state: MqRow['state']): { label: string; variant: 'primary' | 'secondary'; restart: boolean } {
+  if (state === 'progress') return { label: 'Продолжить', variant: 'primary', restart: false };
+  if (state === 'done') return { label: 'Пройти заново', variant: 'secondary', restart: true };
+  return { label: 'Начать', variant: 'primary', restart: false };
 }
 
 /** Compose one live row from server meta + local queue/bundles state. */
@@ -67,16 +82,14 @@ async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
   return {
     quest_id: meta.quest_id,
     title: meta.name,
-    // Real author values from the catalog; null simply hides that meta item.
     city: meta.city,
     duration: meta.duration,
-    // primary_comic is a full media URL (post-R2) / path / data: URI / id-token;
-    // coverSrc keeps only real image refs so production https covers render (not blank).
     photo: coverSrc(meta.primary_comic),
     state,
     pos: attempt ? Math.min(attempt.last_step_idx + 1, total ?? attempt.last_step_idx + 1) : undefined,
     total,
     attemptDate: attempt?.created_at,
+    myRating: latestRating(facts),
     version: meta.snapshot_version,
     publishedSnapshotId: meta.snapshot_id,
     bundle,
@@ -87,100 +100,53 @@ async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
   };
 }
 
-function MqMeta({ city, duration }: { city: string | null; duration: string | null }) {
-  if (!city && !duration) return null;
-  return (
-    <p className="mq-row__meta">
-      {city && <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-pin--navy.svg)' }} />{city}</span>}
-      {duration && <span><span className="ic" style={{ backgroundImage: 'url(/assets/icons/ic-clock-ring--navy.svg)' }} />{duration}</span>}
-    </p>
-  );
-}
-
 const STAGE_WIDTH: Record<DownloadStage, number> = { fetching: 33, storing: 66, caching: 90, done: 100 };
 
 /**
- * Offline-availability marker. Players only need to know whether the quest
- * works without a connection — not the bundle size or technical status text.
+ * §4.2 offline slot: quiet-pill button → same-slot progress → (cover badge
+ * takes over once the bundle exists). Sizes are honest: bundle byte size is
+ * unknown before the fetch, so the button and the progress line name the
+ * action, not a fabricated number.
  */
 function MqDl({ q, stage, onDownload }: { q: MqRow; stage: DownloadStage | null; onDownload: () => void }) {
   if (stage && stage !== 'done') {
     return (
-      <span className="mq-dl">
-        Скачиваем…
-        <span className="dl-bar" style={{ display: 'block', marginTop: 4 }}><i style={{ width: `${STAGE_WIDTH[stage]}%` }} /></span>
+      <span className="mq-dl mq-dl--busy">
+        <span className="psheet__spinner mq-dl__spin" aria-hidden />
+        <span className="mq-dl__col">
+          <span>Скачиваем для офлайна…</span>
+          <span className="dl-bar"><i style={{ width: `${STAGE_WIDTH[stage]}%` }} /></span>
+        </span>
       </span>
     );
   }
-  if (q.bundle) {
-    return <span className="mq-dl mq-dl--ready">✓ Доступно офлайн</span>;
-  }
+  if (q.bundle) return null; // the «⭳ офлайн» cover badge says it all
   return (
-    <span className="mq-dl">
-      <button className="link" type="button" onClick={onDownload}>Скачать для офлайна</button>
+    <button className="btn btn--quiet mq-dl__btn" type="button" onClick={onDownload}>
+      ⭳ Скачать для офлайна
+    </button>
+  );
+}
+
+function Stars({ n }: { n: number }) {
+  return (
+    <span className="mq-stars" aria-label={`Оценка ${n} из 5`}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <span key={i} className={i <= n ? '' : 'is-off'}>★</span>
+      ))}
     </span>
   );
 }
 
-/**
- * Attempt status. Version numbers are intentionally omitted — players care
- * about progress and last-played date, not which snapshot they are on.
- */
-function MqState({ q }: { q: MqRow }) {
-  if (q.state === 'progress') {
-    return (
-      <div className="mq-state">
-        <span className="mq-badge mq-badge--progress">
-          В процессе{q.pos && q.total ? <> · шаг {q.pos} из {q.total}</> : null}
-        </span>
-        {q.pos && q.total ? (
-          <div className="mq-progressline"><i style={{ width: `${(q.pos / q.total) * 100}%` }} /></div>
-        ) : null}
-        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)}</span>
-      </div>
-    );
-  }
-  if (q.state === 'done') {
-    return (
-      <div className="mq-state">
-        <span className="mq-badge mq-badge--done">Пройден</span>
-        <span className="mq-sub">Попытка от {formatDate(q.attemptDate)}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="mq-state">
-      <span className="mq-badge mq-badge--new">Не начат</span>
-      <span className="mq-sub">Доступ навсегда</span>
-    </div>
-  );
+/** Meta line: place · duration · attempt/completion date (with year). */
+function metaLine(q: MqRow): string[] {
+  const parts = [q.city, q.duration].filter((p): p is string => !!p);
+  if (q.state === 'done' && q.attemptDate) parts.push(`пройден ${formatDate(q.attemptDate)}`);
+  else if (q.state === 'progress' && q.attemptDate) parts.push(`попытка от ${formatDate(q.attemptDate)}`);
+  else if (q.state === 'new') parts.push('не начат');
+  return parts;
 }
 
-function MqActions({ q }: { q: MqRow }) {
-  // The player's start gate (SPEC) confirms continue/restart with «монеты останутся».
-  const open = `/quest/${encodeURIComponent(q.quest_id)}`;
-  if (q.state === 'progress') {
-    return (
-      <div className="mq-actions">
-        <Link className="btn" href={open}>Продолжить</Link>
-        <Link className="btn btn--outline" href={open}>Начать заново</Link>
-      </div>
-    );
-  }
-  if (q.state === 'done') {
-    // A completed quest reopens on its finale; ?restart=1 tells the player to
-    // supersede that attempt and start a fresh run from step 0 (coins are kept).
-    return <div className="mq-actions"><Link className="btn" href={`${open}?restart=1`}>Пройти заново</Link></div>;
-  }
-  return <div className="mq-actions"><Link className="btn" href={open}>Начать</Link></div>;
-}
-
-/**
- * Pure data composition — server lists × local queue/bundles. The catalog and
- * grants load independently: only a CATALOG failure (GET /api/quests, public)
- * shows the labeled demo fallback. If grants alone fail, the collection is simply
- * empty (live, no owned quests) rather than masquerading as "сервер недоступен".
- */
 async function loadCollection(): Promise<Collection> {
   let quests: PublishedQuestWire[];
   try {
@@ -194,8 +160,6 @@ async function loadCollection(): Promise<Collection> {
     const playerId = currentPlayerId();
     ownedIds = new Set(grants.filter((g) => g.player_id === playerId).map((g) => g.quest_id));
   } catch {
-    // Grants unavailable (transient auth/network): show an empty owned collection,
-    // not demo rows — the catalog itself loaded fine.
     ownedIds = new Set();
   }
   const owned = quests.filter((q) => ownedIds.has(q.quest_id));
@@ -207,6 +171,11 @@ export default function MyQuestsPage() {
   const [collection, setCollection] = useState<Collection>({ source: 'loading' });
   const [downloads, setDownloads] = useState<Record<string, DownloadStage | null>>({});
 
+  const reload = useCallback(() => {
+    setCollection({ source: 'loading' });
+    void loadCollection().then(setCollection);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     loadCollection().then((c) => {
@@ -217,19 +186,23 @@ export default function MyQuestsPage() {
     };
   }, []);
 
-  const handleDownload = useCallback(async (questId: string) => {
+  // Function declaration (hoisted) so the toast's «Повторить» can re-invoke it.
+  async function handleDownload(questId: string) {
     setDownloads((d) => ({ ...d, [questId]: 'fetching' }));
     try {
       await downloadBundle(questId, currentPlayerId(), api, (stage) =>
         setDownloads((d) => ({ ...d, [questId]: stage })),
       );
-      setCollection(await loadCollection()); // re-compose (download state + step totals from the bundle)
-    } catch (err) {
-      console.warn('bundle download failed', err);
+      setCollection(await loadCollection()); // re-compose (badge + step totals from the bundle)
+    } catch {
       setDownloads((d) => ({ ...d, [questId]: null }));
-      alert('Не удалось скачать квест — проверьте подключение и доступ.');
+      // §4.2: toast with a retry action, never alert().
+      toast('Не удалось скачать квест — проверьте связь', {
+        label: 'Повторить',
+        onClick: () => void handleDownload(questId),
+      });
     }
-  }, []);
+  }
 
   const rows = collection.source === 'live' ? collection.rows : [];
 
@@ -239,49 +212,82 @@ export default function MyQuestsPage() {
       <main className="co-wrap">
         <h2 className="co-title">Мои квесты</h2>
         <p className="co-sub">Все купленные и полученные квесты. Доступ бессрочный — проходите когда удобно.</p>
-        <InstallPrompt />
 
         {collection.source === 'loading' ? (
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>
         ) : collection.source === 'error' ? (
-          <p className="mq-sub" style={{ marginTop: 24, color: '#B45309' }}>
-            Не удалось загрузить коллекцию — проверьте подключение и обновите страницу.
-          </p>
+          <div className="card mq-empty" style={{ marginTop: 24 }}>
+            <p className="mq-empty__text">Не удалось загрузить коллекцию.<br />Проверьте подключение — и попробуем снова.</p>
+            <button className="btn btn--sm" type="button" onClick={reload}>Повторить</button>
+          </div>
         ) : rows.length === 0 ? (
           <div className="card mq-empty" style={{ marginTop: 24 }}>
-            <div className="ic-ring">?</div>
-            <h3>Пока ни одного квеста</h3>
-            <p>Выберите квест в магазине — после покупки или получения он появится здесь и останется навсегда.</p>
-            <Link className="btn" href="/">В магазин квестов</Link>
+            <p className="mq-empty__text">Пока пусто. Выберите первый квест —<br />и город станет игрой.</p>
+            <Link className="btn btn--sm" href="/#shop">В магазин квестов</Link>
           </div>
         ) : (
           <div className="mq-list">
-            {rows.map((q) => (
-              <div className="card mq-row" key={q.quest_id}>
-                <div
-                  className="mq-row__photo"
-                  style={{ backgroundImage: q.photo ? `url(${q.photo})` : undefined, backgroundColor: q.photo ? undefined : 'var(--navy)' }}
-                >
-                  {!q.photo && <span className="qmark">?</span>}
-                </div>
-                <div className="mq-row__body">
-                  <MqMeta city={q.city} duration={q.duration} />
-                  <h3>{q.title}</h3>
-                  <MqDl q={q} stage={downloads[q.quest_id] ?? null} onDownload={() => void handleDownload(q.quest_id)} />
-                  {q.updateAvailable && (
-                    <div className="mq-version">
-                      Доступно обновление.{' '}
-                      <button className="link" type="button" onClick={() => void handleDownload(q.quest_id)}>Обновить</button>
+            {rows.map((q) => {
+              const open = `/quest/${encodeURIComponent(q.quest_id)}`;
+              const cta = ctaFor(q.state);
+              const stage = downloads[q.quest_id] ?? null;
+              return (
+                <div className="card mq-row" key={q.quest_id} data-state={q.state}>
+                  <div
+                    className="mq-row__photo"
+                    style={{ backgroundImage: q.photo ? `url(${q.photo})` : undefined, backgroundColor: q.photo ? undefined : 'var(--navy)' }}
+                  >
+                    {!q.photo && <span className="qmark">?</span>}
+                    {q.state === 'done' && <span className="mq-cover-badge mq-cover-badge--done">Пройден</span>}
+                    {q.state === 'progress' && <span className="mq-cover-badge mq-cover-badge--progress mq-cover-badge--mobile">В процессе</span>}
+                    {q.state === 'new' && <span className="mq-cover-badge mq-cover-badge--new mq-cover-badge--mobile">Не начат</span>}
+                    {q.bundle && <span className="mq-cover-badge mq-cover-badge--offline">⭳ офлайн</span>}
+                    {q.state === 'progress' && q.pos && q.total && (
+                      <span className="mq-cover-progress" aria-hidden><span style={{ width: `${(q.pos / q.total) * 100}%` }} /></span>
+                    )}
+                  </div>
+
+                  <div className="mq-row__body">
+                    <div className="mq-row__titleline">
+                      <h3>{q.title}</h3>
+                      {q.updateAvailable && (
+                        <button className="mq-update-chip" type="button" onClick={() => void handleDownload(q.quest_id)}>
+                          Доступно обновление · обновить
+                        </button>
+                      )}
                     </div>
-                  )}
+                    <p className="mq-row__meta">
+                      {metaLine(q).map((part, i) => (
+                        <React.Fragment key={i}>{i > 0 && <span className="mq-dot">·</span>}<span>{part}</span></React.Fragment>
+                      ))}
+                    </p>
+                    {q.state === 'progress' && q.pos && q.total && (
+                      <div className="mq-progress">
+                        <div className="mq-progressline"><i style={{ width: `${(q.pos / q.total) * 100}%` }} /></div>
+                        <span className="mq-progress__label">шаг {q.pos} из {q.total}</span>
+                      </div>
+                    )}
+                    {q.state === 'done' && q.myRating > 0 && (
+                      <p className="mq-rating"><span>Ваша оценка</span><Stars n={q.myRating} /></p>
+                    )}
+                    {q.state === 'done' && q.myRating === 0 && (
+                      <p className="mq-rating"><span>без оценки</span></p>
+                    )}
+                    <MqDl q={q} stage={stage} onDownload={() => void handleDownload(q.quest_id)} />
+                  </div>
+
+                  <div className="mq-actions">
+                    <Link className={`btn ${cta.variant === 'secondary' ? 'btn--secondary' : ''}`} href={cta.restart ? `${open}?restart=1` : open}>
+                      {cta.label}
+                    </Link>
+                  </div>
                 </div>
-                <MqState q={q} />
-                <MqActions q={q} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
+      <SiteFooter />
     </div>
   );
 }

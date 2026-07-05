@@ -33,7 +33,20 @@
       "Bash(npx tsc *)",
       "Bash(echo \"eslint exit=$?\")",
       "Bash(echo \"tsc exit=$?\")",
-      "Bash(echo \"LINT-EXIT:$?\")"
+      "Bash(echo \"LINT-EXIT:$?\")",
+      "Bash(ssh geohod *)",
+      "Bash(git --no-pager log --oneline -8)",
+      "Bash(cargo metadata *)",
+      "Bash(timeout 90 podman pull quay.io/minio/minio:latest)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(R2_TEST_ENDPOINT=http://127.0.0.1:9000 cargo test r2_put_then_get_round_trips_via_s3 -- --nocapture)",
+      "Bash(export DATABASE_URL=postgres://geohod:geohod@localhost:5432/geohod)",
+      "Bash(export R2_TEST_ENDPOINT=http://127.0.0.1:9000)",
+      "Bash(git fetch *)",
+      "Bash(curl -fsS https://api.quest.geohod.ru/health)",
+      "Bash(curl -fsS -o /dev/null -w 'status=%{http_code} type=%{content_type} bytes=%{size_download}\\\\n' https://api.quest.geohod.ru/api/media/05443776b9942a93b459fbc9d762d55af25753f86ec89557c7ff4b53e78b222c)",
+      "Bash(curl -s -o /dev/null -w \"status=%{http_code}\\\\n\" \"https://api.quest.geohod.ru/api/media/0000000000000000000000000000000000000000000000000000000000000000\")",
+      "Bash(curl -fsS https://api.quest.geohod.ru/api/quests)"
     ]
   }
 }

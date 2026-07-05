@@ -149,6 +149,60 @@ impl InMemoryFactStore {
         Some(accepted)
     }
 
+    /// §11 reviews v1 — the last quest_rated fact WITH text per attempt of the
+    /// quest, newest attempt first. Timestamped by the attempt (facts carry no
+    /// clock); the UI shows the month.
+    pub fn reviews_for_quest(&self, quest_id: &str, limit: usize) -> Vec<ReviewRow> {
+        let mut attempts: Vec<&AttemptMeta> = self
+            .attempts
+            .values()
+            .filter(|m| m.quest_id == quest_id)
+            .collect();
+        attempts.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+        let mut out = Vec::new();
+        for meta in attempts {
+            let Some(facts) = self.fact_logs.get(&meta.attempt_id) else {
+                continue;
+            };
+            let Some(f) = facts.iter().rev().find(|f| f.kind == FactKind::QuestRated) else {
+                continue;
+            };
+            let text = f.note.as_deref().map(str::trim).unwrap_or("");
+            if text.is_empty() {
+                continue;
+            }
+            let rating = f
+                .submitted_value
+                .as_deref()
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .unwrap_or(0);
+            out.push(ReviewRow {
+                player_id: meta.player_id.clone(),
+                created_at: meta.created_at,
+                rating,
+                text: text.chars().take(500).collect(),
+            });
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out
+    }
+
+    /// §7.4 delete account: drop the player's attempts and their fact logs.
+    pub fn delete_player_data(&mut self, player_id: &str) {
+        let attempt_ids: Vec<String> = self
+            .attempts
+            .iter()
+            .filter(|(_, m)| m.player_id == player_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in attempt_ids {
+            self.attempts.remove(&id);
+            self.fact_logs.remove(&id);
+        }
+    }
+
     /// True if any attempt of (player, quest) already holds a completion bonus.
     fn bonus_already_awarded(&self, player_id: &str, quest_id: &str) -> bool {
         self.attempts
@@ -291,6 +345,17 @@ pub struct PublishedMeta {
     /// Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
     #[serde(default)]
     pub price: Option<i64>,
+    /// Store description from the constructor settings (product page, §3.1).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Content chips derived from the frozen snapshot at publish time; None for
+    /// versions published before the chips existed (the UI hides unknown chips).
+    #[serde(default)]
+    pub pages: Option<u32>,
+    #[serde(default)]
+    pub tasks: Option<u32>,
+    #[serde(default)]
+    pub paid_hints: Option<bool>,
 }
 
 /// In-memory grants + published-quest store. `snapshots` holds the frozen snapshot
@@ -389,6 +454,24 @@ impl InMemoryGrantStore {
         self.grants.values().cloned().collect()
     }
 
+    /// Distinct grant holders per quest — the honest «{N} купивших» number the
+    /// editor's status-change confirm shows. Counts only, no player ids leak.
+    pub fn buyers_by_quest(&self) -> std::collections::HashMap<String, usize> {
+        let mut m: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for g in self.grants.values() {
+            *m.entry(g.quest_id.clone()).or_default() += 1;
+        }
+        m
+    }
+
+    /// §7.4 delete account: purge every grant of the player. Returns the count
+    /// (the confirm dialog shows honest numbers).
+    pub fn delete_grants_for_player(&mut self, player_id: &str) -> usize {
+        let before = self.grants.len();
+        self.grants.retain(|(p, _), _| p != player_id);
+        before - self.grants.len()
+    }
+
     /// Grants owned by a single player — the only grant view safe to return to a
     /// player-scoped request (no cross-player leakage).
     pub fn grants_for_player(&self, player_id: &str) -> Vec<AccessGrant> {
@@ -400,6 +483,19 @@ impl InMemoryGrantStore {
     }
 }
 
+/// One single-use auth token (password reset / email confirmation), stored by
+/// sha256 hash — a leaked store never yields working links.
+#[derive(Clone, Debug)]
+pub struct AuthTokenRecord {
+    pub player_id: String,
+    pub kind: String,
+    pub expires_at: u64,
+    pub used_at: Option<u64>,
+}
+
+pub const TOKEN_KIND_RESET: &str = "reset";
+pub const TOKEN_KIND_CONFIRM: &str = "confirm";
+
 /// In-memory identity store: registrations (the `users` table) + opaque sessions.
 /// A record exists ONLY for registered users — anonymous ids have no row by
 /// design (registration is metadata on an existing id, never a migration).
@@ -408,6 +504,8 @@ pub struct InMemoryAuthStore {
     users: HashMap<String, UserRecord>,
     email_index: HashMap<String, String>,
     sessions: HashMap<String, String>,
+    /// Single-use auth tokens keyed by sha256(token): reset/confirm (§6).
+    auth_tokens: HashMap<String, AuthTokenRecord>,
 }
 
 impl InMemoryAuthStore {
@@ -437,6 +535,7 @@ impl InMemoryAuthStore {
             display_name,
             role: crate::auth::DEFAULT_ROLE.to_string(),
             created_at: now_secs(),
+            email_confirmed_at: None,
         };
         self.users.insert(
             player_id.to_string(),
@@ -480,8 +579,8 @@ impl InMemoryAuthStore {
     pub fn list_users(&self) -> Vec<UserAccount> {
         let mut accounts: Vec<UserAccount> =
             self.users.values().map(|r| r.account.clone()).collect();
-        accounts.sort_by(|a, b| a.player_id.cmp(&b.player_id));
-        accounts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        accounts.sort_by_key(|a| a.player_id.clone());
+        accounts.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         accounts
     }
 
@@ -495,6 +594,78 @@ impl InMemoryAuthStore {
     pub fn get_session(&self, token: &str) -> Option<String> {
         self.sessions.get(token).cloned()
     }
+
+    /// §7.3 «Изменить имя» — set/clear the display name.
+    pub fn set_display_name(
+        &mut self,
+        player_id: &str,
+        display_name: Option<String>,
+    ) -> Result<UserAccount, AppError> {
+        let record = self
+            .users
+            .get_mut(player_id)
+            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
+        record.account.display_name = display_name;
+        Ok(record.account.clone())
+    }
+
+    /// Replace the account's password hash (§6.2 reset / §7.3 change).
+    pub fn set_password(&mut self, player_id: &str, password_hash: &str) -> Result<(), AppError> {
+        let record = self
+            .users
+            .get_mut(player_id)
+            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
+        record.password_hash = password_hash.to_string();
+        Ok(())
+    }
+
+    /// Mark the email confirmed (§6.3); idempotent — the first timestamp wins.
+    pub fn confirm_email(&mut self, player_id: &str, at: u64) -> Result<UserAccount, AppError> {
+        let record = self
+            .users
+            .get_mut(player_id)
+            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
+        if record.account.email_confirmed_at.is_none() {
+            record.account.email_confirmed_at = Some(at);
+        }
+        Ok(record.account.clone())
+    }
+
+    /// Store a single-use token (hashed by the caller).
+    pub fn create_auth_token(&mut self, token_hash: &str, rec: AuthTokenRecord) {
+        self.auth_tokens.insert(token_hash.to_string(), rec);
+    }
+
+    /// Consume a token: valid kind + not expired + unused → marks used and
+    /// returns the player id; anything else is None (one opaque failure).
+    pub fn consume_auth_token(&mut self, token_hash: &str, kind: &str, now: u64) -> Option<String> {
+        let rec = self.auth_tokens.get_mut(token_hash)?;
+        if rec.kind != kind || rec.used_at.is_some() || rec.expires_at < now {
+            return None;
+        }
+        rec.used_at = Some(now);
+        Some(rec.player_id.clone())
+    }
+
+    /// §7.4 delete account: user row, email index, sessions and tokens.
+    pub fn delete_user(&mut self, player_id: &str) -> bool {
+        let Some(record) = self.users.remove(player_id) else {
+            return false;
+        };
+        self.email_index.remove(&record.account.email);
+        self.sessions.retain(|_, p| p != player_id);
+        self.auth_tokens.retain(|_, r| r.player_id != player_id);
+        true
+    }
+}
+
+/// §11: one player review row (text attached to the finale rating).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReviewRow {
+    pub player_id: String,
+    pub created_at: u64,
+    pub rating: i64,
+    pub text: String,
 }
 
 /// Fact/attempt storage backend, selected at startup. Both variants expose the
@@ -515,6 +686,29 @@ impl FactStores {
     ) -> Result<std::sync::MutexGuard<'_, InMemoryFactStore>, AppError> {
         m.lock()
             .map_err(|e| AppError::Internal(anyhow::anyhow!("store lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryFactStore::reviews_for_quest`].
+    pub async fn reviews_for_quest(
+        &self,
+        quest_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ReviewRow>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.reviews_for_quest(quest_id, limit)),
+            Self::Postgres(pg) => pg.reviews_for_quest(quest_id, limit).await,
+        }
+    }
+
+    /// See [`InMemoryFactStore::delete_player_data`].
+    pub async fn delete_player_data(&self, player_id: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.delete_player_data(player_id);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.delete_player_data(player_id).await,
+        }
     }
 
     /// See [`InMemoryFactStore::create_attempt`].
@@ -692,6 +886,70 @@ impl AuthStores {
         }
     }
 
+    /// See [`InMemoryAuthStore::set_display_name`].
+    pub async fn set_display_name(
+        &self,
+        player_id: &str,
+        display_name: Option<String>,
+    ) -> Result<UserAccount, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_display_name(player_id, display_name),
+            Self::Postgres(pg) => pg.set_display_name(player_id, display_name).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::set_password`].
+    pub async fn set_password(&self, player_id: &str, password_hash: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_password(player_id, password_hash),
+            Self::Postgres(pg) => pg.set_password(player_id, password_hash).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::confirm_email`].
+    pub async fn confirm_email(&self, player_id: &str, at: u64) -> Result<UserAccount, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.confirm_email(player_id, at),
+            Self::Postgres(pg) => pg.confirm_email(player_id, at).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::create_auth_token`].
+    pub async fn create_auth_token(
+        &self,
+        token_hash: &str,
+        rec: AuthTokenRecord,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.create_auth_token(token_hash, rec);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.create_auth_token(token_hash, rec).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::consume_auth_token`].
+    pub async fn consume_auth_token(
+        &self,
+        token_hash: &str,
+        kind: &str,
+        now: u64,
+    ) -> Result<Option<String>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.consume_auth_token(token_hash, kind, now)),
+            Self::Postgres(pg) => pg.consume_auth_token(token_hash, kind, now).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::delete_user`].
+    pub async fn delete_user(&self, player_id: &str) -> Result<bool, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_user(player_id)),
+            Self::Postgres(pg) => pg.delete_user(player_id).await,
+        }
+    }
+
     /// See [`InMemoryAuthStore::get_session`].
     pub async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
         match self {
@@ -779,6 +1037,24 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_all_grants()),
             Self::Postgres(pg) => pg.list_all_grants().await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::buyers_by_quest`].
+    pub async fn buyers_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, usize>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.buyers_by_quest()),
+            Self::Postgres(pg) => pg.buyers_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::delete_grants_for_player`].
+    pub async fn delete_grants_for_player(&self, player_id: &str) -> Result<usize, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_grants_for_player(player_id)),
+            Self::Postgres(pg) => pg.delete_grants_for_player(player_id).await,
         }
     }
 
@@ -911,8 +1187,8 @@ impl InMemoryConstructorStore {
             .filter(|q| q.author_id == author_id)
             .map(|q| q.summary())
             .collect();
-        v.sort_by(|a, b| a.quest_id.cmp(&b.quest_id));
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|q| q.quest_id.clone());
+        v.sort_by_key(|q| std::cmp::Reverse(q.created_at));
         v
     }
 
@@ -931,10 +1207,9 @@ impl InMemoryConstructorStore {
         body: serde_json::Value,
         updated_at: u64,
     ) -> Result<ConstructorQuestSummary, AppError> {
-        let q = self
-            .quests
-            .get_mut(quest_id)
-            .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+        let q = self.quests.get_mut(quest_id).ok_or_else(|| {
+            AppError::NotFound(format!("constructor quest '{quest_id}' not found"))
+        })?;
         q.name = name.to_string();
         q.cover = cover;
         q.steps_count = steps_count;
@@ -963,8 +1238,8 @@ impl InMemoryConstructorStore {
     /// scoped. Editors and the ops-token path keep the per-author list.
     pub fn list_all_summaries(&self) -> Vec<ConstructorQuestSummary> {
         let mut v: Vec<_> = self.quests.values().map(|q| q.summary()).collect();
-        v.sort_by(|a, b| a.quest_id.cmp(&b.quest_id));
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|q| q.quest_id.clone());
+        v.sort_by_key(|q| std::cmp::Reverse(q.created_at));
         v
     }
 
@@ -1312,6 +1587,10 @@ mod grant_tests {
             city: None,
             duration: None,
             price: None,
+            description: None,
+            pages: None,
+            tasks: None,
+            paid_hints: None,
         }
     }
 
@@ -1444,7 +1723,10 @@ mod constructor_tests {
         assert_eq!(full.cover.as_deref(), Some("cover.png"));
         assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
 
-        assert!(s.save_body("ghost", "x", None, 0, serde_json::json!({}), 0).is_err());
+        assert!(
+            s.save_body("ghost", "x", None, 0, serde_json::json!({}), 0)
+                .is_err()
+        );
     }
 
     #[test]

@@ -23,6 +23,13 @@ pub struct AppConfig {
     /// Media-storage backend: Cloudflare R2 in production, an in-process store
     /// otherwise (tests / local dev).
     pub media: MediaConfig,
+    /// Transactional-mail SMTP url (`smtps://user:pass@host[:port]`); None →
+    /// mails are logged instead of sent (dev/staging).
+    pub smtp_url: Option<String>,
+    /// From address for transactional mail.
+    pub mail_from: String,
+    /// Public frontend origin used in emailed links (reset/confirm).
+    pub frontend_base: String,
 }
 
 impl AppConfig {
@@ -60,12 +67,27 @@ impl AppConfig {
 
         let media = MediaConfig::from_env(port);
 
+        let smtp_url = std::env::var("SMTP_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let mail_from = std::env::var("MAIL_FROM")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "GEOHOD QUEST <no-reply@geohod.ru>".to_string());
+        let frontend_base = std::env::var("FRONTEND_BASE")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "http://localhost:3000".to_string());
+
         Ok(Self {
             addr,
             version: env!("CARGO_PKG_VERSION"),
             admin_token,
             cors_allowed_origins,
             media,
+            smtp_url,
+            mail_from,
+            frontend_base,
         })
     }
 }

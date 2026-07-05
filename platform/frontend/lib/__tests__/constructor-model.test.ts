@@ -87,6 +87,20 @@ describe('computeGates', () => {
     expect(texts).toContain('Первая страница должна быть «Первый экран»');
   });
 
+  it('tags page errors with the field to focus (§9.2 «Исправить →»)', () => {
+    const q = quest();
+    const task = newStep('task_answer');
+    task.acceptable = [''];
+    task.images.task = null;
+    task.nav = { ...task.nav, on: true, lat: '', lng: '' };
+    q.steps = [q.steps[0], task, q.steps[1]];
+    const errs = computeGates(q).errors;
+    const fieldOf = (frag: string) => errs.find((e) => e.text.includes(frag))?.field;
+    expect(fieldOf('нет комикса')).toBe('comic');
+    expect(fieldOf('список ответов пуст')).toBe('answers');
+    expect(fieldOf('координаты не заданы')).toBe('nav');
+  });
+
   it('errors when there is no terminal «Поздравление»', () => {
     const q = quest();
     q.steps = q.steps.filter((s) => s.template !== 'congrats');

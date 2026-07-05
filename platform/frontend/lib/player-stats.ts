@@ -27,6 +27,8 @@ import { getFacts, listAttempts } from './queue';
 export interface AttemptLog {
   quest_id: string;
   facts: Fact[];
+  /** ISO date the attempt started (profile shows it as the completion date). */
+  created_at?: string;
 }
 
 /** The minimal stats shape shared by the local fold and the server response. */
@@ -78,9 +80,36 @@ export async function gatherLocalAttemptLogs(): Promise<AttemptLog[]> {
   const logs: AttemptLog[] = [];
   for (const a of attempts) {
     const facts = (await getFacts(a.attempt_key)).map((r) => r.fact);
-    logs.push({ quest_id: a.quest_id, facts });
+    logs.push({ quest_id: a.quest_id, facts, created_at: a.created_at });
   }
   return logs;
+}
+
+/** §7.2 — per-quest completion details: date of the completing attempt and the
+ *  player's own finale rating from that attempt's log (0 = «без оценки»). */
+export interface CompletedQuestDetail {
+  quest_id: string;
+  completed_at: string | null;
+  rating: number;
+}
+
+export function completedQuestDetails(logs: AttemptLog[]): Record<string, CompletedQuestDetail> {
+  const out: Record<string, CompletedQuestDetail> = {};
+  for (const log of logs) {
+    if (!log.facts.some((f) => f.type === 'attempt_completed')) continue;
+    const rated = [...log.facts].reverse().find((f) => f.type === 'quest_rated');
+    const rating = rated ? Math.max(0, Math.min(5, Math.round(Number(rated.submitted_value) || 0))) : 0;
+    // Newest completing attempt wins (a replay updates the date and rating).
+    const prev = out[log.quest_id];
+    if (!prev || (log.created_at ?? '') >= (prev.completed_at ?? '')) {
+      out[log.quest_id] = {
+        quest_id: log.quest_id,
+        completed_at: log.created_at ?? null,
+        rating,
+      };
+    }
+  }
+  return out;
 }
 
 /**

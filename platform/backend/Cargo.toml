@@ -7,9 +7,12 @@ edition = "2024"
 anyhow = "1.0.102"
 argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["macros"] }
+base64 = "0.22"
 bytes = "1"
 dotenvy = "0.15.7"
 hex = "0.4.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
 # S3-compatible client for Cloudflare R2 media storage (rust-s3; lib name `s3`).
 # rustls(ring) to match sqlx's TLS stack (no native-tls / aws-lc-rs / cmake).
 rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustls-tls"] }

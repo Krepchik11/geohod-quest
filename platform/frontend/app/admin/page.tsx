@@ -50,6 +50,8 @@ export default function AdminUsersPage() {
 
   const [query, setQuery] = useState('');
   const [activeRoles, setActiveRoles] = useState<Role[]>([]);
+  // §10.2: classic pagination — 25 per page, reset on any filter change.
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftRole, setDraftRole] = useState<Role | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -115,6 +117,13 @@ export default function AdminUsersPage() {
     [users, activeRoles, query],
   );
   const hint = useMemo(() => detectHint(query), [query]);
+  const PER_PAGE = 25;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const safePage = Math.min(page, pageCount);
+  const pageItems = filtered.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE);
+  const rangeLabel = filtered.length === 0
+    ? '0 из 0'
+    : `${(safePage - 1) * PER_PAGE + 1}–${Math.min(safePage * PER_PAGE, filtered.length)} из ${filtered.length}`;
   const selected = useMemo(
     () => users.find((u) => u.id === selectedId) ?? null,
     [users, selectedId],
@@ -130,10 +139,12 @@ export default function AdminUsersPage() {
     setSelectedId(null);
     setConfirmOpen(false);
   };
-  const toggleRole = (role: Role) =>
+  const toggleRole = (role: Role) => {
+    setPage(1); // §10.2: filters reset pagination
     setActiveRoles((roles) =>
       roles.includes(role) ? roles.filter((r) => r !== role) : [...roles, role],
     );
+  };
 
   const applyRole = useCallback(async () => {
     if (!selected || !draftRole) return;
@@ -202,8 +213,147 @@ export default function AdminUsersPage() {
       <div className="au-frame">
         <AdminHeader initial={meInitial} />
 
-        {selected ? (
-          <main className="au-main">
+        {/* §10.3: ≥1024px master-detail — list left (460px, selected row gets a
+            blue bar), profile right; below 1024 the panes swap like screens. */}
+        <div className={`au-split${selected ? ' has-selected' : ''}`}>
+          <main className="au-main au-pane au-pane--list">
+            <div>
+              <div className="au-eyebrow">УПРАВЛЕНИЕ</div>
+              <h1 className="au-title">Пользователи</h1>
+            </div>
+
+            <div className="au-search-row">
+              <div className="au-search">
+                <span className="au-search-icon" aria-hidden />
+                <input
+                  type="text"
+                  className="au-search-input"
+                  value={query}
+                  onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                  placeholder="Почта или имя…"
+                  aria-label="Поиск пользователей"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {query.length > 0 && (
+                  <button
+                    type="button"
+                    className="au-clear"
+                    aria-label="Очистить"
+                    onClick={() => { setQuery(''); setPage(1); }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {hint && (
+              <div className="au-hint">
+                <span className="au-hint-label">РАСПОЗНАНО</span>
+                <span className="au-hint-chip">{hint}</span>
+              </div>
+            )}
+
+            <div className="au-roles">
+              <span className="au-roles-label">РОЛИ</span>
+              {ROLE_ORDER.map((role) => (
+                <button
+                  type="button"
+                  key={role}
+                  className={`au-chip${activeRoles.includes(role) ? ' is-on' : ''}`}
+                  aria-pressed={activeRoles.includes(role)}
+                  onClick={() => toggleRole(role)}
+                >
+                  {ROLE_LABELS[role]}
+                </button>
+              ))}
+            </div>
+
+            {listError === 'none' && <div className="au-count">{pluralizeUsers(filtered.length)} · новые сверху</div>}
+
+            {listError !== 'none' ? (
+              <div className="au-empty">
+                <div className="au-empty-mark" aria-hidden>
+                  !
+                </div>
+                <div className="au-empty-title">
+                  {listError === 'auth' ? 'Сессия устарела' : 'Не удалось загрузить'}
+                </div>
+                <div className="au-empty-text">
+                  {listError === 'auth'
+                    ? 'Войдите снова под учётной записью администратора.'
+                    : 'Проверьте соединение и обновите страницу.'}
+                </div>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="au-empty">
+                <div className="au-empty-mark" aria-hidden>
+                  ∅
+                </div>
+                <div className="au-empty-title">Никого не нашлось</div>
+                <div className="au-empty-text">Измените запрос или снимите фильтр по ролям.</div>
+              </div>
+            ) : (
+              pageItems.map((u) => (
+                <div
+                  key={u.id}
+                  className={`au-card${selected?.id === u.id ? ' is-selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openUser(u)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openUser(u);
+                    }
+                  }}
+                >
+                  <div className="au-card-head">
+                    <div className="au-card-main">
+                      <div className="au-card-name">{titleOf(u)}</div>
+                      <div className="au-card-meta">вступил {formatJoined(u.createdAt)}</div>
+                    </div>
+                    <span className={`au-badge au-badge--${u.role}`}>{ROLE_LABELS[u.role]}</span>
+                    <span className="au-chev" aria-hidden>
+                      ›
+                    </span>
+                  </div>
+                  <div className="au-contacts">
+                    {contactsOf(u).map((c) => (
+                      <div className="au-contact" key={c.glyph + c.value}>
+                        <span className="au-contact-glyph" aria-hidden>
+                          {c.glyph}
+                        </span>
+                        <span className="au-contact-val">{c.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+
+            {listError === 'none' && filtered.length > PER_PAGE && (
+              <div className="au-pager">
+                <span className="au-pager__range">{rangeLabel}</span>
+                <div className="au-pager__pages">
+                  {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`au-pager__page${n === safePage ? ' is-on' : ''}`}
+                      onClick={() => setPage(n)}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </main>
+          <aside className="au-main au-pane au-pane--detail">
+            {selected ? (
+              <>
             <button type="button" className="au-back" onClick={back}>
               <span className="au-back-arrow" aria-hidden>
                 ‹
@@ -264,126 +414,12 @@ export default function AdminUsersPage() {
             >
               {canSave ? 'Сохранить роль' : 'Текущая роль'}
             </button>
-          </main>
-        ) : (
-          <main className="au-main">
-            <div>
-              <div className="au-eyebrow">УПРАВЛЕНИЕ</div>
-              <h1 className="au-title">Пользователи</h1>
-            </div>
-
-            <div className="au-search-row">
-              <div className="au-search">
-                <span className="au-search-icon" aria-hidden />
-                <input
-                  type="text"
-                  className="au-search-input"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="почта, telegram или телефон"
-                  aria-label="Поиск пользователей"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {query.length > 0 && (
-                  <button
-                    type="button"
-                    className="au-clear"
-                    aria-label="Очистить"
-                    onClick={() => setQuery('')}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {hint && (
-              <div className="au-hint">
-                <span className="au-hint-label">РАСПОЗНАНО</span>
-                <span className="au-hint-chip">{hint}</span>
-              </div>
-            )}
-
-            <div className="au-roles">
-              <span className="au-roles-label">РОЛИ</span>
-              {ROLE_ORDER.map((role) => (
-                <button
-                  type="button"
-                  key={role}
-                  className={`au-chip${activeRoles.includes(role) ? ' is-on' : ''}`}
-                  aria-pressed={activeRoles.includes(role)}
-                  onClick={() => toggleRole(role)}
-                >
-                  {ROLE_LABELS[role]}
-                </button>
-              ))}
-            </div>
-
-            {listError === 'none' && <div className="au-count">{pluralizeUsers(filtered.length)}</div>}
-
-            {listError !== 'none' ? (
-              <div className="au-empty">
-                <div className="au-empty-mark" aria-hidden>
-                  !
-                </div>
-                <div className="au-empty-title">
-                  {listError === 'auth' ? 'Сессия устарела' : 'Не удалось загрузить'}
-                </div>
-                <div className="au-empty-text">
-                  {listError === 'auth'
-                    ? 'Войдите снова под учётной записью администратора.'
-                    : 'Проверьте соединение и обновите страницу.'}
-                </div>
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="au-empty">
-                <div className="au-empty-mark" aria-hidden>
-                  ∅
-                </div>
-                <div className="au-empty-title">Никого не нашлось</div>
-                <div className="au-empty-text">Измените запрос или снимите фильтр по ролям.</div>
-              </div>
+          </>
             ) : (
-              filtered.map((u) => (
-                <div
-                  key={u.id}
-                  className="au-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openUser(u)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      openUser(u);
-                    }
-                  }}
-                >
-                  <div className="au-card-head">
-                    <div className="au-card-main">
-                      <div className="au-card-name">{titleOf(u)}</div>
-                      <div className="au-card-meta">вступил {formatJoined(u.createdAt)}</div>
-                    </div>
-                    <span className={`au-badge au-badge--${u.role}`}>{ROLE_LABELS[u.role]}</span>
-                    <span className="au-chev" aria-hidden>
-                      ›
-                    </span>
-                  </div>
-                  <div className="au-contacts">
-                    {contactsOf(u).map((c) => (
-                      <div className="au-contact" key={c.glyph + c.value}>
-                        <span className="au-contact-glyph" aria-hidden>
-                          {c.glyph}
-                        </span>
-                        <span className="au-contact-val">{c.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
+              <div className="au-detail-empty">Выберите пользователя из списка</div>
             )}
-          </main>
-        )}
+          </aside>
+        </div>
 
         {confirmOpen && selected && draftRole && (
           <div
