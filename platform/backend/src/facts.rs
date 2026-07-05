@@ -218,7 +218,9 @@ pub struct PerVersionStats {
 
 /// Parse a `quest_rated` fact's 1–5 score from its `submitted_value`.
 fn parse_rating(f: &Fact) -> Option<i64> {
-    f.submitted_value.as_deref().and_then(|s| s.trim().parse().ok())
+    f.submitted_value
+        .as_deref()
+        .and_then(|s| s.trim().parse().ok())
 }
 
 /// Pure per-version stats fold over the logs of attempts bound to `snap`.
@@ -600,7 +602,10 @@ mod tests {
 
         let stats = project_version_stats("snap-v1", &logs, &snaps, 3);
         assert_eq!(stats.rating_count, 2, "two attempts left a rating");
-        assert_eq!(stats.rating_avg, 4.5, "(5 + 4) / 2 — last rating per attempt");
+        assert_eq!(
+            stats.rating_avg, 4.5,
+            "(5 + 4) / 2 — last rating per attempt"
+        );
         // A rating must never leak into balance/state projections.
         assert!(project_state(&logs["att-1"]).completed_steps.contains(&3));
         assert_eq!(project_balance(&logs["att-1"]), 0);

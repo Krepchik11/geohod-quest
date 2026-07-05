@@ -6,6 +6,7 @@ import {
   plural,
   serializeDraft,
   type CtorQuest,
+  type GateField,
   type Gates,
 } from '../../lib/constructor-model';
 
@@ -13,6 +14,7 @@ interface ChecklistRow {
   st: 'ok' | 'err' | 'warn';
   text: string;
   pageId?: string | null;
+  field?: GateField;
 }
 
 /** Чек-лист: зелёные строки за пройденные группы гейтов + все ошибки/предупреждения. */
@@ -32,8 +34,8 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   if (navs.length && navs.every((s) => Number.isFinite(parseFloat(s.nav.lat)) && Number.isFinite(parseFloat(s.nav.lng)))) {
     rows.push({ st: 'ok', text: `Навигатор: координаты заданы у всех включённых точек (${navs.length})` });
   }
-  gates.errors.forEach((e) => rows.push({ st: 'err', text: e.text, pageId: e.pageId }));
-  gates.warnings.forEach((w) => rows.push({ st: 'warn', text: w.text, pageId: w.pageId }));
+  gates.errors.forEach((e) => rows.push({ st: 'err', text: e.text, pageId: e.pageId, field: e.field }));
+  gates.warnings.forEach((w) => rows.push({ st: 'warn', text: w.text, pageId: w.pageId, field: w.field }));
   try {
     serializeDraft(quest);
     rows.push({ st: 'ok', text: 'Dry-run сериализации: снапшот собирается без ошибок' });
@@ -60,8 +62,8 @@ function PublishModal({ nextN, size, onCancel, onConfirm }: {
         </ul>
         <p className="note">Бандл версии {nextN} (~{size}) соберётся и станет доступен для скачивания сразу после публикации.</p>
         <div className="row">
-          <button className="btn-ui btn-ui--outline" type="button" onClick={onCancel}>Отмена</button>
-          <button className="btn-ui" type="button" onClick={onConfirm}>Опубликовать v{nextN}</button>
+          <button className="btn btn--secondary btn--sm" type="button" onClick={onCancel}>Отмена</button>
+          <button className="btn btn--md" type="button" onClick={onConfirm}>Опубликовать v{nextN}</button>
         </div>
       </div>
     </div>
@@ -74,10 +76,17 @@ export function PublishPanel({ quest, gates, justPublished, publishError, publis
   justPublished: number | null;
   publishError: string | null;
   publishing: boolean;
-  onFix: (pageId: string) => void;
+  /** §9.2: navigate to the page (or settings for pageId null) and focus `field`. */
+  onFix: (pageId: string | null, field?: GateField) => void;
   onPublish: () => void;
 }) {
   const rows = buildChecklist(quest, gates);
+  // «Стр. 4 · …» prefix: the page's 1-based position; structural rows say where they lead.
+  const pageNo = (pageId: string | null | undefined): string | null => {
+    if (!pageId) return null;
+    const i = quest.steps.findIndex((st) => st.id === pageId);
+    return i >= 0 ? `Стр. ${i + 1}` : null;
+  };
   const errN = gates.errors.length;
   const [modal, setModal] = useState(false);
   const nextN = nextVersionNumber(quest);
@@ -100,17 +109,34 @@ export function PublishPanel({ quest, gates, justPublished, publishError, publis
       <div className="ed-block">
         <h4>Чек-лист публикации <span className="opt">ошибки блокируют, предупреждения — нет</span></h4>
         <div className="gate-list">
-          {rows.map((g, i) => (
-            <div className={'gate-row ' + g.st} key={i}>
-              <span className="st">{g.st === 'ok' ? '✓' : g.st === 'err' ? '✗' : '!'}</span>
-              <span>{g.text}</span>
-              {g.pageId ? <button className="btn-ui btn-ui--sm btn-ui--outline fix" type="button" onClick={() => onFix(g.pageId!)}>Исправить</button> : null}
-            </div>
-          ))}
+          {rows.map((g, i) => {
+            const fixable = g.st !== 'ok' && (g.pageId || g.field);
+            if (!fixable) {
+              return (
+                <div className={'gate-row ' + g.st} key={i}>
+                  <span className="st">{g.st === 'ok' ? '✓' : g.st === 'err' ? '✗' : '!'}</span>
+                  <span>{g.text}</span>
+                </div>
+              );
+            }
+            const no = pageNo(g.pageId) ?? (g.field === 'cover' ? 'Настройки' : 'Структура');
+            return (
+              <button
+                type="button"
+                className={'gate-row gate-row--fix ' + g.st}
+                key={i}
+                onClick={() => onFix(g.pageId ?? null, g.field)}
+              >
+                <span className="st">{g.st === 'err' ? '✗' : '!'}</span>
+                <span><b className="gate-row__no">{no}</b> · {g.text}</span>
+                <span className="gate-row__go">Исправить →</span>
+              </button>
+            );
+          })}
         </div>
         <div className="gate-sum">
           <span className="est">Оценка бандла: ~{gates.sizeLabel} · {quest.steps.length} {plural(quest.steps.length, 'страница', 'страницы', 'страниц')} · {gates.imgs} изобр. · {gates.vids} видео · цель ≤ 5 МБ</span>
-          <button className="btn-ui" type="button" disabled={errN > 0 || publishing} onClick={() => setModal(true)}>
+          <button className="btn btn--md" type="button" disabled={errN > 0 || publishing} onClick={() => setModal(true)}>
             {publishing
               ? 'Публикуем…'
               : errN > 0

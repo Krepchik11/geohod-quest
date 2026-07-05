@@ -8,23 +8,19 @@ import { api, hasAdminToken } from '../lib/api';
 import { canEditQuests, isAdmin } from '../lib/roles';
 
 /**
- * SiteHeader — visual + behavior port from the design site header.
- * Client state: user dropdown + (mobile) nav drawer, both click-outside close.
+ * SiteHeader v2 (§2.5, §1.2) — logo + nav + auth slot.
  *
- * Session-aware: subscribes to the shared identity store so the user menu reflects
- * login state live. Anonymous visitors get a single «войти / регистрация» entry;
- * logged-in users get profile + editor + a REAL «выйти» that clears the session
- * and rotates the device id (see lib/identity.clearSession). The old menu had a
- * dead «выход» link that only navigated to /auth and never logged anyone out.
+ * Auth slot is honest about state: anonymous visitors see a text pill «Войти»
+ * (the bare icon button never shows for them); signed-in users see the avatar
+ * circle with a green presence dot that opens the profile dropdown with a REAL
+ * «выйти» (clears the session and rotates the device id — lib/identity).
  *
- * Mobile: the desktop inline nav cannot fit a phone, so below 768px a
- * .nav-toggle hamburger (styled in styles/responsive.css) reveals the nav as
- * a dropdown panel. Desktop markup/layout is unchanged — the toggle is
- * display:none until the phone tier, so it stays out of the flex flow.
+ * Mobile (<768px): the inline nav is hidden — navigation moves to the bottom
+ * tab bar (components/TabBar) — so the header is just logo + auth slot. The old
+ * hamburger drawer is gone with it.
  */
 export default function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [navOpen, setNavOpen] = useState(false);
   // SSR snapshot is null (anonymous) — useSyncExternalStore reconciles to the real
   // session on the client without a hydration mismatch.
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
@@ -62,24 +58,17 @@ export default function SiteHeader() {
       : session.role
     : undefined;
 
-  // Single document listener closes whichever popover is open (click-outside).
+  // Click-outside closes the profile dropdown.
   useEffect(() => {
-    if (!menuOpen && !navOpen) return;
-    const onDoc = () => { setMenuOpen(false); setNavOpen(false); };
+    if (!menuOpen) return;
+    const onDoc = () => setMenuOpen(false);
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
-  }, [menuOpen, navOpen]);
+  }, [menuOpen]);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setNavOpen(false);
     setMenuOpen(v => !v);
-  };
-
-  const toggleNav = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setMenuOpen(false);
-    setNavOpen(v => !v);
   };
 
   const handleLogout = () => {
@@ -93,67 +82,57 @@ export default function SiteHeader() {
   };
 
   return (
-    <header className={`site-header container ${navOpen ? 'is-nav-open' : ''}`}>
-      <button
-        className="nav-toggle"
-        type="button"
-        aria-label="Меню"
-        aria-expanded={navOpen}
-        onClick={toggleNav}
-      >
-        <span className="bars" />
-      </button>
-
+    <header className="site-header container">
       <Link className="logo" href="/" aria-label="GEOHOD QUEST — на главную">
         <span className="ic logo-mark" />
         <span className="ic logo-text" />
       </Link>
 
-      {/* Clicking any link navigates and closes the mobile drawer. */}
-      <nav className="site-nav" aria-label="Основная навигация" onClick={() => setNavOpen(false)}>
+      <nav className="site-nav" aria-label="Основная навигация">
         <Link href="/">главная</Link>
         <Link href="/#shop">магазин квестов</Link>
         <Link href="/my-quests">мои квесты</Link>
-        <a href="#contacts">контакты</a>
+        {/* §1.3: absolute anchor so «контакты» works from every page, not just /. */}
+        <Link href="/#contacts">контакты</Link>
       </nav>
 
-      <div className={`user-menu ${menuOpen ? 'is-open' : ''}`}>
-        <button
-          className="user-menu__btn"
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          title="Профиль"
-          onClick={toggleMenu}
-        >
-          <span className="user-icon">
-            <span className="head" />
-            <span className="body" />
-          </span>
-        </button>
-        <div className="user-menu__dropdown" role="menu">
-          <Link href="/profile" role="menuitem">мой профиль</Link>
-          {/* Role-gated nav (admin-roles). The role comes from the stored session, so
-              it can be briefly stale; the destination pages AND the backend re-check
-              authorization regardless, so a stale link can only ever lead to a clean
-              "no access" screen, never real access. The admin-token path admits an
-              operator build before any admin/editor account exists. */}
-          {(isAdmin(role) || hasAdminToken()) && (
-            <Link href="/admin" role="menuitem">админка</Link>
-          )}
-          {session ? (
-            <>
-              {/* Quest editor — editors and admins only (authoring capability). */}
-              {(canEditQuests(role) || hasAdminToken()) && (
-                <Link href="/quest-editor" role="menuitem">редактор</Link>
-              )}
-              <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
-            </>
-          ) : (
-            <Link href="/auth" role="menuitem">войти / регистрация</Link>
-          )}
+      {session ? (
+        <div className={`user-menu ${menuOpen ? 'is-open' : ''}`}>
+          <button
+            className="user-menu__btn"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title="Профиль"
+            onClick={toggleMenu}
+          >
+            <span className="user-icon">
+              <span className="head" />
+              <span className="body" />
+            </span>
+            <span className="user-menu__dot" aria-hidden />
+          </button>
+          <div className="user-menu__dropdown" role="menu">
+            <Link href="/profile" role="menuitem">мой профиль</Link>
+            {/* Role-gated nav (admin-roles). The role comes from the stored session, so
+                it can be briefly stale; the destination pages AND the backend re-check
+                authorization regardless, so a stale link can only ever lead to a clean
+                "no access" screen, never real access. The admin-token path admits an
+                operator build before any admin/editor account exists. */}
+            {(isAdmin(role) || hasAdminToken()) && (
+              <Link href="/admin" role="menuitem">админка</Link>
+            )}
+            {/* Quest editor — editors and admins only (authoring capability). */}
+            {(canEditQuests(role) || hasAdminToken()) && (
+              <Link href="/quest-editor" role="menuitem">редактор</Link>
+            )}
+            <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
+          </div>
         </div>
-      </div>
+      ) : (
+        // §2.5: anonymous users get a text pill, never the bare icon button.
+        <Link className="header-login" href="/auth">Войти</Link>
+      )}
     </header>
   );
 }

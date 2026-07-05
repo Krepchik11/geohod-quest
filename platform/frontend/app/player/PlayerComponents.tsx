@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { plural } from '../../lib/storefront';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.
@@ -199,6 +200,8 @@ export interface StepState {
   note?: string;
   wrong?: boolean;
   hintRevealed?: boolean;
+  /** §11: optional review text revealed after the star tap. */
+  reviewText?: string;
   coinsEarned?: number;
   time?: string;
   steps?: string;
@@ -217,6 +220,8 @@ export interface StepHandlers {
   play?: () => void;
   navigator?: () => void;
   rate?: (n: number) => void;
+  /** §11: review-text change (committed with the rating on «что дальше»). */
+  reviewText?: (v: string) => void;
   /** Final screen «что дальше» — leave the finale (into the catalog). */
   onward?: () => void;
   /** Final screen «пройти заново» — replay this quest from step 0 (real player only). */
@@ -365,6 +370,18 @@ export function StepView({ step, quest, copy, st, on }: {
           </div>
         ) : null}
         {stateIn.wrong ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
+        {/* §8.1 (4.1): the hint is ALWAYS purchasable on steps that sell one —
+            a paper chip above the answer form (the post-2nd-wrong popup stays as
+            the proactive offer). Cost comes from the step data, never hardcoded.
+            Disappears after purchase — the hint then renders inline above. */}
+        {step.hint && typeof step.hint !== 'string' && step.hint.cost != null && !stateIn.hintRevealed ? (
+          <div className="p-hintchip-row">
+            <button className="p-hintchip" type="button" onClick={h.buyHint || noop}>
+              <PCoin size={15} />
+              подсказка · {step.hint.cost} {plural(step.hint.cost, 'монета', 'монеты', 'монет')}
+            </button>
+          </div>
+        ) : null}
         {/* Inline submit: the field and its submit share ONE row, so the browser's
             native "scroll focused field into view" lifts BOTH above the on-screen
             keyboard (iOS, which ignores interactiveWidget, included). The <form> +
@@ -482,6 +499,17 @@ export function FinalScreen({ quest, copy, st, on }: {
           <>
             <RateStars value={s.rating} onRate={h.rate} />
             <span className="p-rate-thanks"><PCheck />{copy?.rateThanks || "Спасибо за оценку — отправим автору"}</span>
+            {/* §11: optional review text — revealed by the star tap, skippable,
+                never blocks «что дальше» (committed together with the rating). */}
+            {h.reviewText && (
+              <textarea
+                className="p-reviewtext"
+                placeholder="Пара слов для будущих игроков?"
+                maxLength={500}
+                value={s.reviewText || ''}
+                onChange={(e) => h.reviewText!(e.target.value)}
+              />
+            )}
           </>
         ) : (
           <>
@@ -599,7 +627,7 @@ export function HintPopup({ step, copy, on }: {
   on?: { buy?: () => void; dismiss?: () => void };
 }) {
   const h = on || {};
-  const cost = step?.hint?.cost ?? step?.hint?.cost_coins ?? 5;
+  const cost = step?.hint?.cost ?? step?.hint?.cost_coins ?? 0;
   return (
     <div className="p-overlay" onClick={h.dismiss}>
       <div className="p-popup" onClick={(e) => e.stopPropagation()}>

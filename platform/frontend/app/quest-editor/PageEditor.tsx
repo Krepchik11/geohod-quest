@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   COMIC_ROLES,
   TPL_BY_KEY,
   plural,
   type CtorQuest,
   type CtorStep,
+  type GateField,
 } from '../../lib/constructor-model';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';
@@ -23,7 +24,7 @@ function ComicBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const set = (key: string, value: string | null) => onPatch({ images: { ...step.images, [key]: value } });
   const cols = roles.length === 1 ? 'repeat(2, 1fr)' : roles.length === 3 ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)';
   return (
-    <WspBlock title="Комикс страницы" aside={roles.length > 1 ? `${roles.length} роли изображений` : 'изображение'}>
+    <WspBlock title="Комикс страницы" gateField="comic" aside={roles.length > 1 ? `${roles.length} роли изображений` : 'изображение'}>
       <div className="comic-grid" style={{ gridTemplateColumns: cols }}>
         {roles.map((r) => (
           <ImageZone
@@ -57,11 +58,11 @@ function VideoBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
       <div className="wsp-trow">
         <div>
           <label className="adm-label">Длительность</label>
-          <input className="field-ui field-ui--sm" value={v.dur} onChange={(e) => set({ dur: e.target.value })} />
+          <input className="input input--compact" value={v.dur} onChange={(e) => set({ dur: e.target.value })} />
         </div>
         <div className="wsp-grow">
           <label className="adm-label">Подпись постера</label>
-          <input className="field-ui" value={v.label} onChange={(e) => set({ label: e.target.value })} />
+          <input className="input" value={v.label} onChange={(e) => set({ label: e.target.value })} />
         </div>
       </div>
       <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Загрузка видео-файлов появится вместе с медиа-хранилищем; в бандле — постер и метаданные.</p>
@@ -86,27 +87,27 @@ function AnswersBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
     setPasteText('');
   };
   return (
-    <WspBlock title="Ответы" aside="регистр и пробелы по краям не важны">
+    <WspBlock title="Ответы" gateField="answers" aside="регистр и пробелы по краям не важны">
       {answers.map((a, i) => (
         <div className="ans-row" key={i}>
-          <input className="field-ui" value={a} onChange={(e) => setAnswers(answers.map((x, j) => (j === i ? e.target.value : x)))} />
+          <input className="input" value={a} onChange={(e) => setAnswers(answers.map((x, j) => (j === i ? e.target.value : x)))} />
           <button className="del" type="button" aria-label="Удалить ответ" onClick={() => setAnswers(answers.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <div className="ans-add">
-        <button className="btn-ui btn-ui--outline btn-ui--sm" type="button" onClick={() => setAnswers([...answers, ''])}>+ Добавить ответ</button>
-        <button className="btn-ui btn-ui--outline btn-ui--sm" type="button" onClick={() => setPasteOpen(!pasteOpen)}>Вставить строками</button>
+        <button className="btn btn--secondary btn--sm" type="button" onClick={() => setAnswers([...answers, ''])}>+ Добавить ответ</button>
+        <button className="btn btn--secondary btn--sm" type="button" onClick={() => setPasteOpen(!pasteOpen)}>Вставить строками</button>
       </div>
       {pasteOpen ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <textarea className="textarea-ui" placeholder={'один ответ на строку\n1730\nв 1730'} value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
-          <button className="btn-ui btn-ui--sm" type="button" style={{ alignSelf: 'flex-start' }} onClick={applyPaste}>Заменить список</button>
+          <textarea className="textarea" placeholder={'один ответ на строку\n1730\nв 1730'} value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
+          <button className="btn btn--sm" type="button" style={{ alignSelf: 'flex-start' }} onClick={applyPaste}>Заменить список</button>
         </div>
       ) : null}
       <div className="ans-test">
-        <input className="field-ui" placeholder="Тест: введите ответ как игрок…" value={testValue} onChange={(e) => setTestValue(e.target.value)} />
+        <input className="input" placeholder="Тест: введите ответ как игрок…" value={testValue} onChange={(e) => setTestValue(e.target.value)} />
         {verdict === null
-          ? <span className="ans-verdict" style={{ color: 'var(--gray)' }}>—</span>
+          ? <span className="ans-verdict" style={{ color: 'var(--muted)' }}>—</span>
           : verdict
             ? <span className="ans-verdict ok">✓ зачтено</span>
             : <span className="ans-verdict no">✗ не зачтено</span>}
@@ -129,11 +130,11 @@ function GiftBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
           <div className="wsp-trow">
             <div>
               <label className="adm-label">Монеты</label>
-              <input className="field-ui field-ui--sm" type="number" min={0} value={g.coins} onChange={(e) => set({ coins: Math.max(0, +e.target.value || 0) })} />
+              <input className="input input--compact" type="number" min={0} value={g.coins} onChange={(e) => set({ coins: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="wsp-grow">
               <label className="adm-label">Подпись к награде<small>появится в тосте: «+5 монет · Острый глаз!»</small></label>
-              <input className="field-ui" value={g.narrative} onChange={(e) => set({ narrative: e.target.value })} />
+              <input className="input" value={g.narrative} onChange={(e) => set({ narrative: e.target.value })} />
             </div>
           </div>
           <p className="freeze-note">Сумма заморозится в снапшоте при публикации: игроки на этой версии всегда получат именно столько.</p>
@@ -147,18 +148,18 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const h = step.hint;
   const set = (patch: Partial<typeof h>) => onPatch({ hint: { ...h, ...patch } });
   return (
-    <WspBlock title="Подсказка" aside="попап после 2-й ошибки ответа">
+    <WspBlock title="Подсказка" gateField="hint" aside="попап после 2-й ошибки ответа">
       <WspToggle on={h.on} onClick={() => set({ on: !h.on })} label="Платная подсказка на этом шаге" />
       {h.on ? (
         <>
           <div className="wsp-trow">
             <div>
               <label className="adm-label">Стоимость, монет</label>
-              <input className="field-ui field-ui--sm" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
+              <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="wsp-grow">
               <label className="adm-label">Текст подсказки<small>останется открытым до конца шага вместе с комиксом «подсказка»</small></label>
-              <input className="field-ui" value={h.text} onChange={(e) => set({ text: e.target.value })} />
+              <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
             </div>
           </div>
           <p className="freeze-note">Стоимость заморозится при публикации. Баланс игрока может уйти в минус — покупка никогда не блокируется.</p>
@@ -173,25 +174,25 @@ function NavBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const set = (patch: Partial<typeof n>) => onPatch({ nav: { ...n, ...patch } });
   const bad = n.on && (!Number.isFinite(parseFloat(n.lat)) || !Number.isFinite(parseFloat(n.lng)));
   return (
-    <WspBlock title="Навигатор" aside="передача в системные карты, без маршрута в бандле">
+    <WspBlock title="Навигатор" gateField="nav" aside="передача в системные карты, без маршрута в бандле">
       <WspToggle on={n.on} onClick={() => set({ on: !n.on })} label="Кнопка навигатора на странице" />
       {n.on ? (
         <>
           <div className="wsp-trow">
             <div>
               <label className="adm-label">Широта</label>
-              <input className="field-ui field-ui--sm" value={n.lat} onChange={(e) => set({ lat: e.target.value })} />
+              <input className="input input--compact" value={n.lat} onChange={(e) => set({ lat: e.target.value })} />
             </div>
             <div>
               <label className="adm-label">Долгота</label>
-              <input className="field-ui field-ui--sm" value={n.lng} onChange={(e) => set({ lng: e.target.value })} />
+              <input className="input input--compact" value={n.lng} onChange={(e) => set({ lng: e.target.value })} />
             </div>
             <div className="wsp-grow">
               <label className="adm-label">Подпись точки</label>
-              <input className="field-ui" value={n.label} onChange={(e) => set({ label: e.target.value })} />
+              <input className="input" value={n.label} onChange={(e) => set({ label: e.target.value })} />
             </div>
           </div>
-          {bad ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--pink)', fontWeight: 600 }}>✗ Координаты не заданы — публикация будет заблокирована.</p> : null}
+          {bad ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>✗ Координаты не заданы — публикация будет заблокирована.</p> : null}
         </>
       ) : null}
     </WspBlock>
@@ -207,11 +208,11 @@ function StartContent({ quest, step, set, onSettings }: { quest: CtorQuest; step
       <WspBlock title="Контент обложки">
         <div>
           <label className="adm-label">Надзаголовок<small>например «Городской квест»</small></label>
-          <input className="field-ui" value={step.kicker} onChange={(e) => set({ kicker: e.target.value })} />
+          <input className="input" value={step.kicker} onChange={(e) => set({ kicker: e.target.value })} />
         </div>
         <div>
           <label className="adm-label">Подзаголовок<small>строка под названием</small></label>
-          <input className="field-ui" value={step.text} onChange={(e) => set({ text: e.target.value })} />
+          <input className="input" value={step.text} onChange={(e) => set({ text: e.target.value })} />
         </div>
       </WspBlock>
       <WspBlock title="Из настроек квеста" aside="название, город, длительность, обложка">
@@ -224,7 +225,7 @@ function StartContent({ quest, step, set, onSettings }: { quest: CtorQuest; step
             <b>{m.title}</b><br />
             <span>{[m.city, m.duration].filter(Boolean).join(' · ') || 'город и длительность не заданы'}</span>
           </span>
-          <button className="btn-ui btn-ui--outline btn-ui--sm" type="button" onClick={onSettings}>Открыть настройки</button>
+          <button className="btn btn--secondary btn--sm" type="button" onClick={onSettings}>Открыть настройки</button>
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>«Первый экран» собирается из общих настроек квеста — они меняются в одном месте и для магазина, и для плеера.</p>
       </WspBlock>
@@ -237,20 +238,20 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
     <WspBlock title="Контент">
       <div>
         <label className="adm-label">Текст задания</label>
-        <textarea className="textarea-ui" value={step.text} onChange={(e) => set({ text: e.target.value })} />
+        <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
       </div>
       <div>
         <label className="adm-label">Адрес и расстояние<small>строка с булавкой, например «ул. Николаевска порта 2 · 400 м отсюда»</small></label>
-        <input className="field-ui" value={step.place} onChange={(e) => set({ place: e.target.value })} />
+        <input className="input" value={step.place} onChange={(e) => set({ place: e.target.value })} />
       </div>
       <div>
         <label className="adm-label">Действие на месте<small>необязательно</small></label>
-        <input className="field-ui" value={step.action.desc} onChange={(e) => set({ action: { ...step.action, desc: e.target.value } })} />
+        <input className="input" value={step.action.desc} onChange={(e) => set({ action: { ...step.action, desc: e.target.value } })} />
       </div>
       <div className="wsp-trow">
         <div className="wsp-grow">
           <label className="adm-label">Кнопка подтверждения</label>
-          <input className="field-ui" value={step.action.confirmLabel} onChange={(e) => set({ action: { ...step.action, confirmLabel: e.target.value } })} />
+          <input className="input" value={step.action.confirmLabel} onChange={(e) => set({ action: { ...step.action, confirmLabel: e.target.value } })} />
         </div>
         <div style={{ paddingBottom: 12 }}>
           <WspToggle on={step.allowNote} onClick={() => set({ allowNote: !step.allowNote })} label="Разрешить заметку" />
@@ -263,15 +264,29 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
 
 /* ---------- Редактор страницы ---------- */
 
-export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, onSettings }: {
+export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, onDuplicate, onSettings }: {
   quest: CtorQuest;
   step: CtorStep;
   msgs: Array<{ kind: 'err' | 'warn'; text: string }> | undefined;
+  /** §9.2: control to scroll to + flash after an «Исправить →» click. */
+  highlight?: { field?: GateField; nonce: number } | null;
   onPatch: Patcher;
   onDelete: () => void;
   onDuplicate: () => void;
   onSettings: () => void;
 }) {
+  // Scroll to and flash the offending block. DOM query (not refs) keeps the
+  // anchor declaration next to each block via WspBlock's gateField prop.
+  useEffect(() => {
+    if (!highlight?.field) return;
+    const el = document.querySelector(`[data-gate-field="${highlight.field}"]`);
+    if (!(el instanceof HTMLElement)) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('gate-flash');
+    const t = setTimeout(() => el.classList.remove('gate-flash'), 2400);
+    return () => clearTimeout(t);
+  }, [highlight]);
+
   const tplMeta = TPL_BY_KEY[step.template];
   const set = onPatch;
   const errs = (msgs || []).filter((m) => m.kind === 'err');
@@ -284,7 +299,7 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
           ? <span className="wsp-gatechip err">✗ {errs.length} {plural(errs.length, 'ошибка', 'ошибки', 'ошибок')}</span>
           : <span className="wsp-gatechip ok">✓ готова к публикации</span>}
         <span style={{ flex: 1 }} />
-        <button className="btn-ui btn-ui--outline btn-ui--sm" type="button" onClick={onDuplicate}>Дублировать</button>
+        <button className="btn btn--secondary btn--sm" type="button" onClick={onDuplicate}>Дублировать</button>
         <WspDanger label="Удалить" confirmLabel="Точно удалить?" onConfirm={onDelete} />
       </div>
 
@@ -297,7 +312,7 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
       <WspBlock title="Страница">
         <div>
           <label className="adm-label">Название<small>служебное, игрок не видит</small></label>
-          <input className="field-ui" value={step.name} onChange={(e) => set({ name: e.target.value })} />
+          <input className="input" value={step.name} onChange={(e) => set({ name: e.target.value })} />
         </div>
       </WspBlock>
 
@@ -309,7 +324,7 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
           <WspBlock title="Контент">
             <div>
               <label className="adm-label">Текст под видео</label>
-              <textarea className="textarea-ui" value={step.text} onChange={(e) => set({ text: e.target.value })} />
+              <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
             </div>
           </WspBlock>
         </>
@@ -321,11 +336,11 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
         <WspBlock title="Контент">
           <div>
             <label className="adm-label">Текст задания</label>
-            <textarea className="textarea-ui" value={step.text} onChange={(e) => set({ text: e.target.value })} />
+            <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Плейсхолдер поля ответа</label>
-            <input className="field-ui" value={step.prompt} onChange={(e) => set({ prompt: e.target.value })} />
+            <input className="input" value={step.prompt} onChange={(e) => set({ prompt: e.target.value })} />
           </div>
         </WspBlock>
       ) : null}
@@ -334,7 +349,7 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
         <WspBlock title="Контент">
           <div>
             <label className="adm-label">Текст<small>поддерживает абзацы — пустая строка между ними</small></label>
-            <textarea className="textarea-ui" style={{ minHeight: 140 }} value={step.text} onChange={(e) => set({ text: e.target.value })} />
+            <textarea className="textarea" style={{ minHeight: 140 }} value={step.text} onChange={(e) => set({ text: e.target.value })} />
           </div>
         </WspBlock>
       ) : null}
@@ -344,11 +359,11 @@ export function PageEditor({ quest, step, msgs, onPatch, onDelete, onDuplicate, 
           <WspBlock title="Контент финала">
             <div>
               <label className="adm-label">Заголовок</label>
-              <input className="field-ui" value={step.title} onChange={(e) => set({ title: e.target.value })} />
+              <input className="input" value={step.title} onChange={(e) => set({ title: e.target.value })} />
             </div>
             <div>
               <label className="adm-label">Финальный текст<small>развязка истории</small></label>
-              <textarea className="textarea-ui" value={step.text} onChange={(e) => set({ text: e.target.value })} />
+              <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
             </div>
           </WspBlock>
           <WspBlock title="Встроено в шаблон" aside="настраивается платформой, не квестом">

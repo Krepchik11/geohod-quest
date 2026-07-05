@@ -61,7 +61,12 @@ export default function Workspace() {
   const [active, setActive] = useState<CtorQuest | null>(null);
   const [sel, setSel] = useState<CtorSelection | null>(null);
   const [saveOk, setSaveOk] = useState(true);
+  // §9.4 auto-retry: bumping the tick re-runs the autosave effect. Fired by the
+  // browser's online event and by a slow poll while a save is failing.
+  const [saveRetryTick, setSaveRetryTick] = useState(0);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // True after a successful save in THIS session (drives «Сохранено · только что»).
+  const [saveFresh, setSaveFresh] = useState(false);
   const [justPublished, setJustPublished] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -118,6 +123,8 @@ export default function Workspace() {
 
   // Server autosave: persist the active draft (debounced) whenever it changes.
   // savedAt is NOT part of `active`, so updating it never retriggers this effect.
+  // saveRetryTick re-runs it after a failure (reconnect / poll) — §9.4: the
+  // header promises «Повторим автоматически», so we actually do.
   useEffect(() => {
     if (!active) return;
     const quest = active;
@@ -131,12 +138,26 @@ export default function Workspace() {
         })
         .then(() => {
           setSaveOk(true);
+          setSaveFresh(true);
           setSavedAt(Date.now());
         })
         .catch(() => setSaveOk(false));
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [active]);
+  }, [active, saveRetryTick]);
+
+  // While a save is failing: retry the moment the browser reports connectivity,
+  // and poll slowly as a fallback (the online event is not reliable everywhere).
+  useEffect(() => {
+    if (saveOk) return;
+    const retry = () => setSaveRetryTick((n) => n + 1);
+    window.addEventListener('online', retry);
+    const iv = setInterval(retry, 15_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      clearInterval(iv);
+    };
+  }, [saveOk]);
 
   const patchQuest = useCallback((fn: (q: CtorQuest) => CtorQuest) => {
     setActive((q) => (q ? fn(q) : q));
@@ -177,6 +198,7 @@ export default function Workspace() {
       setJustPublished(null);
       setPublishError(null);
       setSavedAt(q.lastSaved ?? null);
+      setSaveFresh(false);
       setSaveOk(true);
       setActive(q);
       setSel(q.steps.length ? { type: 'page', id: q.steps[0].id } : { type: 'settings' });
@@ -270,6 +292,13 @@ export default function Workspace() {
 
   // ---- Builder actions ----
 
+  // §9.1: a snapshot-less quest can't be flipped to test/published — the
+  // dashboard routes those transitions here, straight into the gated panel.
+  const openPublish = async (id: string) => {
+    await openQuest(id);
+    setSel({ type: 'publish' });
+  };
+
   const selectIn = (s: CtorSelection) => {
     if (s.type !== 'publish') {
       setJustPublished(null);
@@ -348,6 +377,7 @@ export default function Workspace() {
         city: active.meta.city,
         duration: active.meta.duration,
         price: active.meta.price,
+        description: active.meta.desc,
       });
       const sizeLabel = computeGates(active).sizeLabel;
       patchQuest((q) => ({
@@ -379,6 +409,7 @@ export default function Workspace() {
       {screen === 'builder' && builderQuest ? (
         <div className="admin wsp">
           <BuilderScreen
+            saveFresh={saveFresh}
             quest={builderQuest}
             sel={sel}
             saveOk={saveOk}
@@ -417,6 +448,7 @@ export default function Workspace() {
               onDuplicate: (q) => void duplicate(q),
               onDelete: (q) => void deleteQuest(q),
               onStatusChange: (q, status) => void changeStatus(q, status),
+              onOpenPublish: (q) => void openPublish(q.quest_id),
               onLogout,
             }}
           />

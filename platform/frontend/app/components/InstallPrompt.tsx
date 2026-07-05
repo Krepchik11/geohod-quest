@@ -1,75 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { installState, isIosSafari, isStandalone, type InstallState } from '../../lib/install';
-
-/** The non-standard Chromium `beforeinstallprompt` event we capture to drive install. */
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-
-function readStandalone(): boolean {
-  return isStandalone({
-    displayModeStandalone: window.matchMedia?.('(display-mode: standalone)').matches ?? false,
-    navigatorStandalone: (window.navigator as Navigator & { standalone?: boolean }).standalone,
-  });
-}
+import { useState } from 'react';
+import { useInstall } from './useInstall';
 
 /**
- * «Установить приложение» affordance on /my-quests (the PWA `start_url` — the
- * home-screen target). Chromium fires `beforeinstallprompt`, which we capture to
- * show a button that triggers the native install; iOS Safari has no such API, so
- * it gets a manual «Поделиться → На экран „Домой"» sheet. An already-installed
- * (standalone) app renders nothing. Installing is what makes offline play feel
- * like a real app — the downloaded bundles are already there.
+ * «Установить приложение» — the GLOBAL app install affordance (root manifest).
+ * §7.3 moves the trigger into Profile; Chromium gets the captured native
+ * prompt, iOS Safari a manual «Поделиться → На экран „Домой"» sheet, an
+ * installed (standalone) app renders nothing. Install logic lives in the
+ * shared useInstall hook (also used by the per-quest button, §5).
  */
 export default function InstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [state, setState] = useState<InstallState>('hidden');
+  const { state, prompt } = useInstall();
   const [sheetOpen, setSheetOpen] = useState(false);
-
-  useEffect(() => {
-    const recompute = (canPrompt: boolean) =>
-      setState(
-        installState({
-          standalone: readStandalone(),
-          canPrompt,
-          iosSafari: isIosSafari(window.navigator.userAgent),
-        }),
-      );
-
-    const onPrompt = (e: Event) => {
-      e.preventDefault(); // suppress the mini-infobar; we drive install from our own button
-      setDeferred(e as BeforeInstallPromptEvent);
-      recompute(true);
-    };
-    const onInstalled = () => {
-      setDeferred(null);
-      setSheetOpen(false);
-      setState('installed');
-    };
-
-    window.addEventListener('beforeinstallprompt', onPrompt);
-    window.addEventListener('appinstalled', onInstalled);
-    recompute(false); // initial: covers already-installed + iOS Safari (no prompt event fires)
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt);
-      window.removeEventListener('appinstalled', onInstalled);
-    };
-  }, []);
-
-  const install = async () => {
-    if (!deferred) return;
-    await deferred.prompt(); // single-use; `appinstalled` finalizes the success path
-    setDeferred(null);
-    setState('hidden');
-  };
 
   // Chromium fires the native prompt; iOS Safari has no API, so open the manual sheet.
   const onCta = () => {
-    if (state === 'installable') void install();
+    if (state === 'installable') void prompt();
     else setSheetOpen(true);
   };
 

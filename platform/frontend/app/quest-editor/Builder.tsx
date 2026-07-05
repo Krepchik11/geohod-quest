@@ -16,6 +16,7 @@ import {
   type CtorStep,
   type CtorTemplate,
   type Gates,
+  type GateField,
 } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
@@ -115,25 +116,25 @@ function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: Cto
       <WspBlock title="Карточка квеста" aside="используется «Первым экраном» и магазином">
         <div>
           <label className="adm-label">Название</label>
-          <input className="field-ui" value={m.title} onChange={(e) => set({ title: e.target.value })} />
+          <input className="input" value={m.title} onChange={(e) => set({ title: e.target.value })} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <div>
             <label className="adm-label">Город</label>
-            <input className="field-ui" value={m.city} onChange={(e) => set({ city: e.target.value })} />
+            <input className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Длительность</label>
-            <input className="field-ui" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
+            <input className="input" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Цена, ₽</label>
-            <input className="field-ui" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
+            <input className="input" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
         <div>
           <label className="adm-label">Описание для магазина</label>
-          <textarea className="textarea-ui" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
+          <textarea className="textarea" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
       </WspBlock>
@@ -172,7 +173,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
       </div>
       {designStep.hint ? <WspToggle on={hintOn} onClick={() => setHintOn(!hintOn)} label="С купленной подсказкой" /> : null}
       {designStep.template === 'task_answer' ? <WspToggle on={wrongOn} onClick={() => setWrongOn(!wrongOn)} label="С ошибкой ответа" /> : null}
-      <button className="btn-ui btn-ui--outline" type="button" style={{ width: '100%' }} onClick={() => onTestFrom(pos)}>▶ Тест с этой страницы</button>
+      <button className="btn btn--secondary btn--sm" type="button" style={{ width: '100%' }} onClick={() => onTestFrom(pos)}>▶ Тест с этой страницы</button>
     </>
   );
 }
@@ -248,10 +249,12 @@ export interface BuilderActions {
   publish: () => void;
 }
 
-export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError, publishing, actions }: {
+export function BuilderScreen({ quest, sel, saveOk, saveFresh, justPublished, publishError, publishing, actions }: {
   quest: CtorQuest;
   sel: CtorSelection | null;
   saveOk: boolean;
+  /** True once a save completed in THIS session — «Сохранено · только что». */
+  saveFresh: boolean;
   justPublished: number | null;
   publishError: string | null;
   publishing: boolean;
@@ -263,6 +266,9 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
   const view = sel && (sel.type === 'settings' || sel.type === 'publish') ? sel.type : selStep ? 'page' : 'settings';
   const selIdx = selStep ? steps.indexOf(selStep) : 0;
   const [picker, setPicker] = useState(false);
+  // §9.2: which control the last «Исправить →» pointed at; nonce re-fires the
+  // scroll/flash when the same field is clicked twice.
+  const [highlight, setHighlight] = useState<{ pageId: string | null; field?: GateField; nonce: number } | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const live = quest.versions.find((v) => v.live);
@@ -285,13 +291,18 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
           </>
         }
       >
+        {/* §9.4: автосейв серверный — статус честный про сеть, не про localStorage. */}
         <span className={'wsp-save' + (saveOk ? '' : ' failed')}>
           {saveOk
-            ? quest.lastSaved ? `Черновик сохранён · ${fmtTime(quest.lastSaved)}` : 'Черновик'
-            : 'Не сохранено — хранилище переполнено'}
+            ? quest.lastSaved
+              ? saveFresh
+                ? 'Сохранено · только что'
+                : `Сохранено · ${fmtTime(quest.lastSaved)}`
+              : 'Черновик'
+            : 'Нет сети — правки не сохранены. Повторим автоматически.'}
         </span>
-        <button className="btn-ui btn-ui--outline" type="button" onClick={() => actions.onTest(0)}>▶ Тест-игрок</button>
-        <button className="btn-ui" type="button" onClick={() => actions.onSel({ type: 'publish' })}>
+        <button className="btn btn--secondary btn--sm" type="button" onClick={() => actions.onTest(0)}>▶ Тест-игрок</button>
+        <button className="btn btn--md" type="button" onClick={() => actions.onSel({ type: 'publish' })}>
           {errN ? `Опубликовать · ${errN} ${plural(errN, 'ошибка', 'ошибки', 'ошибок')}` : 'Опубликовать'}
         </button>
       </WspHeader>
@@ -329,7 +340,7 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
               />
             ))}
           </div>
-          <button className="btn-ui btn-ui--outline btn-ui--sm wsp-addpage" type="button" onClick={() => setPicker(true)}>+ Добавить страницу</button>
+          <button className="btn btn--secondary btn--sm wsp-addpage" type="button" onClick={() => setPicker(true)}>+ Добавить страницу</button>
           <div className="wsp-vers">
             {live
               ? <span className="wsp-ver"><b>v{live.n}</b>&nbsp;в магазине · {live.attempts} {plural(live.attempts, 'попытка', 'попытки', 'попыток')}</span>
@@ -346,7 +357,10 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
               justPublished={justPublished}
               publishError={publishError}
               publishing={publishing}
-              onFix={(pageId) => actions.onSel({ type: 'page', id: pageId })}
+              onFix={(pageId, field) => {
+                actions.onSel(pageId ? { type: 'page', id: pageId } : { type: 'settings' });
+                setHighlight({ pageId, field, nonce: Date.now() });
+              }}
               onPublish={actions.publish}
             />
           ) : view === 'settings' ? (
@@ -356,6 +370,7 @@ export function BuilderScreen({ quest, sel, saveOk, justPublished, publishError,
               quest={quest}
               step={selStep!}
               msgs={gates.perPage[selStep!.id]}
+              highlight={highlight && highlight.pageId === selStep!.id ? highlight : null}
               onPatch={(patch) => patchStep(selStep!.id, patch)}
               onDelete={() => actions.removeStep(selStep!.id)}
               onDuplicate={() => actions.duplicateStep(selStep!.id)}
