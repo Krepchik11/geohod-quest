@@ -42,7 +42,7 @@ consistency rules thread through it:
    first boot (`sqlx::migrate!`). Copy the **session-pooler** URL.
 2. **Cloudflare R2** — create the bucket, bind the custom domain, set bucket CORS,
    mint an S3 API token (the **Media storage (Cloudflare R2)** section).
-3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys), set the R2
+3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys, SMTP url), set the R2
    identifiers in the API unit (`R2_PUBLIC_BASE_URL` = the step-2 domain), install +
    start the unit, wire Caddy (the **Backend (VPS · Podman · Caddy)** section).
 4. **Vercel** — set `NEXT_PUBLIC_API_URL`; redeploy. No media env is needed (R2 URLs
