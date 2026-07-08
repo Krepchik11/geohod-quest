@@ -195,10 +195,9 @@ async fn session_account(
     let Some(token) = bearer_token(headers) else {
         return Ok(None);
     };
-    let Some(player_id) = state.auth.get_session(&token).await? else {
-        return Ok(None);
-    };
-    state.auth.get_user(&player_id).await
+    // One round-trip (session⋈users), not get_session then get_user — this runs on
+    // the front of nearly every authenticated request.
+    state.auth.account_for_session(&token).await
 }
 
 /// The identity authorized to act on the admin user-management surface. `player_id`
@@ -908,13 +907,7 @@ async fn get_constructor_quest_handler(
     headers: HeaderMap,
 ) -> Result<Json<ConstructorQuestFullWire>, AppError> {
     let q = require_owned_constructor_quest(&state, &headers, &quest_id).await?;
-    let completed = state
-        .store
-        .completions_by_quest()
-        .await?
-        .get(&q.quest_id)
-        .copied()
-        .unwrap_or(0);
+    let completed = state.store.completions_for_quest(&q.quest_id).await?;
     Ok(Json(ConstructorQuestFullWire {
         quest_id: q.quest_id,
         name: q.name,
@@ -972,13 +965,7 @@ async fn create_constructor_quest_handler(
         .get_published(&summary.quest_id)
         .await?
         .map(|m| m.snapshot_version);
-    let buyers = state
-        .grants
-        .buyers_by_quest()
-        .await?
-        .get(&summary.quest_id)
-        .copied()
-        .unwrap_or(0);
+    let buyers = state.grants.buyers_for_quest(&summary.quest_id).await?;
     Ok(Json(ctor_wire(summary, 0, buyers, published_version)))
 }
 
@@ -1053,20 +1040,8 @@ async fn set_constructor_status_handler(
         .set_status(&quest_id, &req.status, now)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
-    let completed = state
-        .store
-        .completions_by_quest()
-        .await?
-        .get(&updated.quest_id)
-        .copied()
-        .unwrap_or(0);
-    let buyers = state
-        .grants
-        .buyers_by_quest()
-        .await?
-        .get(&updated.quest_id)
-        .copied()
-        .unwrap_or(0);
+    let completed = state.store.completions_for_quest(&updated.quest_id).await?;
+    let buyers = state.grants.buyers_for_quest(&updated.quest_id).await?;
     Ok(Json(ctor_wire(
         updated,
         completed,
@@ -1164,27 +1139,34 @@ async fn list_quests_handler(
     );
     let published = published?;
     let statuses = statuses?;
-    let mut out = Vec::with_capacity(published.len());
-    for meta in published {
-        // Hidden when the author moved it to `test`/`draft`; listed when `published`
-        // or when there is no constructor row (legacy/direct publish).
-        if statuses
-            .get(&meta.quest_id)
-            .map(String::as_str)
-            .is_some_and(|s| s != store::CTOR_STATUS_PUBLISHED)
-        {
-            continue;
-        }
-        // Aggregate ratings for the version on sale (the published snapshot),
-        // reusing the same projector the author dashboard's version-stats use.
-        // grants_count does not affect the rating fields, so pass 0.
-        let stats = state.store.get_version_stats(&meta.snapshot_id, 0).await?;
-        out.push(CatalogQuest {
-            meta,
-            rating_avg: stats.rating_avg,
-            rating_count: stats.rating_count,
-        });
-    }
+    // Keep only visible quests: `published` status, or NO constructor row at all
+    // (legacy/direct publish). A `test`/`draft` quest keeps its snapshot but leaves
+    // the store.
+    let visible: Vec<PublishedMeta> = published
+        .into_iter()
+        .filter(|meta| {
+            statuses
+                .get(&meta.quest_id)
+                .map(String::as_str)
+                .is_none_or(|s| s == store::CTOR_STATUS_PUBLISHED)
+        })
+        .collect();
+    // Ratings for EVERY visible quest in ONE round-trip (was a per-quest
+    // `get_version_stats` N+1 that dominated this endpoint's latency).
+    let snap_ids: Vec<String> = visible.iter().map(|m| m.snapshot_id.clone()).collect();
+    let ratings = state.store.rating_stats_for_snapshots(&snap_ids).await?;
+    let out: Vec<CatalogQuest> = visible
+        .into_iter()
+        .map(|meta| {
+            let (rating_avg, rating_count) =
+                ratings.get(&meta.snapshot_id).copied().unwrap_or((0.0, 0));
+            CatalogQuest {
+                meta,
+                rating_avg,
+                rating_count,
+            }
+        })
+        .collect();
     Ok(Json(out))
 }
 
@@ -1267,16 +1249,23 @@ async fn get_quest_product_handler(
     // §11 reviews: last quest_rated WITH text per attempt, newest first.
     let review_rows = state.store.reviews_for_quest(&quest_id, 1000).await?;
     let reviews_total = review_rows.len();
-    let mut reviews = Vec::with_capacity(review_rows.len().min(10));
-    for r in review_rows.into_iter().take(10) {
-        let account = state.auth.get_user(&r.player_id).await?;
-        reviews.push(ReviewWire {
-            author: review_author_label(account.and_then(|a| a.display_name).as_deref()),
+    let page: Vec<store::ReviewRow> = review_rows.into_iter().take(10).collect();
+    // Author display names in ONE round-trip (was one get_user per review — an N+1).
+    let author_ids: Vec<String> = page.iter().map(|r| r.player_id.clone()).collect();
+    let authors = state.auth.get_users_by_ids(&author_ids).await?;
+    let reviews: Vec<ReviewWire> = page
+        .into_iter()
+        .map(|r| ReviewWire {
+            author: review_author_label(
+                authors
+                    .get(&r.player_id)
+                    .and_then(|a| a.display_name.as_deref()),
+            ),
             rating: r.rating,
             text: r.text,
             created_at: r.created_at,
-        });
-    }
+        })
+        .collect();
     Ok(Json(ProductPageWire {
         meta,
         rating_avg: stats.rating_avg,

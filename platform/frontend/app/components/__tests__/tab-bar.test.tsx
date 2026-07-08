@@ -46,4 +46,14 @@ describe('TabBar', () => {
     expect(screen.getByRole('link', { name: 'Мои квесты' }).className).toContain('is-active');
     expect(screen.getByRole('link', { name: 'Магазин' }).className).not.toContain('is-active');
   });
+
+  // The store lives below the hero + features on `/`; the tab must land the
+  // player on the quest grid (#shop), not the top of the marketing page —
+  // mirroring the desktop header's «магазин квестов» link.
+  it('store tab links to the shop grid and stays active on the home route', () => {
+    renderAt('/');
+    const store = screen.getByRole('link', { name: 'Магазин' });
+    expect(store.getAttribute('href')).toBe('/#shop');
+    expect(store.className).toContain('is-active');
+  });
 });

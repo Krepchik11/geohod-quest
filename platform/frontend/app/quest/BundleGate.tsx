@@ -2,37 +2,22 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { QuestSnapshot } from '../../lib/shared-model';
-import { loadQuestSnapshot } from '../../lib/shared-model';
-import { getActiveAttempt, getBundle, getLatestBundleForQuest } from '../../lib/queue';
 import { storeBundle, precacheBundleMedia } from '../../lib/download';
 import { api } from '../../lib/api';
 import { currentPlayerId } from '../../lib/identity';
+import { resolveGate, type GateResolution } from '../../lib/bundle-resolver';
 import { PlayerFrame, Flourish } from '../player/PlayerComponents';
 import QuestPlayerClient from './QuestPlayerClient';
 
-type GateState =
-  | { kind: 'loading' }
-  | { kind: 'ready'; snapshot: QuestSnapshot; snapshotId: string }
-  | { kind: 'denied' }
-  | { kind: 'login-required' }
-  | { kind: 'unavailable'; offline: boolean };
-
-function httpStatus(err: unknown): number | null {
-  const m = err instanceof Error ? /^API (\d{3}) /.exec(err.message) : null;
-  return m ? Number(m[1]) : null;
-}
+type GateState = { kind: 'loading' } | GateResolution;
 
 /**
- * Snapshot resolution gate — resolves BEFORE first paint of the player so the
- * snapshot never swaps mid-attempt (version freeze):
- *   1. the attempt-bound downloaded bundle,
- *   2. the latest downloaded bundle for the quest,
- *   3. the server bundle (grant-gated 403; stored locally so the next open is
- *      offline-capable).
- * There is no fixture fallback and no client-side grant synthesis: access is
- * enforced by the server, full stop. IndexedDB is client-only, hence this thin
- * gate under the RSC shell.
+ * Snapshot resolution gate — resolves BEFORE first paint of the player. The
+ * decision itself lives in `lib/bundle-resolver` (unit-tested); this component
+ * only feeds it the runtime (network, player id, restart intent) and renders the
+ * outcome. Version freeze (an in-progress attempt keeps its snapshot) and the
+ * restart-adopts-latest rule both live in the resolver. Access is enforced by
+ * the server — no fixture fallback, no client-side grant synthesis.
  */
 export default function BundleGate({ questId }: { questId: string }) {
   const [state, setState] = useState<GateState>({ kind: 'loading' });
@@ -43,34 +28,26 @@ export default function BundleGate({ questId }: { questId: string }) {
       if (!cancelled) setState(next);
     };
     void (async () => {
-      try {
-        const attempt = await getActiveAttempt(questId);
-        const bundle =
-          (attempt && (await getBundle(attempt.snapshot_id))) || (await getLatestBundleForQuest(questId));
-        if (bundle) {
-          apply({ kind: 'ready', snapshot: bundle.snapshot, snapshotId: bundle.snapshot_id });
-          return;
-        }
-      } catch {
-        // IndexedDB unavailable — fall through to the network path.
+      // «Пройти заново» (My Quests) and the finale «Начать заново» both arrive as
+      // ?restart=1. Consume it HERE — the single place resolution happens — so a
+      // restart re-resolves the latest published version; strip it once consumed
+      // so a refresh resumes the fresh attempt instead of restarting again.
+      const restart =
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('restart') === '1';
+      const resolution = await resolveGate(questId, restart, {
+        playerId: currentPlayerId(),
+        online: typeof navigator === 'undefined' || navigator.onLine,
+        getBundle: (id, playerId) => api.getBundle(id, playerId),
+        persist: async (wire) => {
+          const row = await storeBundle(wire);
+          void precacheBundleMedia(row.snapshot_id, row.snapshot, wire.primary_comic).catch(() => {});
+        },
+      });
+      if (restart && !cancelled && typeof window !== 'undefined') {
+        window.history.replaceState(null, '', `/quest/${encodeURIComponent(questId)}`);
       }
-      try {
-        const wire = await api.getBundle(questId, currentPlayerId());
-        const snapshot = loadQuestSnapshot(wire.snapshot);
-        apply({ kind: 'ready', snapshot, snapshotId: wire.snapshot_id });
-        // Persist + warm media (snapshot refs + the envelope's cover) in the background
-        // so a quest merely OPENED online — not just explicitly «Скачать»-ed — is fully
-        // playable offline next time. Off the first-paint path; best-effort, so a failure
-        // never breaks play.
-        void storeBundle(wire)
-          .then((row) => precacheBundleMedia(row.snapshot_id, row.snapshot, wire.primary_comic))
-          .catch(() => {});
-      } catch (err) {
-        const status = httpStatus(err);
-        if (status === 403) apply({ kind: 'denied' });
-        else if (status === 401) apply({ kind: 'login-required' });
-        else apply({ kind: 'unavailable', offline: typeof navigator !== 'undefined' && !navigator.onLine });
-      }
+      apply(resolution);
     })();
     return () => {
       cancelled = true;

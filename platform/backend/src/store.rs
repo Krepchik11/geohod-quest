@@ -246,6 +246,33 @@ impl InMemoryFactStore {
         )
     }
 
+    /// Batch store rating per snapshot for the catalog — the in-memory mirror of
+    /// [`crate::pg_store::PgFactStore::rating_stats_for_snapshots`]. Folds through
+    /// the same [`crate::facts::fold_attempt_ratings`] as `get_version_stats`, so
+    /// this returns exactly `(rating_avg, rating_count)` for each snapshot.
+    pub fn rating_stats_for_snapshots(&self, snaps: &[String]) -> HashMap<String, (f64, usize)> {
+        let amap = self.attempt_snapshot_map();
+        let wanted: std::collections::HashSet<&str> = snaps.iter().map(String::as_str).collect();
+        // snapshot -> the fact logs of its attempts
+        let mut by_snap: HashMap<&str, Vec<&Vec<Fact>>> = HashMap::new();
+        for (att, snap) in &amap {
+            if !wanted.contains(snap.as_str()) {
+                continue;
+            }
+            if let Some(log) = self.fact_logs.get(att) {
+                by_snap.entry(snap.as_str()).or_default().push(log);
+            }
+        }
+        // Every requested snapshot gets an entry, even with no attempts yet (0.0, 0).
+        snaps
+            .iter()
+            .map(|snap| {
+                let logs = by_snap.remove(snap.as_str()).unwrap_or_default();
+                (snap.clone(), crate::facts::fold_attempt_ratings(logs))
+            })
+            .collect()
+    }
+
     /// Feedback reports for a version (admin visibility), via the pure projector.
     pub fn list_feedbacks_for_version(&self, snap: &str) -> Vec<Fact> {
         crate::facts::list_feedbacks_for_snapshot(
@@ -318,6 +345,23 @@ impl InMemoryFactStore {
             }
         }
         sets.into_iter().map(|(q, s)| (q, s.len())).collect()
+    }
+
+    /// Distinct finishers of ONE quest — the single-quest mirror of
+    /// `completions_by_quest`, matching its `bonus_awards`-per-(player,quest) count.
+    pub fn completions_for_quest(&self, quest_id: &str) -> usize {
+        self.attempts
+            .values()
+            .filter(|meta| {
+                meta.quest_id == quest_id
+                    && self
+                        .fact_logs
+                        .get(&meta.attempt_id)
+                        .is_some_and(|log| log.iter().any(|f| f.kind == FactKind::CompletionBonus))
+            })
+            .map(|meta| meta.player_id.clone())
+            .collect::<HashSet<String>>()
+            .len()
     }
 }
 
@@ -464,6 +508,15 @@ impl InMemoryGrantStore {
         m
     }
 
+    /// Distinct buyers of ONE quest — the single-quest mirror of `buyers_by_quest`
+    /// (grants are unique per (player, quest), so a plain count is the distinct one).
+    pub fn buyers_for_quest(&self, quest_id: &str) -> usize {
+        self.grants
+            .values()
+            .filter(|g| g.quest_id == quest_id)
+            .count()
+    }
+
     /// §7.4 delete account: purge every grant of the player. Returns the count
     /// (the confirm dialog shows honest numbers).
     pub fn delete_grants_for_player(&mut self, player_id: &str) -> usize {
@@ -570,6 +623,15 @@ impl InMemoryAuthStore {
         self.users.get(player_id).map(|r| r.account.clone())
     }
 
+    /// Accounts for a batch of player ids (unknown/anonymous ids are simply
+    /// absent) — the in-memory mirror of the Postgres `ANY($1)` batch lookup.
+    pub fn get_users_by_ids(&self, player_ids: &[String]) -> HashMap<String, UserAccount> {
+        player_ids
+            .iter()
+            .filter_map(|id| self.users.get(id).map(|r| (id.clone(), r.account.clone())))
+            .collect()
+    }
+
     /// Assign `role` to a registered account (admin-users spec). Returns 404 for
     /// an unknown/anonymous id — only registered accounts have a role. The caller
     /// validates `role` against the known set before reaching here.
@@ -603,6 +665,13 @@ impl InMemoryAuthStore {
     /// Resolve a session token to its player id.
     pub fn get_session(&self, token: &str) -> Option<String> {
         self.sessions.get(token).cloned()
+    }
+
+    /// The account behind a session token in one step — mirror of the Postgres
+    /// single-JOIN path. An anonymous session (no account row) yields `None`.
+    pub fn account_for_session(&self, token: &str) -> Option<UserAccount> {
+        let player_id = self.sessions.get(token)?;
+        self.users.get(player_id).map(|r| r.account.clone())
     }
 
     /// §7.3 «Изменить имя» — set/clear the display name.
@@ -809,6 +878,17 @@ impl FactStores {
         }
     }
 
+    /// See [`InMemoryFactStore::rating_stats_for_snapshots`].
+    pub async fn rating_stats_for_snapshots(
+        &self,
+        snaps: &[String],
+    ) -> Result<std::collections::HashMap<String, (f64, usize)>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.rating_stats_for_snapshots(snaps)),
+            Self::Postgres(pg) => pg.rating_stats_for_snapshots(snaps).await,
+        }
+    }
+
     /// See [`InMemoryFactStore::run_legacy_migration`].
     pub async fn run_legacy_migration(
         &self,
@@ -843,6 +923,14 @@ impl FactStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.completions_by_quest()),
             Self::Postgres(pg) => pg.completions_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryFactStore::completions_for_quest`].
+    pub async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.completions_for_quest(quest_id)),
+            Self::Postgres(pg) => pg.completions_for_quest(quest_id).await,
         }
     }
 }
@@ -896,6 +984,17 @@ impl AuthStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_user(player_id)),
             Self::Postgres(pg) => pg.get_user(player_id).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::get_users_by_ids`].
+    pub async fn get_users_by_ids(
+        &self,
+        player_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, UserAccount>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_users_by_ids(player_ids)),
+            Self::Postgres(pg) => pg.get_users_by_ids(player_ids).await,
         }
     }
 
@@ -1016,6 +1115,14 @@ impl AuthStores {
             Self::Postgres(pg) => pg.get_session(token).await,
         }
     }
+
+    /// See [`InMemoryAuthStore::account_for_session`].
+    pub async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.account_for_session(token)),
+            Self::Postgres(pg) => pg.account_for_session(token).await,
+        }
+    }
 }
 
 /// Grant/published-quest storage backend (see [`FactStores`] for the pattern).
@@ -1106,6 +1213,14 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.buyers_by_quest()),
             Self::Postgres(pg) => pg.buyers_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::buyers_for_quest`].
+    pub async fn buyers_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.buyers_for_quest(quest_id)),
+            Self::Postgres(pg) => pg.buyers_for_quest(quest_id).await,
         }
     }
 
