@@ -7,12 +7,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   CTOR_TEMPLATES,
+  GIFT_COINS,
   computeGates,
   duplicateStep,
   insertionIndex,
+  migrateQuest,
   newQuest,
   newStep,
   nextVersionNumber,
+  parseCoords,
   plural,
   removeStep,
   reorderSteps,
@@ -32,11 +35,16 @@ describe('templates and presets', () => {
     ]);
   });
 
-  it('prefills task_answer with gift, hint and answer prompt (SPEC presets)', () => {
+  it('prefills task_answer with hint and answer prompt (SPEC presets)', () => {
     const s = newStep('task_answer');
     expect(s.prompt).toBe('Введите ответ');
-    expect(s.gift).toEqual({ on: true, coins: 5, narrative: '' });
+    expect(s.gift).toEqual({ narrative: '' });
     expect(s.hint).toEqual({ on: true, cost: 5, text: '' });
+  });
+
+  it('every new step has a single empty image slot', () => {
+    expect(newStep('task_no').image).toBeNull();
+    expect(newStep('continue').image).toBeNull();
   });
 
   it('prefills task_no with navigator on and note allowed', () => {
@@ -91,12 +99,12 @@ describe('computeGates', () => {
     const q = quest();
     const task = newStep('task_answer');
     task.acceptable = [''];
-    task.images.task = null;
-    task.nav = { ...task.nav, on: true, lat: '', lng: '' };
+    task.image = null;
+    task.nav = { on: true, coords: '' };
     q.steps = [q.steps[0], task, q.steps[1]];
     const errs = computeGates(q).errors;
     const fieldOf = (frag: string) => errs.find((e) => e.text.includes(frag))?.field;
-    expect(fieldOf('нет комикса')).toBe('comic');
+    expect(fieldOf('нет изображения')).toBe('image');
     expect(fieldOf('список ответов пуст')).toBe('answers');
     expect(fieldOf('координаты не заданы')).toBe('nav');
   });
@@ -117,29 +125,29 @@ describe('computeGates', () => {
     expect(err?.text).toContain('может быть только первой страницей');
   });
 
-  it('requires task comic and answers; ties errors to the page id', () => {
+  it('requires task image and answers; ties errors to the page id', () => {
     const q = quest();
     const task = newStep('task_answer');
     q.steps = [q.steps[0], task, q.steps[1]];
     const g = computeGates(q);
-    expect(g.perPage[task.id]?.some((m) => m.text.includes('нет комикса'))).toBe(true);
+    expect(g.perPage[task.id]?.some((m) => m.text.includes('нет изображения'))).toBe(true);
     expect(g.perPage[task.id]?.some((m) => m.text.includes('список ответов пуст'))).toBe(true);
   });
 
   it('accepts whitespace-only answers as empty', () => {
     const q = quest();
     const task = newStep('task_answer');
-    task.images.task = '/img.jpg';
+    task.image = '/img.jpg';
     task.acceptable = ['  ', ''];
     q.steps = [q.steps[0], task, q.steps[1]];
     expect(computeGates(q).errors.some((e) => e.text.includes('список ответов пуст'))).toBe(true);
   });
 
-  it('errors on navigator without numeric coordinates', () => {
+  it('errors on navigator without parseable coordinates', () => {
     const q = quest();
     const s = newStep('task_no');
-    s.images.task = '/img.jpg';
-    s.nav = { on: true, lat: 'abc', lng: '19.84', label: '' };
+    s.image = '/img.jpg';
+    s.nav = { on: true, coords: 'abc, 19.84' };
     q.steps = [q.steps[0], s, q.steps[1]];
     expect(computeGates(q).errors.some((e) => e.text.includes('координаты'))).toBe(true);
   });
@@ -147,7 +155,7 @@ describe('computeGates', () => {
   it('warns (not errors) on a paid hint without text', () => {
     const q = quest();
     const s = newStep('task_answer');
-    s.images.task = '/img.jpg';
+    s.image = '/img.jpg';
     s.acceptable = ['1730'];
     s.hint = { on: true, cost: 5, text: '' };
     q.steps = [q.steps[0], s, q.steps[1]];
@@ -186,17 +194,42 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(d.image).toBe('/assets/img/quest-card.png');
   });
 
-  it('task_answer: trims and drops blank answers; hint/gift only when enabled', () => {
+  it('task_answer: trims and drops blank answers; hint only when enabled', () => {
     const s = newStep('task_answer');
     s.acceptable = [' 1730 ', '', 'в 1730'];
     s.hint = { on: true, cost: 7, text: 'смотрите выше' };
-    s.gift = { on: false, coins: 5, narrative: '' };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.completion.acceptable).toEqual(['1730', 'в 1730']);
     expect(g.supporting?.hint).toEqual({ cost_coins: 7, reveal_text: 'смотрите выше' });
-    expect(g.supporting?.gift).toBeUndefined();
     // the serialized list satisfies the shared matcher exactly
     expect(isAnswerCorrect('  В 1730 ', g.completion.acceptable || [])).toBe(true);
+  });
+
+  it('task steps always carry the fixed 5-coin gift', () => {
+    for (const tpl of ['task_no', 'task_answer'] as const) {
+      const s = newStep(tpl);
+      s.gift = { narrative: 'Острый глаз!' };
+      const g = stepToGameStep(s, newQuest({}).meta);
+      expect(g.supporting?.gift).toEqual({ coins: GIFT_COINS, narrative_text: 'Острый глаз!' });
+    }
+    expect(GIFT_COINS).toBe(5);
+  });
+
+  it('non-task steps carry no gift', () => {
+    for (const tpl of ['start', 'video', 'continue', 'route_video', 'congrats'] as const) {
+      expect(stepToGameStep(newStep(tpl), newQuest({}).meta).supporting?.gift).toBeUndefined();
+    }
+  });
+
+  it('the single step image maps to the primary media slot; legacy roles stay empty', () => {
+    const s = newStep('task_no');
+    s.image = '/img.jpg';
+    const g = stepToGameStep(s, newQuest({}).meta);
+    expect(g.media.task).toBe('/img.jpg');
+    expect(g.media.character).toBeNull();
+    expect(g.media.hint).toBeNull();
+    expect(g.media.atmosphere).toBeNull();
+    expect(toDesignStep(g).image).toBe('/img.jpg');
   });
 
   it('task_no: physical action, place, note and navigator survive the mapping', () => {
@@ -204,12 +237,20 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     s.text = 'Дойдите до церкви';
     s.place = 'ул. Николаевска порта 2';
     s.action = { desc: 'Прикоснитесь к ограде', confirmLabel: 'Я на месте, нашёл' };
-    s.nav = { on: true, lat: '45.2551', lng: '19.8451', label: 'Церковь' };
+    s.nav = { on: true, coords: '45.2551, 19.8451' };
     const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
     expect(d.place).toBe('ул. Николаевска порта 2');
     expect(d.action?.confirmLabel).toBe('Я на месте, нашёл');
     expect(d.allowNote).toBe(true);
-    expect(d.nav).toEqual({ lat: 45.2551, lng: 19.8451, label: 'Церковь' });
+    // the content-block address doubles as the navigator point label
+    expect(d.nav).toEqual({ lat: 45.2551, lng: 19.8451, label: 'ул. Николаевска порта 2' });
+  });
+
+  it('task_answer: the address lives in content and flows to place_text', () => {
+    const s = newStep('task_answer');
+    s.place = 'пл. Свободы 1';
+    const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
+    expect(d.place).toBe('пл. Свободы 1');
   });
 
   it('video: duration and caption flow into the design video block', () => {
@@ -219,15 +260,9 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(d.video).toEqual({ dur: '0:48', label: 'видео-приветствие' });
   });
 
-  it('gift requires positive coins (zero-coin gift is dropped)', () => {
-    const s = newStep('task_no');
-    s.gift = { on: true, coins: 0, narrative: 'x' };
-    expect(stepToGameStep(s, newQuest({}).meta).supporting?.gift).toBeUndefined();
-  });
-
   it('navigator with unparsable coords is dropped from the snapshot (gates block publish anyway)', () => {
     const s = newStep('task_no');
-    s.nav = { on: true, lat: '', lng: '', label: '' };
+    s.nav = { on: true, coords: '' };
     expect(stepToGameStep(s, newQuest({}).meta).supporting?.navigator).toBeUndefined();
   });
 
@@ -297,13 +332,13 @@ describe('structural edits', () => {
   it('duplicateStep deep-copies right after the source with a fresh id and «(копия)»', () => {
     const q = quest();
     const src = q.steps[0];
-    src.images.task = '/img.jpg';
+    src.action = { ...src.action, desc: 'исходное' };
     const { steps, newId } = duplicateStep(q.steps, src.id);
     expect(steps).toHaveLength(3);
     expect(steps[1].id).toBe(newId);
     expect(steps[1].name).toBe(src.name + ' (копия)');
-    steps[1].images.task = '/other.jpg';
-    expect(src.images.task).toBe('/img.jpg');
+    steps[1].action.desc = 'изменённое';
+    expect(src.action.desc).toBe('исходное');
   });
 
   it('removeStep selects the next page, then the previous, then null', () => {
@@ -327,6 +362,89 @@ describe('versions', () => {
       { n: 1, date: '', pages: 2, size: '', live: true, attempts: 0 },
     ];
     expect(nextVersionNumber(q)).toBe(4);
+  });
+});
+
+describe('parseCoords', () => {
+  it('parses the Google Maps copy format «lat, lng»', () => {
+    expect(parseCoords('45.2651377918879, 19.865664144668212')).toEqual({
+      lat: 45.2651377918879,
+      lng: 19.865664144668212,
+    });
+  });
+
+  it('tolerates missing space, extra whitespace and negative values', () => {
+    expect(parseCoords('45.26,-19.86')).toEqual({ lat: 45.26, lng: -19.86 });
+    expect(parseCoords('  -45.26 ,  19.86  ')).toEqual({ lat: -45.26, lng: 19.86 });
+  });
+
+  it('rejects junk, partial input and out-of-range values', () => {
+    expect(parseCoords('')).toBeNull();
+    expect(parseCoords('45.26')).toBeNull();
+    expect(parseCoords('abc, 19.86')).toBeNull();
+    expect(parseCoords('91, 19.86')).toBeNull();
+    expect(parseCoords('45.26, 181')).toBeNull();
+    expect(parseCoords('45.26, 19.86, 7')).toBeNull();
+  });
+});
+
+describe('migrateQuest (legacy draft bodies)', () => {
+  const legacyBody = () => {
+    const q = quest({ id: 'q-old' });
+    const task = {
+      ...newStep('task_answer'),
+      images: { task: '/t.jpg', character: '/c.jpg', hint: null, atmosphere: '/a.jpg' },
+      gift: { on: true, coins: 12, narrative: 'молодец' },
+      hint: { on: true, cost: 5, text: 'ищите выше' },
+      nav: { on: true, lat: '45.2551', lng: '19.8451', label: 'Церковь' },
+      place: '',
+    } as unknown as CtorQuest['steps'][number];
+    delete (task as unknown as { image?: unknown }).image;
+    q.steps = [q.steps[0], task, q.steps[1]];
+    return JSON.parse(JSON.stringify(q)) as unknown;
+  };
+
+  it('returns null for a non-quest body', () => {
+    expect(migrateQuest(null, 'q-1')).toBeNull();
+    expect(migrateQuest({ meta: {} }, 'q-1')).toBeNull();
+  });
+
+  it('forces the server id onto the body', () => {
+    const q = migrateQuest(legacyBody(), 'q-server');
+    expect(q?.id).toBe('q-server');
+  });
+
+  it('collapses the legacy role images to the single image (task first)', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.steps[1].image).toBe('/t.jpg');
+    expect((q.steps[1] as unknown as { images?: unknown }).images).toBeUndefined();
+  });
+
+  it('normalizes gift to narrative-only and nav to a single coords field', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.steps[1].gift).toEqual({ narrative: 'молодец' });
+    expect(q.steps[1].nav).toEqual({ on: true, coords: '45.2551, 19.8451' });
+  });
+
+  it('moves the legacy navigator label into the empty content address', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.steps[1].place).toBe('Церковь');
+  });
+
+  it('keeps an existing address over the legacy navigator label', () => {
+    const body = legacyBody() as { steps: Array<{ place: string }> };
+    body.steps[1].place = 'пл. Свободы 1';
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.steps[1].place).toBe('пл. Свободы 1');
+  });
+
+  it('is idempotent on a current-shape quest', () => {
+    const current = quest({ id: 'q-new' });
+    current.steps[0].image = '/cover.jpg';
+    const once = migrateQuest(JSON.parse(JSON.stringify(current)), 'q-new')!;
+    const twice = migrateQuest(JSON.parse(JSON.stringify(once)), 'q-new')!;
+    expect(twice).toEqual(once);
+    expect(once.steps[0].image).toBe('/cover.jpg');
   });
 });
 
