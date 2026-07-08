@@ -353,8 +353,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email }),
     }),
-  authResetPassword: (body: { token: string; password: string }) =>
-    apiFetch<Session>('/api/auth/reset', { method: 'POST', body: JSON.stringify(body) }),
+  // Reset finishes with either mailed credential: the link token (R1) or the
+  // email-scoped 6-digit code (R2, typed in-app).
+  authResetPassword: (
+    body: { token: string; password: string } | { email: string; code: string; password: string },
+  ) => apiFetch<Session>('/api/auth/reset', { method: 'POST', body: JSON.stringify(body) }),
   authConfirmEmail: (token: string) =>
     apiFetch<{ status: string; email: string }>('/api/auth/confirm', {
       method: 'POST',

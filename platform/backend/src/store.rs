@@ -489,12 +489,22 @@ impl InMemoryGrantStore {
 pub struct AuthTokenRecord {
     pub player_id: String,
     pub kind: String,
+    /// sha256 of the emailed 6-digit code (§6.2 R2); `""` when none was minted
+    /// (legacy rows) — no sha256 hex ever matches it.
+    pub code_hash: String,
     pub expires_at: u64,
     pub used_at: Option<u64>,
+    /// Code-verify attempts so far; the code stops verifying at
+    /// [`MAX_CODE_ATTEMPTS`] (low-entropy codes must not be brute-forceable).
+    pub attempts: u32,
 }
 
 pub const TOKEN_KIND_RESET: &str = "reset";
 pub const TOKEN_KIND_CONFIRM: &str = "confirm";
+
+/// A 6-digit code survives at most this many verify attempts (right or wrong):
+/// 5 guesses against 10^6 codes in a 30-minute window is negligible.
+pub const MAX_CODE_ATTEMPTS: u32 = 5;
 
 /// In-memory identity store: registrations (the `users` table) + opaque sessions.
 /// A record exists ONLY for registered users — anonymous ids have no row by
@@ -631,8 +641,13 @@ impl InMemoryAuthStore {
         Ok(record.account.clone())
     }
 
-    /// Store a single-use token (hashed by the caller).
+    /// Store a single-use token (hashed by the caller). Latest mail wins:
+    /// issuing invalidates prior unused tokens of the same kind — with codes
+    /// in play, N outstanding credentials would be N× guessable.
     pub fn create_auth_token(&mut self, token_hash: &str, rec: AuthTokenRecord) {
+        self.auth_tokens.retain(|_, r| {
+            r.player_id != rec.player_id || r.kind != rec.kind || r.used_at.is_some()
+        });
         self.auth_tokens.insert(token_hash.to_string(), rec);
     }
 
@@ -641,6 +656,31 @@ impl InMemoryAuthStore {
     pub fn consume_auth_token(&mut self, token_hash: &str, kind: &str, now: u64) -> Option<String> {
         let rec = self.auth_tokens.get_mut(token_hash)?;
         if rec.kind != kind || rec.used_at.is_some() || rec.expires_at < now {
+            return None;
+        }
+        rec.used_at = Some(now);
+        Some(rec.player_id.clone())
+    }
+
+    /// Consume by emailed code (§6.2 R2): the player's active (unused,
+    /// unexpired, under-budget) token of `kind`. EVERY call spends one attempt;
+    /// only a code_hash match consumes the token and returns the player id.
+    pub fn consume_auth_token_by_code(
+        &mut self,
+        player_id: &str,
+        kind: &str,
+        code_hash: &str,
+        now: u64,
+    ) -> Option<String> {
+        let rec = self.auth_tokens.values_mut().find(|r| {
+            r.player_id == player_id
+                && r.kind == kind
+                && r.used_at.is_none()
+                && r.expires_at >= now
+                && r.attempts < MAX_CODE_ATTEMPTS
+        })?;
+        rec.attempts += 1;
+        if rec.code_hash.is_empty() || rec.code_hash != code_hash {
             return None;
         }
         rec.used_at = Some(now);
@@ -939,6 +979,25 @@ impl AuthStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.consume_auth_token(token_hash, kind, now)),
             Self::Postgres(pg) => pg.consume_auth_token(token_hash, kind, now).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::consume_auth_token_by_code`].
+    pub async fn consume_auth_token_by_code(
+        &self,
+        player_id: &str,
+        kind: &str,
+        code_hash: &str,
+        now: u64,
+    ) -> Result<Option<String>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(
+                Self::lock_inmem(m)?.consume_auth_token_by_code(player_id, kind, code_hash, now)
+            ),
+            Self::Postgres(pg) => {
+                pg.consume_auth_token_by_code(player_id, kind, code_hash, now)
+                    .await
+            }
         }
     }
 
