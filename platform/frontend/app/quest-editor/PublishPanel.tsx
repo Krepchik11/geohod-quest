@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   nextVersionNumber,
+  parseCoords,
   plural,
   serializeDraft,
   type CtorQuest,
@@ -31,7 +32,7 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
     rows.push({ st: 'ok', text: 'Списки ответов заполнены у всех «Заданий с ответом»' });
   }
   const navs = quest.steps.filter((s) => s.nav.on);
-  if (navs.length && navs.every((s) => Number.isFinite(parseFloat(s.nav.lat)) && Number.isFinite(parseFloat(s.nav.lng)))) {
+  if (navs.length && navs.every((s) => parseCoords(s.nav.coords))) {
     rows.push({ st: 'ok', text: `Навигатор: координаты заданы у всех включённых точек (${navs.length})` });
   }
   gates.errors.forEach((e) => rows.push({ st: 'err', text: e.text, pageId: e.pageId, field: e.field }));

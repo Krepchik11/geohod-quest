@@ -26,12 +26,12 @@ import {
 import { flushPending } from '../../lib/sync';
 import { currentPlayerId, getDeviceId } from '../../lib/identity';
 import { StartGate } from './StartGate';
-import { coinChime } from './sound';
+import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
   PlayerFrame, StepView, TopBar, CoinToast, PCheck,
-  HintPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
+  HintPopup, HintRevealPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
 } from '../player/PlayerComponents';
 
 /** RU copy, classic tone — shared with the constructor preview/test player. */
@@ -84,7 +84,9 @@ interface PlayerState {
   showStartGate: boolean;
   /** Step whose hint popup is open (SPEC: from the 2nd wrong answer only). */
   hintOfferPos: number | null;
-  /** Designed coin toast (gift / completion bonus). */
+  /** Step whose just-purchased hint content popup (text/image) is open. */
+  hintRevealPos: number | null;
+  /** Designed coin toast: positive = gift/bonus, negative = spend. */
   toast: { amount: number; narrative?: string } | null;
 }
 
@@ -104,6 +106,7 @@ type PlayerAction =
   | { type: 'dismissStartGate' }
   | { type: 'setQueueStatus'; status: Record<string, 'pending' | 'sent'> }
   | { type: 'offerHint'; pos: number | null }
+  | { type: 'revealHint'; pos: number | null }
   | { type: 'setToast'; toast: PlayerState['toast'] };
 
 const initialState: PlayerState = {
@@ -115,6 +118,7 @@ const initialState: PlayerState = {
   queueStatus: {},
   showStartGate: false,
   hintOfferPos: null,
+  hintRevealPos: null,
   toast: null,
 };
 
@@ -154,6 +158,8 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
       return { ...state, queueStatus: action.status };
     case 'offerHint':
       return { ...state, hintOfferPos: action.pos };
+    case 'revealHint':
+      return { ...state, hintRevealPos: action.pos };
     case 'setToast':
       return { ...state, toast: action.toast };
     default:
@@ -173,14 +179,14 @@ export default function QuestPlayerClient({
 }) {
   const router = useRouter();
   const online = useOnline();
-  // Publish the keyboard's occluded height as --kb-inset so the multi-line note
-  // bar and the report sheet stay above the on-screen keyboard on iOS (Part B).
+  // Publish the keyboard's occluded height as --kb-inset so the report sheet
+  // stays above the on-screen keyboard on iOS (Part B).
   useKeyboardInset();
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const {
     facts, stepIdx, maxStepIdx, attemptKey, attemptCreatedAt,
-    queueStatus, showStartGate, hintOfferPos, toast,
+    queueStatus, showStartGate, hintOfferPos, hintRevealPos, toast,
   } = state;
 
   // SPEC (blueprint/SPEC.md §Coins): there is exactly ONE balance — the player's
@@ -227,7 +233,6 @@ export default function QuestPlayerClient({
   const [ui, setUi] = useState(() => ({
     answer: '',
     wrong: false,
-    note: '',
     menuOpen: false,
     feedbackOpen: false,
     feedbackText: '',
@@ -255,10 +260,15 @@ export default function QuestPlayerClient({
     });
   }, [setUi]);
 
+  // One shared dismiss timer: a new toast (e.g. a hint spend right after a step
+  // gift) restarts the clock so an earlier toast's pending clear can never wipe
+  // the current one before its own 1.9s is up.
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = useCallback((amount: number, narrative?: string, soundOn?: boolean) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     dispatch({ type: 'setToast', toast: { amount, narrative } });
-    if (soundOn) coinChime();
-    setTimeout(() => dispatch({ type: 'setToast', toast: null }), TOAST_MS);
+    if (soundOn) (amount < 0 ? spendChime : coinChime)();
+    toastTimer.current = setTimeout(() => dispatch({ type: 'setToast', toast: null }), TOAST_MS);
   }, []);
 
   /** Append to the reducer + write-through to the durable queue; returns the built fact. */
@@ -317,22 +327,18 @@ export default function QuestPlayerClient({
     dispatch({ type: 'advance', to: stepIdx - 1 });
   }, [stepIdx, setUi]);
 
-  const handlePhysicalConfirm = useCallback(
-    (note?: string) => {
-      appendFact({
-        type: 'physical_confirmed',
-        step_position: stepIdx,
-        submitted_value: null,
-        local_is_correct: true,
-        coins_delta: 0,
-        note: note || null,
-      });
-      claimGiftIfNeeded(stepIdx);
-      setUi((u) => ({ ...u, note: '' }));
-      doAdvance();
-    },
-    [stepIdx, appendFact, claimGiftIfNeeded, doAdvance, setUi]
-  );
+  const handlePhysicalConfirm = useCallback(() => {
+    appendFact({
+      type: 'physical_confirmed',
+      step_position: stepIdx,
+      submitted_value: null,
+      local_is_correct: true,
+      coins_delta: 0,
+      note: null,
+    });
+    claimGiftIfNeeded(stepIdx);
+    doAdvance();
+  }, [stepIdx, appendFact, claimGiftIfNeeded, doAdvance]);
 
   const handleAnswerSubmit = useCallback(
     (value: string) => {
@@ -376,7 +382,11 @@ export default function QuestPlayerClient({
       note: hint?.reveal_text || null,
     });
     dispatch({ type: 'offerHint', pos: null });
-  }, [hintOfferPos, stepIdx, steps, appendFact]);
+    // The purchased content (text and/or image) opens as a popup; the inline
+    // hint box then keeps it for the rest of the step.
+    dispatch({ type: 'revealHint', pos });
+    if (hint?.cost_coins) showToast(-hint.cost_coins, 'подсказка', ui.soundOn);
+  }, [hintOfferPos, stepIdx, steps, appendFact, showToast, ui.soundOn]);
 
   const handleFeedback = useCallback(
     (note: string) => {
@@ -443,7 +453,7 @@ export default function QuestPlayerClient({
       try {
         const fresh = await restartAttempt(questId, snapshotId);
         dispatch({ type: 'reset', attemptKey: fresh.attempt_key, attemptCreatedAt: fresh.created_at });
-        setUi((u) => ({ ...u, answer: '', wrong: false, note: '', rating: 0, showCatalog: false, shareToast: false }));
+        setUi((u) => ({ ...u, answer: '', wrong: false, rating: 0, showCatalog: false, shareToast: false }));
       } catch (err) {
         console.warn('restart failed', err);
       }
@@ -670,19 +680,16 @@ export default function QuestPlayerClient({
         hintRevealed: proj.revealedHints.includes(pos),
         wrong: ui.wrong,
         answer: ui.answer,
-        note: ui.note,
         rating: ui.rating || latestRating(facts),
         reviewText: ui.reviewText,
         coinsEarned: runEarned,
         time: formatElapsed(attemptCreatedAt),
-        allowNote: currentDisplayStep.allowNote,
       }}
       on={{
         next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
-        confirm: (note?: string) => handlePhysicalConfirm(note || ui.note || undefined),
+        confirm: handlePhysicalConfirm,
         submit: handleAnswerSubmit,
         answer: (v: string) => setUi((u) => ({ ...u, answer: v, wrong: false })),
-        note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setUi((u) => ({ ...u, note: e.target.value })),
         buyHint: handleBuyHint,
         navigator: handleNavigator,
         play: () => { /* inline video playback lands with real media refs */ },
@@ -754,6 +761,16 @@ export default function QuestPlayerClient({
           step={{ hint: { cost: hintStep.supporting.hint.cost_coins } }}
           copy={COPY}
           on={{ buy: handleBuyHint, dismiss: () => dispatch({ type: 'offerHint', pos: null }) }}
+        />
+      )}
+      {hintRevealPos != null && steps[hintRevealPos]?.supporting?.hint && (
+        <HintRevealPopup
+          hint={{
+            text: steps[hintRevealPos].supporting?.hint?.reveal_text,
+            image: steps[hintRevealPos].media?.hint,
+          }}
+          copy={COPY}
+          on={{ dismiss: () => dispatch({ type: 'revealHint', pos: null }) }}
         />
       )}
       {ui.menuOpen && (

@@ -31,7 +31,7 @@ describe('toDesignStep over golden-ironia-sudby-v1 (all 7 templates)', () => {
     expect(steps[5].nav).toMatchObject({ lat: 45.2552, lng: 19.8489 });
   });
 
-  it('maps the physical task (place, action, navigator, gift, note)', () => {
+  it('maps the physical task (place, action, navigator, gift); the retired note flag is ignored', () => {
     expect(steps[3]).toMatchObject({
       place: 'ул. Николаевска порта 2 · 400 м отсюда',
       action: {
@@ -40,15 +40,16 @@ describe('toDesignStep over golden-ironia-sudby-v1 (all 7 templates)', () => {
       },
       nav: { lat: 45.2551, lng: 19.8451, label: 'Николаевская церковь' },
       gift: { coins: 3, narrative_text: 'За смелость и точность' },
-      allowNote: true,
     });
+    // Frozen snapshots still carry completion.allow_note — the mapper drops it.
+    expect('allowNote' in (steps[3] as unknown as Record<string, unknown>)).toBe(false);
   });
 
-  it('maps the answer task (prompt, acceptable, hint cost/text, gift)', () => {
+  it('maps the answer task (prompt, acceptable, hint cost/text/image, gift)', () => {
     expect(steps[4]).toMatchObject({
       prompt: 'Введите год',
       acceptable: ['1730'],
-      hint: { cost: 5, text: 'Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки.' },
+      hint: { cost: 5, text: 'Цифры выбиты в каменной арке над дверью — две первые уже видны с дорожки.', image: null },
       gift: { coins: 5, narrative_text: 'Острый глаз!' },
     });
   });

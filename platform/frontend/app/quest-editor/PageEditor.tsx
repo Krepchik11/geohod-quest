@@ -138,22 +138,26 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const set = (patch: Partial<typeof h>) => onPatch({ hint: { ...h, ...patch } });
   return (
     <WspBlock title="Подсказка" gateField="hint" aside="попап после 2-й ошибки ответа">
-      <WspToggle on={h.on} onClick={() => set({ on: !h.on })} label="Платная подсказка на этом шаге" />
-      {h.on ? (
-        <>
-          <div className="wsp-trow">
-            <div>
-              <label className="adm-label">Стоимость, монет</label>
-              <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
-            </div>
-            <div className="wsp-grow">
-              <label className="adm-label">Текст подсказки<small>останется открытым до конца шага</small></label>
-              <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
-            </div>
-          </div>
-          <p className="freeze-note">Стоимость заморозится при публикации. Баланс игрока может уйти в минус — покупка никогда не блокируется.</p>
-        </>
-      ) : null}
+      <div className="wsp-trow">
+        <div>
+          <label className="adm-label">Стоимость, монет</label>
+          <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
+        </div>
+        <div className="wsp-grow">
+          <label className="adm-label">Текст подсказки<small>останется открытым до конца шага</small></label>
+          <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
+        </div>
+      </div>
+      <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        <ImageZone
+          src={h.image}
+          label="изображение подсказки"
+          aspect43
+          onChange={(image) => set({ image })}
+        />
+      </div>
+      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подсказка может быть текстом, изображением или обоими сразу; игрок увидит её попапом и под вопросом. Без текста и изображения подсказка не продаётся.</p>
+      <p className="freeze-note">Стоимость заморозится при публикации. Баланс игрока может уйти в минус — покупка никогда не блокируется.</p>
     </WspBlock>
   );
 }
@@ -228,14 +232,9 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
         <label className="adm-label">Действие на месте<small>необязательно</small></label>
         <input className="input" value={step.action.desc} onChange={(e) => set({ action: { ...step.action, desc: e.target.value } })} />
       </div>
-      <div className="wsp-trow">
-        <div className="wsp-grow">
-          <label className="adm-label">Кнопка подтверждения</label>
-          <input className="input" value={step.action.confirmLabel} onChange={(e) => set({ action: { ...step.action, confirmLabel: e.target.value } })} />
-        </div>
-        <div style={{ paddingBottom: 12 }}>
-          <WspToggle on={step.allowNote} onClick={() => set({ allowNote: !step.allowNote })} label="Разрешить заметку" />
-        </div>
+      <div>
+        <label className="adm-label">Кнопка подтверждения</label>
+        <input className="input" value={step.action.confirmLabel} onChange={(e) => set({ action: { ...step.action, confirmLabel: e.target.value } })} />
       </div>
       <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подтверждение — на честность игрока: никакой проверки геолокации нет.</p>
     </WspBlock>
