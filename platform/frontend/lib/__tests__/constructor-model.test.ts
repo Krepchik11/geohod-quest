@@ -35,11 +35,12 @@ describe('templates and presets', () => {
     ]);
   });
 
-  it('prefills task_answer with hint and answer prompt (SPEC presets)', () => {
+  it('prefills task_answer with an always-on hint slot and answer prompt (SPEC presets)', () => {
     const s = newStep('task_answer');
     expect(s.prompt).toBe('Введите ответ');
     expect(s.gift).toEqual({ narrative: '' });
-    expect(s.hint).toEqual({ on: true, cost: 5, text: '' });
+    // The hint has no toggle: it exists as soon as the author adds text or an image.
+    expect(s.hint).toEqual({ cost: 5, text: '', image: null });
   });
 
   it('every new step has a single empty image slot', () => {
@@ -47,10 +48,9 @@ describe('templates and presets', () => {
     expect(newStep('continue').image).toBeNull();
   });
 
-  it('prefills task_no with navigator on and note allowed', () => {
+  it('prefills task_no with navigator on', () => {
     const s = newStep('task_no');
     expect(s.nav.on).toBe(true);
-    expect(s.allowNote).toBe(true);
   });
 
   it('prefills route_video with navigator and a video block', () => {
@@ -152,16 +152,38 @@ describe('computeGates', () => {
     expect(computeGates(q).errors.some((e) => e.text.includes('координаты'))).toBe(true);
   });
 
-  it('warns (not errors) on a paid hint without text', () => {
+  it('warns (not errors) on an answer task without any hint content', () => {
     const q = quest();
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { on: true, cost: 5, text: '' };
+    s.hint = { cost: 5, text: '', image: null };
     q.steps = [q.steps[0], s, q.steps[1]];
     const g = computeGates(q);
     expect(g.errors).toEqual([]);
-    expect(g.warnings.some((w) => w.text.includes('подсказка'))).toBe(true);
+    expect(g.warnings.some((w) => w.text.includes('подсказк'))).toBe(true);
+  });
+
+  it('an image-only hint satisfies the hint gate', () => {
+    const q = quest();
+    const s = newStep('task_answer');
+    s.image = '/img.jpg';
+    s.acceptable = ['1730'];
+    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    expect(computeGates(q).warnings.some((w) => w.text.includes('подсказк'))).toBe(false);
+  });
+
+  it('counts the hint image into the bundle size estimate', () => {
+    const q = quest();
+    const s = newStep('task_answer');
+    s.image = '/img.jpg';
+    s.acceptable = ['1730'];
+    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    const withHintImage = computeGates(q).imgs;
+    s.hint = { cost: 5, text: 'текст', image: null };
+    expect(withHintImage).toBe(computeGates(q).imgs + 1);
   });
 
   it('estimates data-URL images by their real base64 size', () => {
@@ -194,15 +216,34 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(d.image).toBe('/assets/img/quest-card.png');
   });
 
-  it('task_answer: trims and drops blank answers; hint only when enabled', () => {
+  it('task_answer: trims and drops blank answers; hint emitted when it has text', () => {
     const s = newStep('task_answer');
     s.acceptable = [' 1730 ', '', 'в 1730'];
-    s.hint = { on: true, cost: 7, text: 'смотрите выше' };
+    s.hint = { cost: 7, text: 'смотрите выше', image: null };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.completion.acceptable).toEqual(['1730', 'в 1730']);
     expect(g.supporting?.hint).toEqual({ cost_coins: 7, reveal_text: 'смотрите выше' });
     // the serialized list satisfies the shared matcher exactly
     expect(isAnswerCorrect('  В 1730 ', g.completion.acceptable || [])).toBe(true);
+  });
+
+  it('task_answer: a content-less hint is not emitted (no empty paid hints)', () => {
+    const s = newStep('task_answer');
+    s.acceptable = ['1730'];
+    const g = stepToGameStep(s, newQuest({}).meta);
+    expect(g.supporting?.hint).toBeUndefined();
+    expect(g.media.hint).toBeNull();
+  });
+
+  it('task_answer: the hint image rides the media.hint role (image-only hint allowed)', () => {
+    const s = newStep('task_answer');
+    s.acceptable = ['1730'];
+    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    const g = stepToGameStep(s, newQuest({}).meta);
+    expect(g.supporting?.hint).toEqual({ cost_coins: 5, reveal_text: '' });
+    expect(g.media.hint).toBe('/hint.jpg');
+    const d = toDesignStep(g);
+    expect(d.hint).toEqual({ cost: 5, text: '', image: '/hint.jpg' });
   });
 
   it('task steps always carry the fixed 5-coin gift', () => {
@@ -232,16 +273,18 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(toDesignStep(g).image).toBe('/img.jpg');
   });
 
-  it('task_no: physical action, place, note and navigator survive the mapping', () => {
+  it('task_no: physical action, place and navigator survive the mapping', () => {
     const s = newStep('task_no');
     s.text = 'Дойдите до церкви';
     s.place = 'ул. Николаевска порта 2';
     s.action = { desc: 'Прикоснитесь к ограде', confirmLabel: 'Я на месте, нашёл' };
     s.nav = { on: true, coords: '45.2551, 19.8451' };
-    const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
+    const g = stepToGameStep(s, newQuest({}).meta);
+    // The note feature is gone: physical completion carries the mode only.
+    expect(g.completion).toEqual({ mode: 'physical' });
+    const d = toDesignStep(g);
     expect(d.place).toBe('ул. Николаевска порта 2');
     expect(d.action?.confirmLabel).toBe('Я на месте, нашёл');
-    expect(d.allowNote).toBe(true);
     // the content-block address doubles as the navigator point label
     expect(d.nav).toEqual({ lat: 45.2551, lng: 19.8451, label: 'ул. Николаевска порта 2' });
   });
@@ -397,6 +440,7 @@ describe('migrateQuest (legacy draft bodies)', () => {
       gift: { on: true, coins: 12, narrative: 'молодец' },
       hint: { on: true, cost: 5, text: 'ищите выше' },
       nav: { on: true, lat: '45.2551', lng: '19.8451', label: 'Церковь' },
+      allowNote: true,
       place: '',
     } as unknown as CtorQuest['steps'][number];
     delete (task as unknown as { image?: unknown }).image;
@@ -436,6 +480,23 @@ describe('migrateQuest (legacy draft bodies)', () => {
     body.steps[1].place = 'пл. Свободы 1';
     const q = migrateQuest(body, 'q-old')!;
     expect(q.steps[1].place).toBe('пл. Свободы 1');
+  });
+
+  it('drops the legacy hint toggle, keeping cost and text; adds the image slot', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.steps[1].hint).toEqual({ cost: 5, text: 'ищите выше', image: null });
+  });
+
+  it('preserves hint text even when the legacy toggle was off (no data loss)', () => {
+    const body = legacyBody() as { steps: Array<{ hint: unknown }> };
+    body.steps[1].hint = { on: false, cost: 3, text: 'черновик подсказки' };
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.steps[1].hint).toEqual({ cost: 3, text: 'черновик подсказки', image: null });
+  });
+
+  it('strips the legacy allowNote flag', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect('allowNote' in (q.steps[1] as unknown as Record<string, unknown>)).toBe(false);
   });
 
   it('is idempotent on a current-shape quest', () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { plural } from '../../lib/storefront';
 
 /**
@@ -152,8 +152,7 @@ export interface DesignStep {
   action?: { desc?: string; confirmLabel?: string };
   nav?: { lat: number; lng: number; label?: string };
   gift?: { coins: number; narrative_text?: string };
-  hint?: { cost?: number; text?: string } | string;
-  allowNote?: boolean;
+  hint?: { cost?: number; text?: string; image?: string | null } | string;
   completion?: { acceptable?: string[] | null };
 }
 
@@ -174,7 +173,6 @@ export interface StepCopy {
   submit?: string;
   navigator?: string;
   wrong1?: string;
-  noteHolder?: string;
   /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
   final?: string;
   whatNext?: string;
@@ -200,12 +198,16 @@ export interface StepCopy {
   hintBody?: (cost: number) => string;
   hintYes?: (cost: number) => string;
   hintNo?: string;
+  /** Заголовок и кнопка попапа с купленной подсказкой (текст и/или изображение). */
+  hintRevealTitle?: string;
+  hintOk?: string;
   giftToast?: (n: number) => string;
+  /** Тост списания монет («−N монет» — покупка подсказки). */
+  spendToast?: (n: number) => string;
 }
 
 export interface StepState {
   answer?: string;
-  note?: string;
   wrong?: boolean;
   hintRevealed?: boolean;
   /** §11: optional review text revealed after the star tap. */
@@ -215,15 +217,13 @@ export interface StepState {
   steps?: string;
   rating?: number;
   reviewSent?: boolean;
-  allowNote?: boolean;
 }
 
 export interface StepHandlers {
   next?: () => void;
-  confirm?: (note?: string) => void;
+  confirm?: () => void;
   submit?: (value: string) => void;
   answer?: (value: string) => void;
-  note?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   buyHint?: () => void;
   play?: () => void;
   navigator?: () => void;
@@ -249,6 +249,19 @@ export function PlayerFrame({ children, screenLabel, tw = { art: "paper", layout
 }
 
 export function TopBar({ pos, total, coins, onMenu, onBack }: { pos: number; total: number; coins: number; onMenu?: () => void; onBack?: () => void }) {
+  // The wallet chip reacts to every balance change: a bump + coin spin, tinted
+  // by direction (gain gold / spend accent). Pure presentation — the number
+  // itself always renders; the CSS animation is gated by the frame's anims flag
+  // and prefers-reduced-motion (player-paper.css blanket rules).
+  const prevCoins = useRef(coins);
+  const [fx, setFx] = useState<'up' | 'down' | null>(null);
+  useEffect(() => {
+    if (coins === prevCoins.current) return;
+    setFx(coins > prevCoins.current ? 'up' : 'down');
+    prevCoins.current = coins;
+    const t = setTimeout(() => setFx(null), 900);
+    return () => clearTimeout(t);
+  }, [coins]);
   return (
     <div className="p-top">
       <span className="p-top__left">
@@ -256,7 +269,7 @@ export function TopBar({ pos, total, coins, onMenu, onBack }: { pos: number; tot
         <span className="p-top__progress">{pos} / {total}</span>
       </span>
       <span className="p-top__right">
-        <span className="p-coins"><PCoin />{coins}</span>
+        <span className={'p-coins' + (fx ? ` p-coins--${fx}` : '')}><PCoin />{coins}</span>
         <button className="p-iconbtn" type="button" aria-label="Меню" onClick={onMenu}><PBurger /></button>
       </span>
     </div>
@@ -353,14 +366,6 @@ export function StepView({ step, quest, copy, st, on }: {
         <p className="p-text">{step.text}</p>
         {step.place && <p className="p-place"><PPin />{step.place}</p>}
         {step.action && <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)" }}>{step.action.desc}</p>}
-        {step.allowNote || stateIn.allowNote ? (
-          <textarea
-            className="p-note"
-            placeholder={copy?.noteHolder || "Заметка для себя (необязательно)"}
-            value={stateIn.note || ""}
-            onChange={(e) => h.note && h.note(e)}
-          />
-        ) : null}
         <div className="p-actions">
           {step.nav && <button className="p-btn p-btn--ghost" onClick={h.navigator || noop}><PCompass />Навигатор</button>}
           <button className="p-btn p-btn--solid" onClick={() => (h.confirm ? h.confirm() : (h.next || noop)())}>{step.action?.confirmLabel || "Я на месте"}</button>
@@ -386,7 +391,14 @@ export function StepView({ step, quest, copy, st, on }: {
         {stateIn.hintRevealed ? (
           <div className="p-hintbox">
             <PCoin size={16} />
-            <div><b>Подсказка</b> {typeof step.hint === 'string' ? step.hint : step.hint?.text}</div>
+            <div>
+              <b>Подсказка</b>
+              {typeof step.hint === 'string' ? step.hint : step.hint?.text}
+              {typeof step.hint === 'object' && step.hint?.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="p-hintbox__img" src={step.hint.image} alt="Изображение-подсказка" />
+              ) : null}
+            </div>
           </div>
         ) : null}
         {stateIn.wrong ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
@@ -638,11 +650,18 @@ export function CatalogScreen({ quests, copy, on }: {
 }
 
 /* Overlays and toasts per design/player/components.jsx (lifted for full PWA flows) */
+/** Coin toast for BOTH directions: a positive amount is a gain («+N монет», coin
+ *  spin), a negative one a spend («−N монет», reverse spin + accent tint). */
 export function CoinToast({ amount, narrative, copy }: { amount: number; narrative?: string; copy?: StepCopy }) {
+  const spend = amount < 0;
+  const n = Math.abs(amount);
+  const label = spend
+    ? (copy?.spendToast ? copy.spendToast(n) : `−${n} монет`)
+    : (copy?.giftToast ? copy.giftToast(n) : `+${n} монет`);
   return (
-    <div className="p-toast" role="status">
+    <div className={'p-toast' + (spend ? ' p-toast--spend' : '')} role="status">
       <PCoin size={22} />
-      <span>{(copy && copy.giftToast ? copy.giftToast(amount) : `+${amount} монет`)}{narrative ? <small>{narrative}</small> : null}</span>
+      <span>{label}{narrative ? <small>{narrative}</small> : null}</span>
     </div>
   );
 }
@@ -661,6 +680,30 @@ export function HintPopup({ step, copy, on }: {
         <p className="p-popup__text">{copy && copy.hintBody ? copy.hintBody(cost) : `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`}</p>
         <button className="p-btn p-btn--solid" type="button" onClick={h.buy}>{copy && copy.hintYes ? copy.hintYes(cost) : `Потратить ${cost} монет`}</button>
         <button className="p-btn p-btn--ghost" type="button" onClick={h.dismiss}>{copy?.hintNo || "Попробую сам"}</button>
+      </div>
+    </div>
+  );
+}
+
+/** The purchased hint itself, popup-sized: text, image, or both (SPEC hint flow).
+ *  Shown right after the purchase; the inline hint box then keeps the content
+ *  available for the rest of the step. */
+export function HintRevealPopup({ hint, copy, on }: {
+  hint: { text?: string; image?: string | null };
+  copy?: StepCopy | null;
+  on?: { dismiss?: () => void };
+}) {
+  const h = on || {};
+  return (
+    <div className="p-overlay" onClick={h.dismiss}>
+      <div className="p-popup" onClick={(e) => e.stopPropagation()}>
+        <p className="p-popup__title"><PCoin size={20} />{copy?.hintRevealTitle || "Подсказка"}</p>
+        {hint.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="p-popup__img" src={hint.image} alt="Изображение-подсказка" />
+        ) : null}
+        {hint.text ? <p className="p-popup__text">{hint.text}</p> : null}
+        <button className="p-btn p-btn--solid" type="button" onClick={h.dismiss}>{copy?.hintOk || "Понятно"}</button>
       </div>
     </div>
   );
