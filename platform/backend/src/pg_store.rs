@@ -254,18 +254,42 @@ impl PgFactStore {
         ),
         AppError,
     > {
+        // Every attempt bound to the snapshot — INCLUDING zero-fact ones, which
+        // still count toward attempts_count in the projector. Seeds the maps so a
+        // fact-less attempt keeps an empty log (the JOIN below can't surface it).
         let attempt_rows = sqlx::query("SELECT attempt_id FROM attempts WHERE snapshot_id = $1")
             .bind(snap)
             .fetch_all(&self.pool)
             .await
             .map_err(internal)?;
-        let mut fact_logs = std::collections::HashMap::new();
-        let mut attempt_snaps = std::collections::HashMap::new();
-        for row in attempt_rows {
+        let mut fact_logs: std::collections::HashMap<String, Vec<Fact>> =
+            std::collections::HashMap::with_capacity(attempt_rows.len());
+        let mut attempt_snaps = std::collections::HashMap::with_capacity(attempt_rows.len());
+        for row in &attempt_rows {
             let att: String = row.try_get("attempt_id").map_err(internal)?;
-            let facts = self.load_facts(&att).await?;
-            fact_logs.insert(att.clone(), facts);
+            fact_logs.insert(att.clone(), Vec::new());
             attempt_snaps.insert(att, snap.to_string());
+        }
+        // ONE round-trip for the facts of ALL those attempts (was one query per
+        // attempt — the N+1). `ORDER BY seq` is a global order, but a per-attempt
+        // subsequence of it is still in append order, so grouping stays correct.
+        let fact_rows = sqlx::query(
+            "SELECT f.attempt_id, f.data FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE a.snapshot_id = $1
+             ORDER BY f.seq",
+        )
+        .bind(snap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        for row in fact_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
+            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
+            if let Some(log) = fact_logs.get_mut(&att) {
+                log.push(fact);
+            }
         }
         Ok((fact_logs, attempt_snaps))
     }
@@ -295,26 +319,96 @@ impl PgFactStore {
         ))
     }
 
+    /// See [`crate::store::InMemoryFactStore::rating_stats_for_snapshots`].
+    /// The catalog's batch rating loader: ONE round-trip for the rating facts of
+    /// EVERY listed snapshot, replacing the per-quest `get_version_stats` N+1 that
+    /// dominated `GET /api/quests`. Folds through the shared `fold_attempt_ratings`
+    /// so a card's rating is identical to the version-stats page's.
+    pub async fn rating_stats_for_snapshots(
+        &self,
+        snaps: &[String],
+    ) -> Result<std::collections::HashMap<String, (f64, usize)>, AppError> {
+        if snaps.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let rows = sqlx::query(
+            "SELECT a.snapshot_id, f.attempt_id, f.data FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE a.snapshot_id = ANY($1)
+             ORDER BY f.seq",
+        )
+        .bind(snaps)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        // snapshot_id -> attempt_id -> facts (in seq order)
+        let mut by_snap: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, Vec<Fact>>,
+        > = std::collections::HashMap::new();
+        for row in rows {
+            let snap: String = row.try_get("snapshot_id").map_err(internal)?;
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
+            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
+            by_snap
+                .entry(snap)
+                .or_default()
+                .entry(att)
+                .or_default()
+                .push(fact);
+        }
+        Ok(by_snap
+            .into_iter()
+            .map(|(snap, logs)| (snap, crate::facts::fold_attempt_ratings(logs.values())))
+            .collect())
+    }
+
     /// See [`crate::store::InMemoryFactStore::attempt_logs_for_player`].
-    /// N+1 per attempt mirrors the version-stats loader (known, recorded debt);
-    /// a player's lifetime attempt count is small.
     pub async fn attempt_logs_for_player(
         &self,
         player_id: &str,
     ) -> Result<Vec<(String, Vec<Fact>)>, AppError> {
+        // Attempts first: preserves their row order, captures each quest_id, and
+        // keeps zero-fact attempts (the facts JOIN below can't surface those).
         let rows = sqlx::query("SELECT attempt_id, quest_id FROM attempts WHERE player_id = $1")
             .bind(player_id)
             .fetch_all(&self.pool)
             .await
             .map_err(internal)?;
-        let mut out = Vec::with_capacity(rows.len());
-        for row in rows {
-            let attempt_id: String = row.try_get("attempt_id").map_err(internal)?;
-            let quest_id: String = row.try_get("quest_id").map_err(internal)?;
-            let facts = self.load_facts(&attempt_id).await?;
-            out.push((quest_id, facts));
+        let mut order: Vec<(String, String)> = Vec::with_capacity(rows.len());
+        for row in &rows {
+            order.push((
+                row.try_get("attempt_id").map_err(internal)?,
+                row.try_get("quest_id").map_err(internal)?,
+            ));
         }
-        Ok(out)
+        // ONE round-trip for ALL of the player's facts (was one query per attempt).
+        let mut logs: std::collections::HashMap<String, Vec<Fact>> = order
+            .iter()
+            .map(|(att, _)| (att.clone(), Vec::new()))
+            .collect();
+        let fact_rows = sqlx::query(
+            "SELECT f.attempt_id, f.data FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE a.player_id = $1
+             ORDER BY f.seq",
+        )
+        .bind(player_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        for row in fact_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
+            if let Some(log) = logs.get_mut(&att) {
+                log.push(serde_json::from_value(data).map_err(internal)?);
+            }
+        }
+        Ok(order
+            .into_iter()
+            .map(|(att, quest)| (quest, logs.remove(&att).unwrap_or_default()))
+            .collect())
     }
 
     /// See [`crate::store::InMemoryFactStore::completions_by_quest`]. Counts
@@ -336,6 +430,20 @@ impl PgFactStore {
             out.insert(quest_id, n.max(0) as usize);
         }
         Ok(out)
+    }
+
+    /// See [`crate::store::InMemoryFactStore::completions_for_quest`]. Single-quest
+    /// count via the `bonus_awards(quest_id)` index — the editor's per-quest pages
+    /// use this instead of `completions_by_quest`'s whole-table GROUP BY.
+    pub async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+        let n: i64 = sqlx::query("SELECT COUNT(*) AS n FROM bonus_awards WHERE quest_id = $1")
+            .bind(quest_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(internal)?
+            .try_get("n")
+            .map_err(internal)?;
+        Ok(n.max(0) as usize)
     }
 
     /// See [`crate::store::InMemoryFactStore::run_legacy_migration`].
@@ -647,6 +755,22 @@ impl PgGrantStore {
             .collect())
     }
 
+    /// See [`crate::store::InMemoryGrantStore::buyers_for_quest`]. Single-quest
+    /// buyer count via the `access_grants(quest_id)` index — replaces the editor
+    /// endpoints' whole-table `buyers_by_quest` GROUP BY.
+    pub async fn buyers_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+        let n: i64 = sqlx::query(
+            "SELECT COUNT(DISTINCT player_id) AS n FROM access_grants WHERE quest_id = $1",
+        )
+        .bind(quest_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?
+        .try_get("n")
+        .map_err(internal)?;
+        Ok(n.max(0) as usize)
+    }
+
     /// See [`crate::store::InMemoryGrantStore::grants_for_player`].
     pub async fn grants_for_player(&self, player_id: &str) -> Result<Vec<AccessGrant>, AppError> {
         let rows = sqlx::query(
@@ -771,6 +895,24 @@ impl PgAuthStore {
         .transpose()
     }
 
+    /// See [`crate::store::InMemoryAuthStore::account_for_session`]. Resolves the
+    /// session token to its account in ONE round-trip (was `get_session` then
+    /// `get_user` — two serial round-trips on the front of every authenticated
+    /// request). An anonymous session (no `users` row) yields `None` via the inner
+    /// join, exactly like the two-step path.
+    pub async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
+        let row = sqlx::query(
+            "SELECT u.player_id, u.email, u.display_name, u.role, u.created_at, u.email_confirmed_at \
+             FROM sessions s JOIN users u ON u.player_id = s.player_id \
+             WHERE s.token = $1",
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.as_ref().map(account_from_row).transpose()
+    }
+
     /// See [`crate::store::InMemoryAuthStore::get_user`].
     pub async fn get_user(&self, player_id: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
@@ -782,6 +924,32 @@ impl PgAuthStore {
         .await
         .map_err(internal)?;
         row.as_ref().map(account_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::get_users_by_ids`]. Batch author
+    /// lookup for the product page's review list — ONE round-trip for all the
+    /// displayed reviews' authors, replacing a per-review `get_user` N+1.
+    pub async fn get_users_by_ids(
+        &self,
+        player_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, UserAccount>, AppError> {
+        if player_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let rows = sqlx::query(
+            "SELECT player_id, email, display_name, role, created_at, email_confirmed_at \
+             FROM users WHERE player_id = ANY($1)",
+        )
+        .bind(player_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let account = account_from_row(r)?;
+                Ok((account.player_id.clone(), account))
+            })
+            .collect()
     }
 
     /// See [`crate::store::InMemoryAuthStore::set_role`]. An UPDATE touching zero

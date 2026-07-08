@@ -18,7 +18,6 @@ import {
   ensureActiveAttempt,
   getFacts,
   setLastStepIdx,
-  restartAttempt,
   openAttempt,
   migrateLegacyLocalStorage,
   appendFact as queueAppendFact,
@@ -93,7 +92,6 @@ interface PlayerState {
 type PlayerAction =
   | { type: 'append'; fact: Fact }
   | { type: 'advance'; to: number }
-  | { type: 'reset'; attemptKey: string; attemptCreatedAt: string }
   | {
       type: 'hydrate';
       facts: Fact[];
@@ -135,12 +133,6 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
       };
     case 'advance':
       return { ...state, stepIdx: action.to, maxStepIdx: Math.max(state.maxStepIdx, action.to) };
-    case 'reset':
-      return {
-        ...initialState,
-        attemptKey: action.attemptKey,
-        attemptCreatedAt: action.attemptCreatedAt,
-      };
     case 'hydrate':
       return {
         ...state,
@@ -199,10 +191,9 @@ export default function QuestPlayerClient({
   // the wallet never "jumps" or needs a correction popup.
   const [priorLogs, setPriorLogs] = useState<AttemptLog[]>([]);
 
-  // Guards the mount hydration to exactly one execution. `restartAttempt` is a
-  // multi-step DB mutation, so letting StrictMode's setup→cleanup→setup run it
-  // twice would race (the 2nd read could see the attempt before the 1st supersede
-  // commits). A single run also means a stable dispatch — no `cancelled` flag.
+  // Guards the mount hydration to exactly one execution. Hydration is a
+  // multi-step DB read, so letting StrictMode's setup→cleanup→setup run it twice
+  // would race. A single run also means a stable dispatch — no `cancelled` flag.
   const didHydrateRef = useRef(false);
 
   const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
@@ -446,19 +437,17 @@ export default function QuestPlayerClient({
     if (isTerminalStep && !hasCompleted) handleTerminal();
   }, [isTerminalStep, hasCompleted, handleTerminal]);
 
-  // «Начать заново»: supersede the attempt in the queue (facts are never deleted —
-  // «монеты останутся»; the completion bonus stays once-ever server-side regardless).
+  // «Начать заново»: re-enter the gate with the restart intent so the fresh run
+  // adopts the LATEST published version — resolution + version freeze live in one
+  // place (BundleGate → bundle-resolver), never split between gate and player. A
+  // full reload is needed because the gate keys on the quest id, not the query.
+  // Facts are never deleted (the resolver's restartAttempt only supersedes) —
+  // «монеты останутся»; the completion bonus stays once-ever server-side too.
   const handleReplay = useCallback(() => {
-    void (async () => {
-      try {
-        const fresh = await restartAttempt(questId, snapshotId);
-        dispatch({ type: 'reset', attemptKey: fresh.attempt_key, attemptCreatedAt: fresh.created_at });
-        setUi((u) => ({ ...u, answer: '', wrong: false, rating: 0, showCatalog: false, shareToast: false }));
-      } catch (err) {
-        console.warn('restart failed', err);
-      }
-    })();
-  }, [questId, snapshotId, setUi]);
+    if (typeof window !== 'undefined') {
+      window.location.assign(`/quest/${encodeURIComponent(questId)}?restart=1`);
+    }
+  }, [questId]);
 
   // Optional finale rating → a structured quest_rated fact, carried through the
   // same offline queue + idempotent sync as every other fact and surfaced to the
@@ -558,17 +547,13 @@ export default function QuestPlayerClient({
     if (didHydrateRef.current) return;
     didHydrateRef.current = true;
     void (async () => {
-      // Read the intent before the migration await, then strip ?restart=1 once
-      // consumed so a refresh resumes the fresh attempt instead of restarting it.
-      const restart =
-        typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('restart') === '1';
+      // Restart is resolved by the gate (BundleGate) BEFORE this mounts — it
+      // supersedes the old attempt, binds the fresh one to the latest snapshot,
+      // and strips ?restart=1. So here we only ever RESUME the active attempt
+      // (the fresh one after a restart, or the in-progress one otherwise).
       try {
         await migrateLegacyLocalStorage(questId, snapshotId, window.localStorage);
-        const opened = await openAttempt(questId, snapshotId, { restart });
-        if (restart && typeof window !== 'undefined') {
-          window.history.replaceState(null, '', `/quest/${encodeURIComponent(questId)}`);
-        }
+        const opened = await openAttempt(questId, snapshotId);
         dispatch({
           type: 'hydrate',
           facts: opened.facts,
