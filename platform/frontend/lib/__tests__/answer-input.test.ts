@@ -58,3 +58,36 @@ describe('task_answer inline-submit', () => {
     expect(html).toContain('Неверно');
   });
 });
+
+/**
+ * The question must live ON THE PAGE, never only inside the input: a placeholder
+ * vanishes the moment the player types, so a question stored there becomes
+ * unreadable mid-answer. `prompt` renders as visible .p-prompt text and the
+ * input placeholder is always the generic «Введите ответ».
+ */
+describe('task_answer question placement', () => {
+  function renderStep(s: DesignStep): string {
+    return renderToStaticMarkup(
+      createElement(StepView, { step: s, copy: PLAYER_COPY, st: { answer: '' }, on: {} })
+    );
+  }
+
+  it('renders the authored question as page text, not as the placeholder', () => {
+    const html = renderStep({ template: 'task_answer', text: 'Осмотритесь.', prompt: 'Сколько колонн у собора?' });
+    expect(html).toContain('p-prompt');
+    expect(html).toContain('Сколько колонн у собора?');
+    expect(html).toContain('placeholder="Введите ответ"');
+    expect(html).not.toContain('placeholder="Сколько колонн у собора?"');
+  });
+
+  it('suppresses the legacy default prompt («Введите ответ») from page text', () => {
+    const html = renderStep({ template: 'task_answer', text: 'Вопрос?', prompt: 'Введите ответ' });
+    expect(html).not.toContain('p-prompt');
+    expect(html).toContain('placeholder="Введите ответ"');
+  });
+
+  it('renders no question block when the prompt is empty', () => {
+    const html = renderStep({ template: 'task_answer', text: 'Вопрос?', prompt: '' });
+    expect(html).not.toContain('p-prompt');
+  });
+});

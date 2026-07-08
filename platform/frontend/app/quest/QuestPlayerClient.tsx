@@ -70,6 +70,10 @@ function formatElapsed(createdAt: string | null): string {
 interface PlayerState {
   facts: Fact[];
   stepIdx: number;
+  /** Furthest step ever reached this attempt. The resume position persists THIS
+   *  (not stepIdx), so a back-navigation reread never regresses where the
+   *  player resumes after a restart. */
+  maxStepIdx: number;
   /* Local attempt identity from the IndexedDB queue (server id lives there too). */
   attemptKey: string | null;
   attemptCreatedAt: string | null;
@@ -105,6 +109,7 @@ type PlayerAction =
 const initialState: PlayerState = {
   facts: [],
   stepIdx: 0,
+  maxStepIdx: 0,
   attemptKey: null,
   attemptCreatedAt: null,
   queueStatus: {},
@@ -125,7 +130,7 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
           : { ...state.queueStatus, [factNaturalKey(action.fact)]: 'pending' },
       };
     case 'advance':
-      return { ...state, stepIdx: action.to };
+      return { ...state, stepIdx: action.to, maxStepIdx: Math.max(state.maxStepIdx, action.to) };
     case 'reset':
       return {
         ...initialState,
@@ -137,6 +142,7 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
         ...state,
         facts: action.facts,
         stepIdx: action.stepIdx,
+        maxStepIdx: action.stepIdx,
         attemptKey: action.attemptKey,
         attemptCreatedAt: action.attemptCreatedAt,
         queueStatus: action.queueStatus,
@@ -173,7 +179,7 @@ export default function QuestPlayerClient({
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const {
-    facts, stepIdx, attemptKey, attemptCreatedAt,
+    facts, stepIdx, maxStepIdx, attemptKey, attemptCreatedAt,
     queueStatus, showStartGate, hintOfferPos, toast,
   } = state;
 
@@ -301,6 +307,15 @@ export default function QuestPlayerClient({
   const doAdvance = useCallback(() => {
     dispatch({ type: 'advance', to: Math.min(stepIdx + 1, steps.length - 1) });
   }, [stepIdx, steps.length]);
+
+  // Back is a VIEW rewind only: the fact log is append-only and every completion
+  // side effect (gift, bonus, attempt_completed) is idempotency-guarded, so
+  // rereading and re-advancing through already-passed steps never double-fires.
+  const doBack = useCallback(() => {
+    if (stepIdx === 0) return;
+    setUi((u) => ({ ...u, wrong: false, answer: '' }));
+    dispatch({ type: 'advance', to: stepIdx - 1 });
+  }, [stepIdx, setUi]);
 
   const handlePhysicalConfirm = useCallback(
     (note?: string) => {
@@ -599,11 +614,13 @@ export default function QuestPlayerClient({
     };
   }, [attemptKey, online, pendingCount, runFlush]);
 
-  // Resume position write-through (covers every advance path incl. the advance offer).
+  // Resume position write-through (covers every advance path incl. the advance
+  // offer). Persists the FURTHEST step reached, not the viewed one — a back-
+  // navigation reread must never regress where the player resumes.
   useEffect(() => {
     if (!attemptKey) return;
-    setLastStepIdx(attemptKey, stepIdx).catch(() => {});
-  }, [attemptKey, stepIdx]);
+    setLastStepIdx(attemptKey, maxStepIdx).catch(() => {});
+  }, [attemptKey, maxStepIdx]);
 
   const closeMenu = () => setUi((u) => ({ ...u, menuOpen: false }));
   const sendFeedback = () => {
@@ -674,6 +691,9 @@ export default function QuestPlayerClient({
         rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
         reviewText: (v: string) => setUi((u) => ({ ...u, reviewText: v })),
         onward: openCatalog,
+        // Chromeless finale: the floating back button lets the player reread
+        // the last steps (view-only rewind; completion facts stay guarded).
+        back: stepIdx > 0 ? doBack : undefined,
         // «пройти заново» restarts from step 0. The tapped rating is intentionally
         // NOT committed here: a quest_rated fact is delivered only via the forward
         // «что дальше» path (openCatalog), because the queue flushes only the
@@ -695,6 +715,7 @@ export default function QuestPlayerClient({
         pick: (id) => router.push(`/quest/${encodeURIComponent(id)}`),
         share: handleShare,
         home: () => router.push('/'),
+        back: () => setUi((u) => ({ ...u, showCatalog: false })),
       }}
     />
   ) : stepBody;
@@ -714,6 +735,7 @@ export default function QuestPlayerClient({
             total={displaySteps.length}
             coins={walletBalance}
             onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
+            onBack={stepIdx > 0 ? doBack : undefined}
           />
           {/* §8.3: 2px ink progress — completed/total, visible outside the menu */}
           <div className="p-progress" aria-hidden>
