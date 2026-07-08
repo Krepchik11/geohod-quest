@@ -106,6 +106,14 @@ export function PWarn({ size = 14 }: { size?: number }) {
   );
 }
 
+export function PBack({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <polyline points="10,2.5 4.5,8 10,13.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"></polyline>
+    </svg>
+  );
+}
+
 export function PArrow() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
@@ -227,6 +235,8 @@ export interface StepHandlers {
   /** Final screen «пройти заново» — replay this quest from step 0 (real player only). */
   replay?: () => void;
   review?: () => void;
+  /** Step back through history to reread earlier content (real player only). */
+  back?: () => void;
 }
 
 /* Frame */
@@ -238,10 +248,13 @@ export function PlayerFrame({ children, screenLabel, tw = { art: "paper", layout
   );
 }
 
-export function TopBar({ pos, total, coins, onMenu }: { pos: number; total: number; coins: number; onMenu?: () => void }) {
+export function TopBar({ pos, total, coins, onMenu, onBack }: { pos: number; total: number; coins: number; onMenu?: () => void; onBack?: () => void }) {
   return (
     <div className="p-top">
-      <span className="p-top__progress">{pos} / {total}</span>
+      <span className="p-top__left">
+        {onBack && <button className="p-iconbtn" type="button" aria-label="Назад" onClick={onBack}><PBack /></button>}
+        <span className="p-top__progress">{pos} / {total}</span>
+      </span>
       <span className="p-top__right">
         <span className="p-coins"><PCoin />{coins}</span>
         <button className="p-iconbtn" type="button" aria-label="Меню" onClick={onMenu}><PBurger /></button>
@@ -359,10 +372,17 @@ export function StepView({ step, quest, copy, st, on }: {
   if (step.template === "task_answer") {
     const val = stateIn.answer || "";
     const canSubmit = val.trim().length > 0;
+    // The question lives ON THE PAGE: a placeholder disappears the moment the
+    // player types, so a question stored there is unreadable mid-answer. The
+    // legacy model default («Введите ответ», baked into old snapshots) is a
+    // field hint, not a question — suppress it rather than echo the placeholder.
+    const promptText = (step.prompt || "").trim();
+    const question = promptText && promptText !== "Введите ответ" ? promptText : null;
     return (
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
+        {question && <p className="p-prompt">{question}</p>}
         {stateIn.hintRevealed ? (
           <div className="p-hintbox">
             <PCoin size={16} />
@@ -399,7 +419,7 @@ export function StepView({ step, quest, copy, st, on }: {
           <input
             className={"p-input" + (stateIn.wrong ? " p-input--wrong" : "")}
             name="answer"
-            placeholder={step.prompt || "Введите ответ"}
+            placeholder="Введите ответ"
             value={val}
             onChange={(e) => h.answer && h.answer(e.target.value)}
             enterKeyHint="send"
@@ -407,7 +427,7 @@ export function StepView({ step, quest, copy, st, on }: {
             autoCorrect="off"
             autoComplete="off"
             spellCheck={false}
-            aria-label={step.prompt || "Введите ответ"}
+            aria-label={question || "Введите ответ"}
           />
           <button
             className="p-submit"
@@ -485,6 +505,9 @@ export function FinalScreen({ quest, copy, st, on }: {
 
   return (
     <div className="p-stepbody p-final">
+      {/* Chromeless by design (no TopBar) — the floating back button keeps
+          "reread the last step" reachable here too. Previews pass no handler. */}
+      {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
       <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
       <h2 className="p-title">{copy?.final || "Квест пройден!"}</h2>
       <Flourish />
@@ -551,6 +574,8 @@ export interface CatalogHandlers {
   pick?: (id: string) => void;
   share?: () => void;
   home?: () => void;
+  /** Back to the finale (the catalog replaces it in place). */
+  back?: () => void;
 }
 
 /* ============================================================
@@ -566,6 +591,7 @@ export function CatalogScreen({ quests, copy, on }: {
   const h = on || {};
   return (
     <div className="p-stepbody p-catalog">
+      {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
       <div className="p-catalog__head">
         <p className="p-kicker">{copy?.catalogKicker || "маршрут окончен"}</p>
         <h2 className="p-title">{copy?.catalogTitle || "Продолжите путешествие"}</h2>

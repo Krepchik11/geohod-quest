@@ -73,6 +73,9 @@
   --p-radius: 2px;
   --p-coin: #C99B3F;
   --p-coin-rim: #8A6A1F;
+  /* Step-body side padding; .p-media bleeds over it with a matching negative
+     margin, so the two must stay one value. */
+  --p-pad-x: 22px;
 
   background-image: var(--p-bg-texture);
 }
@@ -102,6 +105,7 @@
   z-index: 4;
   background: var(--p-bg);
 }
+.p-top__left { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .p-top__progress {
   font-family: var(--p-display);
   font-size: 13px;
@@ -122,6 +126,23 @@
   padding: 0;
 }
 
+/* Floating back button for the chromeless screens (finale, post-finale catalog):
+   no TopBar there, but "reread the previous step" must stay reachable. Anchored
+   to .pframe (position:relative), so it does not scroll with .p-scroll content. */
+.p-backfab {
+  position: absolute;
+  top: 10px; left: 10px;
+  z-index: 4;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  background: var(--p-bg);
+  border: 1px solid var(--p-line);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--p-ink);
+  padding: 0;
+}
+
 /* ---------- Контент шага ---------- */
 .p-scroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .p-stepbody {
@@ -131,22 +152,27 @@
   gap: 14px;
   /* Bottom breathing room lives on the sticky .p-actions instead, so the action
      bar can pin flush to the scroll viewport's bottom edge. */
-  padding: 18px 22px 0;
+  padding: 18px var(--p-pad-x) 0;
   min-height: 0;
 }
 .pframe[data-layout="text"] .p-stepbody .p-media { order: 5; }
 .pframe[data-layout="text"] .p-stepbody { gap: 12px; }
 
-/* Медиа: картинка-комикс / видео / плейсхолдер */
+/* Медиа: картинка-комикс / видео / плейсхолдер.
+   Full-bleed: the image spans the frame edge-to-edge (negative margins swallow
+   .p-stepbody's 22px side padding), so only top/bottom hairlines remain of the
+   old 1px ring. */
 .p-media {
   position: relative;
   flex: 0 1 auto;
   height: 252px;
   min-height: 132px;
-  border-radius: var(--p-radius);
+  margin: 0 calc(-1 * var(--p-pad-x));
+  border-radius: 0;
   overflow: hidden;
   background: var(--p-card);
-  box-shadow: 0 0 0 1px var(--p-line);
+  border-top: 1px solid var(--p-line);
+  border-bottom: 1px solid var(--p-line);
 }
 .pframe[data-layout="text"] .p-media { height: 196px; }
 .p-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -191,6 +217,16 @@
   text-wrap: balance;
 }
 .p-text { color: var(--p-ink); white-space: pre-line; text-wrap: pretty; }
+/* Вопрос задания — on-page (a placeholder vanishes while typing), set apart
+   from the narrative .p-text by weight and an accent rule. */
+.p-prompt {
+  font-weight: 600;
+  color: var(--p-ink);
+  padding-left: 10px;
+  border-left: 2px solid var(--p-accent);
+  white-space: pre-line;
+  text-wrap: pretty;
+}
 .p-place {
   display: flex; align-items: flex-start; gap: 8px;
   font-size: 13.5px; color: var(--p-muted);
