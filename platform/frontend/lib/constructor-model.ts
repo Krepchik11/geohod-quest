@@ -51,6 +51,9 @@ export interface CtorQuestMeta {
   cover: string | null;
   desc: string;
   price: number;
+  /** Marketing padding added to the real completions for the public players
+   *  counter (store card / product page). 0 = show only real completions. */
+  playersBonus: number;
 }
 
 export interface CtorVersion {
@@ -196,6 +199,7 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       cover: meta.cover || null,
       desc: meta.desc || '',
       price: meta.price || 0,
+      playersBonus: meta.playersBonus || 0,
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
@@ -263,8 +267,11 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     }
     return s;
   });
+  // Тела, сохранённые до появления маркетингового счётчика игроков, не имеют
+  // meta.playersBonus — нормализуем к 0, чтобы поле в настройках было управляемым.
+  const meta = { ...raw.meta, playersBonus: raw.meta.playersBonus ?? 0 };
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
-  return { ...raw, steps, id: serverId };
+  return { ...raw, meta, steps, id: serverId };
 }
 
 /* ---------- Гейты публикации (живой пересчёт по черновику) ---------- */

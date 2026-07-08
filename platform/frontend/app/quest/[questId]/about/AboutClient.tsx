@@ -6,7 +6,7 @@ import { api, type ProductPageWire } from '../../../../lib/api';
 import { currentPlayerId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
-import { fmtRating, plural, ratingPlural } from '../../../../lib/storefront';
+import { fmtRating, plural, ratingPlural, playersPlural } from '../../../../lib/storefront';
 import PurchaseSheet from '../../../components/PurchaseSheet';
 import InstallQuestButton from '../../../components/InstallQuestButton';
 
@@ -185,6 +185,7 @@ export default function AboutClient({ questId }: { questId: string }) {
               {p.rating_count > 0 && (
                 <span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-star-18--gold.svg')" } as React.CSSProperties} />{fmtRating(p.rating_avg)} · {p.rating_count} {ratingPlural(p.rating_count)}</span>
               )}
+              {p.players > 0 && <span>{p.players} {playersPlural(p.players)}</span>}
             </p>
             <h1 className="qp-title display">{p.name}</h1>
             {p.description && <p className="qp-desc">{p.description}</p>}

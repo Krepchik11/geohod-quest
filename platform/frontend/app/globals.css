@@ -158,8 +158,10 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 /* §2.5 header auth slot: anonymous = text pill; signed-in = avatar with presence dot */
 .header-login { flex:none; display:inline-flex; align-items:center; justify-content:center; height:44px; padding:0 26px; border-radius:22px; box-shadow:inset 0 0 0 2px var(--blue); color:var(--blue); font-weight:600; font-size:14px; }
 .header-login:hover { background:#EFF4FF; }
-.logo { display:flex; align-items:center; gap:10px; width:99px; height:40px; flex:none; }
-.logo .logo-mark { --ic:url("/assets/icons/c/logo-mark--navy.svg"); width:30px; height:27px; }
+.logo { display:flex; align-items:center; gap:9px; height:40px; flex:none; }
+/* New GeoHod lockup: a ~square map mark + a two-line «GEOHOD / QUEST» wordmark
+   (aspect ≈1.85). Sizes chosen so the wordmark reads at header scale. */
+.logo .logo-mark { --ic:url("/assets/icons/c/logo-mark--navy.svg"); width:32px; height:32px; }
 .logo .logo-text { --ic:url("/assets/icons/c/logo-text--navy.svg"); width:52px; height:28px; }
 .logo--white .logo-mark { --ic:url("/assets/icons/c/logo-mark--white.svg"); }
 .logo--white .logo-text { --ic:url("/assets/icons/c/logo-text--white.svg"); }
@@ -206,7 +208,7 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .feature p { margin-top:8px; font-size:14px; }
 
 .quest-grid { display:flex; gap:24.5px; justify-content:center; }
-.quest-card { width:303px; overflow:hidden; transition:transform .15s ease,box-shadow .15s ease; }
+.quest-card { position:relative; width:303px; overflow:hidden; transition:transform .15s ease,box-shadow .15s ease; }
 .quest-card:hover { transform:translateY(-4px); box-shadow:0 16px 24px rgba(0,0,0,.08),1px 2px 15px rgba(0,0,0,.08); }
 .quest-card__photo { position:relative; display:block; height:220px; background:center/cover no-repeat; border-radius:var(--r-card) var(--r-card) 0 0; }
 .quest-card__photo .qmark { position:absolute; inset:0; display:grid; place-items:center; font-family:var(--font-serif); font-size:44px; letter-spacing:.03em; color:var(--white); }
@@ -216,18 +218,21 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .quest-card__meta span { display:inline-flex; align-items:center; gap:4px; }
 .quest-card__meta .ic { width:14px; height:14px; }
 .quest-card__title { margin-top:16px; font-weight:700; font-size:18px; line-height:1.22; min-height:44px; }
+/* The title anchor stretches over the whole card so the entire card is one click
+   target to the product page. Interactive controls (the footer CTA) sit above it
+   via z-index so a click on a button never triggers the card navigation. */
+.quest-card__link::after { content:""; position:absolute; inset:0; z-index:1; }
 .rating { display:flex; align-items:center; gap:8px; font-size:16px; }
 .rating .ic { --ic:url("/assets/icons/c/ic-star-18--gold.svg"); width:17px; height:16px; }
 .rating b { font-weight:700; }
 .rating .muted { font-weight:400; }
 .quest-card__rating { margin-top:20px; }
 .quest-card__divider { margin:16px 4px 0; border:0; border-top:1px solid rgba(18,41,71,.2); }
-.quest-card__footer { margin-top:14px; display:flex; align-items:center; justify-content:space-between; }
+.quest-card__footer { position:relative; z-index:2; margin-top:14px; display:flex; align-items:center; justify-content:space-between; }
 .quest-card__price { font-weight:700; font-size:20px; }
 .quest-card__footer .btn.quest-card__cta { width:160px; padding:0; }
 .quest-card__owned-badge { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:24px; padding:0 10px; border-radius:12px; background:rgba(255,255,255,.92); color:var(--green); font-size:11px; font-weight:700; }
-.quest-card__about { display:inline-block; margin-top:10px; font-size:13px; font-weight:500; color:var(--blue); }
-.quest-card__about:hover { text-decoration:underline; }
+.quest-card__players { margin-top:10px; font-size:13px; font-weight:500; }
 .quest-card__price--owned { color:var(--green); font-size:14px; }
 .quest-card__error { margin-top:10px; font-size:12px; color:var(--red); }
 .quest-card__cta.is-pending { background:#9DB6F8; display:inline-flex; gap:8px; }

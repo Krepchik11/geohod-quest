@@ -6,12 +6,14 @@ import { api, type PublishedQuestWire } from '../../lib/api';
 import { currentPlayerId } from '../../lib/identity';
 import { coverCss } from '../../lib/cover';
 import { downloadBundle } from '../../lib/download';
-import { fmtRating, priceLabel, ratingPlural } from '../../lib/storefront';
+import { fmtRating, priceLabel, ratingPlural, playersPlural } from '../../lib/storefront';
 import PurchaseSheet from './PurchaseSheet';
 
 /**
- * §2.1/§2.2 shop card v2. Cover, title and «О квесте и отзывы →» route to the
- * product page — nothing on the card opens the player except the owned CTA.
+ * §2.1/§2.2 shop card v2. The whole card is a single block link to the product
+ * page (the title anchor stretches over the card via ::after) — nothing on the
+ * card opens the player except the owned CTA. The CTAs sit above the overlay
+ * (z-index) so a click on a button never triggers the card navigation.
  * All purchase status lives IN the card: pending spinner on the button, success
  * in the price slot, a red line under the price row on failure. Paid quests go
  * through the confirmation sheet; free quests grant instantly.
@@ -61,10 +63,10 @@ export default function QuestCard({
 
   return (
     <article className="quest-card card">
-      <Link className="quest-card__photo" href={aboutUrl} style={{ backgroundImage: coverCss(quest.primary_comic) }}>
+      <div className="quest-card__photo" style={{ backgroundImage: coverCss(quest.primary_comic) }}>
         {!quest.primary_comic && <span className="qmark">?</span>}
         {owned && <span className="quest-card__owned-badge">✓ Куплен</span>}
-      </Link>
+      </div>
       <div className="quest-card__body">
         {(quest.city || quest.duration) && (
           <p className="quest-card__meta">
@@ -76,7 +78,9 @@ export default function QuestCard({
             )}
           </p>
         )}
-        <h3 className="quest-card__title"><Link href={aboutUrl}>{quest.name}</Link></h3>
+        <h3 className="quest-card__title">
+          <Link className="quest-card__link" href={aboutUrl}>{quest.name}</Link>
+        </h3>
         {quest.rating_count > 0 ? (
           <p className="rating quest-card__rating">
             <span className="ic" /><b>{fmtRating(quest.rating_avg)}</b>
@@ -85,7 +89,9 @@ export default function QuestCard({
         ) : (
           <p className="rating quest-card__rating"><span className="muted">Нет оценок</span></p>
         )}
-        <Link className="quest-card__about" href={aboutUrl}>О квесте и отзывы →</Link>
+        {quest.players > 0 && (
+          <p className="quest-card__players muted">{quest.players}&nbsp;{playersPlural(quest.players)}</p>
+        )}
         <hr className="quest-card__divider" />
         <div className="quest-card__footer">
           {owned ? (
@@ -93,7 +99,7 @@ export default function QuestCard({
               <span className="quest-card__price quest-card__price--owned">
                 {justBought ? '✓ Квест в «Моих квестах»' : 'Куплен'}
               </span>
-              <Link className="btn quest-card__cta" href={playUrl}>Пройти</Link>
+              <Link className="btn quest-card__cta" href={playUrl}>Играть</Link>
             </>
           ) : (
             <>

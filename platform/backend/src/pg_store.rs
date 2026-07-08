@@ -534,12 +534,13 @@ fn published_from_row(row: &sqlx::postgres::PgRow) -> Result<PublishedMeta, AppE
             .map_err(internal)?
             .map(|v| v as u32),
         paid_hints: row.try_get("paid_hints").map_err(internal)?,
+        players_bonus: row.try_get("players_bonus").map_err(internal)?,
     })
 }
 
 /// Published-quest columns selected wherever a [`PublishedMeta`] is read (kept in
 /// one place so list/get/bundle stay in sync with [`published_from_row`]).
-const PUBLISHED_COLS: &str = "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price, description, pages, tasks, paid_hints";
+const PUBLISHED_COLS: &str = "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price, description, pages, tasks, paid_hints, players_bonus";
 
 impl PgGrantStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -676,8 +677,9 @@ impl PgGrantStore {
         sqlx::query(
             "INSERT INTO published_quests
                  (quest_id, name, primary_comic, template_summary, snapshot_version,
-                  snapshot_id, city, duration, price, description, pages, tasks, paid_hints)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                  snapshot_id, city, duration, price, description, pages, tasks, paid_hints,
+                  players_bonus)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              ON CONFLICT (quest_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  primary_comic = EXCLUDED.primary_comic,
@@ -690,7 +692,8 @@ impl PgGrantStore {
                  description = EXCLUDED.description,
                  pages = EXCLUDED.pages,
                  tasks = EXCLUDED.tasks,
-                 paid_hints = EXCLUDED.paid_hints",
+                 paid_hints = EXCLUDED.paid_hints,
+                 players_bonus = EXCLUDED.players_bonus",
         )
         .bind(quest_id)
         .bind(&meta.name)
@@ -705,6 +708,7 @@ impl PgGrantStore {
         .bind(meta.pages.map(|v| v as i32))
         .bind(meta.tasks.map(|v| v as i32))
         .bind(meta.paid_hints)
+        .bind(meta.players_bonus)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;

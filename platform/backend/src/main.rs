@@ -643,6 +643,11 @@ struct PublishRequest {
     /// Store description shown on the product page (§3.1); blank stays absent.
     #[serde(default)]
     description: Option<String>,
+    /// Marketing padding for the public players counter (real completions + this).
+    /// Negative values are clamped to 0 at publish so the count never drops below
+    /// the honest completions figure.
+    #[serde(default)]
+    players_bonus: Option<i64>,
 }
 
 /// Content chips for the product page, derived from the frozen snapshot at
@@ -706,6 +711,7 @@ async fn publish_quest_handler(
         pages,
         tasks,
         paid_hints,
+        players_bonus: req.players_bonus.unwrap_or(0).max(0),
     };
     state
         .grants
@@ -1113,6 +1119,9 @@ struct CatalogQuest {
     meta: PublishedMeta,
     rating_avg: f64,
     rating_count: usize,
+    /// Public players counter: real distinct completions + the author's marketing
+    /// `players_bonus`. The raw bonus is never sent on its own (see PublishedMeta).
+    players: i64,
 }
 
 async fn list_quests_handler(
@@ -1154,16 +1163,28 @@ async fn list_quests_handler(
     // Ratings for EVERY visible quest in ONE round-trip (was a per-quest
     // `get_version_stats` N+1 that dominated this endpoint's latency).
     let snap_ids: Vec<String> = visible.iter().map(|m| m.snapshot_id.clone()).collect();
-    let ratings = state.store.rating_stats_for_snapshots(&snap_ids).await?;
+    // Ratings (per snapshot) and completions (per quest) are independent aggregate
+    // reads — run them concurrently. Completions is ONE GROUP BY over the whole set
+    // (never a per-quest N+1), matching the ratings round-trip.
+    let (ratings, completions) = tokio::join!(
+        state.store.rating_stats_for_snapshots(&snap_ids),
+        state.store.completions_by_quest(),
+    );
+    let ratings = ratings?;
+    let completions = completions?;
     let out: Vec<CatalogQuest> = visible
         .into_iter()
         .map(|meta| {
             let (rating_avg, rating_count) =
                 ratings.get(&meta.snapshot_id).copied().unwrap_or((0.0, 0));
+            // Public players counter: real distinct completions + marketing bonus.
+            let players =
+                completions.get(&meta.quest_id).copied().unwrap_or(0) as i64 + meta.players_bonus;
             CatalogQuest {
                 meta,
                 rating_avg,
                 rating_count,
+                players,
             }
         })
         .collect();
@@ -1180,6 +1201,8 @@ struct ProductPageWire {
     meta: PublishedMeta,
     rating_avg: f64,
     rating_count: usize,
+    /// Public players counter: real distinct completions + marketing `players_bonus`.
+    players: i64,
     /// Author display label from the constructor row; None for legacy/direct
     /// publishes that have no constructor lifecycle.
     author_name: Option<String>,
@@ -1266,10 +1289,14 @@ async fn get_quest_product_handler(
             created_at: r.created_at,
         })
         .collect();
+    // Public players counter: real distinct completions + marketing bonus, same
+    // basis as the store card so the two never disagree.
+    let players = state.store.completions_for_quest(&quest_id).await? as i64 + meta.players_bonus;
     Ok(Json(ProductPageWire {
         meta,
         rating_avg: stats.rating_avg,
         rating_count: stats.rating_count,
+        players,
         author_name,
         author_published_count,
         reviews,
@@ -2835,6 +2862,75 @@ mod tests {
             0,
             "bonus is once per (player, quest), ever"
         );
+    }
+
+    /// The public players counter = real distinct completions + the author's
+    /// marketing `players_bonus`, on BOTH the catalog card and the product page.
+    /// The raw bonus is never serialized on its own (it would reveal the padding),
+    /// and a negative bonus clamps to 0 so the count never drops below the honest
+    /// completions figure.
+    #[tokio::test]
+    async fn players_counter_is_completions_plus_bonus_and_hides_raw_bonus() {
+        let app = test_app();
+        let ids = Ids::new("players-counter");
+
+        // One real completion: grant → publish → attempt → CompletionBonus fact.
+        let attempt = grant_publish_attempt(&app, &ids).await;
+        let bonus = json!({"facts": [fact_json(FactKind::CompletionBonus, 3, 5, "device-a")]});
+        let (st, fv) = post_json(&app, &format!("/api/attempts/{attempt}/facts"), bonus).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(fv["accepted"].as_array().expect("accepted").len(), 1);
+
+        // Re-publish the SAME quest with a marketing bonus of 1000.
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({
+                "quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                "snapshot_version": 1, "snapshot_id": ids.snap1, "players_bonus": 1000,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Catalog: players = 1 real completion + 1000 bonus; raw bonus never ships.
+        let (_, list) = get_json(&app, "/api/quests").await;
+        let card = list
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|q| q["quest_id"] == ids.quest)
+            .expect("quest in store");
+        assert_eq!(card["players"], 1001);
+        assert!(
+            card.get("players_bonus").is_none(),
+            "raw marketing bonus must not be serialized"
+        );
+
+        // Product page agrees with the card (same basis).
+        let (_, prod) = get_json(&app, &format!("/api/quests/{}", ids.quest)).await;
+        assert_eq!(prod["players"], 1001);
+        assert!(prod.get("players_bonus").is_none());
+
+        // Negative bonus clamps to 0 → players falls back to honest completions.
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({
+                "quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                "snapshot_version": 1, "snapshot_id": ids.snap1, "players_bonus": -50,
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json(&app, "/api/quests").await;
+        let card = list
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|q| q["quest_id"] == ids.quest)
+            .expect("quest in store");
+        assert_eq!(card["players"], 1);
     }
 
     async fn scenario_version_freeze(app: &Router, ids: &Ids) {
