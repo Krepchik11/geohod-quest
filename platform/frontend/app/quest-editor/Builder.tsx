@@ -56,10 +56,10 @@ const PREVIEW_TEXT: Record<CtorTemplate, string> = {
 function previewStepFor(template: CtorTemplate): { step: DesignStep; pos: number; total: number } {
   const s = newStep(template);
   s.text = PREVIEW_TEXT[template];
-  // Задания рисуют комикс — нейтральный плейсхолдер, чтобы рамка выглядела цельной,
+  // Задания рисуют изображение — нейтральный плейсхолдер, чтобы рамка выглядела цельной,
   // не привязываясь ни к какому квесту.
   if (template === 'task_no' || template === 'task_answer') {
-    s.images = { ...s.images, task: '/assets/img/quest-card.png' };
+    s.image = '/assets/img/quest-card.png';
   }
   if (template === 'task_no') s.place = 'адрес точки · 300 м';
   const idx = CTOR_TEMPLATES.findIndex((t) => t.key === template);

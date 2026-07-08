@@ -6,6 +6,7 @@ import {
   duplicateQuest,
   duplicateStep as modelDuplicate,
   insertionIndex,
+  migrateQuest,
   newQuest,
   newStep,
   removeStep as modelRemove,
@@ -37,14 +38,9 @@ const AUTOSAVE_DEBOUNCE_MS = 350;
 
 type Screen = 'list' | 'builder';
 
-/** Безопасно привести серверное тело к CtorQuest (это тот же объект, что мы храним). */
-function bodyToQuest(body: unknown, fallbackId: string): CtorQuest | null {
-  if (!body || typeof body !== 'object') return null;
-  const q = body as CtorQuest;
-  if (!Array.isArray(q.steps) || !q.meta) return null;
-  // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
-  return { ...q, id: fallbackId };
-}
+/** Безопасно привести серверное тело к CtorQuest: валидация + миграция старых
+ *  форм шагов (images-роли, gift-тумблер, nav.lat/lng) — вся логика в модели. */
+const bodyToQuest = migrateQuest;
 
 export default function Workspace() {
   // ---- Список (дашборд) ----

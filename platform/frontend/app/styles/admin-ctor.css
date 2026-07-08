@@ -54,6 +54,16 @@
 .comic-zone.filled .tag { position: absolute; left: 6px; top: 6px; font: 600 10px/1 'Inter', sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 4px 7px; border-radius: 6px; }
 .comic-zone.req::after { content: "обязательно"; position: absolute; right: 6px; top: 6px; font: 600 9px/1 'Inter', sans-serif; color: var(--red); background: rgba(231,90,124,.12); padding: 3px 6px; border-radius: 6px; }
 
+/* Кадрирование 4:3 (изображение страницы) */
+.crop-overlay { position: fixed; inset: 0; z-index: 120; background: rgba(2,8,135,.45); display: flex; align-items: center; justify-content: center; padding: 20px; cursor: default; }
+.crop-card { background: #fff; border-radius: 20px; padding: 22px 26px; width: min(480px, 100%); display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.crop-card h4 { margin: 0; font-size: 16px; font-weight: 700; }
+.crop-note { margin: 0; font-size: 12px; color: var(--muted); }
+.crop-view { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; border: 2px solid var(--border); background: var(--bg-subtle); cursor: grab; touch-action: none; }
+.crop-view:active { cursor: grabbing; }
+.crop-view img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; pointer-events: none; }
+.crop-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 /* Ответы */
 .ans-row { display: flex; align-items: center; gap: 10px; }
 .ans-row .input { flex: 1; width: auto; }

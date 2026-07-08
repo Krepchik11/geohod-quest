@@ -23,7 +23,7 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   const structErr = gates.errors.some((e) => !e.pageId);
   if (!structErr) rows.push({ st: 'ok', text: 'Структура: «Первый экран» в начале, есть терминальное «Поздравление»' });
   const tasks = quest.steps.filter((s) => s.template === 'task_no' || s.template === 'task_answer');
-  if (tasks.length && tasks.every((s) => s.images.task)) {
+  if (tasks.length && tasks.every((s) => s.image)) {
     rows.push({ st: 'ok', text: `Комикс «задание» загружен у всех страниц-заданий (${tasks.length} из ${tasks.length})` });
   }
   const answers = quest.steps.filter((s) => s.template === 'task_answer');

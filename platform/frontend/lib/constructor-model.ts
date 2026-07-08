@@ -15,7 +15,8 @@ import type { GameStep, QuestSnapshot, Supporting } from './shared-model';
 export type CtorTemplate =
   | 'start' | 'video' | 'task_no' | 'task_answer' | 'continue' | 'route_video' | 'congrats';
 
-export type ComicRole = 'task' | 'character' | 'hint' | 'atmosphere';
+/** Подарок за шаг-задание фиксирован платформой: всегда включён, всегда 5 монет. */
+export const GIFT_COINS = 5;
 
 export interface CtorStep {
   id: string;
@@ -29,16 +30,18 @@ export interface CtorStep {
   title: string;
   /** task_answer: плейсхолдер поля ответа. */
   prompt: string;
-  /** task_no: адрес и расстояние (строка с булавкой). */
+  /** Адрес точки (контент-блок); он же — подпись точки в навигаторе. */
   place: string;
   action: { desc: string; confirmLabel: string };
   allowNote: boolean;
-  images: Partial<Record<ComicRole, string | null>>;
+  /** Единственное изображение страницы (4:3, ≤100 КБ — контракт пайплайна загрузки). */
+  image: string | null;
   video: { dur: string; label: string } | null;
   acceptable: string[];
-  gift: { on: boolean; coins: number; narrative: string };
+  gift: { narrative: string };
   hint: { on: boolean; cost: number; text: string };
-  nav: { on: boolean; lat: string; lng: string; label: string };
+  /** Координаты одним полем в формате Google Maps: «45.2651, 19.8656». */
+  nav: { on: boolean; coords: string };
 }
 
 export interface CtorQuestMeta {
@@ -80,7 +83,7 @@ export interface GateMessage {
 }
 
 /** Controls a gate failure can point at inside the page editor / settings. */
-export type GateField = 'comic' | 'answers' | 'nav' | 'hint' | 'cover';
+export type GateField = 'image' | 'answers' | 'nav' | 'hint' | 'cover';
 
 export interface Gates {
   errors: GateMessage[];
@@ -95,7 +98,7 @@ export interface Gates {
 export const CTOR_TEMPLATES: Array<{ key: CtorTemplate; name: string; desc: string; fill: string }> = [
   { key: 'start', name: 'Первый экран', desc: 'Обложка квеста: название, город, длительность.', fill: 'кнопка «начать квест», мета из настроек квеста' },
   { key: 'video', name: 'Приветственное видео', desc: 'Знакомство с автором или сюжетом через видео.', fill: 'видео-блок + кнопка «продолжить»' },
-  { key: 'task_no', name: 'Задание без ответа', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», навигатор вкл, заметка разрешена' },
+  { key: 'task_no', name: 'Задание без ответа', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», навигатор вкл, заметка разрешена, подарок 5 монет' },
   { key: 'task_answer', name: 'Задание с ответом', desc: 'Вопрос с проверкой по списку ответов.', fill: 'поле ответа, подсказка 5 монет, подарок 5 монет' },
   { key: 'continue', name: 'Продолжить', desc: 'Развитие сюжета: диалог, факт, переход.', fill: 'кнопка «продолжить»' },
   { key: 'route_video', name: 'Видео маршрута', desc: 'Видео-навигация до следующей точки.', fill: 'видео-блок + навигатор + «в путь»' },
@@ -107,20 +110,26 @@ export const TPL_BY_KEY = Object.fromEntries(CTOR_TEMPLATES.map((t) => [t.key, t
   (typeof CTOR_TEMPLATES)[number]
 >;
 
-export const COMIC_ROLES: Partial<Record<CtorTemplate, Array<{ key: ComicRole; label: string; req?: boolean }>>> = {
-  task_no: [
-    { key: 'task', label: 'задание', req: true },
-    { key: 'character', label: 'персонаж' },
-    { key: 'atmosphere', label: 'атмосфера' },
-  ],
-  task_answer: [
-    { key: 'task', label: 'задание', req: true },
-    { key: 'character', label: 'персонаж' },
-    { key: 'hint', label: 'подсказка' },
-    { key: 'atmosphere', label: 'атмосфера' },
-  ],
-  continue: [{ key: 'task', label: 'иллюстрация' }],
+/** Шаблоны со своим изображением страницы (обязательно для заданий). */
+export const IMAGE_TEMPLATES: Partial<Record<CtorTemplate, { label: string; req?: boolean }>> = {
+  task_no: { label: 'изображение', req: true },
+  task_answer: { label: 'изображение', req: true },
+  continue: { label: 'иллюстрация' },
 };
+
+/**
+ * Координаты одним полем — формат копипасты из Google Maps:
+ * «45.2651377918879, 19.865664144668212». Допускаем произвольные пробелы
+ * вокруг запятой; валидируем диапазоны широты/долготы.
+ */
+export function parseCoords(input: string): { lat: number; lng: number } | null {
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(input);
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lng = parseFloat(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -155,12 +164,12 @@ export function newStep(template: CtorTemplate): CtorStep {
     place: '',
     action: { desc: '', confirmLabel: 'Я на месте' },
     allowNote: false,
-    images: {},
+    image: null,
     video: null,
     acceptable: [],
-    gift: { on: false, coins: 5, narrative: '' },
+    gift: { narrative: '' },
     hint: { on: false, cost: 5, text: '' },
-    nav: { on: false, lat: '', lng: '', label: '' },
+    nav: { on: false, coords: '' },
   };
   if (template === 'start') s.kicker = 'Городской квест';
   if (template === 'video') s.video = { dur: '0:00', label: 'видео-приветствие' };
@@ -174,7 +183,6 @@ export function newStep(template: CtorTemplate): CtorStep {
   }
   if (template === 'task_answer') {
     s.prompt = 'Введите ответ';
-    s.gift = { on: true, coins: 5, narrative: '' };
     s.hint = { on: true, cost: 5, text: '' };
   }
   if (template === 'congrats') s.title = 'Квест пройден!';
@@ -212,11 +220,49 @@ export function duplicateQuest(src: CtorQuest, newId: string): CtorQuest {
   return copy;
 }
 
+/* ---------- Миграция старых тел черновиков ---------- */
+
+/** Дособерём legacy-поля старого шага (до перехода на image/coords/фикс-подарок). */
+interface LegacyStepFields {
+  images?: Partial<Record<'task' | 'character' | 'hint' | 'atmosphere', string | null>>;
+  gift?: { narrative?: string };
+  nav?: { on?: boolean; coords?: string; lat?: string; lng?: string; label?: string };
+}
+
+/**
+ * Единственная точка входа серверного тела в редактор. Сервер хранит тело
+ * опа́ково и round-trip'ит как есть, поэтому старые черновики приходят в
+ * прежней форме (images-роли, gift-тумблер, nav.lat/lng/label) — приводим к
+ * текущей. Идемпотентна для тел текущей формы.
+ */
+export function migrateQuest(body: unknown, serverId: string): CtorQuest | null {
+  if (!body || typeof body !== 'object') return null;
+  const raw = body as CtorQuest;
+  if (!Array.isArray(raw.steps) || !raw.meta) return null;
+  const steps = raw.steps.map((step) => {
+    const s = { ...step };
+    const legacy = step as CtorStep & LegacyStepFields;
+    if (s.image === undefined) {
+      const img = legacy.images;
+      s.image = img?.task ?? img?.character ?? img?.hint ?? img?.atmosphere ?? null;
+    }
+    delete (s as LegacyStepFields).images;
+    s.gift = { narrative: legacy.gift?.narrative ?? '' };
+    if (legacy.nav?.coords === undefined) {
+      const lat = legacy.nav?.lat?.trim() || '';
+      const lng = legacy.nav?.lng?.trim() || '';
+      s.nav = { on: !!legacy.nav?.on, coords: lat && lng ? `${lat}, ${lng}` : '' };
+      if (!s.place && legacy.nav?.label) s.place = legacy.nav.label;
+    }
+    return s;
+  });
+  // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
+  return { ...raw, steps, id: serverId };
+}
+
 /* ---------- Гейты публикации (живой пересчёт по черновику) ---------- */
 
 const isTaskTemplate = (t: CtorTemplate) => t === 'task_no' || t === 'task_answer';
-const hasNumericCoords = (nav: CtorStep['nav']) =>
-  Number.isFinite(parseFloat(nav.lat)) && Number.isFinite(parseFloat(nav.lng));
 
 /** Грубая оценка веса медиа: data-URL считаем честно по base64, внешние пути — константой. */
 function imageMb(src: string): number {
@@ -247,13 +293,13 @@ export function computeGates(quest: CtorQuest): Gates {
     if (s.template === 'start' && i > 0) {
       add(s.id, 'err', `«${s.name}» — «Первый экран» может быть только первой страницей`);
     }
-    if (isTaskTemplate(s.template) && !s.images.task) {
-      add(s.id, 'err', `«${s.name}» — нет комикса «задание»`, 'comic');
+    if (isTaskTemplate(s.template) && !s.image) {
+      add(s.id, 'err', `«${s.name}» — нет изображения страницы`, 'image');
     }
     if (s.template === 'task_answer' && !s.acceptable.some((a) => a.trim())) {
       add(s.id, 'err', `«${s.name}» — список ответов пуст`, 'answers');
     }
-    if (s.nav.on && !hasNumericCoords(s.nav)) {
+    if (s.nav.on && !parseCoords(s.nav.coords)) {
       add(s.id, 'err', `«${s.name}» — навигатор включён, координаты не заданы`, 'nav');
     }
     if (s.template === 'task_answer' && s.hint.on && !s.hint.text.trim()) {
@@ -274,7 +320,7 @@ export function computeGates(quest: CtorQuest): Gates {
     mb += imageMb(src);
   };
   steps.forEach((s) => {
-    (Object.values(s.images) as Array<string | null | undefined>).forEach(countImage);
+    countImage(s.image);
     if (s.video) {
       vids += 1;
       mb += 1.6;
@@ -293,13 +339,14 @@ export function computeGates(quest: CtorQuest): Gates {
 /* ---------- Сериализация черновика в канонический GameStep ---------- */
 
 function navOf(s: CtorStep): Supporting['navigator'] {
-  if (!s.nav.on || !hasNumericCoords(s.nav)) return null;
-  return { lat: parseFloat(s.nav.lat), lng: parseFloat(s.nav.lng), label: s.nav.label || '' };
+  if (!s.nav.on) return null;
+  const c = parseCoords(s.nav.coords);
+  // The content-block address doubles as the navigator point label.
+  return c ? { lat: c.lat, lng: c.lng, label: s.place || '' } : null;
 }
 
 function giftOf(s: CtorStep): Supporting['gift'] {
-  if (!s.gift.on || !(s.gift.coins > 0)) return null;
-  return { coins: s.gift.coins, narrative_text: s.gift.narrative || '' };
+  return { coins: GIFT_COINS, narrative_text: s.gift.narrative || '' };
 }
 
 /**
@@ -312,10 +359,10 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
     template: s.template,
     rich_content: { title: s.name, main_text: s.text },
     media: {
-      task: s.images.task || null,
-      character: s.images.character || null,
-      hint: s.images.hint || null,
-      atmosphere: s.images.atmosphere || null,
+      task: s.image || null,
+      character: null,
+      hint: null,
+      atmosphere: null,
       video: s.video ? { duration_label: s.video.dur, caption: s.video.label } : null,
     },
     completion: { mode: 'physical' },
@@ -323,7 +370,6 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
   };
   const sup = g.supporting as Supporting;
   const nav = navOf(s);
-  const gift = giftOf(s);
 
   switch (s.template) {
     case 'start':
@@ -346,13 +392,14 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
       g.completion = { mode: 'physical', allow_note: s.allowNote };
       sup.physical_action = { description: s.action.desc, confirm_label: s.action.confirmLabel || 'Я на месте' };
       if (nav) sup.navigator = nav;
-      if (gift) sup.gift = gift;
+      sup.gift = giftOf(s);
       break;
     case 'task_answer':
+      g.rich_content.place_text = s.place;
       g.rich_content.question_prompt = s.prompt || 'Введите ответ';
       g.completion = { mode: 'answer', acceptable: s.acceptable.map((a) => a.trim()).filter(Boolean) };
       if (s.hint.on) sup.hint = { cost_coins: s.hint.cost, reveal_text: s.hint.text };
-      if (gift) sup.gift = gift;
+      sup.gift = giftOf(s);
       if (nav) sup.navigator = nav;
       break;
     case 'continue':
