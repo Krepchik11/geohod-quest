@@ -36,7 +36,8 @@ export interface Media {
 export interface Completion {
   mode: 'physical' | 'answer';
   acceptable?: string[] | null; // only for answer; plain list from constructor
-  allow_note?: boolean;
+  // NOTE: frozen snapshots published before the note feature was retired still
+  // carry an `allow_note` boolean here — the player ignores it.
 }
 
 export interface Gift {

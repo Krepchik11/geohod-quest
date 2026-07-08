@@ -26,13 +26,12 @@ GameStep {
     video?: { ref, poster?, duration_label }            // inline block, never fullscreen
   },
   completion?: { mode: 'physical' | 'answer',
-                 acceptable?: string[],                 // answer mode only
-                 allow_note?: boolean },                // physical mode only
+                 acceptable?: string[] },               // answer mode only
   // completion ABSENT ⇒ advance-on-CTA step (start/video/continue/route_video/congrats);
   // terminal behaviour comes from supporting.terminal, not from completion.
   supporting: {
     gift?: { coins: number, narrative_text: string },
-    hint?: { cost_coins: number, reveal_text?: string },  // + media.images.hint role
+    hint?: { cost_coins: number, reveal_text?: string },  // content = reveal_text and/or media.images.hint; present only when it has content
     navigator?: { lat, lng, label? },                     // system-maps handoff only
     terminal?: boolean, is_start?: boolean
   }
@@ -45,8 +44,8 @@ All amounts and lists freeze verbatim in the snapshot at publish.
 |---|---|---|
 | start | — (advance) | CTA «начать квест»; meta from store settings |
 | video | — (advance) | video block; CTA «продолжить» |
-| task_no | physical | confirm «Я на месте», allow_note, navigator ON |
-| task_answer | answer | prompt «Введите ответ», hint cost 5, gift 5 |
+| task_no | physical | confirm «Я на месте», navigator ON |
+| task_answer | answer | prompt «Введите ответ», hint cost 5 (no toggle — hint ships when it has text and/or image), gift 5 |
 | continue | — (advance) | CTA «продолжить» |
 | route_video | — (advance) | video block + navigator; CTA «в путь» |
 | congrats | — (terminal) | supporting.terminal; completion bonus +5; inline rating block |
@@ -65,8 +64,10 @@ goldens. Reference: `player/matcher.js`.
 1. Wrong submit #1 → inline error «Неверно. Попробуйте ещё раз.» + input shake.
 2. Wrong submit #2+ (hint exists, not yet bought) → popup: title «Нужна подсказка?», body with
    frozen cost, buttons [Потратить N монет] / [Попробую сам]. Decline → inline error.
-3. Purchase: CoinFact spend (idempotent per attempt+step), hint box (reveal_text + hint image
-   role) rendered persistently above the input for the rest of the attempt.
+3. Purchase: CoinFact spend (idempotent per attempt+step) → the hint content opens as a popup
+   (title «Подсказка», reveal_text and/or hint image, [Понятно]) + spend toast «−N монет»; the
+   same content then stays in the inline hint box above the input for the rest of the attempt.
+   A hint is text-only, image-only, or both — the popup and box render whatever is present.
 4. **No insufficient-funds branch. No revocation. Balance may go negative.**
 
 ## Coins / Economy
@@ -77,6 +78,9 @@ goldens. Reference: `player/matcher.js`.
   and quest menu as-is; personal rating displays max(balance-derived score, 0).
 - Award UI: bottom toast (coin icon spin + «+N монет» + narrative subtitle), auto-dismiss ~1.9s,
   WebAudio two-note chime when sound on. Completion bonus toast fires on entering terminal step.
+- Spend UI: accent-tinted toast (reverse coin spin + «−N монет» + «подсказка»), softer descending
+  two-note chime. On EVERY balance change the top-bar coin chip bumps (scale + coin spin, gold
+  tint on gain / accent on spend); all coin animation gates on the anims flag + reduced-motion.
 
 ## Player UI Contracts
 - **Top bar** (every step except `start`): progress «N / M», coin chip, burger → menu.
@@ -153,11 +157,13 @@ Frame: 360×740 design canvas; media block uses `flex: 0 1 auto` so CTAs never c
   [Открыть как тест-игрок], versions panel: draft (gate count) / published versions
   (immutable; live one marked; old versions note active attempts). No mutable status select.
 - **Per-step editor** (blocks): template chip + internal name; content (text, prompt);
-  4 comic upload zones (task marked required); AnswerListEditor (rows + add + «Вставить
-  строками» replace + live «Тест ответа» via shared matcher with «зачтено/не зачтено» verdict);
-  gift subform with freeze note; hint subform (cost + text); navigator toggle revealing
-  lat/lng/label; live phone preview (real player components) + «показать с купленной
-  подсказкой» toggle; save note: changes reach players only via next published version.
+  single 4:3 step image (required on tasks; non-4:3 uploads open a drag-to-pan crop, compressed
+  to ≤100 KB); AnswerListEditor (rows + add + «Вставить строками» replace + live «Тест ответа»
+  via shared matcher with «зачтено/не зачтено» verdict); gift subform with freeze note; hint
+  subform — no toggle: cost + text + optional 4:3 image, the hint publishes when it has text
+  and/or image; navigator toggle revealing a single Google-Maps-format coords field; live phone
+  preview (real player components) + «показать с купленной подсказкой» toggle; save note:
+  changes reach players only via next published version.
 - **Publish gates** (errors block, warnings don't): structure (start first, terminal exists);
   task image present on all task templates; non-empty acceptable lists; navigator enabled ⇒
   coordinates set; bundle size estimate vs 5 MB target (warning); dry-run serialize passes.

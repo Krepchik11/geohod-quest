@@ -9,13 +9,14 @@ import {
   CoinToast,
   FeedbackSheet,
   HintPopup,
+  HintRevealPopup,
   MenuOverlay,
   PlayerFrame,
   StepView,
   TopBar,
   type DesignStep,
 } from '../player/PlayerComponents';
-import { coinChime } from '../quest/sound';
+import { coinChime, spendChime } from '../quest/sound';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и
@@ -50,11 +51,10 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const [startTs, setStartTs] = useState(() => Date.now());
   const [finalTime, setFinalTime] = useState('0:01');
   const [answer, setAnswer] = useState('');
-  const [note, setNote] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
   const [wrongFlash, setWrongFlash] = useState(false);
   const [toast, setToast] = useState<{ amount: number; narrative?: string } | null>(null);
-  const [overlay, setOverlay] = useState<'hint' | 'menu' | 'feedback' | 'paused' | null>(null);
+  const [overlay, setOverlay] = useState<'hint' | 'hintReveal' | 'menu' | 'feedback' | 'paused' | null>(null);
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   useEffect(() => {
     const pending = timers.current;
@@ -64,10 +64,16 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
 
   const step = quest.steps[pos];
 
+  // One shared dismiss timer (mirrors the real player): a new toast restarts the
+  // clock, so a step gift's pending clear can't wipe a hint spend toast shown on
+  // the very next step before its own 1.9s elapses.
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (amount: number, narrative?: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ amount, narrative });
-    if (sound) coinChime();
-    after(TOAST_MS, () => setToast(null));
+    if (sound) (amount < 0 ? spendChime : coinChime)();
+    toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
+    timers.current.push(toastTimer.current);
   };
 
   // Тост стартового бонуса — асинхронно после маунта (сам бонус уже в стейте).
@@ -94,7 +100,6 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const goTo = (n: number) => {
     const target = clamp(n);
     setAnswer('');
-    setNote('');
     setWrongFlash(false);
     setPos(target);
     if (quest.steps[target].template === 'congrats' && !awarded.includes('__terminal')) {
@@ -119,7 +124,6 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     setReviewSent(false);
     setOverlay(null);
     setAnswer('');
-    setNote('');
     setWrongFlash(false);
     setStartTs(Date.now());
     setFinalTime('0:01');
@@ -131,7 +135,6 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     navigator: () => {
       if (step.nav) onNav(`→ Системные карты: ${step.nav.label || 'точка'} · ${step.nav.lat}, ${step.nav.lng}`);
     },
-    note: (e: React.ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value),
     answer: (value: string) => { setAnswer(value); setWrongFlash(false); },
     confirm: () => {
       const gifted = award(step, pos);
@@ -156,9 +159,11 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   };
 
   const hintCost = typeof step.hint === 'object' && step.hint ? step.hint.cost || 0 : 0;
+  const hintContent = typeof step.hint === 'object' && step.hint
+    ? { text: step.hint.text, image: step.hint.image }
+    : { text: typeof step.hint === 'string' ? step.hint : undefined, image: null };
   const stepState = {
     answer,
-    note,
     wrong: wrongFlash,
     hintRevealed: hints.includes(pos),
     coinsEarned: coins,
@@ -190,9 +195,18 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
           copy={PLAYER_COPY}
           on={{
             dismiss: () => { setOverlay(null); setWrongFlash(true); },
-            buy: () => { setCoins((c) => c - hintCost); setHints((h) => [...h, pos]); setOverlay(null); },
+            buy: () => {
+              setCoins((c) => c - hintCost);
+              setHints((h) => [...h, pos]);
+              setOverlay('hintReveal');
+              showToast(-hintCost, 'подсказка');
+            },
           }}
         />
+      ) : null}
+
+      {overlay === 'hintReveal' ? (
+        <HintRevealPopup hint={hintContent} copy={PLAYER_COPY} on={{ dismiss: () => setOverlay(null) }} />
       ) : null}
 
       {overlay === 'menu' ? (

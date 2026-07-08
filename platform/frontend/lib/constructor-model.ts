@@ -33,13 +33,13 @@ export interface CtorStep {
   /** Адрес точки (контент-блок); он же — подпись точки в навигаторе. */
   place: string;
   action: { desc: string; confirmLabel: string };
-  allowNote: boolean;
   /** Единственное изображение страницы (4:3, ≤100 КБ — контракт пайплайна загрузки). */
   image: string | null;
   video: { dur: string; label: string } | null;
   acceptable: string[];
   gift: { narrative: string };
-  hint: { on: boolean; cost: number; text: string };
+  /** Подсказка без тумблера: существует, как только есть текст и/или изображение. */
+  hint: { cost: number; text: string; image: string | null };
   /** Координаты одним полем в формате Google Maps: «45.2651, 19.8656». */
   nav: { on: boolean; coords: string };
 }
@@ -98,7 +98,7 @@ export interface Gates {
 export const CTOR_TEMPLATES: Array<{ key: CtorTemplate; name: string; desc: string; fill: string }> = [
   { key: 'start', name: 'Первый экран', desc: 'Обложка квеста: название, город, длительность.', fill: 'кнопка «начать квест», мета из настроек квеста' },
   { key: 'video', name: 'Приветственное видео', desc: 'Знакомство с автором или сюжетом через видео.', fill: 'видео-блок + кнопка «продолжить»' },
-  { key: 'task_no', name: 'Задание без ответа', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», навигатор вкл, заметка разрешена, подарок 5 монет' },
+  { key: 'task_no', name: 'Задание без ответа', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», навигатор вкл, подарок 5 монет' },
   { key: 'task_answer', name: 'Задание с ответом', desc: 'Вопрос с проверкой по списку ответов.', fill: 'поле ответа, подсказка 5 монет, подарок 5 монет' },
   { key: 'continue', name: 'Продолжить', desc: 'Развитие сюжета: диалог, факт, переход.', fill: 'кнопка «продолжить»' },
   { key: 'route_video', name: 'Видео маршрута', desc: 'Видео-навигация до следующей точки.', fill: 'видео-блок + навигатор + «в путь»' },
@@ -163,12 +163,11 @@ export function newStep(template: CtorTemplate): CtorStep {
     prompt: '',
     place: '',
     action: { desc: '', confirmLabel: 'Я на месте' },
-    allowNote: false,
     image: null,
     video: null,
     acceptable: [],
     gift: { narrative: '' },
-    hint: { on: false, cost: 5, text: '' },
+    hint: { cost: 5, text: '', image: null },
     nav: { on: false, coords: '' },
   };
   if (template === 'start') s.kicker = 'Городской квест';
@@ -179,11 +178,9 @@ export function newStep(template: CtorTemplate): CtorStep {
   }
   if (template === 'task_no') {
     s.nav.on = true;
-    s.allowNote = true;
   }
   if (template === 'task_answer') {
     s.prompt = 'Введите ответ';
-    s.hint = { on: true, cost: 5, text: '' };
   }
   if (template === 'congrats') s.title = 'Квест пройден!';
   return s;
@@ -222,11 +219,13 @@ export function duplicateQuest(src: CtorQuest, newId: string): CtorQuest {
 
 /* ---------- Миграция старых тел черновиков ---------- */
 
-/** Дособерём legacy-поля старого шага (до перехода на image/coords/фикс-подарок). */
+/** Дособерём legacy-поля старого шага (до перехода на image/coords/фикс-подарок/подсказку без тумблера). */
 interface LegacyStepFields {
   images?: Partial<Record<'task' | 'character' | 'hint' | 'atmosphere', string | null>>;
   gift?: { narrative?: string };
   nav?: { on?: boolean; coords?: string; lat?: string; lng?: string; label?: string };
+  hint?: { on?: boolean; cost?: number; text?: string; image?: string | null };
+  allowNote?: boolean;
 }
 
 /**
@@ -248,6 +247,14 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     }
     delete (s as LegacyStepFields).images;
     s.gift = { narrative: legacy.gift?.narrative ?? '' };
+    // Подсказка потеряла тумблер: текст сохраняем даже при выключенном legacy-`on`
+    // (без потери данных; подсказка публикуется только при наличии контента).
+    s.hint = {
+      cost: legacy.hint?.cost ?? 5,
+      text: legacy.hint?.text ?? '',
+      image: legacy.hint?.image ?? null,
+    };
+    delete (s as LegacyStepFields).allowNote;
     if (legacy.nav?.coords === undefined) {
       const lat = legacy.nav?.lat?.trim() || '';
       const lng = legacy.nav?.lng?.trim() || '';
@@ -302,8 +309,8 @@ export function computeGates(quest: CtorQuest): Gates {
     if (s.nav.on && !parseCoords(s.nav.coords)) {
       add(s.id, 'err', `«${s.name}» — навигатор включён, координаты не заданы`, 'nav');
     }
-    if (s.template === 'task_answer' && s.hint.on && !s.hint.text.trim()) {
-      add(s.id, 'warn', `«${s.name}» — подсказка платная, но без текста`, 'hint');
+    if (s.template === 'task_answer' && !s.hint.text.trim() && !s.hint.image) {
+      add(s.id, 'warn', `«${s.name}» — нет подсказки (текста или изображения): после 2-й ошибки игроку нечего будет купить`, 'hint');
     }
   });
 
@@ -321,6 +328,7 @@ export function computeGates(quest: CtorQuest): Gates {
   };
   steps.forEach((s) => {
     countImage(s.image);
+    countImage(s.hint.image);
     if (s.video) {
       vids += 1;
       mb += 1.6;
@@ -389,7 +397,6 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
       break;
     case 'task_no':
       g.rich_content.place_text = s.place;
-      g.completion = { mode: 'physical', allow_note: s.allowNote };
       sup.physical_action = { description: s.action.desc, confirm_label: s.action.confirmLabel || 'Я на месте' };
       if (nav) sup.navigator = nav;
       sup.gift = giftOf(s);
@@ -398,7 +405,11 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
       g.rich_content.place_text = s.place;
       g.rich_content.question_prompt = s.prompt || 'Введите ответ';
       g.completion = { mode: 'answer', acceptable: s.acceptable.map((a) => a.trim()).filter(Boolean) };
-      if (s.hint.on) sup.hint = { cost_coins: s.hint.cost, reveal_text: s.hint.text };
+      // Подсказка существует, когда у неё есть контент; изображение едет ролью media.hint.
+      if (s.hint.text.trim() || s.hint.image) {
+        sup.hint = { cost_coins: s.hint.cost, reveal_text: s.hint.text };
+        g.media.hint = s.hint.image;
+      }
       sup.gift = giftOf(s);
       if (nav) sup.navigator = nav;
       break;

@@ -30,7 +30,8 @@ export function toDesignStep(step: GameStep): DesignStep {
       : undefined,
     nav: sup?.navigator ?? undefined,
     gift: sup?.gift ?? undefined,
-    hint: sup?.hint ? { cost: sup.hint.cost_coins, text: sup.hint.reveal_text } : undefined,
-    allowNote: step.completion?.allow_note,
+    hint: sup?.hint
+      ? { cost: sup.hint.cost_coins, text: sup.hint.reveal_text, image: step.media?.hint ?? null }
+      : undefined,
   };
 }

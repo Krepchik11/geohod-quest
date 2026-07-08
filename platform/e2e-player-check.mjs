@@ -68,6 +68,11 @@ await page.locator('.p-overlay').waitFor({ timeout: 3000 });
 check('2nd wrong → hint popup', (await page.locator('.p-overlay').innerText()).includes('Нужна подсказка'));
 await page.locator('.p-overlay .p-btn', { hasText: 'Потратить 5 монет' }).click();
 await page.waitForTimeout(300);
+// purchase opens the hint-content popup (text and/or image) + spend toast «−5 монет»
+check('purchase → hint content popup', (await page.locator('.p-overlay').innerText()).includes('Подсказка'));
+check('spend toast −5 монет', (await page.locator('.p-toast--spend').count()) === 1);
+await page.locator('.p-overlay .p-btn', { hasText: 'Понятно' }).click();
+await page.waitForTimeout(200);
 check('hint box revealed after purchase', (await page.locator('.p-hintbox').count()) === 1);
 await page.fill('.pframe input.p-input', '1730');
 await page.locator('.pframe .p-btn', { hasText: 'Ответить' }).click();

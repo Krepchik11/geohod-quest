@@ -16,8 +16,10 @@ export const PLAYER_COPY: StepCopy = {
   hintBody: (cost: number) => `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`,
   hintYes: (cost: number) => `Потратить ${cost} монет`,
   hintNo: 'Попробую сам',
-  noteHolder: 'Заметка для себя (необязательно)',
+  hintRevealTitle: 'Подсказка',
+  hintOk: 'Понятно',
   giftToast: (n: number) => `+${n} монет`,
+  spendToast: (n: number) => `−${n} монет`,
   // Финал «Квест пройден!» — оценка необязательна и не блокирует «что дальше».
   final: 'Квест пройден!',
   whatNext: 'что дальше',
