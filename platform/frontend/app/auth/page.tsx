@@ -30,7 +30,7 @@ type Step =
   | { name: 'login'; email: string; confirmed: boolean }
   | { name: 'register'; email: string }
   | { name: 'recover'; email: string; confirmed: boolean }
-  | { name: 'recover-sent'; email: string; masked: string };
+  | { name: 'recover-sent'; email: string; masked: string; confirmed: boolean };
 
 /** Show/hide toggle for a password field (§6: «Показать» on every field). */
 export function PasswordField({
@@ -189,9 +189,10 @@ export default function AuthPage() {
     setError(null);
     try {
       const res = await api.authRecover(s.email);
-      setStep({ name: 'recover-sent', email: s.email, masked: res.masked });
-    } catch {
-      setError('Сервер недоступен — попробуйте позже.');
+      setStep({ name: 'recover-sent', email: s.email, masked: res.masked, confirmed: s.confirmed });
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      setError(status === 429 ? 'Слишком много писем — подождите и попробуйте позже.' : 'Сервер недоступен — попробуйте позже.');
     } finally {
       setLoading(false);
     }
@@ -326,7 +327,11 @@ export default function AuthPage() {
           {step.name === 'recover-sent' && (
             <RecoverSent
               masked={step.masked}
-              onResend={() => void api.authRecover(step.email).catch(() => {})}
+              confirmed={step.confirmed}
+              onResend={() => api.authRecover(step.email)}
+              onCode={async (code, newPassword) => {
+                applySession(await api.authResetPassword({ email: step.email, code, password: newPassword }));
+              }}
               onBack={toEmailStep}
             />
           )}
@@ -336,21 +341,109 @@ export default function AuthPage() {
   );
 }
 
-function RecoverSent({ masked, onResend, onBack }: { masked: string; onResend: () => void; onBack: () => void }) {
+/**
+ * «Письмо ушло» card. For a confirmed account the reset mail carries a link
+ * AND a 6-digit code (§6.2 R2) — the code is typed right here, so a mobile
+ * user reads it off the mail notification and never leaves the app (a link
+ * would open in the browser, stranding the PWA session). An unconfirmed
+ * account got a confirmation mail instead — no code to type.
+ */
+function RecoverSent({
+  masked,
+  confirmed,
+  onResend,
+  onCode,
+  onBack,
+}: {
+  masked: string;
+  confirmed: boolean;
+  onResend: () => Promise<unknown>;
+  onCode: (code: string, newPassword: string) => Promise<void>;
+  onBack: () => void;
+}) {
   const [left, restart] = useCooldown(RESEND_COOLDOWN_SECS);
+  const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const mm = Math.floor(left / 60);
   const ss = String(left % 60).padStart(2, '0');
+  const resend = () => {
+    setError(null);
+    restart();
+    onResend().catch((e) => {
+      const status = (e as { status?: number })?.status;
+      setError(status === 429 ? 'Слишком много писем — подождите и попробуйте позже.' : 'Не получилось отправить — попробуйте позже.');
+    });
+  };
+  const submitCode = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      setError('Код из письма — 6 цифр.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError('Минимум 8 символов');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onCode(code, newPassword);
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      setError(status === 400
+        ? 'Код не подошёл или устарел — проверьте цифры или запросите новое письмо.'
+        : 'Сервер недоступен — попробуйте позже.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
   return (
     <div className="af-sent">
       <span className="af-sent__icon" aria-hidden>✉</span>
       <b>Письмо ушло</b>
-      <p>Ссылка на {masked} действует 30 минут. Не пришло — проверьте «Спам».</p>
+      {confirmed ? (
+        <>
+          <p>Отправили код и ссылку на {masked} — действуют 30 минут. Не пришло — проверьте «Спам».</p>
+          <label className="af-field">
+            <span className="af-field__label">Код из письма</span>
+            <span className="af-field__wrap">
+              <input
+                className="af-field__input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                aria-label="Код из письма"
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+            </span>
+          </label>
+          <PasswordField
+            label="Новый пароль"
+            value={newPassword}
+            hint="Минимум 8 символов"
+            autoComplete="new-password"
+            onChange={setNewPassword}
+            onEnter={() => void submitCode()}
+          />
+          {error && <p className="af-error">{error}</p>}
+          <button className="btn btn--block" type="button" disabled={submitting} onClick={() => void submitCode()}>
+            {submitting ? 'Проверяем…' : 'Сменить пароль и войти'}
+          </button>
+        </>
+      ) : (
+        <>
+          <p>Отправили письмо для подтверждения почты на {masked}. Подтвердите её по ссылке и запросите восстановление ещё раз.</p>
+          {error && <p className="af-error">{error}</p>}
+        </>
+      )}
       {left > 0 ? (
         <button className="btn btn--quiet btn--sm" type="button" disabled>
           Отправить ещё раз · {mm}:{ss}
         </button>
       ) : (
-        <button className="btn btn--quiet btn--sm" type="button" onClick={() => { onResend(); restart(); }}>
+        <button className="btn btn--quiet btn--sm" type="button" onClick={resend}>
           Отправить ещё раз
         </button>
       )}

@@ -106,7 +106,7 @@ describe('AuthPage — email-first (§6.1)', () => {
     expect(screen.getByText('Восстановление пароля')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Отправить ссылку' }));
     await waitFor(() => expect(screen.getByText('Письмо ушло')).toBeTruthy());
-    expect(screen.getByText(/an\*\*\*@gmail.com действует 30 минут/)).toBeTruthy();
+    expect(screen.getByText(/код и ссылку на an\*\*\*@gmail.com — действуют 30 минут/)).toBeTruthy();
   });
 
   it('the ✕ link navigates home, never history.back()', () => {

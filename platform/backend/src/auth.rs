@@ -107,9 +107,34 @@ pub fn generate_token() -> String {
     out
 }
 
+/// §6.2 R2: emailed password-reset code — 6 digits, crypto-random, uniform
+/// (rejection sampling, no modulo bias). Low entropy is deliberate (typed from
+/// a mail notification), so verification MUST stay attempt-capped server-side
+/// (see `store::MAX_CODE_ATTEMPTS`).
+pub fn generate_reset_code() -> String {
+    // Largest multiple of 1_000_000 that fits in u32; resample above it.
+    const LIMIT: u32 = u32::MAX - (u32::MAX % 1_000_000);
+    loop {
+        let mut bytes = [0u8; 4];
+        OsRng.fill_bytes(&mut bytes);
+        let n = u32::from_le_bytes(bytes);
+        if n < LIMIT {
+            return format!("{:06}", n % 1_000_000);
+        }
+    }
+}
+
+/// Canonical email form: trimmed + lowercased. Applied at EVERY auth boundary
+/// that accepts an email (register/login/identify/recover) so one mailbox maps
+/// to one account regardless of caller casing — client-side normalization is
+/// not a boundary the server may rely on.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 /// Minimal credential validation: enough to reject obvious garbage without
-/// pretending to be full email validation (no confirmation flow exists by
-/// requirement, so deliverability is unverifiable anyway).
+/// pretending to be full email validation (real deliverability is proven by
+/// the §6.3 confirmation mail, not by parsing).
 pub fn validate_credentials(email: &str, password: &str) -> Result<(), AppError> {
     let email_ok = email.len() >= 3 && email.contains('@') && !email.contains(char::is_whitespace);
     if !email_ok {
@@ -142,6 +167,21 @@ mod tests {
         assert_eq!(a.len(), 64);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b, "two tokens must not collide");
+    }
+
+    #[test]
+    fn reset_code_is_six_digits() {
+        for _ in 0..64 {
+            let code = generate_reset_code();
+            assert_eq!(code.len(), 6);
+            assert!(code.chars().all(|c| c.is_ascii_digit()), "{code}");
+        }
+    }
+
+    #[test]
+    fn normalize_email_trims_and_lowercases() {
+        assert_eq!(normalize_email("  Anna@Example.COM "), "anna@example.com");
+        assert_eq!(normalize_email("a@b.io"), "a@b.io");
     }
 
     #[test]

@@ -67,8 +67,10 @@ struct AppState {
     payments: Arc<dyn PaymentProvider>,
     /// Transactional mail (§6.2/§6.3) — SMTP in prod, log fallback, recorder in tests.
     mailer: mailer::Mailer,
-    /// §6.1 identify rate limiter: sliding-window counters keyed by email.
-    identify_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
+    /// Fixed-window rate limiter for abusable auth endpoints (§6.1 identify,
+    /// §6.2 recover, §6.3 resend). Keyed by `"<scope>:<email>"`; the value is
+    /// `(resets_at, count)`. See [`fixed_window_allow`].
+    rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
 }
 
 fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
@@ -84,7 +86,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         media,
         payments: Arc::new(MockPaymentProvider),
         mailer,
-        identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
     }
 }
 
@@ -1442,14 +1444,15 @@ async fn register_handler(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    auth::validate_credentials(&req.email, &req.password)?;
+    let email = auth::normalize_email(&req.email);
+    auth::validate_credentials(&email, &req.password)?;
     if req.player_id.is_empty() {
         return Err(AppError::BadRequest("player_id is required".into()));
     }
     let password_hash = auth::hash_password(&req.password)?;
     let account = state
         .auth
-        .register_user(&req.player_id, &req.email, &password_hash, req.display_name)
+        .register_user(&req.player_id, &email, &password_hash, req.display_name)
         .await?;
     let token = auth::generate_token();
     state
@@ -1476,7 +1479,7 @@ async fn login_handler(
     let bad = || AppError::Unauthorized("invalid email or password".into());
     let record = state
         .auth
-        .find_by_email(&req.email)
+        .find_by_email(&auth::normalize_email(&req.email))
         .await?
         .ok_or_else(bad)?;
     if !auth::verify_password(&record.password_hash, &req.password) {
@@ -1505,15 +1508,55 @@ const CONFIRM_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
 /// §6.1 identify rate limit: requests per fixed window, per email.
 const IDENTIFY_LIMIT: u32 = 10;
 const IDENTIFY_WINDOW_SECS: u64 = 60;
+/// §6.2/§6.3 mail-sending rate limit (recover, resend-confirm), per email.
+/// The server is the boundary — the UI cooldown is advisory only.
+const MAIL_SEND_LIMIT: u32 = 5;
+const MAIL_SEND_WINDOW_SECS: u64 = 3600;
+/// Above this many limiter keys, expired windows are evicted before insert so
+/// an attacker spraying unique emails cannot grow memory without bound.
+const RATE_LIMITER_MAX_KEYS: usize = 100_000;
 
-/// Mint a single-use token, store its sha256, return the RAW token (mail-only).
+/// Fixed-window rate limit: up to `limit` hits per `window_secs` for `key`
+/// (`"<scope>:<email>"`); over the limit is a 429.
+fn fixed_window_allow(
+    state: &AppState,
+    key: String,
+    window_secs: u64,
+    limit: u32,
+) -> Result<(), AppError> {
+    let now = store::now_secs();
+    let mut lim = state
+        .rate_limiter
+        .lock()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("limiter poisoned: {e}")))?;
+    if lim.len() >= RATE_LIMITER_MAX_KEYS && !lim.contains_key(&key) {
+        lim.retain(|_, (resets_at, _)| *resets_at > now);
+    }
+    let entry = lim.entry(key).or_insert((now + window_secs, 0));
+    if entry.0 <= now {
+        *entry = (now + window_secs, 0);
+    }
+    entry.1 += 1;
+    if entry.1 > limit {
+        return Err(AppError::TooManyRequests(
+            "too many attempts — try again later".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Mint a single-use (token, 6-digit code) pair sharing ONE store row —
+/// consuming either credential kills both — and return the RAW pair
+/// (mail-only); only hashes are stored. Issuing invalidates prior unused
+/// tokens of the same kind (latest mail wins).
 async fn issue_auth_token(
     state: &AppState,
     player_id: &str,
     kind: &str,
     ttl_secs: u64,
-) -> Result<String, AppError> {
+) -> Result<(String, String), AppError> {
     let token = auth::generate_token();
+    let code = auth::generate_reset_code();
     state
         .auth
         .create_auth_token(
@@ -1521,12 +1564,14 @@ async fn issue_auth_token(
             store::AuthTokenRecord {
                 player_id: player_id.to_string(),
                 kind: kind.to_string(),
+                code_hash: media::sha256_hex(code.as_bytes()),
                 expires_at: store::now_secs() + ttl_secs,
                 used_at: None,
+                attempts: 0,
             },
         )
         .await?;
-    Ok(token)
+    Ok((token, code))
 }
 
 /// Best-effort transactional mail — a down SMTP must not fail the parent flow.
@@ -1541,7 +1586,9 @@ async fn send_confirm_email(
     player_id: &str,
     email: &str,
 ) -> Result<(), AppError> {
-    let token = issue_auth_token(
+    // Confirmation is link-only (§6.3 is soft, nobody types codes for it) —
+    // the minted code is simply never mailed, so it is unusable.
+    let (token, _code) = issue_auth_token(
         state,
         player_id,
         store::TOKEN_KIND_CONFIRM,
@@ -1575,27 +1622,16 @@ async fn identify_handler(
     State(state): State<AppState>,
     Json(req): Json<IdentifyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let email = req.email.trim().to_lowercase();
+    let email = auth::normalize_email(&req.email);
     if email.len() < 3 || !email.contains('@') {
         return Err(AppError::BadRequest("invalid email".into()));
     }
-    {
-        let now = store::now_secs();
-        let mut lim = state
-            .identify_limiter
-            .lock()
-            .map_err(|e| AppError::Internal(anyhow::anyhow!("limiter poisoned: {e}")))?;
-        let entry = lim.entry(email.clone()).or_insert((now, 0));
-        if now - entry.0 >= IDENTIFY_WINDOW_SECS {
-            *entry = (now, 0);
-        }
-        entry.1 += 1;
-        if entry.1 > IDENTIFY_LIMIT {
-            return Err(AppError::TooManyRequests(
-                "too many identify attempts — try again in a minute".into(),
-            ));
-        }
-    }
+    fixed_window_allow(
+        &state,
+        format!("identify:{email}"),
+        IDENTIFY_WINDOW_SECS,
+        IDENTIFY_LIMIT,
+    )?;
     let record = state.auth.find_by_email(&email).await?;
     Ok(Json(serde_json::json!({
         "exists": record.is_some(),
@@ -1619,10 +1655,16 @@ async fn recover_handler(
     State(state): State<AppState>,
     Json(req): Json<RecoverRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let email = req.email.trim().to_lowercase();
+    let email = auth::normalize_email(&req.email);
+    fixed_window_allow(
+        &state,
+        format!("recover:{email}"),
+        MAIL_SEND_WINDOW_SECS,
+        MAIL_SEND_LIMIT,
+    )?;
     if let Some(record) = state.auth.find_by_email(&email).await? {
         if record.account.email_confirmed_at.is_some() {
-            let token = issue_auth_token(
+            let (token, code) = issue_auth_token(
                 &state,
                 &record.account.player_id,
                 store::TOKEN_KIND_RESET,
@@ -1630,12 +1672,15 @@ async fn recover_handler(
             )
             .await?;
             let link = format!("{}/auth/reset?token={token}", state.config.frontend_base);
+            // The code goes FIRST so it shows in mail notification previews —
+            // typable without leaving the app (§6.2 R2); the link is the
+            // desktop-friendly R1 path. Both die in 30 minutes.
             send_mail_best_effort(
                 &state,
                 &email,
                 "Восстановление пароля — GEOHOD QUEST",
                 &format!(
-                    "Здравствуйте!\n\nСсылка для смены пароля (действует 30 минут):\n{link}\n\nЕсли вы не запрашивали смену пароля, просто игнорируйте это письмо."
+                    "Здравствуйте!\n\nКод для смены пароля: {code}\n\nВведите его на странице восстановления или откройте ссылку:\n{link}\n\nКод и ссылка действуют 30 минут. Если вы не запрашивали смену пароля, просто игнорируйте это письмо."
                 ),
             )
             .await;
@@ -1649,44 +1694,84 @@ async fn recover_handler(
     })))
 }
 
-/// Body for POST /api/auth/reset (§6.2): finish recovery with the mailed token.
+/// Body for POST /api/auth/reset (§6.2): finish recovery with the mailed link
+/// token (R1) or with the mailed 6-digit code + email (R2 — typed in-app, so
+/// mobile users never leave their browsing context).
 #[derive(serde::Deserialize)]
-struct ResetPasswordRequest {
-    token: String,
-    password: String,
+#[serde(untagged)]
+enum ResetPasswordRequest {
+    ByToken {
+        token: String,
+        password: String,
+    },
+    ByCode {
+        email: String,
+        code: String,
+        password: String,
+    },
 }
 
-/// §6.2 — consume the reset token, set the new password and SIGN IN (the flow
-/// ends with the user in their account, per spec).
+/// §6.2 — consume the reset credential (link token or email-scoped code), set
+/// the new password and SIGN IN (the flow ends with the user in their account,
+/// per spec). Failures are ONE opaque 400 — wrong code, unknown email, expired
+/// or spent credential are indistinguishable (no enumeration). Code guessing
+/// is bounded by the store: `MAX_CODE_ATTEMPTS` per token, and recover itself
+/// is mail-rate-limited, so no extra limiter is needed here.
 async fn reset_password_handler(
     State(state): State<AppState>,
     Json(req): Json<ResetPasswordRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    if req.password.len() < 8 {
+    let password = match &req {
+        ResetPasswordRequest::ByToken { password, .. }
+        | ResetPasswordRequest::ByCode { password, .. } => password.clone(),
+    };
+    if password.len() < 8 {
         return Err(AppError::BadRequest(
             "password must be at least 8 characters".into(),
         ));
     }
-    let player_id = state
-        .auth
-        .consume_auth_token(
-            &media::sha256_hex(req.token.as_bytes()),
-            store::TOKEN_KIND_RESET,
-            store::now_secs(),
-        )
-        .await?
-        .ok_or_else(|| {
-            AppError::BadRequest("ссылка недействительна или устарела — запросите новую".into())
-        })?;
+    let now = store::now_secs();
+    let player_id = match req {
+        ResetPasswordRequest::ByToken { token, .. } => {
+            state
+                .auth
+                .consume_auth_token(
+                    &media::sha256_hex(token.as_bytes()),
+                    store::TOKEN_KIND_RESET,
+                    now,
+                )
+                .await?
+        }
+        ResetPasswordRequest::ByCode { email, code, .. } => {
+            match state
+                .auth
+                .find_by_email(&auth::normalize_email(&email))
+                .await?
+            {
+                Some(record) => {
+                    state
+                        .auth
+                        .consume_auth_token_by_code(
+                            &record.account.player_id,
+                            store::TOKEN_KIND_RESET,
+                            &media::sha256_hex(code.trim().as_bytes()),
+                            now,
+                        )
+                        .await?
+                }
+                None => None,
+            }
+        }
+    }
+    .ok_or_else(|| {
+        AppError::BadRequest("код или ссылка недействительны или устарели — запросите новые".into())
+    })?;
     state
         .auth
-        .set_password(&player_id, &auth::hash_password(&req.password)?)
+        .set_password(&player_id, &auth::hash_password(&password)?)
         .await?;
-    // Opening a valid reset link also proves mailbox ownership (§6.3).
-    let account = state
-        .auth
-        .confirm_email(&player_id, store::now_secs())
-        .await?;
+    // Using a valid reset credential also proves mailbox ownership (§6.3).
+    let account = state.auth.confirm_email(&player_id, now).await?;
     let token = auth::generate_token();
     state.auth.create_session(&token, &player_id).await?;
     Ok(Json(AuthResponse {
@@ -1739,6 +1824,12 @@ async fn resend_confirm_handler(
     if account.email_confirmed_at.is_some() {
         return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
     }
+    fixed_window_allow(
+        &state,
+        format!("confirm:{}", account.email),
+        MAIL_SEND_WINDOW_SECS,
+        MAIL_SEND_LIMIT,
+    )?;
     send_confirm_email(&state, &account.player_id, &account.email).await?;
     Ok(Json(serde_json::json!({ "status": "sent" })))
 }
@@ -2062,7 +2153,7 @@ async fn main() -> anyhow::Result<()> {
                 media,
                 payments: Arc::new(MockPaymentProvider),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
-                identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
             }
         }
         Err(_) => {
@@ -3174,6 +3265,18 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::CONFLICT);
 
+        // One mailbox is one account regardless of casing: a mixed-case
+        // duplicate is still a 409 (the API must enforce this itself — the UI
+        // lowercasing is not a security boundary).
+        let (st, _) = post_json(
+            app,
+            "/api/auth/register",
+            json!({"player_id": format!("{}-case", ids.player),
+                   "email": email.to_uppercase(), "password": "hunter2hunter2"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "mixed-case duplicate email");
+
         // Login: fresh token, same identity; wrong password and unknown email are 401.
         let (st, v) = post_json(
             app,
@@ -3185,6 +3288,14 @@ mod tests {
         assert_eq!(v["player_id"], ids.player.as_str());
         let login_token = v["token"].as_str().expect("token").to_string();
         assert_ne!(login_token, token, "each login mints a fresh session");
+        let (st, v) = post_json(
+            app,
+            "/api/auth/login",
+            json!({"email": email.to_uppercase(), "password": "hunter2hunter2"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "login is email-case-insensitive");
+        assert_eq!(v["player_id"], ids.player.as_str());
         let (st, _) = post_json(
             app,
             "/api/auth/login",
@@ -4000,6 +4111,19 @@ mod tests {
         mail.body[idx + 6..idx + 6 + 64].to_string()
     }
 
+    /// Pull the freshest emailed 6-digit reset code for `to` out of the outbox.
+    fn mailed_code(mails: &Mutex<Vec<mailer::OutgoingMail>>, to: &str) -> String {
+        let mails = mails.lock().expect("outbox lock");
+        let mail = mails
+            .iter()
+            .rev()
+            .find(|m| m.to == to)
+            .expect("mail for recipient");
+        let marker = "Код для смены пароля: ";
+        let idx = mail.body.find(marker).expect("reset code in mail") + marker.len();
+        mail.body[idx..idx + 6].to_string()
+    }
+
     /// §6/§12.1–5 — auth v2 end to end: identify → register (+confirm mail) →
     /// confirm → recover → reset (signs in) → change password → delete account
     /// (with the editor-published block).
@@ -4277,6 +4401,147 @@ mod tests {
     #[tokio::test]
     async fn auth_enforcement_two_tier() {
         scenario_auth_enforcement(&test_app(), &Ids::new("enforce")).await;
+    }
+
+    /// The mail-sending endpoints must be rate-limited server-side (per email):
+    /// without this, a loop over /api/auth/recover mail-bombs the victim and
+    /// burns the SMTP quota — the UI cooldown is not a boundary.
+    #[tokio::test]
+    async fn mail_endpoints_are_rate_limited_per_email() {
+        let app = test_app();
+        let ids = Ids::new("ratelimit");
+        let (email, token) = register(&app, &ids.player).await;
+
+        for i in 0..MAIL_SEND_LIMIT {
+            let (st, _) = post_json(&app, "/api/auth/recover", json!({"email": email})).await;
+            assert_eq!(st, StatusCode::OK, "recover #{i} within the window");
+        }
+        let (st, _) = post_json(&app, "/api/auth/recover", json!({"email": email})).await;
+        assert_eq!(st, StatusCode::TOO_MANY_REQUESTS, "recover over the limit");
+
+        // Resend-confirm has its own budget (separate limiter scope).
+        let bearer = format!("Bearer {token}");
+        for i in 0..MAIL_SEND_LIMIT {
+            let (st, _) = post_json_h(
+                &app,
+                "/api/auth/confirm/resend",
+                json!({}),
+                &[("authorization", &bearer)],
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "resend #{i} within the window");
+        }
+        let (st, _) = post_json_h(
+            &app,
+            "/api/auth/confirm/resend",
+            json!({}),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::TOO_MANY_REQUESTS, "resend over the limit");
+    }
+
+    /// §6.2 R2 — reset by emailed 6-digit code alongside the R1 link: the code
+    /// is email-scoped, dies after MAX_CODE_ATTEMPTS verify attempts, and a
+    /// fresh recover invalidates BOTH prior credentials (latest mail wins —
+    /// with codes in play, N outstanding credentials would be N× guessable).
+    async fn scenario_reset_by_code(
+        app: &Router,
+        mails: &Mutex<Vec<mailer::OutgoingMail>>,
+        ids: &Ids,
+    ) {
+        let (email, _) = register(app, &ids.player).await;
+
+        // Confirm the email — reset mail goes only to confirmed accounts.
+        let confirm_token = mailed_token(mails, &email);
+        let (st, _) = post_json(app, "/api/auth/confirm", json!({ "token": confirm_token })).await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Recover: ONE mail carries both the link token and the code.
+        let (st, _) = post_json(app, "/api/auth/recover", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        let old_token = mailed_token(mails, &email);
+        let code = mailed_code(mails, &email);
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+
+        // The code is scoped to its email: another account's email rejects it.
+        let other = Ids::new(&format!("{}-other", ids.player));
+        let (other_email, _) = register(app, &other.player).await;
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "email": other_email, "code": code, "password": "newpass-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "code is email-scoped");
+
+        // Wrong guesses burn the per-token attempt budget; after that even the
+        // RIGHT code is dead (low-entropy codes must not be brute-forceable).
+        for i in 0..store::MAX_CODE_ATTEMPTS {
+            let (st, _) = post_json(
+                app,
+                "/api/auth/reset",
+                json!({ "email": email, "code": "000000", "password": "newpass-12345" }),
+            )
+            .await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "wrong code #{i}");
+        }
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "email": email, "code": code, "password": "newpass-12345" }),
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "exhausted budget kills the code"
+        );
+
+        // A fresh recover invalidates the PREVIOUS link token too.
+        let (st, _) = post_json(app, "/api/auth/recover", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "token": old_token, "password": "newpass-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "new issue kills the old link");
+
+        // The fresh code works (email case-insensitively): signs in, sets the
+        // password; single-use.
+        let code = mailed_code(mails, &email);
+        let (st, v) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "email": email.to_uppercase(), "code": code, "password": "bycode-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "reset by code: {v}");
+        assert_eq!(v["player_id"], ids.player.as_str());
+        assert_eq!(v["token"].as_str().map(str::len), Some(64), "signed in");
+        let (st, _) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "bycode-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "new password works");
+        let (st, _) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "email": email, "code": code, "password": "again-12345" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "code is single-use");
+    }
+
+    #[tokio::test]
+    async fn reset_by_code_alongside_link() {
+        let (app, mails) = test_app_with_mail();
+        scenario_reset_by_code(&app, &mails, &Ids::new("resetcode")).await;
     }
 
     #[tokio::test]
@@ -4847,7 +5112,7 @@ mod tests {
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payments: Arc::new(MockPaymentProvider),
             mailer: m,
-            identify_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
         });
         (router, outbox)
     }
@@ -5054,6 +5319,7 @@ mod tests {
         scenario_ctor_status_lifecycle(&app, &Ids::new(&format!("ctorstatus-{run}"))).await;
         scenario_product_page(&app, &Ids::new(&format!("product-{run}"))).await;
         scenario_auth_v2(&app, &pg_mails, &Ids::new(&format!("authv2-{run}"))).await;
+        scenario_reset_by_code(&app, &pg_mails, &Ids::new(&format!("resetcode-{run}"))).await;
         scenario_bad_payload(&app, &Ids::new(&format!("bad-{run}"))).await;
         scenario_migration_idempotent(&app, &format!("legacy:{run}")).await;
         scenario_auth_register_login(&app, &Ids::new(&format!("auth-{run}"))).await;

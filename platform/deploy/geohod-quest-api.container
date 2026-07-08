@@ -30,7 +30,7 @@ Environment=DB_MAX_CONNECTIONS=5
 # CORS allowlist (comma-separated; exact origins or single-* wildcards). MUST be
 # set in production or the API reflects ANY origin. Replace the prod frontend
 # origin below with the real Vercel custom domain; the wildcard covers previews.
-Environment=CORS_ALLOWED_ORIGINS=https://app.quest.geohod.ru,https://*.vercel.app
+Environment=CORS_ALLOWED_ORIGINS=https://quest.geohod.ru,https://*.vercel.app
 # Full Supabase connection string (incl. password) lives in a podman secret. Use
 # the SESSION-mode pooler host with sslmode=require — NOT the IPv6-only direct
 # host and NOT the :6543 transaction pooler (see DEPLOYMENT.md):
@@ -64,9 +64,9 @@ Secret=geohod-quest-r2-secret-access-key,type=env,target=R2_SECRET_ACCESS_KEY
 # Secret= line below until the secret exists, or the unit fails to start.
 Secret=geohod-quest-smtp-url,type=env,target=SMTP_URL
 # From header; its mailbox must be one the SMTP account is allowed to send as.
-Environment="MAIL_FROM=GEOHOD QUEST <no-reply@geohod.ru>"
+Environment=MAIL_FROM=no-reply@geohod.ru
 # Public frontend origin baked into emailed reset/confirm links.
-Environment=FRONTEND_BASE=https://app.quest.geohod.ru
+Environment=FRONTEND_BASE=https://quest.geohod.ru
 
 [Service]
 Restart=always

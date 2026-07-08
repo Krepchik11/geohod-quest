@@ -888,24 +888,38 @@ impl PgAuthStore {
         }
     }
 
-    /// See [`crate::store::InMemoryAuthStore::create_auth_token`].
+    /// See [`crate::store::InMemoryAuthStore::create_auth_token`] — latest
+    /// mail wins: issuing deletes prior unused tokens of the same kind in the
+    /// same transaction.
     pub async fn create_auth_token(
         &self,
         token_hash: &str,
         rec: crate::store::AuthTokenRecord,
     ) -> Result<(), AppError> {
+        let mut tx = self.pool.begin().await.map_err(internal)?;
         sqlx::query(
-            "INSERT INTO auth_tokens (token_hash, player_id, kind, expires_at, used_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "DELETE FROM auth_tokens WHERE player_id = $1 AND kind = $2 AND used_at IS NULL",
+        )
+        .bind(&rec.player_id)
+        .bind(&rec.kind)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        sqlx::query(
+            "INSERT INTO auth_tokens (token_hash, player_id, kind, code_hash, expires_at, used_at, attempts)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(token_hash)
         .bind(&rec.player_id)
         .bind(&rec.kind)
+        .bind(&rec.code_hash)
         .bind(rec.expires_at as i64)
         .bind(rec.used_at.map(|v| v as i64))
-        .execute(&self.pool)
+        .bind(rec.attempts as i64)
+        .execute(&mut *tx)
         .await
         .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
         Ok(())
     }
 
@@ -930,6 +944,50 @@ impl PgAuthStore {
         .await
         .map_err(internal)?;
         row.map(|r| r.try_get::<String, _>("player_id").map_err(internal))
+            .transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::consume_auth_token_by_code`].
+    /// The attempt is spent atomically (the guarded UPDATE), then a code_hash
+    /// match consumes via a second used_at-guarded UPDATE — concurrent correct
+    /// codes race safely, exactly one wins.
+    pub async fn consume_auth_token_by_code(
+        &self,
+        player_id: &str,
+        kind: &str,
+        code_hash: &str,
+        now: u64,
+    ) -> Result<Option<String>, AppError> {
+        let row = sqlx::query(
+            "UPDATE auth_tokens SET attempts = attempts + 1
+             WHERE player_id = $1 AND kind = $2 AND used_at IS NULL
+               AND expires_at >= $3 AND attempts < $4
+             RETURNING token_hash, code_hash",
+        )
+        .bind(player_id)
+        .bind(kind)
+        .bind(now as i64)
+        .bind(crate::store::MAX_CODE_ATTEMPTS as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        let Some(row) = row else { return Ok(None) };
+        let stored: String = row.try_get("code_hash").map_err(internal)?;
+        if stored.is_empty() || stored != code_hash {
+            return Ok(None);
+        }
+        let token_hash: String = row.try_get("token_hash").map_err(internal)?;
+        let won = sqlx::query(
+            "UPDATE auth_tokens SET used_at = $2
+             WHERE token_hash = $1 AND used_at IS NULL
+             RETURNING player_id",
+        )
+        .bind(&token_hash)
+        .bind(now as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        won.map(|r| r.try_get::<String, _>("player_id").map_err(internal))
             .transpose()
     }
 
