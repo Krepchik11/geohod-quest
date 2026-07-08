@@ -223,6 +223,37 @@ fn parse_rating(f: &Fact) -> Option<i64> {
         .and_then(|s| s.trim().parse().ok())
 }
 
+/// Aggregate ONE rating per attempt — the last `quest_rated` fact wins, matching
+/// the client `latestRating` so re-rating never double-counts — into `(mean,
+/// count)`. The single definition of the store rating: `project_version_stats`
+/// (author dashboard) and the catalog's batch ratings both fold through here, so
+/// the marketplace card and the version-stats page can never disagree.
+pub fn fold_attempt_ratings<'a, I>(logs: I) -> (f64, usize)
+where
+    I: IntoIterator<Item = &'a Vec<Fact>>,
+{
+    let mut rating_sum: i64 = 0;
+    let mut rating_count = 0usize;
+    for log in logs {
+        let mut last_rating: Option<i64> = None;
+        for f in log {
+            if f.kind == FactKind::QuestRated {
+                last_rating = parse_rating(f);
+            }
+        }
+        if let Some(r) = last_rating {
+            rating_sum += r;
+            rating_count += 1;
+        }
+    }
+    let rating_avg = if rating_count > 0 {
+        rating_sum as f64 / rating_count as f64
+    } else {
+        0.0
+    };
+    (rating_avg, rating_count)
+}
+
 /// Pure per-version stats fold over the logs of attempts bound to `snap`.
 ///
 /// `attempt_snaps` maps attempt_id -> bound snapshot_id. Small-N scan; the
@@ -242,10 +273,6 @@ pub fn project_version_stats(
     let mut completions_count = 0usize;
     let mut per_step: std::collections::HashMap<i32, StepStats> = std::collections::HashMap::new();
     let mut all_facts: Vec<Fact> = Vec::new();
-    // Ratings aggregate ONE value per attempt (the last quest_rated fact wins,
-    // matching the client `latestRating`), so re-rating never double-counts.
-    let mut rating_sum: i64 = 0;
-    let mut rating_count = 0usize;
 
     for att in &bound {
         let Some(log) = fact_logs.get(*att) else {
@@ -254,7 +281,6 @@ pub fn project_version_stats(
         if log.iter().any(|f| f.kind == FactKind::AttemptCompleted) {
             completions_count += 1;
         }
-        let mut last_rating: Option<i64> = None;
         for f in log {
             all_facts.push(f.clone());
             let entry = per_step.entry(f.step_position).or_default();
@@ -263,24 +289,19 @@ pub fn project_version_stats(
                 FactKind::HintPurchased => entry.hints += 1,
                 FactKind::NavigatorUsed => entry.nav += 1,
                 FactKind::FeedbackReported => entry.feedbacks += 1,
-                FactKind::QuestRated => last_rating = parse_rating(f),
                 _ => {}
             }
         }
-        if let Some(r) = last_rating {
-            rating_sum += r;
-            rating_count += 1;
-        }
     }
+
+    // Ratings share one definition with the catalog (fold_attempt_ratings): last
+    // rating per attempt wins, so re-rating never double-counts.
+    let (rating_avg, rating_count) =
+        fold_attempt_ratings(bound.iter().filter_map(|att| fact_logs.get(*att)));
 
     let analytics = project_analytics(&all_facts);
     let completion_rate = if attempts_count > 0 {
         completions_count as f64 / attempts_count as f64
-    } else {
-        0.0
-    };
-    let rating_avg = if rating_count > 0 {
-        rating_sum as f64 / rating_count as f64
     } else {
         0.0
     };
@@ -609,6 +630,15 @@ mod tests {
         // A rating must never leak into balance/state projections.
         assert!(project_state(&logs["att-1"]).completed_steps.contains(&3));
         assert_eq!(project_balance(&logs["att-1"]), 0);
+
+        // The catalog's batch fold MUST agree with the version-stats page — they
+        // share `fold_attempt_ratings`, so a card and the dashboard can never
+        // report a different rating for the same snapshot.
+        let (batch_avg, batch_count) = fold_attempt_ratings(logs.values());
+        assert_eq!(
+            (batch_avg, batch_count),
+            (stats.rating_avg, stats.rating_count)
+        );
     }
 
     #[test]

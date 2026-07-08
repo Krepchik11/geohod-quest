@@ -11,13 +11,16 @@ import { usePathname } from 'next/navigation';
  * full viewport (the product page has its own sticky purchase bar). Visibility
  * above 768px is CSS (.tab-bar is display:none on desktop).
  */
+// `match` is the pathname the tab represents (visibility + active state); `href`
+// is where tapping it navigates. They differ for «Магазин»: the store grid sits
+// below the hero on `/`, so the tab jumps to #shop like the desktop header does.
 const TABS = [
-  { href: '/', label: 'Магазин', icon: 'shop' },
-  { href: '/my-quests', label: 'Мои квесты', icon: 'list' },
-  { href: '/profile', label: 'Профиль', icon: 'user' },
+  { match: '/', href: '/#shop', label: 'Магазин', icon: 'shop' },
+  { match: '/my-quests', href: '/my-quests', label: 'Мои квесты', icon: 'list' },
+  { match: '/profile', href: '/profile', label: 'Профиль', icon: 'user' },
 ] as const;
 
-const VISIBLE_ON = new Set(TABS.map((t) => t.href));
+const VISIBLE_ON = new Set(TABS.map((t) => t.match));
 
 function TabIcon({ icon }: { icon: 'shop' | 'list' | 'user' }) {
   if (icon === 'shop') {
@@ -43,11 +46,11 @@ function TabIcon({ icon }: { icon: 'shop' | 'list' | 'user' }) {
 
 export default function TabBar() {
   const pathname = usePathname();
-  if (!VISIBLE_ON.has(pathname as (typeof TABS)[number]['href'])) return null;
+  if (!VISIBLE_ON.has(pathname as (typeof TABS)[number]['match'])) return null;
   return (
     <nav className="tab-bar" aria-label="Разделы">
       {TABS.map((t) => (
-        <Link key={t.href} href={t.href} className={`tab-bar__tab ${pathname === t.href ? 'is-active' : ''}`}>
+        <Link key={t.match} href={t.href} className={`tab-bar__tab ${pathname === t.match ? 'is-active' : ''}`}>
           <TabIcon icon={t.icon} />
           <span>{t.label}</span>
         </Link>
