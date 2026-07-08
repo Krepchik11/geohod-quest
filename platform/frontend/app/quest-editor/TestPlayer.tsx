@@ -105,6 +105,9 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     }
   };
   const next = () => { if (pos < total - 1) goTo(pos + 1); };
+  // View rewind, mirroring the real player: authors test the same "go back and
+  // reread" affordance. goTo's guards (awarded, '__terminal') stay idempotent.
+  const back = () => { if (pos > 0) goTo(pos - 1); };
 
   const reset = () => {
     setPos(clamp(startPos));
@@ -168,7 +171,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   return (
     <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel={'Тест: ' + (step.title || step.template)}>
       {step.template !== 'start' ? (
-        <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} />
+        <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} onBack={pos > 0 ? back : undefined} />
       ) : null}
 
       <StepView
