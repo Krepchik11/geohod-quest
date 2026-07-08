@@ -15,11 +15,11 @@ h2 «Создадим аккаунт»; email chip + изменить; password 
 ## Soft email confirmation (banner in Profile)
 Amber box bg rgba(180,83,9,.08) #7A4A0B 12.5: «Подтвердите почту — отправили письмо на {email}» + outline pill h34 1px rgba(180,83,9,.35) «Отправить ещё раз». Dismissable.
 
-## Recovery R1 (implement; R2 code / R3 magic-link explored & rejected for now)
+## Recovery R1 link + R2 code (R3 magic-link explored & rejected)
 Card 340: h3 «Восстановление пароля»; «Пришлём ссылку для смены пароля.»; prefilled email input; primary «Отправить ссылку»; «← Назад ко входу» centered muted.
-Sent state: ✉ circle green; b «Письмо ушло»; «Ссылка на an***@gmail.com действует 30 минут. Не пришло — проверьте „Спам".»; quiet pill «Отправить ещё раз · 0:42» (cooldown timer).
-Same «sent» response whether or not email exists (no enumeration); resend with timer.
-Link opens /auth/reset?token=… → new password (min 8, Показать) → success → signed in.
+Sent state: ✉ circle green; b «Письмо ушло»; «Отправили код и ссылку на an***@gmail.com — действуют 30 минут. Не пришло — проверьте „Спам".»; inline code entry «Код из письма» (6 digits, one-time-code) + «Новый пароль» + primary «Сменить пароль и войти»; quiet pill «Отправить ещё раз · 0:42» (cooldown timer).
+Same «sent» response whether or not email exists (no enumeration); resend with timer, resend invalidates prior code+link (latest mail wins).
+Mail: code on the first line (notification preview), link below. Link opens /auth/reset?token=… → new password (min 8, Показать) → success → signed in. Code path: POST /api/auth/reset {email, code, password} — email-scoped, 5 verify attempts max.
 
 ## Notes
 - identify: POST /api/auth/identify {email}→{exists}; 409 class disappears by construction (keep defensive msg).

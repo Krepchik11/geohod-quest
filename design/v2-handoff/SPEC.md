@@ -116,11 +116,12 @@ Replace the two blue pill toggles with one flow:
 5. The card's ✕ navigates to `/` (never `history.back()`).
 6. The 409 «email or device already registered» error class disappears by construction; keep a defensive message just in case.
 
-### 6.2 Password recovery — implement R1 (3.1)
+### 6.2 Password recovery — R1 link + R2 code (3.1)
 - «Забыли пароль?» → «Восстановление пароля»: «Пришлём ссылку для смены пароля.», prefilled email, «Отправить ссылку», «← Назад ко входу».
-- Sent state (same response whether or not the email exists — no user enumeration): «Письмо ушло» / «Ссылка на {masked} действует 30 минут. Не пришло — проверьте „Спам".» + resend with cooldown timer «Отправить ещё раз · 0:42».
+- ONE mail carries both credentials: a 6-digit code (first line, so it shows in mail notification previews) and the `/auth/reset?token=…` link. Both die in 30 minutes; a resend invalidates both prior credentials (latest mail wins).
+- Sent state (same response whether or not the email exists — no user enumeration): «Письмо ушло» / «Отправили код и ссылку на {masked} — действуют 30 минут. Не пришло — проверьте „Спам".» + inline code entry («Код из письма», 6 digits) + new password (min 8, «Показать») + «Сменить пароль и войти» — the mobile user types the code off the notification and never leaves the app/PWA context. Resend keeps the cooldown timer «Отправить ещё раз · 0:42».
 - Link opens `/auth/reset?token=…`: new password (min 8, «Показать») → success → signed in.
-- Backend: token issue/verify + transactional email sending (first email infrastructure — also used by §6.3). R2 (6-digit code) and R3 (magic link) were explored and rejected for now — see `Auth v2.dc.html` for rationale; do not build them.
+- Backend: token issue/verify + transactional email sending (first email infrastructure — also used by §6.3). `POST /api/auth/reset` accepts `{token, password}` OR `{email, code, password}`; the code is email-scoped, stored hashed alongside the token in one single-use row, and dies after 5 verify attempts (low-entropy codes must not be brute-forceable). R3 (magic link) stays rejected — do not build it.
 
 ### 6.3 Soft email confirmation
 On registration send a confirmation email; account works immediately. Unconfirmed accounts see a dismissable amber banner in Profile: «Подтвердите почту — отправили письмо» + «Ещё раз». Password recovery is only offered for confirmed emails (unconfirmed → explain and offer resend of confirmation). Store `email_confirmed_at`.
@@ -167,8 +168,8 @@ On registration send a confirmation email; account works immediately. Unconfirme
 ## 12. Backend task summary (new/changed endpoints)
 
 1. `POST /api/auth/identify { email } → { exists }` (rate-limited) — §6.1
-2. Password reset: token issue + `POST /api/auth/reset` — §6.2; transactional email infra
-3. Email confirmation: send on register, `GET /api/auth/confirm?token=…`, `email_confirmed_at` — §6.3
+2. Password reset: token + 6-digit code issue, `POST /api/auth/reset` accepting either credential — §6.2; transactional email infra
+3. Email confirmation: send on register; the mailed link opens `/auth/confirm?token=…` which calls `POST /api/auth/confirm { token }`; sets `email_confirmed_at` — §6.3
 4. Change password endpoint — §7.3
 5. Delete account endpoint with editor-published-quests block — §7.4
 6. FIX `PATCH` constructor status (currently always fails) — §9.1
