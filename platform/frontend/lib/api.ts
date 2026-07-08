@@ -84,6 +84,9 @@ export interface PublishedQuestWire {
   rating_avg: number;
   /** Number of attempts that left a finale rating. */
   rating_count: number;
+  /** Public players counter = real distinct completions + the author's marketing
+   *  bonus (set in the constructor). Server-computed; the raw bonus never ships. */
+  players: number;
 }
 
 /** Product page payload (§3.1) — the published card + live rating + author

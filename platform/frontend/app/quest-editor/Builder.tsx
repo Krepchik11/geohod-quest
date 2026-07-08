@@ -37,6 +37,7 @@ const PREVIEW_META: CtorQuestMeta = {
   cover: '/assets/img/quest-card.png',
   desc: '',
   price: 0,
+  playersBonus: 0,
 };
 
 /** Краткий обобщённый текст-иллюстрация для каждого шаблона: показывает, как
@@ -135,6 +136,19 @@ function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: Cto
         <div>
           <label className="adm-label">Описание для магазина</label>
           <textarea className="textarea" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
+        </div>
+        <div>
+          <label className="adm-label">Бонус к счётчику игроков</label>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            value={m.playersBonus}
+            onChange={(e) => set({ playersBonus: Math.max(0, Math.floor(+e.target.value || 0)) })}
+          />
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+            Прибавляется к реальному числу прохождений в счётчике игроков (карточка магазина и страница квеста). Для маркетинга.
+          </p>
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
       </WspBlock>

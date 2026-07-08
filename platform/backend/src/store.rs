@@ -400,6 +400,12 @@ pub struct PublishedMeta {
     pub tasks: Option<u32>,
     #[serde(default)]
     pub paid_hints: Option<bool>,
+    /// Marketing padding added to the real completions count for the PUBLIC
+    /// players counter (store card / product page). Author-set in the constructor
+    /// settings. Kept out of the client payload (`skip_serializing`) so the raw
+    /// padding is never revealed alone — handlers fold it into the `players` total.
+    #[serde(default, skip_serializing)]
+    pub players_bonus: i64,
 }
 
 /// In-memory grants + published-quest store. `snapshots` holds the frozen snapshot
@@ -1765,6 +1771,7 @@ mod grant_tests {
             pages: None,
             tasks: None,
             paid_hints: None,
+            players_bonus: 0,
         }
     }
 
