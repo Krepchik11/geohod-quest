@@ -23,6 +23,7 @@ const wire = (
   price: null,
   rating_avg: 0,
   rating_count: 0,
+  players: 0,
 });
 
 describe('nextQuestsForCatalog (post-finale catalog selection)', () => {
