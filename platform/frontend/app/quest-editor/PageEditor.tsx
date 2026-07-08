@@ -339,7 +339,7 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
             <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
           </div>
           <div>
-            <label className="adm-label">Плейсхолдер поля ответа</label>
+            <label className="adm-label">Вопрос<small>показывается над полем ответа</small></label>
             <input className="input" value={step.prompt} onChange={(e) => set({ prompt: e.target.value })} />
           </div>
         </WspBlock>
