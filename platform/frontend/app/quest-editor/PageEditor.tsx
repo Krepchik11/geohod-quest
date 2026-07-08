@@ -2,8 +2,10 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  COMIC_ROLES,
+  GIFT_COINS,
+  IMAGE_TEMPLATES,
   TPL_BY_KEY,
+  parseCoords,
   plural,
   type CtorQuest,
   type CtorStep,
@@ -16,29 +18,23 @@ import { ImageZone, WspBlock, WspDanger, WspToggle } from './controls';
 type StepPatch = Partial<CtorStep>;
 type Patcher = (patch: StepPatch) => void;
 
-/* ---------- Комикс страницы ---------- */
+/* ---------- Изображение страницы ---------- */
 
-function ComicBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
-  const roles = COMIC_ROLES[step.template] || [];
-  if (!roles.length) return null;
-  const set = (key: string, value: string | null) => onPatch({ images: { ...step.images, [key]: value } });
-  const cols = roles.length === 1 ? 'repeat(2, 1fr)' : roles.length === 3 ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)';
+function StepImageBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
+  const slot = IMAGE_TEMPLATES[step.template];
+  if (!slot) return null;
   return (
-    <WspBlock title="Комикс страницы" gateField="comic" aside={roles.length > 1 ? `${roles.length} роли изображений` : 'изображение'}>
-      <div className="comic-grid" style={{ gridTemplateColumns: cols }}>
-        {roles.map((r) => (
-          <ImageZone
-            key={r.key}
-            src={step.images[r.key]}
-            label={r.label}
-            required={r.req}
-            onChange={(src) => set(r.key, src)}
-          />
-        ))}
+    <WspBlock title="Изображение страницы" gateField="image" aside="4:3, до 100 КБ">
+      <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        <ImageZone
+          src={step.image}
+          label={slot.label}
+          required={slot.req}
+          aspect43
+          onChange={(image) => onPatch({ image })}
+        />
       </div>
-      {step.template === 'task_answer' ? (
-        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Роль «подсказка» игрок увидит только после покупки подсказки за монеты.</p>
-      ) : null}
+      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Не 4:3 — откроется кадрирование; больше 100 КБ — сожмём автоматически.</p>
     </WspBlock>
   );
 }
@@ -120,26 +116,19 @@ function AnswersBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
 /* ---------- Подарок / Подсказка / Навигатор ---------- */
 
 function GiftBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
-  const g = step.gift;
-  const set = (patch: Partial<typeof g>) => onPatch({ gift: { ...g, ...patch } });
   return (
     <WspBlock title="Подарок монет" aside="начислится при выполнении шага">
-      <WspToggle on={g.on} onClick={() => set({ on: !g.on })} label="Дарить монеты за этот шаг" />
-      {g.on ? (
-        <>
-          <div className="wsp-trow">
-            <div>
-              <label className="adm-label">Монеты</label>
-              <input className="input input--compact" type="number" min={0} value={g.coins} onChange={(e) => set({ coins: Math.max(0, +e.target.value || 0) })} />
-            </div>
-            <div className="wsp-grow">
-              <label className="adm-label">Подпись к награде<small>появится в тосте: «+5 монет · Острый глаз!»</small></label>
-              <input className="input" value={g.narrative} onChange={(e) => set({ narrative: e.target.value })} />
-            </div>
-          </div>
-          <p className="freeze-note">Сумма заморозится в снапшоте при публикации: игроки на этой версии всегда получат именно столько.</p>
-        </>
-      ) : null}
+      <div className="wsp-trow">
+        <div>
+          <label className="adm-label">Монеты<small>фиксировано платформой</small></label>
+          <input className="input input--compact" value={GIFT_COINS} disabled />
+        </div>
+        <div className="wsp-grow">
+          <label className="adm-label">Подпись к награде<small>появится в тосте: «+{GIFT_COINS} монет · Острый глаз!»</small></label>
+          <input className="input" value={step.gift.narrative} onChange={(e) => onPatch({ gift: { narrative: e.target.value } })} />
+        </div>
+      </div>
+      <p className="freeze-note">Каждый шаг-задание дарит {GIFT_COINS} монет — всегда, сумма едина для всех квестов.</p>
     </WspBlock>
   );
 }
@@ -158,7 +147,7 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
               <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
             </div>
             <div className="wsp-grow">
-              <label className="adm-label">Текст подсказки<small>останется открытым до конца шага вместе с комиксом «подсказка»</small></label>
+              <label className="adm-label">Текст подсказки<small>останется открытым до конца шага</small></label>
               <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
             </div>
           </div>
@@ -172,27 +161,18 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
 function NavBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const n = step.nav;
   const set = (patch: Partial<typeof n>) => onPatch({ nav: { ...n, ...patch } });
-  const bad = n.on && (!Number.isFinite(parseFloat(n.lat)) || !Number.isFinite(parseFloat(n.lng)));
+  const bad = n.on && !parseCoords(n.coords);
   return (
     <WspBlock title="Навигатор" gateField="nav" aside="передача в системные карты, без маршрута в бандле">
       <WspToggle on={n.on} onClick={() => set({ on: !n.on })} label="Кнопка навигатора на странице" />
       {n.on ? (
         <>
-          <div className="wsp-trow">
-            <div>
-              <label className="adm-label">Широта</label>
-              <input className="input input--compact" value={n.lat} onChange={(e) => set({ lat: e.target.value })} />
-            </div>
-            <div>
-              <label className="adm-label">Долгота</label>
-              <input className="input input--compact" value={n.lng} onChange={(e) => set({ lng: e.target.value })} />
-            </div>
-            <div className="wsp-grow">
-              <label className="adm-label">Подпись точки</label>
-              <input className="input" value={n.label} onChange={(e) => set({ label: e.target.value })} />
-            </div>
+          <div>
+            <label className="adm-label">Координаты<small>вставьте из Google Maps: правый клик по точке → первая строка</small></label>
+            <input className="input" placeholder="45.2651377918879, 19.865664144668212" value={n.coords} onChange={(e) => set({ coords: e.target.value })} />
           </div>
           {bad ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>✗ Координаты не заданы — публикация будет заблокирована.</p> : null}
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подписью точки служит адрес из блока «Контент».</p>
         </>
       ) : null}
     </WspBlock>
@@ -241,7 +221,7 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
         <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
       </div>
       <div>
-        <label className="adm-label">Адрес и расстояние<small>строка с булавкой, например «ул. Николаевска порта 2 · 400 м отсюда»</small></label>
+        <label className="adm-label">Адрес<small>строка с булавкой, например «ул. Николаевска порта 2 · 400 м отсюда»; он же — подпись точки в навигаторе</small></label>
         <input className="input" value={step.place} onChange={(e) => set({ place: e.target.value })} />
       </div>
       <div>
@@ -339,6 +319,10 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
             <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
           </div>
           <div>
+            <label className="adm-label">Адрес<small>необязательно; он же — подпись точки в навигаторе</small></label>
+            <input className="input" value={step.place} onChange={(e) => set({ place: e.target.value })} />
+          </div>
+          <div>
             <label className="adm-label">Вопрос<small>показывается над полем ответа</small></label>
             <input className="input" value={step.prompt} onChange={(e) => set({ prompt: e.target.value })} />
           </div>
@@ -373,7 +357,7 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
         </>
       ) : null}
 
-      <ComicBlock step={step} onPatch={set} />
+      <StepImageBlock step={step} onPatch={set} />
 
       {tpl === 'task_answer' ? <AnswersBlock step={step} onPatch={set} /> : null}
       {tpl === 'task_no' || tpl === 'task_answer' ? <GiftBlock step={step} onPatch={set} /> : null}
