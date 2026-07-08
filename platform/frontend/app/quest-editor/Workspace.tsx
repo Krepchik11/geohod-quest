@@ -374,6 +374,7 @@ export default function Workspace() {
         duration: active.meta.duration,
         price: active.meta.price,
         description: active.meta.desc,
+        players_bonus: active.meta.playersBonus,
       });
       const sizeLabel = computeGates(active).sizeLabel;
       patchQuest((q) => ({

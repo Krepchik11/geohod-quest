@@ -44,7 +44,11 @@ export const metadata: Metadata = {
   title: "GEOHOD QUEST — авторские квесты",
   description: "GEOHOD QUEST — авторские городские квесты. Откройте город с новой стороны. Магазин квестов, игрок и конструктор.",
   icons: {
-    icon: "/favicon.ico",
+    // Logo mark only (no wordmark). SVG for crisp modern browsers; .ico fallback.
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "48x48" },
+    ],
   },
 };
 

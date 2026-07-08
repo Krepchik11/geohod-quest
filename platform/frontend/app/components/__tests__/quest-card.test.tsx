@@ -5,7 +5,8 @@ import React from 'react';
 
 /**
  * §2.1/§2.2 shop card v2:
- * - cover, title and «О квесте и отзывы →» all route to /quest/[id]/about —
+ * - the WHOLE card is one block link to /quest/[id]/about (the title anchor
+ *   stretches over the card); the separate «О квесте и отзывы →» link is gone;
  *   NOTHING on the card routes to the player anymore (owned CTA excepted);
  * - paid «Купить» opens the confirmation sheet (fast-path);
  * - free «Получить» grants instantly, success state lives IN the card;
@@ -33,7 +34,7 @@ function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
     quest_id: 'q1', name: 'Тайны старого Белграда', primary_comic: null,
     template_summary: '', snapshot_version: 1, snapshot_id: 's1',
     city: 'Белград', duration: '2–3 часа', price: 890,
-    rating_avg: 4.8, rating_count: 24, ...over,
+    rating_avg: 4.8, rating_count: 24, players: 0, ...over,
   };
 }
 
@@ -43,13 +44,22 @@ beforeEach(() => {
 });
 
 describe('QuestCard', () => {
-  it('routes cover, title and the new link to the product page — not the player', () => {
+  it('the whole card is one link to the product page; the old «О квесте» link is gone', () => {
     render(<QuestCard quest={quest({})} owned={false} />);
+    // Unowned card: the only link is the stretched title anchor → product page.
+    // (The CTA is a <button>, not a link.) Nothing routes to the player.
     const links = screen.getAllByRole('link');
-    for (const l of links) {
-      expect(l.getAttribute('href')).toBe('/quest/q1/about');
-    }
-    expect(screen.getByText('О квесте и отзывы →')).toBeTruthy();
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute('href')).toBe('/quest/q1/about');
+    expect(screen.getByRole('link').textContent).toContain('Тайны старого Белграда');
+    expect(screen.queryByText('О квесте и отзывы →')).toBeNull();
+  });
+
+  it('shows the players counter (real + marketing bonus) only when positive', () => {
+    const { rerender } = render(<QuestCard quest={quest({ players: 0 })} owned={false} />);
+    expect(screen.queryByText(/сыграл/)).toBeNull();
+    rerender(<QuestCard quest={quest({ players: 1240 })} owned={false} />);
+    expect(screen.getByText(/1240\s+игроков сыграли/)).toBeTruthy();
   });
 
   it('paid quest: «Купить» opens the confirmation sheet, no instant charge', () => {
@@ -64,7 +74,7 @@ describe('QuestCard', () => {
     render(<QuestCard quest={quest({ price: 0 })} owned={false} />);
     fireEvent.click(screen.getByRole('button', { name: 'Получить' }));
     await waitFor(() => expect(screen.getByText('✓ Квест в «Моих квестах»')).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Пройти' }).getAttribute('href')).toBe('/quest/q1');
+    expect(screen.getByRole('link', { name: 'Играть' }).getAttribute('href')).toBe('/quest/q1');
     expect(checkoutMock).toHaveBeenCalledWith({ player_id: 'dev:test', quest_id: 'q1' });
   });
 
@@ -77,10 +87,10 @@ describe('QuestCard', () => {
     );
   });
 
-  it('owned quest shows the badge and «Пройти» to the player', () => {
+  it('owned quest shows the badge and «Играть» to the player', () => {
     render(<QuestCard quest={quest({})} owned />);
     expect(screen.getByText('✓ Куплен')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Пройти' }).getAttribute('href')).toBe('/quest/q1');
+    expect(screen.getByRole('link', { name: 'Играть' }).getAttribute('href')).toBe('/quest/q1');
   });
 
   it('purchase via the sheet flips the card and auto-downloads silently (§3.4)', async () => {

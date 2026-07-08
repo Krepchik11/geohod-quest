@@ -16,6 +16,7 @@ export function plural(n: number, one: string, few: string, many: string): strin
 }
 
 export const ratingPlural = (n: number) => plural(n, 'оценка', 'оценки', 'оценок');
+export const playersPlural = (n: number) => plural(n, 'игрок сыграл', 'игрока сыграли', 'игроков сыграли');
 export const questPlural = (n: number) => plural(n, 'квест', 'квеста', 'квестов');
 export const cityPlural = (n: number) => plural(n, 'город', 'города', 'городов');
 
