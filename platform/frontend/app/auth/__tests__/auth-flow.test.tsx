@@ -15,6 +15,7 @@ const { apiMock, sessionRef } = vi.hoisted(() => ({
     authLogin: vi.fn(),
     authRegister: vi.fn(),
     authRecover: vi.fn(),
+    getAuthProviders: vi.fn(async () => ({ google_client_id: null, telegram_bot: null })),
   },
   sessionRef: { current: null as unknown },
 }));

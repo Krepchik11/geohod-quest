@@ -37,6 +37,7 @@ mod mailer;
 mod media;
 mod payments;
 mod pg_store;
+mod social;
 mod store;
 
 use std::sync::{Arc, Mutex};
@@ -71,10 +72,22 @@ struct AppState {
     /// §6.2 recover, §6.3 resend). Keyed by `"<scope>:<email>"`; the value is
     /// `(resets_at, count)`. See [`fixed_window_allow`].
     rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
+    /// Google ID-token verifier (holds the cached JWKS). `Some` only when
+    /// `GOOGLE_CLIENT_ID` is configured; `None` disables `/api/auth/google` (501).
+    google: Option<Arc<social::GoogleVerifier>>,
+}
+
+/// Build the Google verifier when a client id is configured (fail-closed otherwise).
+fn build_google_verifier(config: &AppConfig) -> Option<Arc<social::GoogleVerifier>> {
+    config
+        .google_client_id
+        .as_ref()
+        .map(|id| Arc::new(social::GoogleVerifier::new(id.clone())))
 }
 
 fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     let mailer = mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from);
+    let google = build_google_verifier(&config);
     AppState {
         config,
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
@@ -87,6 +100,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         payments: Arc::new(MockPaymentProvider),
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        google,
     }
 }
 
@@ -418,6 +432,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/auth/display-name", post(set_display_name_handler))
         .route("/api/auth/delete-account", post(delete_account_handler))
         .route("/api/auth/login", post(login_handler))
+        .route("/api/auth/google", post(google_auth_handler))
+        .route("/api/auth/telegram", post(telegram_auth_handler))
+        .route("/api/auth/unlink", post(unlink_handler))
+        .route("/api/auth/providers", get(auth_providers_handler))
         .route("/api/players/me", get(get_me_handler))
         .route("/api/players/me/stats", get(get_my_stats_handler))
         .layer(TraceLayer::new_for_http())
@@ -818,7 +836,8 @@ async fn acting_author_role(
         let name = account
             .display_name
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or(account.email);
+            .or(account.email)
+            .unwrap_or_else(|| account.player_id.clone());
         return Ok((account.player_id, name, is_admin));
     }
     let claimed = claimed_from_headers(headers);
@@ -1449,7 +1468,9 @@ struct LoginRequest {
 #[derive(serde::Serialize)]
 struct AuthResponse {
     player_id: String,
-    email: String,
+    /// Login email — `null` for a social-only account (Telegram, or Google before
+    /// an email is attached). The client shows the display name in that case.
+    email: Option<String>,
     display_name: Option<String>,
     /// Access role (admin/editor/player) — drives the admin-surface nav/gate client-side.
     role: String,
@@ -1477,7 +1498,7 @@ async fn register_handler(
         .await?;
     // §6.3 soft confirmation: the account works immediately; the mail is
     // best-effort and the Profile banner offers a resend.
-    send_confirm_email(&state, &account.player_id, &account.email).await?;
+    send_confirm_email(&state, &account.player_id, &email).await?;
     Ok(Json(AuthResponse {
         player_id: account.player_id,
         email: account.email,
@@ -1513,6 +1534,255 @@ async fn login_handler(
         role: record.account.role,
         token,
     }))
+}
+
+// ============ Social sign-in (Google, Telegram) ============
+
+/// Max age of a Telegram Login Widget payload we accept (replay window). 24h is
+/// the common recommendation — long enough for a slow multi-tab login, short
+/// enough that a leaked-but-old payload cannot be reused indefinitely.
+const TELEGRAM_MAX_AUTH_AGE_SECS: u64 = 24 * 3600;
+
+/// A verified provider identity, provider-agnostic, ready for link-or-create.
+struct SocialIdentity {
+    provider: &'static str,
+    subject: String,
+    /// Provider-supplied email, canonicalized. `None` for Telegram.
+    email: Option<String>,
+    /// Whether the provider vouches for the email (Google `email_verified`). Only
+    /// a verified email may auto-link to an existing same-email account.
+    email_verified: bool,
+    display_name: Option<String>,
+}
+
+/// POST /api/auth/google — `{credential, player_id}` where `credential` is a
+/// Google Identity Services ID token. Fail-closed (501) when unconfigured.
+#[derive(serde::Deserialize)]
+struct GoogleAuthRequest {
+    credential: String,
+    player_id: String,
+}
+
+async fn google_auth_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<GoogleAuthRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let verifier = state.google.clone().ok_or_else(|| {
+        AppError::NotImplemented("google sign-in is not configured on this server".into())
+    })?;
+    let claims = verifier.verify(&req.credential, store::now_secs()).await?;
+    let ident = SocialIdentity {
+        provider: auth::PROVIDER_GOOGLE,
+        subject: claims.sub,
+        email: claims.email,
+        email_verified: claims.email_verified,
+        display_name: claims.name,
+    };
+    complete_social_login(&state, &headers, &req.player_id, ident)
+        .await
+        .map(Json)
+}
+
+/// POST /api/auth/telegram — the Login Widget payload + `player_id`. Fail-closed
+/// (501) when unconfigured. `#[serde(flatten)]` lifts the widget's flat fields
+/// (id, first_name, …, hash) alongside our `player_id`.
+#[derive(serde::Deserialize)]
+struct TelegramAuthRequest {
+    player_id: String,
+    #[serde(flatten)]
+    tg: social::TelegramAuth,
+}
+
+async fn telegram_auth_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<TelegramAuthRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let bot_token = state.config.telegram_bot_token.clone().ok_or_else(|| {
+        AppError::NotImplemented("telegram login is not configured on this server".into())
+    })?;
+    req.tg
+        .verify(&bot_token, store::now_secs(), TELEGRAM_MAX_AUTH_AGE_SECS)?;
+    let ident = SocialIdentity {
+        provider: auth::PROVIDER_TELEGRAM,
+        subject: req.tg.subject(),
+        email: None,
+        email_verified: false,
+        display_name: req.tg.display_name(),
+    };
+    complete_social_login(&state, &headers, &req.player_id, ident)
+        .await
+        .map(Json)
+}
+
+/// Link a verified social identity to an account and return a fresh session,
+/// preserving the caller's anonymous player_id where possible (player-identity
+/// spec): (1) an already-linked identity logs into its account; (2) a logged-in
+/// caller links it to their account; (3) a Google-verified email links to the
+/// matching existing account; (4) otherwise it attaches to the anonymous id,
+/// creating an account there so prior coins/grants survive.
+async fn complete_social_login(
+    state: &AppState,
+    headers: &HeaderMap,
+    claimed_player_id: &str,
+    ident: SocialIdentity,
+) -> Result<AuthResponse, AppError> {
+    // 1. Existing identity → login to that account (any device).
+    if let Some(pid) = state
+        .auth
+        .find_identity(ident.provider, &ident.subject)
+        .await?
+    {
+        return issue_session_for(state, &pid).await;
+    }
+
+    // Choose the account to attach the NEW identity to.
+    let target = if let Some(account) = session_account(state, headers).await? {
+        // 2. Logged-in caller → link to their account.
+        account.player_id
+    } else if ident.email_verified
+        && let Some(email) = ident.email.as_ref()
+        && let Some(record) = state.auth.find_by_email(email).await?
+    {
+        // 3. Verified provider email matches an existing account → link to it.
+        record.account.player_id
+    } else {
+        // 4. Attach to the caller's anonymous id (creating an account there).
+        create_social_on_claimed(state, headers, claimed_player_id, &ident).await?
+    };
+
+    // Link the identity. A concurrent duplicate is absorbed as a login below.
+    match state
+        .auth
+        .create_identity(store::AuthIdentity {
+            provider: ident.provider.to_string(),
+            subject: ident.subject.clone(),
+            player_id: target.clone(),
+            email: ident.email.clone(),
+            created_at: store::now_secs(),
+        })
+        .await
+    {
+        Ok(()) => {}
+        // Racing request already linked this identity — fall through to a session.
+        Err(AppError::Conflict(_)) => {}
+        Err(e) => return Err(e),
+    }
+
+    // A verified Google email gives an emailless account (Telegram-created, or a
+    // fresh anon account) a real email login — best-effort; a collision is ignored.
+    if ident.email_verified
+        && let Some(email) = ident.email.as_ref()
+    {
+        let _ = state.auth.attach_email(&target, email, store::now_secs()).await;
+    }
+
+    issue_session_for(state, &target).await
+}
+
+/// Attach step (4): resolve the anonymous claim (rejecting a registered id with no
+/// token — the exact resolve_player invariant), then create a social account keyed
+/// to it so prior grants/coins survive. A taken Google email degrades to no email.
+async fn create_social_on_claimed(
+    state: &AppState,
+    headers: &HeaderMap,
+    claimed_player_id: &str,
+    ident: &SocialIdentity,
+) -> Result<String, AppError> {
+    let pid = resolve_player(state, headers, claimed_player_id).await?;
+    if state.auth.get_user(&pid).await?.is_some() {
+        // Already an account we're authorized to act as (bearer path) — link to it.
+        return Ok(pid);
+    }
+    let email = if ident.email_verified {
+        ident.email.clone()
+    } else {
+        None
+    };
+    let confirmed = email.as_ref().map(|_| store::now_secs());
+    match state
+        .auth
+        .create_social_account(&pid, email.clone(), ident.display_name.clone(), confirmed)
+        .await
+    {
+        Ok(account) => Ok(account.player_id),
+        // The Google email is taken by another account — create without an email;
+        // the identity still links, so the user reaches a working account.
+        Err(AppError::Conflict(_)) if email.is_some() => {
+            let account = state
+                .auth
+                .create_social_account(&pid, None, ident.display_name.clone(), None)
+                .await?;
+            Ok(account.player_id)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Mint a session for an existing account and shape the standard `AuthResponse`.
+async fn issue_session_for(state: &AppState, player_id: &str) -> Result<AuthResponse, AppError> {
+    let account = state
+        .auth
+        .get_user(player_id)
+        .await?
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("account not found after link")))?;
+    let token = auth::generate_token();
+    state.auth.create_session(&token, player_id).await?;
+    Ok(AuthResponse {
+        player_id: account.player_id,
+        email: account.email,
+        display_name: account.display_name,
+        role: account.role,
+        token,
+    })
+}
+
+/// GET /api/auth/providers — which social buttons the client should render, and
+/// the PUBLIC ids they need (Google client id for GIS, Telegram bot username for
+/// the widget). Both `null` when unconfigured, so the UI hides the button.
+async fn auth_providers_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "google_client_id": state.config.google_client_id,
+        "telegram_bot": state.config.telegram_bot_username,
+    }))
+}
+
+/// POST /api/auth/unlink — `{provider}`. Removes a linked social provider from the
+/// current account, refusing to remove the LAST sign-in method (so the account can
+/// never become unreachable).
+#[derive(serde::Deserialize)]
+struct UnlinkRequest {
+    provider: String,
+}
+
+async fn unlink_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UnlinkRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::validate_provider(&req.provider)?;
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    let identities = state.auth.identities_for_player(&account.player_id).await?;
+    // Not-linked is a 404 regardless of the method count — checked first so a
+    // no-op unlink never masquerades as the "last method" conflict.
+    if !identities.iter().any(|i| i.provider == req.provider) {
+        return Err(AppError::NotFound("этот способ входа не подключён".into()));
+    }
+    // Sign-in methods = the email/password login (if any) + each linked provider.
+    let methods = identities.len() + usize::from(account.email.is_some());
+    if methods <= 1 {
+        return Err(AppError::Conflict(
+            "нельзя отвязать единственный способ входа".into(),
+        ));
+    }
+    state
+        .auth
+        .delete_identity(&req.provider, &account.player_id)
+        .await?;
+    Ok(Json(serde_json::json!({ "status": "unlinked" })))
 }
 
 // ============ Auth v2 (§6/§12.1–5) ============
@@ -1837,16 +2107,21 @@ async fn resend_confirm_handler(
     let account = session_account(&state, &headers)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    // A social-only account (Telegram / Google-without-email) has no address to
+    // confirm — treat as already-confirmed (nothing to send).
+    let Some(email) = account.email.clone() else {
+        return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
+    };
     if account.email_confirmed_at.is_some() {
         return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
     }
     fixed_window_allow(
         &state,
-        format!("confirm:{}", account.email),
+        format!("confirm:{email}"),
         MAIL_SEND_WINDOW_SECS,
         MAIL_SEND_LIMIT,
     )?;
-    send_confirm_email(&state, &account.player_id, &account.email).await?;
+    send_confirm_email(&state, &account.player_id, &email).await?;
     Ok(Json(serde_json::json!({ "status": "sent" })))
 }
 
@@ -1896,9 +2171,14 @@ async fn change_password_handler(
     let account = session_account(&state, &headers)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    // Only email/password accounts have a password to change; a social-only
+    // account (no email) must add an email/password first (not modelled here).
+    let email = account.email.clone().ok_or_else(|| {
+        AppError::BadRequest("этот аккаунт входит через провайдера — пароль не задан".into())
+    })?;
     let record = state
         .auth
-        .find_by_email(&account.email)
+        .find_by_email(&email)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
     if !auth::verify_password(&record.password_hash, &req.current_password) {
@@ -1960,14 +2240,32 @@ async fn get_me_handler(
     let player_id = resolve_player(&state, &headers, &claimed).await?;
     let account = state.auth.get_user(&player_id).await?;
     Ok(Json(match account {
-        Some(a) => serde_json::json!({
-            "player_id": a.player_id, "registered": true,
-            "email": a.email, "display_name": a.display_name, "role": a.role,
-            "email_confirmed_at": a.email_confirmed_at,
-        }),
+        Some(a) => {
+            // Sign-in methods for the profile: "email" (when set) + each linked
+            // social provider, so the client shows/links/unlinks them honestly.
+            let identities = state.auth.identities_for_player(&a.player_id).await?;
+            let mut methods: Vec<&str> = Vec::new();
+            if a.email.is_some() {
+                methods.push(auth::METHOD_EMAIL);
+            }
+            for i in &identities {
+                if i.provider == auth::PROVIDER_GOOGLE {
+                    methods.push(auth::PROVIDER_GOOGLE);
+                } else if i.provider == auth::PROVIDER_TELEGRAM {
+                    methods.push(auth::PROVIDER_TELEGRAM);
+                }
+            }
+            serde_json::json!({
+                "player_id": a.player_id, "registered": true,
+                "email": a.email, "display_name": a.display_name, "role": a.role,
+                "email_confirmed_at": a.email_confirmed_at,
+                "methods": methods,
+            })
+        }
         None => serde_json::json!({
             "player_id": player_id, "registered": false,
             "email": null, "display_name": null, "role": null,
+            "methods": [],
         }),
     }))
 }
@@ -1979,7 +2277,8 @@ async fn get_me_handler(
 #[derive(serde::Serialize)]
 struct AdminUserWire {
     player_id: String,
-    email: String,
+    /// `null` for a social-only account (no login email).
+    email: Option<String>,
     display_name: Option<String>,
     role: String,
     created_at: u64,
@@ -2160,6 +2459,7 @@ async fn main() -> anyhow::Result<()> {
                 max_connections,
                 "storage: PostgreSQL (migrations up to date)"
             );
+            let google = build_google_verifier(&config);
             AppState {
                 config: config.clone(),
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
@@ -2170,6 +2470,7 @@ async fn main() -> anyhow::Result<()> {
                 payments: Arc::new(MockPaymentProvider),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                google,
             }
         }
         Err(_) => {
@@ -2267,6 +2568,9 @@ mod tests {
             smtp_url: None,
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_bot_token: None,
+            telegram_bot_username: None,
         }))
     }
 
@@ -2281,6 +2585,9 @@ mod tests {
             smtp_url: None,
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_bot_token: None,
+            telegram_bot_username: None,
         });
         let (m, outbox) = mailer::Mailer::recorder();
         state.mailer = m;
@@ -2298,6 +2605,9 @@ mod tests {
             smtp_url: None,
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_bot_token: None,
+            telegram_bot_username: None,
         }))
     }
 
@@ -2441,6 +2751,9 @@ mod tests {
             smtp_url: None,
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_bot_token: None,
+            telegram_bot_username: None,
         }));
 
         let preflight = |origin: &'static str| {
@@ -2496,6 +2809,216 @@ mod tests {
         // on, so listing is forbidden.
         let (st, _) = get_json_h(&app, "/api/admin/users", &[("x-admin-token", "anything")]).await;
         assert_eq!(st, StatusCode::FORBIDDEN);
+    }
+
+    // ===== Social sign-in (Telegram end-to-end; Google verifier unit-tested in
+    // ===== social.rs, its route shares complete_social_login with Telegram) =====
+
+    const TG_TEST_TOKEN: &str = "111:telegram-test-token";
+
+    /// Router with Telegram configured (Google stays off — its verifier needs live
+    /// JWKS, covered by unit tests). Mirrors `test_app` otherwise.
+    fn test_app_social() -> Router {
+        build_router(test_state(AppConfig {
+            addr: "0.0.0.0:0".parse().expect("test addr"),
+            version: "test-0.0.0",
+            admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
+            cors_allowed_origins: Vec::new(),
+            media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_bot_token: Some(TG_TEST_TOKEN.to_string()),
+            telegram_bot_username: Some("geohodbot".to_string()),
+        }))
+    }
+
+    /// Compute a real Telegram Login Widget `hash` for a minimal payload so tests
+    /// exercise the true verification path (not a stub).
+    fn tg_hash(token: &str, id: i64, first_name: &str, auth_date: i64) -> String {
+        use hmac::{Hmac, Mac};
+        use sha2::{Digest, Sha256};
+        let dcs = format!("auth_date={auth_date}\nfirst_name={first_name}\nid={id}");
+        let secret = Sha256::digest(token.as_bytes());
+        let mut mac = <Hmac<Sha256>>::new_from_slice(&secret).expect("hmac");
+        mac.update(dcs.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn tg_payload(player_id: &str, id: i64, first_name: &str) -> Value {
+        let auth_date = store::now_secs() as i64;
+        let hash = tg_hash(TG_TEST_TOKEN, id, first_name, auth_date);
+        json!({
+            "player_id": player_id,
+            "id": id,
+            "first_name": first_name,
+            "auth_date": auth_date,
+            "hash": hash,
+        })
+    }
+
+    #[tokio::test]
+    async fn telegram_disabled_when_unconfigured() {
+        // test_app() has no telegram token → fail-closed 501, no account effect.
+        let app = test_app();
+        let (st, _) = post_json(&app, "/api/auth/telegram", tg_payload("dev:x", 1, "A")).await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn google_disabled_when_unconfigured() {
+        let app = test_app_social(); // google intentionally off
+        let (st, _) = post_json(
+            &app,
+            "/api/auth/google",
+            json!({ "credential": "x.y.z", "player_id": "dev:x" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn telegram_forged_hash_is_rejected() {
+        let app = test_app_social();
+        let mut payload = tg_payload("dev:a", 42, "Ann");
+        payload["hash"] = json!("00".repeat(32)); // wrong hash
+        let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn telegram_stale_auth_date_is_rejected() {
+        let app = test_app_social();
+        let stale = 1_600_000_000i64; // year 2020, far beyond the 24h window
+        let hash = tg_hash(TG_TEST_TOKEN, 7, "Old", stale);
+        let payload = json!({
+            "player_id": "dev:a", "id": 7, "first_name": "Old",
+            "auth_date": stale, "hash": hash,
+        });
+        let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn telegram_creates_account_on_anonymous_id_preserving_it() {
+        let app = test_app_social();
+        let (st, body) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:keep-me", 500, "Ann")).await;
+        assert_eq!(st, StatusCode::OK);
+        // The account is keyed to the SAME anonymous id (coins/grants survive).
+        assert_eq!(body["player_id"], "dev:keep-me");
+        assert!(body["email"].is_null(), "telegram account has no email");
+        assert_eq!(body["display_name"], "Ann");
+        let token = body["token"].as_str().expect("token");
+
+        // /me reports the telegram method and no email.
+        let (st, me) = get_json_h(&app, "/api/players/me", &[("authorization", &format!("Bearer {token}"))]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(me["registered"], true);
+        assert!(me["email"].is_null());
+        let methods: Vec<String> =
+            serde_json::from_value(me["methods"].clone()).expect("methods");
+        assert_eq!(methods, vec!["telegram".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn telegram_same_user_from_second_device_returns_first_account() {
+        let app = test_app_social();
+        let (_, first) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:one", 900, "Ann")).await;
+        assert_eq!(first["player_id"], "dev:one");
+        // A different anonymous device signs in with the SAME telegram id.
+        let (st, second) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:two", 900, "Ann")).await;
+        assert_eq!(st, StatusCode::OK);
+        // It resolves to the existing account, not a new one on dev:two.
+        assert_eq!(second["player_id"], "dev:one");
+    }
+
+    #[tokio::test]
+    async fn telegram_links_to_logged_in_email_account_and_unlink_guards_last_method() {
+        let app = test_app_social();
+        // Register an email account.
+        let (st, reg) = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "player_id": "dev:acct", "email": "u@example.com", "password": "supersecret" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let token = reg["token"].as_str().expect("token").to_string();
+        let bearer = format!("Bearer {token}");
+
+        // Link Telegram to the logged-in account (Bearer present).
+        let (st, linked) = post_json_h(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:acct", 4242, "Ann"),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(linked["player_id"], "dev:acct"); // same account
+        assert_eq!(linked["email"], "u@example.com");
+
+        // /me lists BOTH methods now.
+        let (_, me) = get_json_h(&app, "/api/players/me", &[("authorization", &bearer)]).await;
+        let mut methods: Vec<String> =
+            serde_json::from_value(me["methods"].clone()).expect("methods");
+        methods.sort();
+        assert_eq!(methods, vec!["email".to_string(), "telegram".to_string()]);
+
+        // Telegram login from another device now reaches the email account.
+        let (_, elsewhere) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:other", 4242, "Ann")).await;
+        assert_eq!(elsewhere["player_id"], "dev:acct");
+
+        // Unlink telegram is allowed (email remains).
+        let (st, _) = post_json_h(
+            &app,
+            "/api/auth/unlink",
+            json!({ "provider": "telegram" }),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Unlinking the LAST method (email) is refused (409) — but email isn't a
+        // provider; unlinking telegram again now fails as not-linked (404).
+        let (st, _) = post_json_h(
+            &app,
+            "/api/auth/unlink",
+            json!({ "provider": "telegram" }),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn telegram_only_account_cannot_unlink_its_sole_method() {
+        let app = test_app_social();
+        let (_, acct) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:solo", 77, "Solo")).await;
+        let token = acct["token"].as_str().expect("token");
+        let (st, _) = post_json_h(
+            &app,
+            "/api/auth/unlink",
+            json!({ "provider": "telegram" }),
+            &[("authorization", &format!("Bearer {token}"))],
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "sole sign-in method must not be removable");
+    }
+
+    #[tokio::test]
+    async fn providers_endpoint_reports_configuration() {
+        let app = test_app_social();
+        let (st, body) = get_json_h(&app, "/api/auth/providers", &[]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(body["google_client_id"].is_null());
+        assert_eq!(body["telegram_bot"], "geohodbot");
     }
 
     async fn post_json_h(
@@ -5189,6 +5712,9 @@ mod tests {
                 smtp_url: None,
                 mail_from: "test@geohod.test".to_string(),
                 frontend_base: "http://localhost:3000".to_string(),
+                google_client_id: None,
+                telegram_bot_token: None,
+                telegram_bot_username: None,
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
@@ -5198,6 +5724,7 @@ mod tests {
             payments: Arc::new(MockPaymentProvider),
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            google: None,
         });
         (router, outbox)
     }

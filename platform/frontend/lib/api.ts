@@ -10,6 +10,27 @@
 
 import { authHeaders, type Session } from './identity';
 
+/** Which social sign-in providers this deployment has configured. Both `null`
+ *  when unset, so the client hides the corresponding button (fail-closed UI that
+ *  mirrors the fail-closed 501 backend). `google_client_id` is the public GIS
+ *  client id; `telegram_bot` is the public bot username the widget mounts. */
+export interface AuthProviders {
+  google_client_id: string | null;
+  telegram_bot: string | null;
+}
+
+/** The exact object the Telegram Login Widget hands its `data-onauth` callback.
+ *  Forwarded verbatim to POST /api/auth/telegram, which verifies its HMAC `hash`. */
+export interface TelegramWidgetUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+}
+
 /**
  * Resolved at BUILD time: NEXT_PUBLIC_* is string-inlined into the browser
  * bundle by `next build`, so this value is frozen at deploy time, not runtime.
@@ -345,6 +366,23 @@ export const api = {
     apiFetch<Session>('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   authLogin: (body: { email: string; password: string }) =>
     apiFetch<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  // Social sign-in (social-auth spec). Both attach to the caller's anonymous
+  // player_id (coins/purchases survive) or link to a logged-in account; the
+  // backend verifies the provider payload before any account effect. Both return
+  // a Session exactly like register/login.
+  authGoogle: (body: { credential: string; player_id: string }) =>
+    apiFetch<Session>('/api/auth/google', { method: 'POST', body: JSON.stringify(body) }),
+  authTelegram: (body: TelegramWidgetUser & { player_id: string }) =>
+    apiFetch<Session>('/api/auth/telegram', { method: 'POST', body: JSON.stringify(body) }),
+  // Unlink a linked social provider (refused server-side if it is the last method).
+  authUnlink: (provider: string) =>
+    apiFetch<{ status: string }>('/api/auth/unlink', {
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    }),
+  // Which social buttons to render + the public ids they need. Both null → hidden.
+  getAuthProviders: () =>
+    apiFetch<AuthProviders>('/api/auth/providers'),
   // Auth v2 (§6): the email-first step + recovery R1 + soft confirmation.
   authIdentify: (email: string) =>
     apiFetch<{ exists: boolean; confirmed: boolean }>('/api/auth/identify', {
@@ -389,6 +427,9 @@ export const api = {
       role: string | null;
       /** §6.3: unix seconds when the email was confirmed; null/absent until then. */
       email_confirmed_at?: number | null;
+      /** Active sign-in methods: "email" (when set) + each linked provider
+       *  ("google"/"telegram"). Drives the profile "Способы входа" block. */
+      methods?: string[];
     }>('/api/players/me'),
   myStats: () =>
     apiFetch<{

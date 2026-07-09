@@ -561,6 +561,18 @@ pub struct AuthTokenRecord {
 pub const TOKEN_KIND_RESET: &str = "reset";
 pub const TOKEN_KIND_CONFIRM: &str = "confirm";
 
+/// One linked social identity (`auth_identities` row): a `(provider, subject)`
+/// pair that resolves to an account `player_id`. `email` is the provider-supplied
+/// address (Google) kept for display/reference — NOT the account's login email.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthIdentity {
+    pub provider: String,
+    pub subject: String,
+    pub player_id: String,
+    pub email: Option<String>,
+    pub created_at: u64,
+}
+
 /// A 6-digit code survives at most this many verify attempts (right or wrong):
 /// 5 guesses against 10^6 codes in a 30-minute window is negligible.
 pub const MAX_CODE_ATTEMPTS: u32 = 5;
@@ -575,6 +587,9 @@ pub struct InMemoryAuthStore {
     sessions: HashMap<String, String>,
     /// Single-use auth tokens keyed by sha256(token): reset/confirm (§6).
     auth_tokens: HashMap<String, AuthTokenRecord>,
+    /// Linked social identities keyed by `(provider, subject)` (the `auth_identities`
+    /// table). One account (`player_id`) may hold several rows.
+    identities: HashMap<(String, String), AuthIdentity>,
 }
 
 impl InMemoryAuthStore {
@@ -600,7 +615,7 @@ impl InMemoryAuthStore {
         }
         let account = UserAccount {
             player_id: player_id.to_string(),
-            email: email.to_string(),
+            email: Some(email.to_string()),
             display_name,
             role: crate::auth::DEFAULT_ROLE.to_string(),
             created_at: now_secs(),
@@ -767,10 +782,123 @@ impl InMemoryAuthStore {
         let Some(record) = self.users.remove(player_id) else {
             return false;
         };
-        self.email_index.remove(&record.account.email);
+        if let Some(email) = &record.account.email {
+            self.email_index.remove(email);
+        }
         self.sessions.retain(|_, p| p != player_id);
         self.auth_tokens.retain(|_, r| r.player_id != player_id);
+        self.identities
+            .retain(|_, i| i.player_id != player_id);
         true
+    }
+
+    /// The account a verified `(provider, subject)` identity resolves to, if linked.
+    pub fn find_identity(&self, provider: &str, subject: &str) -> Option<String> {
+        self.identities
+            .get(&(provider.to_string(), subject.to_string()))
+            .map(|i| i.player_id.clone())
+    }
+
+    /// Link a social identity to an account. Rejects (409) a `(provider, subject)`
+    /// already linked (to any account) — the caller has already resolved that an
+    /// existing link means "login", so reaching here with a duplicate is a bug/race.
+    pub fn create_identity(&mut self, identity: AuthIdentity) -> Result<(), AppError> {
+        let key = (identity.provider.clone(), identity.subject.clone());
+        if self.identities.contains_key(&key) {
+            return Err(AppError::Conflict("identity already linked".into()));
+        }
+        self.identities.insert(key, identity);
+        Ok(())
+    }
+
+    /// All social identities linked to an account (for the profile method list).
+    pub fn identities_for_player(&self, player_id: &str) -> Vec<AuthIdentity> {
+        let mut out: Vec<AuthIdentity> = self
+            .identities
+            .values()
+            .filter(|i| i.player_id == player_id)
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| a.provider.cmp(&b.provider));
+        out
+    }
+
+    /// Unlink a provider from an account. Returns whether a row was removed.
+    pub fn delete_identity(&mut self, provider: &str, player_id: &str) -> bool {
+        let before = self.identities.len();
+        self.identities
+            .retain(|_, i| !(i.provider == provider && i.player_id == player_id));
+        self.identities.len() != before
+    }
+
+    /// Create an account row for a social-only sign-in on `player_id` (no password;
+    /// email present only for a verified Google address). Preserves the id so any
+    /// prior anonymous grants/coins survive. Rejects a taken player_id or email (409).
+    pub fn create_social_account(
+        &mut self,
+        player_id: &str,
+        email: Option<String>,
+        display_name: Option<String>,
+        email_confirmed_at: Option<u64>,
+    ) -> Result<UserAccount, AppError> {
+        if self.users.contains_key(player_id) {
+            return Err(AppError::Conflict("player is already registered".into()));
+        }
+        if let Some(e) = &email {
+            if self.email_index.contains_key(e) {
+                return Err(AppError::Conflict("email is already taken".into()));
+            }
+        }
+        let account = UserAccount {
+            player_id: player_id.to_string(),
+            email: email.clone(),
+            display_name,
+            role: crate::auth::DEFAULT_ROLE.to_string(),
+            created_at: now_secs(),
+            email_confirmed_at,
+        };
+        self.users.insert(
+            player_id.to_string(),
+            UserRecord {
+                account: account.clone(),
+                // No password for a social account; an empty hash never verifies.
+                password_hash: String::new(),
+            },
+        );
+        if let Some(e) = email {
+            self.email_index.insert(e, player_id.to_string());
+        }
+        Ok(account)
+    }
+
+    /// Attach a verified Google email to an EXISTING account that has none yet
+    /// (so the account gains an email login/display). No-op-safe: rejects if the
+    /// email is taken by another account (409). Sets `email_confirmed_at` since
+    /// Google is authoritative for a verified address.
+    pub fn attach_email(
+        &mut self,
+        player_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        if let Some(owner) = self.email_index.get(email) {
+            if owner != player_id {
+                return Err(AppError::Conflict("email is already taken".into()));
+            }
+        }
+        let record = self
+            .users
+            .get_mut(player_id)
+            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
+        if record.account.email.is_none() {
+            record.account.email = Some(email.to_string());
+            if record.account.email_confirmed_at.is_none() {
+                record.account.email_confirmed_at = Some(confirmed_at);
+            }
+            self.email_index
+                .insert(email.to_string(), player_id.to_string());
+        }
+        Ok(record.account.clone())
     }
 }
 
@@ -1127,6 +1255,80 @@ impl AuthStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.account_for_session(token)),
             Self::Postgres(pg) => pg.account_for_session(token).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::find_identity`].
+    pub async fn find_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<String>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.find_identity(provider, subject)),
+            Self::Postgres(pg) => pg.find_identity(provider, subject).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::create_identity`].
+    pub async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.create_identity(identity),
+            Self::Postgres(pg) => pg.create_identity(identity).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::identities_for_player`].
+    pub async fn identities_for_player(
+        &self,
+        player_id: &str,
+    ) -> Result<Vec<AuthIdentity>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_player(player_id)),
+            Self::Postgres(pg) => pg.identities_for_player(player_id).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::delete_identity`].
+    pub async fn delete_identity(&self, provider: &str, player_id: &str) -> Result<bool, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_identity(provider, player_id)),
+            Self::Postgres(pg) => pg.delete_identity(provider, player_id).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::create_social_account`].
+    pub async fn create_social_account(
+        &self,
+        player_id: &str,
+        email: Option<String>,
+        display_name: Option<String>,
+        email_confirmed_at: Option<u64>,
+    ) -> Result<UserAccount, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.create_social_account(
+                player_id,
+                email,
+                display_name,
+                email_confirmed_at,
+            ),
+            Self::Postgres(pg) => {
+                pg.create_social_account(player_id, email, display_name, email_confirmed_at)
+                    .await
+            }
+        }
+    }
+
+    /// See [`InMemoryAuthStore::attach_email`].
+    pub async fn attach_email(
+        &self,
+        player_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.attach_email(player_id, email, confirmed_at),
+            Self::Postgres(pg) => pg.attach_email(player_id, email, confirmed_at).await,
         }
     }
 }

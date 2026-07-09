@@ -35,6 +35,28 @@ pub const DEFAULT_ROLE: &str = ROLE_PLAYER;
 /// The full set of assignable roles, in display order (admin → editor → player).
 pub const ROLES: [&str; 3] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_PLAYER];
 
+/// Linkable social providers (rows in `auth_identities`). The `email` method is
+/// NOT a provider row — it is derived from `users.email`/`password_hash` presence.
+pub const PROVIDER_GOOGLE: &str = "google";
+pub const PROVIDER_TELEGRAM: &str = "telegram";
+/// The synthetic method name the client shows for the built-in email+password
+/// login (see `identity-methods` in the profile). Never stored in `auth_identities`.
+pub const METHOD_EMAIL: &str = "email";
+/// Providers accepted by the social endpoints / `auth_identities` CHECK.
+pub const PROVIDERS: [&str; 2] = [PROVIDER_GOOGLE, PROVIDER_TELEGRAM];
+
+/// Reject a provider outside the known set (keeps the in-memory store honest,
+/// mirroring the DB CHECK constraint).
+pub fn validate_provider(provider: &str) -> Result<(), AppError> {
+    if PROVIDERS.contains(&provider) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!(
+            "unknown provider '{provider}' (expected google or telegram)"
+        )))
+    }
+}
+
 /// Reject any role outside the known set (400). Keeps the `role` column honest in
 /// the in-memory store too, where no DB CHECK constraint exists.
 pub fn validate_role(role: &str) -> Result<(), AppError> {
@@ -53,7 +75,9 @@ pub fn validate_role(role: &str) -> Result<(), AppError> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserAccount {
     pub player_id: String,
-    pub email: String,
+    /// Login email. `None` for a social-only account (a Telegram account has no
+    /// email; a Google account has one). Unique across accounts when present.
+    pub email: Option<String>,
     pub display_name: Option<String>,
     /// Access role (admin/editor/player). New accounts default to `player`.
     pub role: String,

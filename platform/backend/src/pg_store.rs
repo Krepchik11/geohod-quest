@@ -21,7 +21,8 @@ use crate::facts::{
 };
 use crate::grants::{AccessGrant, GrantSource};
 use crate::store::{
-    AttemptMeta, ConstructorQuest, ConstructorQuestSummary, PublishedMeta, now_rfc3339, now_secs,
+    AttemptMeta, AuthIdentity, ConstructorQuest, ConstructorQuestSummary, PublishedMeta,
+    now_rfc3339, now_secs,
 };
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
@@ -891,9 +892,12 @@ impl PgAuthStore {
         .await
         .map_err(internal)?;
         row.map(|r| {
+            // A social-only account (Google) has an email but NULL password_hash;
+            // an empty hash never verifies, so the password path yields 401 cleanly.
+            let password_hash: Option<String> = r.try_get("password_hash").map_err(internal)?;
             Ok(UserRecord {
                 account: account_from_row(&r)?,
-                password_hash: r.try_get("password_hash").map_err(internal)?,
+                password_hash: password_hash.unwrap_or_default(),
             })
         })
         .transpose()
@@ -1195,6 +1199,155 @@ impl PgAuthStore {
             .map_err(internal)?;
         row.map(|r| r.try_get("player_id").map_err(internal))
             .transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::find_identity`].
+    pub async fn find_identity(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<String>, AppError> {
+        let row = sqlx::query(
+            "SELECT player_id FROM auth_identities WHERE provider = $1 AND subject = $2",
+        )
+        .bind(provider)
+        .bind(subject)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| r.try_get("player_id").map_err(internal))
+            .transpose()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::create_identity`]. The `(provider,
+    /// subject)` PK absorbs a concurrent duplicate link (0 rows → 409).
+    pub async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
+        let inserted = sqlx::query(
+            "INSERT INTO auth_identities (provider, subject, player_id, email, created_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&identity.provider)
+        .bind(&identity.subject)
+        .bind(&identity.player_id)
+        .bind(&identity.email)
+        .bind(identity.created_at as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        if inserted.rows_affected() == 0 {
+            return Err(AppError::Conflict("identity already linked".into()));
+        }
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::identities_for_player`].
+    pub async fn identities_for_player(
+        &self,
+        player_id: &str,
+    ) -> Result<Vec<AuthIdentity>, AppError> {
+        let rows = sqlx::query(
+            "SELECT provider, subject, player_id, email, created_at \
+             FROM auth_identities WHERE player_id = $1 ORDER BY provider ASC",
+        )
+        .bind(player_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+                Ok(AuthIdentity {
+                    provider: r.try_get("provider").map_err(internal)?,
+                    subject: r.try_get("subject").map_err(internal)?,
+                    player_id: r.try_get("player_id").map_err(internal)?,
+                    email: r.try_get("email").map_err(internal)?,
+                    created_at: created_at.max(0) as u64,
+                })
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::delete_identity`].
+    pub async fn delete_identity(
+        &self,
+        provider: &str,
+        player_id: &str,
+    ) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            "DELETE FROM auth_identities WHERE provider = $1 AND player_id = $2",
+        )
+        .bind(provider)
+        .bind(player_id)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::create_social_account`]. `password_hash`
+    /// is NULL (no password); a taken player_id or email is absorbed as 409.
+    pub async fn create_social_account(
+        &self,
+        player_id: &str,
+        email: Option<String>,
+        display_name: Option<String>,
+        email_confirmed_at: Option<u64>,
+    ) -> Result<UserAccount, AppError> {
+        let inserted = sqlx::query(
+            "INSERT INTO users (player_id, email, password_hash, display_name, created_at, email_confirmed_at)
+             VALUES ($1, $2, NULL, $3, $4, $5)
+             ON CONFLICT DO NOTHING
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
+        )
+        .bind(player_id)
+        .bind(&email)
+        .bind(&display_name)
+        .bind(now_secs() as i64)
+        .bind(email_confirmed_at.map(|v| v as i64))
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match inserted {
+            Some(row) => account_from_row(&row),
+            None => Err(AppError::Conflict(
+                "player is already registered or email is already taken".into(),
+            )),
+        }
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::attach_email`]. Sets the email only
+    /// when the account has none; a UNIQUE violation (email taken elsewhere) → 409.
+    pub async fn attach_email(
+        &self,
+        player_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        let updated = sqlx::query(
+            "UPDATE users SET email = $2, email_confirmed_at = COALESCE(email_confirmed_at, $3) \
+             WHERE player_id = $1 AND email IS NULL \
+             RETURNING player_id, email, display_name, role, created_at, email_confirmed_at",
+        )
+        .bind(player_id)
+        .bind(email)
+        .bind(confirmed_at as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(db) if db.is_unique_violation() => {
+                AppError::Conflict("email is already taken".into())
+            }
+            other => internal(other),
+        })?;
+        match updated {
+            Some(row) => account_from_row(&row),
+            // The account already has an email (WHERE matched nothing) — return it.
+            None => self
+                .get_user(player_id)
+                .await?
+                .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'"))),
+        }
     }
 }
 

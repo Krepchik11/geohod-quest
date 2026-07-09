@@ -7,9 +7,10 @@ import SiteHeader from '../SiteHeader';
 import SiteFooter from '../components/SiteFooter';
 import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
+import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, ApiError } from '../../lib/api';
 import { flushAll } from '../../lib/sync';
-import { currentPlayerId, getSession, subscribeSession } from '../../lib/identity';
+import { currentPlayerId, getSession, setSession, subscribeSession } from '../../lib/identity';
 import { logoutAndReset } from '../../lib/session-actions';
 import {
   completedQuestDetails,
@@ -41,6 +42,8 @@ interface Me {
   email: string | null;
   display_name: string | null;
   email_confirmed_at?: number | null;
+  /** Active sign-in methods: "email" + linked "google"/"telegram". */
+  methods?: string[];
 }
 
 type ProfileData =
@@ -245,9 +248,13 @@ export default function ProfilePage() {
                 <button className="pf-account__row" type="button" onClick={() => setSheet('name')}>
                   Изменить имя <span aria-hidden>›</span>
                 </button>
-                <button className="pf-account__row" type="button" onClick={() => setSheet('password')}>
-                  Сменить пароль <span aria-hidden>›</span>
-                </button>
+                {/* Password change only applies to an email/password account. A
+                    social-only account (email == null) has no password to change. */}
+                {emailLabel && (
+                  <button className="pf-account__row" type="button" onClick={() => setSheet('password')}>
+                    Сменить пароль <span aria-hidden>›</span>
+                  </button>
+                )}
                 {/* §2.4/§5: the GLOBAL app install lives here now */}
                 <div className="pf-account__install"><InstallPrompt /></div>
                 <button className="pf-account__row" type="button" onClick={logout}>Выйти</button>
@@ -255,6 +262,13 @@ export default function ProfilePage() {
                   Удалить аккаунт
                 </button>
               </div>
+
+              {/* Способы входа — linked methods + link/unlink (social-auth spec). */}
+              <LoginMethods
+                methods={ready?.me?.methods ?? (emailLabel ? ['email'] : [])}
+                email={emailLabel}
+                onChanged={reload}
+              />
             </div>
           )}
         </div>
@@ -275,6 +289,93 @@ export default function ProfilePage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** Human label + glyph for each sign-in method row. */
+const METHOD_META: Record<string, { label: string; glyph: string }> = {
+  email: { label: 'Почта и пароль', glyph: '✉' },
+  google: { label: 'Google', glyph: 'G' },
+  telegram: { label: 'Telegram', glyph: '✈' },
+};
+
+/**
+ * «Способы входа» — lists the account's active sign-in methods, lets the user add
+ * a social provider (reusing SocialAuthButtons in link mode: the Bearer session is
+ * sent automatically, so the backend links instead of creating), and unlink one.
+ * Unlinking the LAST method is refused server-side (409) and surfaced honestly.
+ */
+function LoginMethods({
+  methods,
+  email,
+  onChanged,
+}: {
+  methods: string[];
+  email: string | null;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const linked = methods.length > 0 ? methods : email ? ['email'] : [];
+  const canUnlink = linked.length > 1;
+
+  const unlink = async (provider: string) => {
+    setBusy(true);
+    try {
+      await api.authUnlink(provider);
+      toast('Способ входа отвязан');
+      onChanged();
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      toast(
+        status === 409
+          ? 'Нельзя отвязать единственный способ входа'
+          : 'Не удалось отвязать — попробуйте позже',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card pf-card pf-methods">
+      <h4 className="pf-card__head">Способы входа</h4>
+      <ul className="pf-methods__list">
+        {linked.map((m) => {
+          const meta = METHOD_META[m] ?? { label: m, glyph: '•' };
+          return (
+            <li className="pf-methods__row" key={m}>
+              <span className={`pf-methods__glyph pf-methods__glyph--${m}`} aria-hidden>{meta.glyph}</span>
+              <span className="pf-methods__label">
+                {meta.label}
+                {m === 'email' && email && <small>{email}</small>}
+              </span>
+              {/* Email can't be unlinked here; only social providers, and only
+                  while another method remains (so the account stays reachable). */}
+              {m !== 'email' && canUnlink && (
+                <button
+                  className="pf-methods__unlink"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void unlink(m)}
+                >
+                  Отвязать
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {/* Add a provider not yet linked. Renders nothing when all configured
+          providers are already linked (or none are configured). */}
+      <SocialAuthButtons
+        exclude={linked}
+        onSession={(s) => {
+          setSession(s);
+          toast('Способ входа добавлен');
+          onChanged();
+        }}
+      />
     </div>
   );
 }

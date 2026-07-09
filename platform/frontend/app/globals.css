@@ -492,3 +492,29 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .af-sent__icon { width:56px; height:56px; border-radius:50%; background:rgba(31,138,91,.1); display:grid; place-items:center; font-size:22px; color:var(--green); }
 .af-sent b { font-size:16px; }
 .af-sent p { font-size:13px; line-height:1.55; color:var(--muted-2); }
+
+/* Social sign-in (Google + Telegram) — buttons + "or by email" divider. The
+   provider buttons are rendered by the providers themselves (Google GIS pill,
+   Telegram widget iframe); we just center them and give the block consistent
+   rhythm with the email form below. */
+.af-social { display:flex; flex-direction:column; gap:12px; }
+.af-social__buttons { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.social-btn { display:flex; justify-content:center; align-items:center; width:100%; min-height:44px; }
+.social-btn iframe { margin:0 !important; }
+.af-social__error { text-align:center; }
+.af-divider { display:flex; align-items:center; gap:12px; margin:2px 0; color:var(--muted); font-size:12px; }
+.af-divider::before, .af-divider::after { content:""; flex:1; height:1px; background:var(--border); }
+
+/* Профиль → «Способы входа» */
+.pf-methods { gap:10px; }
+.pf-methods__list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.pf-methods__row { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border-2); border-radius:12px; }
+.pf-methods__glyph { flex:none; width:32px; height:32px; border-radius:50%; display:grid; place-items:center; font-size:15px; font-weight:700; color:#fff; background:var(--dark); }
+.pf-methods__glyph--google { background:#fff; color:#4285F4; border:1px solid var(--border); }
+.pf-methods__glyph--telegram { background:#29A9EB; }
+.pf-methods__glyph--email { background:#6B7A90; }
+.pf-methods__label { flex:1; min-width:0; display:flex; flex-direction:column; font-size:14px; font-weight:500; color:var(--text); }
+.pf-methods__label small { font-size:12px; font-weight:400; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pf-methods__unlink { flex:none; background:none; border:0; padding:0; font-size:13px; color:var(--muted); font-weight:500; cursor:pointer; }
+.pf-methods__unlink:hover:not(:disabled) { color:var(--red); }
+.pf-methods__unlink:disabled { opacity:.5; cursor:default; }

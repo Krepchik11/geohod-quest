@@ -20,7 +20,9 @@ const SESSION_KEY = 'geohod-session:v1';
 export interface Session {
   token: string;
   player_id: string;
-  email: string;
+  /** Login email, or `null` for a social-only account (Telegram, or Google
+   *  before an email is attached). The UI shows the display name in that case. */
+  email: string | null;
   display_name?: string | null;
   /** Access role (admin/editor/player) captured at login/register. Drives the
    *  admin-surface nav link; may go stale if the role changes mid-session (a
