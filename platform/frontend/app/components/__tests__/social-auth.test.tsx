@@ -81,4 +81,25 @@ describe('SocialAuthButtons', () => {
     render(<SocialAuthButtons onSession={() => {}} dividerLabel="или по почте" />);
     await waitFor(() => expect(screen.getByText('или по почте')).toBeTruthy());
   });
+
+  it('on failure delegates to onError WITHOUT also rendering its own inline error', async () => {
+    // Regression: the message must not appear twice (parent renders via onError).
+    apiMock.getAuthProviders.mockResolvedValue({ google_client_id: null, telegram_client_id: '424242' });
+    apiMock.authTelegram.mockRejectedValue(new Error('boom'));
+    const onError = vi.fn();
+
+    const { container } = render(<SocialAuthButtons onSession={() => {}} onError={onError} />);
+    const button = await waitFor(() => {
+      const b = container.querySelector<HTMLButtonElement>('.social-btn--telegram');
+      if (!b) throw new Error('telegram button not mounted');
+      return b;
+    });
+    readyTelegram((_opts, cb) => cb({ id_token: 'JWT' }));
+    await waitFor(() => expect(button.disabled).toBe(false));
+
+    fireEvent.click(button);
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    // No internal inline copy when a parent handler is present.
+    expect(container.querySelector('.af-social__error')).toBeNull();
+  });
 });

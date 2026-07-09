@@ -215,8 +215,10 @@ export default function SocialAuthButtons({
   const fail = useCallback(
     (message: string) => {
       setBusy(false);
-      setError(message);
-      onError?.(message);
+      // Delegate to the parent when it supplied a handler (it renders the message),
+      // else fall back to our own inline error — never both, or it shows twice.
+      if (onError) onError(message);
+      else setError(message);
     },
     [onError],
   );

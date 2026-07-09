@@ -291,19 +291,28 @@ impl GoogleClaims {
 
 // ============================ Telegram claims ============================
 
-/// The claims we consume from a verified Telegram OIDC ID token. The stable subject
-/// is `id` (the Telegram user id); Telegram provides no email.
+/// The claims we consume from a verified Telegram OIDC ID token. `subject` is the
+/// stable identity key; Telegram provides no email.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelegramClaims {
-    pub id: i64,
+    /// The stable subject: the `id` claim (the Telegram user id — the same value the
+    /// legacy widget keyed on, so linked identities survive) when present, else the
+    /// standard OIDC `sub`.
+    pub subject: String,
     pub name: Option<String>,
     pub preferred_username: Option<String>,
     pub picture: Option<String>,
 }
 
+/// `id` and `sub` are BOTH optional here: Telegram serializes the user id as a JSON
+/// number or a string, and a token may carry only `sub`. We coerce whatever is
+/// present into a stable string subject (id preferred) — see [`TelegramClaims::from_claims`].
 #[derive(Debug, Deserialize)]
 struct RawTelegramClaims {
-    id: i64,
+    #[serde(default, deserialize_with = "de_opt_flexible_i64")]
+    id: Option<i64>,
+    #[serde(default)]
+    sub: Option<String>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -312,23 +321,45 @@ struct RawTelegramClaims {
     picture: Option<String>,
 }
 
+/// Deserialize an optional integer that may arrive as a JSON number OR a string
+/// (Telegram's `id` has been observed both ways). An unparseable string → None.
+fn de_opt_flexible_i64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        N(i64),
+        S(String),
+    }
+    Ok(match Option::<NumOrStr>::deserialize(d)? {
+        None => None,
+        Some(NumOrStr::N(n)) => Some(n),
+        Some(NumOrStr::S(s)) => s.trim().parse().ok(),
+    })
+}
+
 impl TelegramClaims {
-    /// Extract Telegram's claims from a verified token body. A body missing the
-    /// numeric `id` is a malformed token (401).
+    /// Extract Telegram's claims from a verified token body. The subject is the `id`
+    /// claim when present (number or string), else the OIDC `sub`; a token carrying
+    /// neither is unidentifiable (401).
     pub fn from_claims(claims: serde_json::Value) -> Result<Self, AppError> {
         let c: RawTelegramClaims = serde_json::from_value(claims)
             .map_err(|_| unauthorized("telegram token is missing required claims"))?;
+        let subject = c
+            .id
+            .map(|id| id.to_string())
+            .or_else(|| c.sub.filter(|s| !s.trim().is_empty()))
+            .ok_or_else(|| unauthorized("telegram token has neither id nor sub"))?;
         Ok(Self {
-            id: c.id,
+            subject,
             name: c.name.filter(|n| !n.trim().is_empty()),
             preferred_username: c.preferred_username.filter(|u| !u.trim().is_empty()),
             picture: c.picture,
         })
     }
 
-    /// Stable identity subject for `auth_identities` (the Telegram user id).
+    /// Stable identity subject for `auth_identities`.
     pub fn subject(&self) -> String {
-        self.id.to_string()
+        self.subject.clone()
     }
 
     /// A human display name: the profile `name`, else `@preferred_username`, else
@@ -620,9 +651,40 @@ mod tests {
             .verify_with_jwk(&token, &ec_jwk())
             .expect("verify ES256");
         let claims = TelegramClaims::from_claims(value).expect("extract");
-        assert_eq!(claims.id, 987654321);
         assert_eq!(claims.subject(), "987654321"); // the Telegram user id, not sub
         assert_eq!(claims.display_name().as_deref(), Some("Ann Telegram"));
+    }
+
+    #[test]
+    fn telegram_id_claim_accepted_as_string() {
+        // Telegram serializes the user id as a JSON string in real tokens; the
+        // subject is still that id, unchanged (not the opaque `sub`).
+        let mut claims = tg_claims(0);
+        claims["id"] = serde_json::json!("987654321"); // string, not number
+        let token = sign_es256(claims);
+        let value = telegram_verifier()
+            .verify_with_jwk(&token, &ec_jwk())
+            .expect("verify");
+        assert_eq!(
+            TelegramClaims::from_claims(value).expect("extract").subject(),
+            "987654321"
+        );
+    }
+
+    #[test]
+    fn telegram_subject_falls_back_to_sub_when_id_absent() {
+        // A token carrying only the standard OIDC `sub` still identifies the user.
+        let mut claims = tg_claims(0);
+        claims.as_object_mut().unwrap().remove("id");
+        claims["sub"] = serde_json::json!("oidc-sub-xyz");
+        let token = sign_es256(claims);
+        let value = telegram_verifier()
+            .verify_with_jwk(&token, &ec_jwk())
+            .expect("verify");
+        assert_eq!(
+            TelegramClaims::from_claims(value).expect("extract").subject(),
+            "oidc-sub-xyz"
+        );
     }
 
     #[test]
@@ -632,7 +694,10 @@ mod tests {
         let value = telegram_verifier()
             .verify_with_jwk(&token, &ed_jwk())
             .expect("verify EdDSA");
-        assert_eq!(TelegramClaims::from_claims(value).expect("extract").id, 42);
+        assert_eq!(
+            TelegramClaims::from_claims(value).expect("extract").subject(),
+            "42"
+        );
     }
 
     #[test]
@@ -673,14 +738,14 @@ mod tests {
     #[test]
     fn telegram_display_name_falls_back_to_username() {
         let claims = TelegramClaims {
-            id: 5,
+            subject: "5".to_string(),
             name: Some("  ".to_string()), // blank → skipped
             preferred_username: Some("nick".to_string()),
             picture: None,
         };
         assert_eq!(claims.display_name().as_deref(), Some("@nick"));
         let none = TelegramClaims {
-            id: 6,
+            subject: "6".to_string(),
             name: None,
             preferred_username: None,
             picture: None,
