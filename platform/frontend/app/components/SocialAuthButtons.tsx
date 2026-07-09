@@ -65,9 +65,12 @@ function GoogleButton({
   onCredential: (credential: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Keep the callback in a ref so re-renders don't re-init the GIS button.
+  // Keep the latest callback in a ref so re-renders don't re-init the GIS button.
+  // Assigned in an effect (never during render) per react-hooks/refs.
   const cb = useRef(onCredential);
-  cb.current = onCredential;
+  useEffect(() => {
+    cb.current = onCredential;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -110,8 +113,11 @@ function TelegramButton({
   onAuth: (user: TelegramWidgetUser) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Latest callback in a ref (assigned in an effect, not during render).
   const cb = useRef(onAuth);
-  cb.current = onAuth;
+  useEffect(() => {
+    cb.current = onAuth;
+  });
 
   useEffect(() => {
     window.onTelegramAuth = (user) => cb.current(user);
