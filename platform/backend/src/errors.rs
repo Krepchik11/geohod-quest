@@ -41,6 +41,11 @@ pub enum AppError {
     /// Rate limit exceeded — e.g. the identify email-existence probe. (429)
     #[error("too many requests: {0}")]
     TooManyRequests(String),
+
+    /// A feature is not configured on this deployment — e.g. a social sign-in
+    /// endpoint whose provider secret is unset (fail-closed). (501)
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
 }
 
 impl IntoResponse for AppError {
@@ -58,6 +63,7 @@ impl IntoResponse for AppError {
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
+            AppError::NotImplemented(msg) => (StatusCode::NOT_IMPLEMENTED, msg),
         };
 
         (status, Json(json!({ "error": message }))).into_response()

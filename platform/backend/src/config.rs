@@ -30,6 +30,18 @@ pub struct AppConfig {
     pub mail_from: String,
     /// Public frontend origin used in emailed links (reset/confirm).
     pub frontend_base: String,
+    /// Google OAuth client id ("Sign in with Google"). `None` (env
+    /// `GOOGLE_CLIENT_ID` unset) → `/api/auth/google` is disabled (501, fail-closed).
+    /// The ID token's `aud` MUST equal this value.
+    pub google_client_id: Option<String>,
+    /// Telegram bot token, used as the HMAC secret for Login Widget verification.
+    /// `None` (env `TELEGRAM_BOT_TOKEN` unset) → `/api/auth/telegram` is disabled
+    /// (501, fail-closed). Secret — never sent to the client.
+    pub telegram_bot_token: Option<String>,
+    /// Telegram bot username the Login Widget mounts (`data-telegram-login`).
+    /// Public; surfaced to the frontend via `GET /api/auth/providers` so the button
+    /// only renders when configured.
+    pub telegram_bot_username: Option<String>,
 }
 
 impl AppConfig {
@@ -79,6 +91,14 @@ impl AppConfig {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "http://localhost:3000".to_string());
 
+        let env_opt = |k: &str| std::env::var(k).ok().filter(|s| !s.trim().is_empty());
+        let google_client_id = env_opt("GOOGLE_CLIENT_ID");
+        let telegram_bot_token = env_opt("TELEGRAM_BOT_TOKEN");
+        // Derive the widget username from the bot token when not given explicitly:
+        // a Telegram token is "<bot_id>:<secret>", but the widget needs the @username,
+        // so prefer the explicit var and only fall back to None (button stays hidden).
+        let telegram_bot_username = env_opt("TELEGRAM_BOT_USERNAME");
+
         Ok(Self {
             addr,
             version: env!("CARGO_PKG_VERSION"),
@@ -88,6 +108,9 @@ impl AppConfig {
             smtp_url,
             mail_from,
             frontend_base,
+            google_client_id,
+            telegram_bot_token,
+            telegram_bot_username,
         })
     }
 }
