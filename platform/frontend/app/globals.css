@@ -493,14 +493,21 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .af-sent b { font-size:16px; }
 .af-sent p { font-size:13px; line-height:1.55; color:var(--muted-2); }
 
-/* Social sign-in (Google + Telegram) — buttons + "or by email" divider. The
-   provider buttons are rendered by the providers themselves (Google GIS pill,
-   Telegram widget iframe); we just center them and give the block consistent
-   rhythm with the email form below. */
+/* Social sign-in (Google + Telegram) — buttons + "or by email" divider. Google
+   renders its own GIS pill; the Telegram button is ours (a real <button> that
+   opens the OIDC popup via Telegram.Login.auth). We center both and give the
+   block consistent rhythm with the email form below. */
 .af-social { display:flex; flex-direction:column; gap:12px; }
 .af-social__buttons { display:flex; flex-direction:column; align-items:center; gap:10px; }
 .social-btn { display:flex; justify-content:center; align-items:center; width:100%; min-height:44px; }
 .social-btn iframe { margin:0 !important; }
+.social-btn--telegram { gap:10px; max-width:400px; padding:0 18px; border:0; border-radius:22px;
+  background:#29A9EB; color:#fff; font:inherit; font-weight:600; font-size:15px; cursor:pointer;
+  transition:background .15s ease; }
+.social-btn--telegram:hover:not(:disabled) { background:#1e97d6; }
+.social-btn--telegram:disabled { opacity:.6; cursor:default; }
+.social-btn__tg-glyph { flex:none; width:20px; height:20px;
+  background:url("/assets/icons/c/ic-telegram-plane--white.svg") no-repeat center / contain; }
 .af-social__error { text-align:center; }
 .af-divider { display:flex; align-items:center; gap:12px; margin:2px 0; color:var(--muted); font-size:12px; }
 .af-divider::before, .af-divider::after { content:""; flex:1; height:1px; background:var(--border); }

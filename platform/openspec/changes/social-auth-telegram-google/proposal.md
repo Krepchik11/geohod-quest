@@ -23,14 +23,17 @@ zero data migration — exactly like email registration does today).
   email (email can change). `email` + `email_verified` tell us when Google is
   authoritative for the address.
 
-**Telegram — Login Widget (HMAC).**
-- Widget returns `{id, first_name, last_name?, username?, photo_url?, auth_date, hash}`.
-  (core.telegram.org/widgets/login + /widgets/login-legacy)
-- Verify: `secret_key = SHA256(bot_token)`;
-  `data_check_string` = every field except `hash`, `key=value` sorted
-  alphabetically, joined by `\n`; check
-  `hex(HMAC_SHA256(data_check_string, secret_key)) == hash` (constant-time).
-  Reject stale `auth_date` (> 24h). Telegram provides **no email**.
+**Telegram — OpenID Connect (`telegram-login.js`).**
+- The frontend loads `oauth.telegram.org/js/telegram-login.js` and calls
+  `Telegram.Login.auth({client_id, scope:['profile']}, cb)`; the popup returns an
+  **ID token (JWT)**. (core.telegram.org/bots/telegram-login — the OIDC login that
+  replaces the legacy HMAC Login Widget.)
+- The token yields an **ID token (JWT)**; the backend MUST verify it against
+  Telegram's JWKS (`oauth.telegram.org/.well-known/jwks.json`, key chosen by `kid`,
+  algorithm from that key — RS256/ES256/EdDSA), require `aud == bot client id`,
+  `iss == https://oauth.telegram.org`, unexpired `exp`. The stable subject is the
+  `id` claim (Telegram user id). Telegram provides **no email**. No bot token or
+  secret is needed — verification is against the public JWKS.
 
 **Account linking (Auth0 / Firebase / Cognito guidance).**
 - Model identities separately from the account; one account, many linked
@@ -46,15 +49,15 @@ zero data migration — exactly like email registration does today).
   subject) → player_id`** table stores linked Google/Telegram identities
   (email/password stays represented by the existing `users` columns). One account
   can hold email + Google + Telegram at once.
-- **Backend:** a pure `social` module (Google ID-token verify with a cached JWKS
-  provider; Telegram HMAC verify), tri-layer store methods
+- **Backend:** a pure `social` module (one generic `OidcVerifier` with a cached
+  JWKS provider, instantiated for Google and Telegram), tri-layer store methods
   (`find_identity`/`create_identity`/`identities_for_player`/`delete_identity`/
   `create_social_account`), migration `0008`, and two routes
   `POST /api/auth/google` and `POST /api/auth/telegram`. Both **link-or-create**:
   existing identity → login to its account; else logged-in caller → link; else
   Google-verified-email match → link to that email account; else attach to the
   caller's anonymous `player_id` (coins/grants preserved). Fail closed when the
-  provider is unconfigured (no `GOOGLE_CLIENT_ID` / `TELEGRAM_BOT_TOKEN`).
+  provider is unconfigured (no `GOOGLE_CLIENT_ID` / `TELEGRAM_CLIENT_ID`).
 - **Frontend:** Google + Telegram buttons on the email-first auth page (email
   stays primary; social sits above a divider as the fast path), a `/api/players/me`
   that lists linked methods, and a Profile "Способы входа" block to link/unlink.
@@ -74,12 +77,11 @@ in-repo call sites are updated in this change.
 
 ## Impact
 
-- **Backend:** `Cargo.toml` (+`hmac`, +`jsonwebtoken`, +`attohttpc` — all already
-  compiled transitively, ring-based TLS, no new heavy deps), `src/social.rs`
-  (new), `src/store.rs`, `src/pg_store.rs`, `src/config.rs`, `src/main.rs`,
-  `migrations/0008_social_auth.sql`.
+- **Backend:** `Cargo.toml` (+`jsonwebtoken`, +`attohttpc` — ring-based, no new
+  heavy deps), `src/social.rs` (new), `src/store.rs`, `src/pg_store.rs`,
+  `src/config.rs`, `src/main.rs`, `migrations/0008_social_auth.sql`.
 - **Frontend:** `lib/api.ts`, `lib/identity.ts`, `app/auth/page.tsx`,
-  `app/profile/page.tsx`, styles, plus a small Telegram-widget loader.
+  `app/profile/page.tsx`, styles, plus a small Telegram OIDC (`telegram-login.js`) loader.
 - **Tests:** unit tests for both verifiers (TDD), store parity (InMemory + Pg),
   route tests for link/create/collision, frontend vitest for the new client
   calls; `cargo test`, `npm run test|lint|build`.

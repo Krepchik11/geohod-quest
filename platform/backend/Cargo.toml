@@ -15,9 +15,8 @@ base64 = "0.22"
 bytes = "1"
 dotenvy = "0.15.7"
 hex = "0.4.3"
-# HMAC-SHA256 for Telegram Login Widget verification (constant-time verify_slice).
-hmac = "0.12"
-# RS256 verification of Google Identity Services ID tokens (uses ring, already in tree).
+# OIDC ID-token verification for social sign-in (Google + Telegram). RS256/ES256/
+# EdDSA via ring — no new TLS/crypto stack. Telegram advertises all three.
 jsonwebtoken = "9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }

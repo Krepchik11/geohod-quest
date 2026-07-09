@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async headers() {
+    // Telegram's telegram-login.js completes the OIDC login through a popup and
+    // talks to it via window.opener. A `Cross-Origin-Opener-Policy: same-origin`
+    // header would sever that channel and break the login; `same-origin-allow-popups`
+    // keeps cross-origin isolation for the page while letting the auth popup work.
+    // (core.telegram.org/bots/telegram-login — "Using the Telegram Login library".)
+    return [
+      {
+        source: '/:path*',
+        headers: [{ key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' }],
+      },
+    ];
+  },
   async redirects() {
     return [
       {
