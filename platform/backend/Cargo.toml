@@ -6,11 +6,19 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 argon2 = "0.5.3"
+# Blocking HTTPS client for fetching Google's JWKS (social auth). Already compiled
+# transitively via rust-s3/aws-creds with the SAME rustls(webpki-roots) feature, so
+# this adds no new build cost and keeps the ring-based TLS stack (no aws-lc/openssl).
+attohttpc = { version = "0.28", default-features = false, features = ["tls-rustls-webpki-roots", "json"] }
 axum = { version = "0.8.9", features = ["macros"] }
 base64 = "0.22"
 bytes = "1"
 dotenvy = "0.15.7"
 hex = "0.4.3"
+# HMAC-SHA256 for Telegram Login Widget verification (constant-time verify_slice).
+hmac = "0.12"
+# RS256 verification of Google Identity Services ID tokens (uses ring, already in tree).
+jsonwebtoken = "9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
 # S3-compatible client for Cloudflare R2 media storage (rust-s3; lib name `s3`).

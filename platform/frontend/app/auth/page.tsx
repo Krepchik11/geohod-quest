@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../SiteHeader';
+import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api } from '../../lib/api';
 import {
   anonymousPlayerId,
@@ -205,7 +206,7 @@ export default function AuthPage() {
         <div className="auth-wrap">
           <div className="af-card card">
             <h2 className="af-title">Вы вошли</h2>
-            <p className="af-sub"><b>{session.email}</b><br />Покупки и монеты привязаны к аккаунту — войдите с любого устройства.</p>
+            <p className="af-sub"><b>{session.email ?? session.display_name ?? 'Аккаунт подключён'}</b><br />Покупки и монеты привязаны к аккаунту — войдите с любого устройства.</p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Link className="btn btn--md" href="/profile">Мой профиль</Link>
               <Link className="btn btn--md btn--secondary" href="/my-quests">Мои квесты</Link>
@@ -229,6 +230,10 @@ export default function AuthPage() {
             <>
               <h2 className="af-title">Вход или регистрация</h2>
               <p className="af-sub">Аккаунт сохранит покупки, монеты и прогресс при смене устройства.</p>
+              {/* Fast path first: one tap with Google or Telegram. Each button
+                  appears only when the server has that provider configured; the
+                  "или по почте" divider follows only when a button is shown. */}
+              <SocialAuthButtons onSession={applySession} onError={setError} dividerLabel="или по почте" />
               <label className="af-field">
                 <span className="af-field__label">Email</span>
                 <span className="af-field__wrap">
