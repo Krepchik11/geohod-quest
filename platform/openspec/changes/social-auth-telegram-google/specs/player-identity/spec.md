@@ -16,12 +16,12 @@
 ## ADDED Requirements
 
 ### Requirement: Social sign-in (Google, Telegram) reaches the same player_id via verified provider identities
-The server SHALL support `POST /api/auth/google` (`{credential, player_id}`, `credential` = a Google Identity Services ID token) and `POST /api/auth/telegram` (`{player_id, id, auth_date, hash, first_name?, last_name?, username?, photo_url?}`, the Telegram Login Widget payload). Each provider SHALL be verified server-side before any account effect:
+The server SHALL support `POST /api/auth/google` (`{credential, player_id}`, `credential` = a Google Identity Services ID token) and `POST /api/auth/telegram` (`{id_token, player_id}`, `id_token` = the OpenID Connect ID token returned by Telegram's `telegram-login.js`). Both providers are OIDC ID tokens verified server-side against the provider's published JWKS before any account effect:
 
-- **Google:** the ID token signature SHALL be verified against Google's published JWKS (keys cached and refreshed per the response `Cache-Control`); `aud` SHALL equal the configured client id; `iss` SHALL be `accounts.google.com` or `https://accounts.google.com`; `exp` SHALL NOT have passed. The stable identity subject is the token `sub`.
-- **Telegram:** the payload SHALL verify as `hex(HMAC_SHA256(data_check_string, SHA256(bot_token))) == hash`, where `data_check_string` is every field except `hash` as `key=value` sorted alphabetically and joined by `\n`, compared in constant time; `auth_date` older than 24h SHALL be rejected. The stable identity subject is the Telegram `id`.
+- **Google:** the ID token signature SHALL be verified against Google's JWKS (keys cached and refreshed per the response `Cache-Control`); `aud` SHALL equal the configured client id; `iss` SHALL be `accounts.google.com` or `https://accounts.google.com`; `exp` SHALL NOT have passed. The stable identity subject is the token `sub`.
+- **Telegram:** the ID token signature SHALL be verified against Telegram's JWKS (`https://oauth.telegram.org/.well-known/jwks.json`), selecting the key by the token's `kid` and verifying with that key's algorithm (Telegram advertises RS256/ES256/EdDSA/ES256K); `aud` SHALL equal the configured bot client id; `iss` SHALL be `https://oauth.telegram.org`; `exp` SHALL NOT have passed. The stable identity subject is the `id` claim (the Telegram user id — the same value the legacy widget keyed on, so existing identities survive the switch). Telegram provides no email.
 
-Each provider SHALL be fail-closed: when its secret is unconfigured (`GOOGLE_CLIENT_ID` / `TELEGRAM_BOT_TOKEN` unset) the endpoint SHALL respond 501 and perform no account effect.
+Each provider SHALL be fail-closed: when its client id is unconfigured (`GOOGLE_CLIENT_ID` / `TELEGRAM_CLIENT_ID` unset) the endpoint SHALL respond 501 and perform no account effect.
 
 Resolution SHALL be link-or-create, and SHALL preserve the anonymous player_id (zero data migration) whenever it creates:
 1. If the verified `(provider, subject)` already maps to an account, return a fresh session for THAT account (login from any device).
@@ -32,7 +32,7 @@ Resolution SHALL be link-or-create, and SHALL preserve the anonymous player_id (
 Every successful call SHALL return an `AuthResponse` (`player_id`, `email` nullable, `display_name`, `role`, `token`).
 
 #### Scenario: Telegram sign-in on a fresh anonymous device creates an account keyed to the device id
-- **WHEN** an anonymous device (with coins from play) posts a valid Telegram Login Widget payload to `/api/auth/telegram` with its `dev:<uuid>` player_id
+- **WHEN** an anonymous device (with coins from play) posts a valid Telegram OIDC `id_token` to `/api/auth/telegram` with its `dev:<uuid>` player_id
 - **THEN** an account is created with that same player_id, no email, a display name from the Telegram profile, and a linked `telegram` identity; a session is returned; the device's coins and grants remain intact.
 
 #### Scenario: Google sign-in from a second device returns the existing account
@@ -40,11 +40,11 @@ Every successful call SHALL return an `AuthResponse` (`player_id`, `email` nulla
 - **THEN** device B receives device A's player_id and a fresh session (the identity already mapped), not a new account.
 
 #### Scenario: Forged or stale provider payloads are rejected with no account effect
-- **WHEN** `/api/auth/telegram` receives a payload whose `hash` does not verify, or whose `auth_date` is older than 24h, or `/api/auth/google` receives a token failing signature/`aud`/`iss`/`exp` checks
+- **WHEN** `/api/auth/telegram` or `/api/auth/google` receives an ID token failing signature/`aud`/`iss`/`exp` verification
 - **THEN** the server responds 401 and creates no account, identity, or session.
 
 #### Scenario: Provider disabled when unconfigured
-- **WHEN** `GOOGLE_CLIENT_ID` (or `TELEGRAM_BOT_TOKEN`) is unset and the corresponding endpoint is called
+- **WHEN** `GOOGLE_CLIENT_ID` (or `TELEGRAM_CLIENT_ID`) is unset and the corresponding endpoint is called
 - **THEN** the server responds 501 and performs no account effect.
 
 ### Requirement: An account exposes its linked sign-in methods and can link/unlink providers

@@ -74,20 +74,32 @@ struct AppState {
     rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
     /// Google ID-token verifier (holds the cached JWKS). `Some` only when
     /// `GOOGLE_CLIENT_ID` is configured; `None` disables `/api/auth/google` (501).
-    google: Option<Arc<social::GoogleVerifier>>,
+    google: Option<Arc<social::OidcVerifier>>,
+    /// Telegram OIDC ID-token verifier (holds the cached JWKS). `Some` only when
+    /// `TELEGRAM_CLIENT_ID` is configured; `None` disables `/api/auth/telegram` (501).
+    telegram: Option<Arc<social::OidcVerifier>>,
 }
 
 /// Build the Google verifier when a client id is configured (fail-closed otherwise).
-fn build_google_verifier(config: &AppConfig) -> Option<Arc<social::GoogleVerifier>> {
+fn build_google_verifier(config: &AppConfig) -> Option<Arc<social::OidcVerifier>> {
     config
         .google_client_id
         .as_ref()
-        .map(|id| Arc::new(social::GoogleVerifier::new(id.clone())))
+        .map(|id| Arc::new(social::OidcVerifier::google(id.clone())))
+}
+
+/// Build the Telegram verifier when a bot client id is configured (fail-closed).
+fn build_telegram_verifier(config: &AppConfig) -> Option<Arc<social::OidcVerifier>> {
+    config
+        .telegram_client_id
+        .as_ref()
+        .map(|id| Arc::new(social::OidcVerifier::telegram(id.clone())))
 }
 
 fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     let mailer = mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from);
     let google = build_google_verifier(&config);
+    let telegram = build_telegram_verifier(&config);
     AppState {
         config,
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
@@ -101,6 +113,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
         google,
+        telegram,
     }
 }
 
@@ -1538,11 +1551,6 @@ async fn login_handler(
 
 // ============ Social sign-in (Google, Telegram) ============
 
-/// Max age of a Telegram Login Widget payload we accept (replay window). 24h is
-/// the common recommendation — long enough for a slow multi-tab login, short
-/// enough that a leaked-but-old payload cannot be reused indefinitely.
-const TELEGRAM_MAX_AUTH_AGE_SECS: u64 = 24 * 3600;
-
 /// A verified provider identity, provider-agnostic, ready for link-or-create.
 struct SocialIdentity {
     provider: &'static str,
@@ -1571,7 +1579,8 @@ async fn google_auth_handler(
     let verifier = state.google.clone().ok_or_else(|| {
         AppError::NotImplemented("google sign-in is not configured on this server".into())
     })?;
-    let claims = verifier.verify(&req.credential, store::now_secs()).await?;
+    let token = verifier.verify(&req.credential, store::now_secs()).await?;
+    let claims = social::GoogleClaims::from_claims(token)?;
     let ident = SocialIdentity {
         provider: auth::PROVIDER_GOOGLE,
         subject: claims.sub,
@@ -1584,14 +1593,12 @@ async fn google_auth_handler(
         .map(Json)
 }
 
-/// POST /api/auth/telegram — the Login Widget payload + `player_id`. Fail-closed
-/// (501) when unconfigured. `#[serde(flatten)]` lifts the widget's flat fields
-/// (id, first_name, …, hash) alongside our `player_id`.
+/// POST /api/auth/telegram — `{id_token, player_id}` where `id_token` is the OIDC
+/// JWT that `telegram-login.js` returns. Fail-closed (501) when unconfigured.
 #[derive(serde::Deserialize)]
 struct TelegramAuthRequest {
+    id_token: String,
     player_id: String,
-    #[serde(flatten)]
-    tg: social::TelegramAuth,
 }
 
 async fn telegram_auth_handler(
@@ -1599,17 +1606,17 @@ async fn telegram_auth_handler(
     headers: HeaderMap,
     Json(req): Json<TelegramAuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    let bot_token = state.config.telegram_bot_token.clone().ok_or_else(|| {
+    let verifier = state.telegram.clone().ok_or_else(|| {
         AppError::NotImplemented("telegram login is not configured on this server".into())
     })?;
-    req.tg
-        .verify(&bot_token, store::now_secs(), TELEGRAM_MAX_AUTH_AGE_SECS)?;
+    let token = verifier.verify(&req.id_token, store::now_secs()).await?;
+    let claims = social::TelegramClaims::from_claims(token)?;
     let ident = SocialIdentity {
         provider: auth::PROVIDER_TELEGRAM,
-        subject: req.tg.subject(),
+        subject: claims.subject(),
         email: None,
         email_verified: false,
-        display_name: req.tg.display_name(),
+        display_name: claims.display_name(),
     };
     complete_social_login(&state, &headers, &req.player_id, ident)
         .await
@@ -1739,12 +1746,13 @@ async fn issue_session_for(state: &AppState, player_id: &str) -> Result<AuthResp
 }
 
 /// GET /api/auth/providers — which social buttons the client should render, and
-/// the PUBLIC ids they need (Google client id for GIS, Telegram bot username for
-/// the widget). Both `null` when unconfigured, so the UI hides the button.
+/// the PUBLIC client ids they need (Google client id for GIS, Telegram bot client
+/// id for `Telegram.Login.init`). Both `null` when unconfigured, so the UI hides
+/// the button.
 async fn auth_providers_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "google_client_id": state.config.google_client_id,
-        "telegram_bot": state.config.telegram_bot_username,
+        "telegram_client_id": state.config.telegram_client_id,
     }))
 }
 
@@ -2460,6 +2468,7 @@ async fn main() -> anyhow::Result<()> {
                 "storage: PostgreSQL (migrations up to date)"
             );
             let google = build_google_verifier(&config);
+            let telegram = build_telegram_verifier(&config);
             AppState {
                 config: config.clone(),
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
@@ -2471,6 +2480,7 @@ async fn main() -> anyhow::Result<()> {
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 google,
+                telegram,
             }
         }
         Err(_) => {
@@ -2569,8 +2579,7 @@ mod tests {
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
-            telegram_bot_token: None,
-            telegram_bot_username: None,
+            telegram_client_id: None,
         }))
     }
 
@@ -2586,8 +2595,7 @@ mod tests {
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
-            telegram_bot_token: None,
-            telegram_bot_username: None,
+            telegram_client_id: None,
         });
         let (m, outbox) = mailer::Mailer::recorder();
         state.mailer = m;
@@ -2606,8 +2614,7 @@ mod tests {
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
-            telegram_bot_token: None,
-            telegram_bot_username: None,
+            telegram_client_id: None,
         }))
     }
 
@@ -2752,8 +2759,7 @@ mod tests {
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
-            telegram_bot_token: None,
-            telegram_bot_username: None,
+            telegram_client_id: None,
         }));
 
         let preflight = |origin: &'static str| {
@@ -2814,12 +2820,12 @@ mod tests {
     // ===== Social sign-in (Telegram end-to-end; Google verifier unit-tested in
     // ===== social.rs, its route shares complete_social_login with Telegram) =====
 
-    const TG_TEST_TOKEN: &str = "111:telegram-test-token";
-
-    /// Router with Telegram configured (Google stays off — its verifier needs live
-    /// JWKS, covered by unit tests). Mirrors `test_app` otherwise.
+    /// Router with Telegram configured via a seeded OIDC verifier (Google stays off
+    /// — its verifier needs live JWKS, covered by unit tests). The verifier's JWKS
+    /// cache is pre-seeded with a local key so `telegram_id_token`s verify offline
+    /// over the REAL signature/aud/iss/exp path. Mirrors `test_app` otherwise.
     fn test_app_social() -> Router {
-        build_router(test_state(AppConfig {
+        let mut state = test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
@@ -2829,38 +2835,24 @@ mod tests {
             mail_from: "test@geohod.test".to_string(),
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
-            telegram_bot_token: Some(TG_TEST_TOKEN.to_string()),
-            telegram_bot_username: Some("geohodbot".to_string()),
-        }))
+            telegram_client_id: Some(social::test_support::TELEGRAM_CLIENT_ID.to_string()),
+        });
+        state.telegram = Some(Arc::new(social::test_support::seeded_telegram_verifier()));
+        build_router(state)
     }
 
-    /// Compute a real Telegram Login Widget `hash` for a minimal payload so tests
-    /// exercise the true verification path (not a stub).
-    fn tg_hash(token: &str, id: i64, first_name: &str, auth_date: i64) -> String {
-        use hmac::{Hmac, Mac};
-        use sha2::{Digest, Sha256};
-        let dcs = format!("auth_date={auth_date}\nfirst_name={first_name}\nid={id}");
-        let secret = Sha256::digest(token.as_bytes());
-        let mut mac = <Hmac<Sha256>>::new_from_slice(&secret).expect("hmac");
-        mac.update(dcs.as_bytes());
-        hex::encode(mac.finalize().into_bytes())
-    }
-
-    fn tg_payload(player_id: &str, id: i64, first_name: &str) -> Value {
-        let auth_date = store::now_secs() as i64;
-        let hash = tg_hash(TG_TEST_TOKEN, id, first_name, auth_date);
+    /// A `/api/auth/telegram` request body: a locally-signed OIDC id_token (name is
+    /// the profile display name) plus the caller's claimed player_id.
+    fn tg_payload(player_id: &str, id: i64, name: &str) -> Value {
         json!({
             "player_id": player_id,
-            "id": id,
-            "first_name": first_name,
-            "auth_date": auth_date,
-            "hash": hash,
+            "id_token": social::test_support::telegram_id_token(id, name, None, 3600),
         })
     }
 
     #[tokio::test]
     async fn telegram_disabled_when_unconfigured() {
-        // test_app() has no telegram token → fail-closed 501, no account effect.
+        // test_app() has no telegram verifier → fail-closed 501, no account effect.
         let app = test_app();
         let (st, _) = post_json(&app, "/api/auth/telegram", tg_payload("dev:x", 1, "A")).await;
         assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
@@ -2879,22 +2871,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telegram_forged_hash_is_rejected() {
+    async fn telegram_invalid_token_is_rejected() {
+        // A structurally-broken / unsigned token never verifies against the JWKS.
         let app = test_app_social();
-        let mut payload = tg_payload("dev:a", 42, "Ann");
-        payload["hash"] = json!("00".repeat(32)); // wrong hash
+        let payload = json!({ "player_id": "dev:a", "id_token": "not.a.valid.jwt" });
         let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn telegram_stale_auth_date_is_rejected() {
+    async fn telegram_expired_token_is_rejected() {
+        // A correctly-signed token whose exp has passed is rejected (replay window).
         let app = test_app_social();
-        let stale = 1_600_000_000i64; // year 2020, far beyond the 24h window
-        let hash = tg_hash(TG_TEST_TOKEN, 7, "Old", stale);
         let payload = json!({
-            "player_id": "dev:a", "id": 7, "first_name": "Old",
-            "auth_date": stale, "hash": hash,
+            "player_id": "dev:a",
+            "id_token": social::test_support::telegram_id_token(7, "Old", None, -3600),
         });
         let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
@@ -3018,7 +3009,7 @@ mod tests {
         let (st, body) = get_json_h(&app, "/api/auth/providers", &[]).await;
         assert_eq!(st, StatusCode::OK);
         assert!(body["google_client_id"].is_null());
-        assert_eq!(body["telegram_bot"], "geohodbot");
+        assert_eq!(body["telegram_client_id"], social::test_support::TELEGRAM_CLIENT_ID);
     }
 
     async fn post_json_h(
@@ -5713,8 +5704,7 @@ mod tests {
                 mail_from: "test@geohod.test".to_string(),
                 frontend_base: "http://localhost:3000".to_string(),
                 google_client_id: None,
-                telegram_bot_token: None,
-                telegram_bot_username: None,
+                telegram_client_id: None,
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
@@ -5725,6 +5715,7 @@ mod tests {
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
             google: None,
+            telegram: None,
         });
         (router, outbox)
     }

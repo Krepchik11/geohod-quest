@@ -695,7 +695,6 @@ dependencies = [
  "bytes",
  "dotenvy",
  "hex",
- "hmac",
  "http-body-util",
  "image",
  "jsonwebtoken",

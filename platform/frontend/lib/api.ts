@@ -12,23 +12,12 @@ import { authHeaders, type Session } from './identity';
 
 /** Which social sign-in providers this deployment has configured. Both `null`
  *  when unset, so the client hides the corresponding button (fail-closed UI that
- *  mirrors the fail-closed 501 backend). `google_client_id` is the public GIS
- *  client id; `telegram_bot` is the public bot username the widget mounts. */
+ *  mirrors the fail-closed 501 backend). Both are PUBLIC client ids: `google_client_id`
+ *  for Google Identity Services; `telegram_client_id` (the bot's Client ID) for
+ *  `Telegram.Login.init`. */
 export interface AuthProviders {
   google_client_id: string | null;
-  telegram_bot: string | null;
-}
-
-/** The exact object the Telegram Login Widget hands its `data-onauth` callback.
- *  Forwarded verbatim to POST /api/auth/telegram, which verifies its HMAC `hash`. */
-export interface TelegramWidgetUser {
-  id: number;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-  photo_url?: string;
-  auth_date: number;
-  hash: string;
+  telegram_client_id: string | null;
 }
 
 /**
@@ -372,7 +361,7 @@ export const api = {
   // a Session exactly like register/login.
   authGoogle: (body: { credential: string; player_id: string }) =>
     apiFetch<Session>('/api/auth/google', { method: 'POST', body: JSON.stringify(body) }),
-  authTelegram: (body: TelegramWidgetUser & { player_id: string }) =>
+  authTelegram: (body: { id_token: string; player_id: string }) =>
     apiFetch<Session>('/api/auth/telegram', { method: 'POST', body: JSON.stringify(body) }),
   // Unlink a linked social provider (refused server-side if it is the last method).
   authUnlink: (provider: string) =>

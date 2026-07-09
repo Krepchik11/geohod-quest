@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type AuthProviders, type TelegramWidgetUser } from '../../lib/api';
+import { api, type AuthProviders } from '../../lib/api';
 import { anonymousPlayerId, type Session } from '../../lib/identity';
 
 /**
@@ -12,12 +12,15 @@ import { anonymousPlayerId, type Session } from '../../lib/identity';
  * provider is configured (GET /api/auth/providers), mirroring the fail-closed
  * backend, so an unconfigured deployment shows nothing rather than a dead button.
  *
- * Both providers load their own first-party script (no bundler import): Google
- * Identity Services renders the official button and hands us an ID token; the
- * Telegram Login Widget renders its button in an iframe and calls a global with
- * the signed user object. We forward each to the backend, which VERIFIES it
- * before trusting anything, then store the returned session.
+ * Both providers load their own first-party script (no bundler import) and hand us
+ * an OpenID Connect **ID token** (a JWT): Google Identity Services renders the
+ * official button; Telegram's `telegram-login.js` opens a login popup via
+ * `Telegram.Login.auth`. We forward each ID token to the backend, which VERIFIES
+ * it against the provider's JWKS before trusting anything, then store the session.
  */
+
+/** Telegram's OIDC login library (oauth.telegram.org/js/telegram-login.js). */
+const TELEGRAM_LOGIN_JS = 'https://oauth.telegram.org/js/telegram-login.js?5';
 
 /** Load an external script once (deduped by src); resolve when ready. */
 function loadScript(src: string): Promise<void> {
@@ -50,10 +53,22 @@ interface GoogleIdApi {
     };
   };
 }
+/** What `Telegram.Login.auth`'s callback receives (core.telegram.org/bots/telegram-login):
+ *  a success carries the OIDC `id_token`; a cancel/failure carries `error`. */
+interface TelegramAuthResult {
+  id_token?: string;
+  error?: string;
+}
+interface TelegramLoginApi {
+  auth: (
+    opts: { client_id: number; scope?: string[]; lang?: string; nonce?: string },
+    callback: (result: TelegramAuthResult) => void,
+  ) => void;
+}
 declare global {
   interface Window {
     google?: GoogleIdApi;
-    onTelegramAuth?: (user: TelegramWidgetUser) => void;
+    Telegram?: { Login?: TelegramLoginApi };
   }
 }
 
@@ -106,38 +121,58 @@ function GoogleButton({
 }
 
 function TelegramButton({
-  botUsername,
-  onAuth,
+  clientId,
+  onToken,
 }: {
-  botUsername: string;
-  onAuth: (user: TelegramWidgetUser) => void;
+  clientId: string;
+  onToken: (idToken: string) => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  // Latest callback in a ref (assigned in an effect, not during render).
-  const cb = useRef(onAuth);
+  // Latest callback in a ref (assigned in an effect, not during render) so the
+  // popup handler always calls the current onToken without re-loading the script.
+  const cb = useRef(onToken);
   useEffect(() => {
-    cb.current = onAuth;
+    cb.current = onToken;
   });
 
+  // Warm the library on mount; the button enables once `Telegram.Login` is ready.
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    window.onTelegramAuth = (user) => cb.current(user);
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.async = true;
-    script.setAttribute('data-telegram-login', botUsername);
-    script.setAttribute('data-size', 'large');
-    script.setAttribute('data-radius', '20');
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
-    script.setAttribute('data-request-access', 'write');
-    const slot = ref.current;
-    slot?.appendChild(script);
+    let cancelled = false;
+    loadScript(TELEGRAM_LOGIN_JS)
+      .then(() => {
+        if (!cancelled && window.Telegram?.Login) setReady(true);
+      })
+      .catch(() => {
+        /* offline / blocked: the button stays disabled rather than dead */
+      });
     return () => {
-      slot?.replaceChildren();
-      delete window.onTelegramAuth;
+      cancelled = true;
     };
-  }, [botUsername]);
+  }, []);
 
-  return <div className="social-btn social-btn--telegram" ref={ref} />;
+  const login = useCallback(() => {
+    // `Telegram.Login.auth` opens the OIDC popup and calls back with the id_token.
+    // We request only `profile` (identity) — no `write` (bot-messaging) scope.
+    window.Telegram?.Login?.auth(
+      { client_id: Number(clientId), scope: ['profile'], lang: 'ru' },
+      (result) => {
+        if (result?.id_token) cb.current(result.id_token);
+      },
+    );
+  }, [clientId]);
+
+  return (
+    <button
+      type="button"
+      className="social-btn social-btn--telegram"
+      onClick={login}
+      disabled={!ready}
+      aria-busy={!ready}
+    >
+      <span className="social-btn__tg-glyph" aria-hidden="true" />
+      Продолжить с Telegram
+    </button>
+  );
 }
 
 export default function SocialAuthButtons({
@@ -170,7 +205,7 @@ export default function SocialAuthButtons({
         if (!cancelled) setProviders(p);
       })
       .catch(() => {
-        if (!cancelled) setProviders({ google_client_id: null, telegram_bot: null });
+        if (!cancelled) setProviders({ google_client_id: null, telegram_client_id: null });
       });
     return () => {
       cancelled = true;
@@ -202,11 +237,11 @@ export default function SocialAuthButtons({
   );
 
   const handleTelegram = useCallback(
-    (user: TelegramWidgetUser) => {
+    (idToken: string) => {
       setBusy(true);
       setError(null);
       api
-        .authTelegram({ ...user, player_id: anonymousPlayerId() })
+        .authTelegram({ id_token: idToken, player_id: anonymousPlayerId() })
         .then((s) => {
           setBusy(false);
           onSession(s);
@@ -218,7 +253,7 @@ export default function SocialAuthButtons({
 
   const skip = new Set(exclude ?? []);
   const showGoogle = !!providers?.google_client_id && !skip.has('google');
-  const showTelegram = !!providers?.telegram_bot && !skip.has('telegram');
+  const showTelegram = !!providers?.telegram_client_id && !skip.has('telegram');
   if (!showGoogle && !showTelegram) {
     // Nothing configured / already all linked (or still loading): render nothing
     // so no empty "or" divider or "add a method" block appears.
@@ -232,7 +267,7 @@ export default function SocialAuthButtons({
           <GoogleButton clientId={providers!.google_client_id!} onCredential={handleGoogle} />
         )}
         {showTelegram && (
-          <TelegramButton botUsername={providers!.telegram_bot!} onAuth={handleTelegram} />
+          <TelegramButton clientId={providers!.telegram_client_id!} onToken={handleTelegram} />
         )}
       </div>
       {error && <p className="af-error af-social__error">{error}</p>}
