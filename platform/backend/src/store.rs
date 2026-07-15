@@ -17,13 +17,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{UserAccount, UserRecord};
+use crate::coupons::{Coupon, CouponRedemption, CouponUsage, check_redeemable, discount_amount};
 use crate::errors::AppError;
 use crate::facts::{
     Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, project_state,
     semantically_same,
 };
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
-use crate::pg_store::{PgAuthStore, PgConstructorStore, PgFactStore, PgGrantStore};
+use crate::pg_store::{PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgGrantStore};
 
 /// Unix seconds (0 on clock error; informational only).
 pub fn now_secs() -> u64 {
@@ -41,6 +42,11 @@ pub fn now_secs() -> u64 {
 /// (see [`rfc3339_from_unix`]) to keep the dependency surface minimal.
 pub fn now_rfc3339() -> String {
     rfc3339_from_unix(now_secs())
+}
+
+/// Current UTC calendar date, `"YYYY-MM-DD"` (the coupon expiry granularity).
+pub fn today_utc() -> String {
+    now_rfc3339()[..10].to_string()
 }
 
 /// Format Unix seconds as a UTC RFC3339 timestamp. Pure and total.
@@ -787,8 +793,7 @@ impl InMemoryAuthStore {
         }
         self.sessions.retain(|_, p| p != player_id);
         self.auth_tokens.retain(|_, r| r.player_id != player_id);
-        self.identities
-            .retain(|_, i| i.player_id != player_id);
+        self.identities.retain(|_, i| i.player_id != player_id);
         true
     }
 
@@ -1749,6 +1754,262 @@ impl ConstructorStores {
     }
 }
 
+/// In-memory coupon registry + redemption log (the executable spec the
+/// Postgres store mirrors). Redemptions are unique per
+/// `(coupon_id, player_id, quest_id)` — same granularity as access grants —
+/// so a checkout retry never double-consumes a coupon.
+#[derive(Clone, Debug, Default)]
+pub struct InMemoryCouponStore {
+    coupons: HashMap<String, Coupon>,
+    redemptions: Vec<CouponRedemption>,
+}
+
+impl InMemoryCouponStore {
+    /// Create an empty store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn code_taken(&self, code: &str, except_id: &str) -> bool {
+        self.coupons
+            .values()
+            .any(|c| c.code == code && c.coupon_id != except_id)
+    }
+
+    fn usage_of(&self, coupon_id: &str) -> CouponUsage {
+        let mut usage = CouponUsage::default();
+        for r in self.redemptions.iter().filter(|r| r.coupon_id == coupon_id) {
+            usage.used += 1;
+            usage.total_discounted += r.amount_discounted;
+            if usage.last_redeemed_at.as_deref() < Some(r.redeemed_at.as_str()) {
+                usage.last_redeemed_at = Some(r.redeemed_at.clone());
+            }
+        }
+        usage
+    }
+
+    fn used_by(&self, coupon_id: &str, player_id: &str) -> u32 {
+        self.redemptions
+            .iter()
+            .filter(|r| r.coupon_id == coupon_id && r.player_id == player_id)
+            .count() as u32
+    }
+
+    /// Register a new coupon; the code must be unique among all coupons.
+    pub fn create(&mut self, coupon: Coupon) -> Result<Coupon, AppError> {
+        if self.code_taken(&coupon.code, &coupon.coupon_id) {
+            return Err(AppError::Conflict(format!(
+                "купон с кодом '{}' уже существует",
+                coupon.code
+            )));
+        }
+        self.coupons
+            .insert(coupon.coupon_id.clone(), coupon.clone());
+        Ok(coupon)
+    }
+
+    /// Replace the editable fields of an existing coupon (created_at and the
+    /// redemption log are preserved by construction — the handler builds the
+    /// updated record from the stored one).
+    pub fn update(&mut self, coupon: Coupon) -> Result<Coupon, AppError> {
+        if !self.coupons.contains_key(&coupon.coupon_id) {
+            return Err(AppError::NotFound(format!(
+                "unknown coupon '{}'",
+                coupon.coupon_id
+            )));
+        }
+        if self.code_taken(&coupon.code, &coupon.coupon_id) {
+            return Err(AppError::Conflict(format!(
+                "купон с кодом '{}' уже существует",
+                coupon.code
+            )));
+        }
+        self.coupons
+            .insert(coupon.coupon_id.clone(), coupon.clone());
+        Ok(coupon)
+    }
+
+    /// Fetch one coupon by id.
+    pub fn get(&self, coupon_id: &str) -> Option<Coupon> {
+        self.coupons.get(coupon_id).cloned()
+    }
+
+    /// Delete a coupon and its redemption log. Grants stay — «уже применённые
+    /// скидки сохраняются». Returns NotFound for an unknown id.
+    pub fn delete(&mut self, coupon_id: &str) -> Result<(), AppError> {
+        if self.coupons.remove(coupon_id).is_none() {
+            return Err(AppError::NotFound(format!("unknown coupon '{coupon_id}'")));
+        }
+        self.redemptions.retain(|r| r.coupon_id != coupon_id);
+        Ok(())
+    }
+
+    /// All coupons with their folded usage, newest first (admin list).
+    pub fn list_with_usage(&self) -> Vec<(Coupon, CouponUsage)> {
+        let mut rows: Vec<_> = self
+            .coupons
+            .values()
+            .map(|c| (c.clone(), self.usage_of(&c.coupon_id)))
+            .collect();
+        rows.sort_by(|(a, _), (b, _)| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.coupon_id.cmp(&b.coupon_id))
+        });
+        rows
+    }
+
+    /// One coupon with usage (admin detail).
+    pub fn get_with_usage(&self, coupon_id: &str) -> Option<(Coupon, CouponUsage)> {
+        self.coupons
+            .get(coupon_id)
+            .map(|c| (c.clone(), self.usage_of(coupon_id)))
+    }
+
+    /// Redeemability snapshot for the purchase-sheet preview: the coupon (by
+    /// normalized code) plus the counts the pure decision needs.
+    pub fn preview(&self, code: &str, player_id: &str) -> Option<(Coupon, u32, u32)> {
+        let coupon = self.coupons.values().find(|c| c.code == code)?.clone();
+        let used_total = self.usage_of(&coupon.coupon_id).used;
+        let used_by_player = self.used_by(&coupon.coupon_id, player_id);
+        Some((coupon, used_total, used_by_player))
+    }
+
+    /// Atomically re-check and record a redemption (the store owns the whole
+    /// critical section, so the counts cannot move between check and insert).
+    /// A repeat for the same `(coupon, player, quest)` returns the recorded
+    /// redemption unchanged — idempotent, mirroring the grant path.
+    pub fn redeem(
+        &mut self,
+        code: &str,
+        player_id: &str,
+        quest_id: &str,
+        price: i64,
+    ) -> Result<CouponRedemption, AppError> {
+        let coupon = self
+            .coupons
+            .values()
+            .find(|c| c.code == code)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound("промокод не найден".into()))?;
+        if let Some(existing) = self.redemptions.iter().find(|r| {
+            r.coupon_id == coupon.coupon_id && r.player_id == player_id && r.quest_id == quest_id
+        }) {
+            return Ok(existing.clone());
+        }
+        let now = now_rfc3339();
+        let today = &now[..10];
+        let used_total = self.usage_of(&coupon.coupon_id).used;
+        let used_by_player = self.used_by(&coupon.coupon_id, player_id);
+        check_redeemable(&coupon, quest_id, used_total, used_by_player, today)
+            .map_err(|reject| AppError::Conflict(reject.message().into()))?;
+        let redemption = CouponRedemption {
+            coupon_id: coupon.coupon_id.clone(),
+            player_id: player_id.to_string(),
+            quest_id: quest_id.to_string(),
+            amount_discounted: discount_amount(&coupon.discount, price),
+            redeemed_at: now,
+        };
+        self.redemptions.push(redemption.clone());
+        Ok(redemption)
+    }
+}
+
+/// Coupon storage behind the same enum-dispatch seam as the other stores.
+#[derive(Clone, Debug)]
+pub enum CouponStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemoryCouponStore>>),
+    /// Durable PostgreSQL.
+    Postgres(PgCouponStore),
+}
+
+impl CouponStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemoryCouponStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryCouponStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("coupons lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryCouponStore::create`].
+    pub async fn create(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.create(coupon),
+            Self::Postgres(pg) => pg.create(coupon).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::update`].
+    pub async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.update(coupon),
+            Self::Postgres(pg) => pg.update(coupon).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::get`].
+    pub async fn get(&self, coupon_id: &str) -> Result<Option<Coupon>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(coupon_id)),
+            Self::Postgres(pg) => pg.get(coupon_id).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::delete`].
+    pub async fn delete(&self, coupon_id: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.delete(coupon_id),
+            Self::Postgres(pg) => pg.delete(coupon_id).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::list_with_usage`].
+    pub async fn list_with_usage(&self) -> Result<Vec<(Coupon, CouponUsage)>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.list_with_usage()),
+            Self::Postgres(pg) => pg.list_with_usage().await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::get_with_usage`].
+    pub async fn get_with_usage(
+        &self,
+        coupon_id: &str,
+    ) -> Result<Option<(Coupon, CouponUsage)>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_with_usage(coupon_id)),
+            Self::Postgres(pg) => pg.get_with_usage(coupon_id).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::preview`].
+    pub async fn preview(
+        &self,
+        code: &str,
+        player_id: &str,
+    ) -> Result<Option<(Coupon, u32, u32)>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.preview(code, player_id)),
+            Self::Postgres(pg) => pg.preview(code, player_id).await,
+        }
+    }
+
+    /// See [`InMemoryCouponStore::redeem`].
+    pub async fn redeem(
+        &self,
+        code: &str,
+        player_id: &str,
+        quest_id: &str,
+        price: i64,
+    ) -> Result<CouponRedemption, AppError> {
+        match self {
+            Self::InMemory(m) => Self::lock_inmem(m)?.redeem(code, player_id, quest_id, price),
+            Self::Postgres(pg) => pg.redeem(code, player_id, quest_id, price).await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2018,6 +2279,112 @@ mod grant_tests {
                 .len(),
             4
         );
+    }
+}
+
+#[cfg(test)]
+mod coupon_tests {
+    use super::*;
+    use crate::coupons::Discount;
+
+    fn coupon(id: &str, code: &str) -> Coupon {
+        Coupon {
+            coupon_id: id.into(),
+            code: code.into(),
+            discount: Discount::Percent(20),
+            valid_until: None,
+            max_redemptions: None,
+            per_user_limit: Some(1),
+            quest_ids: None,
+            paused: false,
+            created_at: now_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn create_rejects_duplicate_code_update_allows_own() {
+        let mut s = InMemoryCouponStore::new();
+        s.create(coupon("c1", "LETO-20")).expect("first create");
+        let dup = s.create(coupon("c2", "LETO-20"));
+        assert!(matches!(dup, Err(AppError::Conflict(_))), "duplicate code");
+        // Updating c1 keeping its own code is fine; stealing another's is not.
+        s.create(coupon("c2", "OTHER")).expect("second create");
+        s.update(coupon("c1", "LETO-20")).expect("own code kept");
+        let steal = s.update(coupon("c1", "OTHER"));
+        assert!(matches!(steal, Err(AppError::Conflict(_))));
+        let ghost = s.update(coupon("ghost", "GHOST-1"));
+        assert!(matches!(ghost, Err(AppError::NotFound(_))));
+    }
+
+    #[test]
+    fn redeem_records_usage_and_enforces_limits_atomically() {
+        let mut s = InMemoryCouponStore::new();
+        let mut c = coupon("c1", "GEOHOD300");
+        c.discount = Discount::Fixed(300);
+        c.max_redemptions = Some(2);
+        c.per_user_limit = Some(1);
+        s.create(c).expect("create");
+
+        let r1 = s.redeem("GEOHOD300", "p1", "q1", 900).expect("first");
+        assert_eq!(r1.amount_discounted, 300);
+        // Same (coupon, player, quest) is idempotent — no second consumption.
+        let again = s.redeem("GEOHOD300", "p1", "q1", 900).expect("retry");
+        assert_eq!(again, r1);
+        assert_eq!(s.usage_of("c1").used, 1);
+        // Per-user cap: same player, different quest.
+        let per_user = s.redeem("GEOHOD300", "p1", "q2", 900);
+        assert!(matches!(per_user, Err(AppError::Conflict(_))));
+        // Second player takes the last slot; a third is exhausted.
+        s.redeem("GEOHOD300", "p2", "q1", 200).expect("second");
+        let spent = s.redeem("GEOHOD300", "p3", "q1", 900);
+        assert!(matches!(spent, Err(AppError::Conflict(_))), "exhausted");
+        let usage = s.usage_of("c1");
+        assert_eq!(usage.used, 2);
+        assert_eq!(usage.total_discounted, 300 + 200, "fixed clamps to price");
+        assert!(usage.last_redeemed_at.is_some());
+        // Unknown code is NotFound, not Conflict.
+        assert!(matches!(
+            s.redeem("NOPE", "p1", "q1", 100),
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn delete_removes_coupon_and_its_log_list_sorts_newest_first() {
+        let mut s = InMemoryCouponStore::new();
+        let mut old = coupon("c-old", "OLD-1");
+        old.created_at = "2026-01-01T00:00:00Z".into();
+        let mut new = coupon("c-new", "NEW-1");
+        new.created_at = "2026-06-01T00:00:00Z".into();
+        s.create(old).expect("old");
+        s.create(new).expect("new");
+        s.redeem("OLD-1", "p1", "q1", 500).expect("redeem");
+
+        let list = s.list_with_usage();
+        assert_eq!(list[0].0.coupon_id, "c-new", "newest first");
+        assert_eq!(list[1].1.used, 1);
+
+        s.delete("c-old").expect("delete");
+        assert!(s.get("c-old").is_none());
+        assert!(s.preview("OLD-1", "p1").is_none());
+        assert!(matches!(s.delete("c-old"), Err(AppError::NotFound(_))));
+        // The other coupon's log is untouched.
+        assert_eq!(s.list_with_usage().len(), 1);
+    }
+
+    #[test]
+    fn preview_returns_counts_for_the_pure_decision() {
+        let mut s = InMemoryCouponStore::new();
+        let mut c = coupon("c1", "FRIENDS");
+        c.per_user_limit = None;
+        s.create(c).expect("create");
+        s.redeem("FRIENDS", "p1", "q1", 600).expect("r1");
+        s.redeem("FRIENDS", "p2", "q1", 600).expect("r2");
+        let (coupon, total, by_p1) = s.preview("FRIENDS", "p1").expect("known code");
+        assert_eq!(coupon.coupon_id, "c1");
+        assert_eq!(total, 2);
+        assert_eq!(by_p1, 1);
+        assert!(s.preview("MISSING", "p1").is_none());
     }
 }
 

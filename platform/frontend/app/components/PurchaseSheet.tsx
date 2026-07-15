@@ -11,11 +11,10 @@ import { coverCss } from '../../lib/cover';
  * modal on desktop (same DOM; CSS switches). Opened by «Купить» from a shop
  * card (fast-path) or the product page order card.
  *
- * Charging happens ONLY on «Подтвердить», via the existing api.checkout — the
- * sheet is the seam where a real PSP step will slot in later. The promo field
- * feeds the same `coupon_percent` parameter checkout already accepts (codes
- * carry their percent: «GEO-20» → −20%); a PSP-side registry replaces this
- * parsing when real payments land.
+ * Charging happens ONLY on «Подтвердить», via the existing api.checkout. The
+ * promo field is validated SERVER-SIDE against the admin coupon registry
+ * (api.validateCoupon — never consumes); checkout then carries the code and
+ * the backend applies the same discount atomically against the coupon's caps.
  */
 export interface PurchaseSheetQuest {
   quest_id: string;
@@ -26,12 +25,11 @@ export interface PurchaseSheetQuest {
   primary_comic: string | null;
 }
 
-/** Percent from a promo code («GEO-20» → 20); null when the code carries none. */
-export function couponPercent(code: string): number | null {
-  const m = /(\d{1,3})\s*$/.exec(code.trim());
-  if (!m) return null;
-  const n = Number(m[1]);
-  return n >= 1 && n <= 100 ? n : null;
+/** A server-confirmed promo: what the registry priced for THIS quest. */
+interface AppliedPromo {
+  code: string;
+  discountAmount: number;
+  finalPrice: number;
 }
 
 export default function PurchaseSheet({
@@ -47,11 +45,13 @@ export default function PurchaseSheet({
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoCode, setPromoCode] = useState('');
-  const [applied, setApplied] = useState<number | null>(null);
+  const [applied, setApplied] = useState<AppliedPromo | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
   const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle');
 
   const price = quest.price ?? 0;
-  const finalPrice = applied ? Math.round((price * (100 - applied)) / 100) : price;
+  const finalPrice = applied ? applied.finalPrice : price;
   const metaLine = [quest.city, quest.duration, 'доступ навсегда'].filter(Boolean).join(' · ');
 
   const confirm = async () => {
@@ -60,7 +60,7 @@ export default function PurchaseSheet({
       await api.checkout({
         player_id: currentPlayerId(),
         quest_id: quest.quest_id,
-        ...(applied ? { coupon_percent: applied } : {}),
+        ...(applied ? { coupon_code: applied.code } : {}),
       });
       onPurchased();
     } catch {
@@ -68,8 +68,37 @@ export default function PurchaseSheet({
     }
   };
 
-  const applyPromo = () => {
-    setApplied(couponPercent(promoCode));
+  const applyPromo = async () => {
+    const code = promoCode.trim();
+    if (!code) {
+      setApplied(null);
+      setPromoError(null);
+      return;
+    }
+    setPromoChecking(true);
+    try {
+      const verdict = await api.validateCoupon({
+        player_id: currentPlayerId(),
+        quest_id: quest.quest_id,
+        code,
+      });
+      if (verdict.valid) {
+        setApplied({
+          code: verdict.code,
+          discountAmount: verdict.discount_amount,
+          finalPrice: verdict.final_price,
+        });
+        setPromoError(null);
+      } else {
+        setApplied(null);
+        setPromoError(verdict.message);
+      }
+    } catch {
+      setApplied(null);
+      setPromoError('Не удалось проверить промокод — попробуйте ещё раз.');
+    } finally {
+      setPromoChecking(false);
+    }
   };
 
   return (
@@ -103,15 +132,21 @@ export default function PurchaseSheet({
                 placeholder="Промокод"
                 value={promoCode}
                 onChange={(e) => setPromoCode(e.target.value)}
-                disabled={state === 'pending'}
+                disabled={state === 'pending' || promoChecking}
               />
-              <button className="btn btn--secondary btn--md" type="button" onClick={applyPromo} disabled={state === 'pending'}>
-                Применить
+              <button
+                className="btn btn--secondary btn--md"
+                type="button"
+                onClick={() => void applyPromo()}
+                disabled={state === 'pending' || promoChecking}
+              >
+                {promoChecking ? 'Проверяем…' : 'Применить'}
               </button>
             </div>
+            {promoError && <div className="psheet__error">{promoError}</div>}
             {applied != null && (
               <div className="psheet__discount">
-                <span>Промокод −{applied}%</span>
+                <span>Промокод −{applied.discountAmount} ₽</span>
                 <span><s>{price} ₽</s> <b>{finalPrice} ₽</b></span>
               </div>
             )}
