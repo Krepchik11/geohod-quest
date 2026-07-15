@@ -192,6 +192,12 @@ export interface ConstructorQuestWire {
   buyers: number;
   /** Live published snapshot version; null ⇒ test/published need the publish panel first. */
   published_version: number | null;
+  /** Сложность (закрытый набор low/medium/high) — фильтруемая колонка дашборда. */
+  complexity: string;
+  /** Аудитория (закрытый набор kids/everyone/18plus). */
+  age_target: string;
+  /** Собственные теги автора (свободные строки). */
+  tags: string[];
   // No `cover`: the dashboard renders a name-derived thumbnail, so the backend
   // omits the heavy base64 cover from list rows (it bloated the list to megabytes
   // for media-heavy quests). The cover is on the full wire below; the builder
@@ -214,6 +220,9 @@ export interface ConstructorQuestUpsert {
   name: string;
   cover: string | null;
   steps_count: number;
+  complexity: string;
+  age_target: string;
+  tags: string[];
   body: unknown;
 }
 

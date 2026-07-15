@@ -23,7 +23,7 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::store::{
     AttemptMeta, AuthIdentity, ConstructorQuest, ConstructorQuestSummary, PublishedMeta,
-    now_rfc3339, now_secs,
+    QuestAttributes, now_rfc3339, now_secs,
 };
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
@@ -1364,6 +1364,11 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
         name: row.try_get("name").map_err(internal)?,
         status: row.try_get("status").map_err(internal)?,
         steps_count: steps_count.max(0) as u32,
+        attrs: QuestAttributes {
+            complexity: row.try_get("complexity").map_err(internal)?,
+            age_target: row.try_get("age_target").map_err(internal)?,
+            tags: row.try_get("tags").map_err(internal)?,
+        },
         created_at: created_at.max(0) as u64,
         updated_at: updated_at.max(0) as u64,
     })
@@ -1374,8 +1379,8 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
 /// the dashboard list never renders them, so reading the TOASTed cover for every
 /// row was the cause of the multi-second list load. GET-one adds `cover`/`body`
 /// back explicitly because the builder needs the full entity.
-const CTOR_SUMMARY_COLS: &str =
-    "quest_id, author_id, author_name, name, status, steps_count, created_at, updated_at";
+const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, steps_count, \
+     complexity, age_target, tags, created_at, updated_at";
 
 impl PgConstructorStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -1391,8 +1396,9 @@ impl PgConstructorStore {
     ) -> Result<ConstructorQuestSummary, AppError> {
         let inserted = sqlx::query(
             "INSERT INTO constructor_quests
-                (quest_id, author_id, author_name, name, status, cover, steps_count, body, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                (quest_id, author_id, author_name, name, status, cover, steps_count,
+                 complexity, age_target, tags, body, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT DO NOTHING
              RETURNING quest_id",
         )
@@ -1403,6 +1409,9 @@ impl PgConstructorStore {
         .bind(&quest.status)
         .bind(&quest.cover)
         .bind(quest.steps_count as i32)
+        .bind(&quest.attrs.complexity)
+        .bind(&quest.attrs.age_target)
+        .bind(&quest.attrs.tags)
         .bind(&quest.body)
         .bind(quest.created_at as i64)
         .bind(quest.updated_at as i64)
@@ -1477,6 +1486,7 @@ impl PgConstructorStore {
                     // selects it explicitly above and reads it straight off the row.
                     cover: row.try_get("cover").map_err(internal)?,
                     steps_count: s.steps_count,
+                    attrs: s.attrs,
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                     body,
@@ -1493,12 +1503,14 @@ impl PgConstructorStore {
         name: &str,
         cover: Option<String>,
         steps_count: u32,
+        attrs: QuestAttributes,
         body: serde_json::Value,
         updated_at: u64,
     ) -> Result<ConstructorQuestSummary, AppError> {
         let sql = format!(
             "UPDATE constructor_quests \
-             SET name = $2, cover = $3, steps_count = $4, body = $5, updated_at = $6 \
+             SET name = $2, cover = $3, steps_count = $4, complexity = $5, age_target = $6, \
+                 tags = $7, body = $8, updated_at = $9 \
              WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
         );
         let row = sqlx::query(&sql)
@@ -1506,6 +1518,9 @@ impl PgConstructorStore {
             .bind(name)
             .bind(&cover)
             .bind(steps_count as i32)
+            .bind(&attrs.complexity)
+            .bind(&attrs.age_target)
+            .bind(&attrs.tags)
             .bind(&body)
             .bind(updated_at as i64)
             .fetch_optional(&self.pool)
