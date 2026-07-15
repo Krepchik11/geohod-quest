@@ -14,6 +14,7 @@
 use sqlx::{PgPool, Row};
 
 use crate::auth::{UserAccount, UserRecord};
+use crate::coupons::{Coupon, CouponRedemption, CouponUsage, Discount};
 use crate::errors::AppError;
 use crate::facts::{
     Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, list_feedbacks_for_snapshot,
@@ -1269,19 +1270,13 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::delete_identity`].
-    pub async fn delete_identity(
-        &self,
-        provider: &str,
-        player_id: &str,
-    ) -> Result<bool, AppError> {
-        let res = sqlx::query(
-            "DELETE FROM auth_identities WHERE provider = $1 AND player_id = $2",
-        )
-        .bind(provider)
-        .bind(player_id)
-        .execute(&self.pool)
-        .await
-        .map_err(internal)?;
+    pub async fn delete_identity(&self, provider: &str, player_id: &str) -> Result<bool, AppError> {
+        let res = sqlx::query("DELETE FROM auth_identities WHERE provider = $1 AND player_id = $2")
+            .bind(provider)
+            .bind(player_id)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
         Ok(res.rows_affected() > 0)
     }
 
@@ -1579,4 +1574,362 @@ impl PgConstructorStore {
             .map_err(internal)?;
         Ok(res.rows_affected() > 0)
     }
+}
+
+/// Coupons + redemptions on PostgreSQL.
+#[derive(Clone, Debug)]
+pub struct PgCouponStore {
+    pool: PgPool,
+}
+
+fn discount_to_cols(d: &Discount) -> (&'static str, i64) {
+    match d {
+        Discount::Percent(p) => ("percent", i64::from(*p)),
+        Discount::Fixed(v) => ("fixed", *v),
+    }
+}
+
+fn discount_from_cols(kind: &str, value: i64) -> Result<Discount, AppError> {
+    match kind {
+        "percent" => u8::try_from(value)
+            .ok()
+            .filter(|p| (1..=100).contains(p))
+            .map(Discount::Percent)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!("invalid percent discount in db: {value}"))
+            }),
+        "fixed" => Ok(Discount::Fixed(value)),
+        other => Err(AppError::Internal(anyhow::anyhow!(
+            "unknown discount type in db: {other}"
+        ))),
+    }
+}
+
+fn coupon_from_row(row: &sqlx::postgres::PgRow) -> Result<Coupon, AppError> {
+    let quest_ids: Option<serde_json::Value> = row.try_get("quest_ids").map_err(internal)?;
+    let quest_ids = quest_ids
+        .map(|v| serde_json::from_value::<Vec<String>>(v).map_err(internal))
+        .transpose()?;
+    let max_redemptions: Option<i64> = row.try_get("max_redemptions").map_err(internal)?;
+    let per_user_limit: Option<i64> = row.try_get("per_user_limit").map_err(internal)?;
+    Ok(Coupon {
+        coupon_id: row.try_get("coupon_id").map_err(internal)?,
+        code: row.try_get("code").map_err(internal)?,
+        discount: discount_from_cols(
+            row.try_get::<String, _>("discount_type")
+                .map_err(internal)?
+                .as_str(),
+            row.try_get("discount_value").map_err(internal)?,
+        )?,
+        valid_until: row.try_get("valid_until").map_err(internal)?,
+        max_redemptions: max_redemptions.map(|v| v as u32),
+        per_user_limit: per_user_limit.map(|v| v as u32),
+        quest_ids,
+        paused: row.try_get("paused").map_err(internal)?,
+        created_at: row.try_get("created_at").map_err(internal)?,
+    })
+}
+
+fn redemption_from_row(row: &sqlx::postgres::PgRow) -> Result<CouponRedemption, AppError> {
+    Ok(CouponRedemption {
+        coupon_id: row.try_get("coupon_id").map_err(internal)?,
+        player_id: row.try_get("player_id").map_err(internal)?,
+        quest_id: row.try_get("quest_id").map_err(internal)?,
+        amount_discounted: row.try_get("amount_discounted").map_err(internal)?,
+        redeemed_at: row.try_get("redeemed_at").map_err(internal)?,
+    })
+}
+
+const COUPON_COLS: &str = "coupon_id, code, discount_type, discount_value, valid_until, \
+                           max_redemptions, per_user_limit, quest_ids, paused, created_at";
+
+impl PgCouponStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    fn bind_coupon<'q>(
+        query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+        coupon: &'q Coupon,
+    ) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+        let (kind, value) = discount_to_cols(&coupon.discount);
+        query
+            .bind(&coupon.coupon_id)
+            .bind(&coupon.code)
+            .bind(kind)
+            .bind(value)
+            .bind(&coupon.valid_until)
+            .bind(coupon.max_redemptions.map(i64::from))
+            .bind(coupon.per_user_limit.map(i64::from))
+            .bind(coupon.quest_ids.as_ref().map(|q| serde_json::json!(q)))
+            .bind(coupon.paused)
+            .bind(&coupon.created_at)
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::create`].
+    pub async fn create(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+        let inserted = Self::bind_coupon(
+            sqlx::query(&format!(
+                "INSERT INTO coupons ({COUPON_COLS})
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT DO NOTHING
+                 RETURNING {COUPON_COLS}"
+            )),
+            &coupon,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match inserted {
+            Some(row) => coupon_from_row(&row),
+            None => Err(AppError::Conflict(format!(
+                "купон с кодом '{}' уже существует",
+                coupon.code
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::update`].
+    pub async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+        let code_taken =
+            sqlx::query("SELECT 1 AS one FROM coupons WHERE code = $1 AND coupon_id <> $2")
+                .bind(&coupon.code)
+                .bind(&coupon.coupon_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(internal)?;
+        if code_taken.is_some() {
+            return Err(AppError::Conflict(format!(
+                "купон с кодом '{}' уже существует",
+                coupon.code
+            )));
+        }
+        let (kind, value) = discount_to_cols(&coupon.discount);
+        let updated = sqlx::query(&format!(
+            "UPDATE coupons SET code = $2, discount_type = $3, discount_value = $4,
+                    valid_until = $5, max_redemptions = $6, per_user_limit = $7,
+                    quest_ids = $8, paused = $9
+             WHERE coupon_id = $1
+             RETURNING {COUPON_COLS}"
+        ))
+        .bind(&coupon.coupon_id)
+        .bind(&coupon.code)
+        .bind(kind)
+        .bind(value)
+        .bind(&coupon.valid_until)
+        .bind(coupon.max_redemptions.map(i64::from))
+        .bind(coupon.per_user_limit.map(i64::from))
+        .bind(coupon.quest_ids.as_ref().map(|q| serde_json::json!(q)))
+        .bind(coupon.paused)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        match updated {
+            Some(row) => coupon_from_row(&row),
+            None => Err(AppError::NotFound(format!(
+                "unknown coupon '{}'",
+                coupon.coupon_id
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::get`].
+    pub async fn get(&self, coupon_id: &str) -> Result<Option<Coupon>, AppError> {
+        let row = sqlx::query(&format!(
+            "SELECT {COUPON_COLS} FROM coupons WHERE coupon_id = $1"
+        ))
+        .bind(coupon_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| coupon_from_row(&r)).transpose()
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::delete`]. The redemption log
+    /// cascades at the schema level (`ON DELETE CASCADE`).
+    pub async fn delete(&self, coupon_id: &str) -> Result<(), AppError> {
+        let res = sqlx::query("DELETE FROM coupons WHERE coupon_id = $1")
+            .bind(coupon_id)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        if res.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!("unknown coupon '{coupon_id}'")));
+        }
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::list_with_usage`].
+    pub async fn list_with_usage(&self) -> Result<Vec<(Coupon, CouponUsage)>, AppError> {
+        let rows = sqlx::query(&format!(
+            "SELECT {COUPON_COLS},
+                    COALESCE(u.used, 0)  AS used,
+                    u.last_redeemed_at   AS last_redeemed_at,
+                    COALESCE(u.total, 0) AS total_discounted
+             FROM coupons c
+             LEFT JOIN (
+                 SELECT coupon_id, COUNT(*) AS used, MAX(redeemed_at) AS last_redeemed_at,
+                        SUM(amount_discounted)::BIGINT AS total
+                 FROM coupon_redemptions GROUP BY coupon_id
+             ) u USING (coupon_id)
+             ORDER BY c.created_at DESC, c.coupon_id ASC"
+        ))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|row| Ok((coupon_from_row(row)?, usage_from_row(row)?)))
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::get_with_usage`].
+    pub async fn get_with_usage(
+        &self,
+        coupon_id: &str,
+    ) -> Result<Option<(Coupon, CouponUsage)>, AppError> {
+        let row = sqlx::query(&format!(
+            "SELECT {COUPON_COLS},
+                    COALESCE(u.used, 0)  AS used,
+                    u.last_redeemed_at   AS last_redeemed_at,
+                    COALESCE(u.total, 0) AS total_discounted
+             FROM coupons c
+             LEFT JOIN (
+                 SELECT coupon_id, COUNT(*) AS used, MAX(redeemed_at) AS last_redeemed_at,
+                        SUM(amount_discounted)::BIGINT AS total
+                 FROM coupon_redemptions GROUP BY coupon_id
+             ) u USING (coupon_id)
+             WHERE c.coupon_id = $1"
+        ))
+        .bind(coupon_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| Ok((coupon_from_row(&r)?, usage_from_row(&r)?)))
+            .transpose()
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::preview`].
+    pub async fn preview(
+        &self,
+        code: &str,
+        player_id: &str,
+    ) -> Result<Option<(Coupon, u32, u32)>, AppError> {
+        let row = sqlx::query(&format!(
+            "SELECT {COUPON_COLS},
+                    (SELECT COUNT(*) FROM coupon_redemptions r
+                      WHERE r.coupon_id = c.coupon_id) AS used_total,
+                    (SELECT COUNT(*) FROM coupon_redemptions r
+                      WHERE r.coupon_id = c.coupon_id AND r.player_id = $2) AS used_by_player
+             FROM coupons c WHERE c.code = $1"
+        ))
+        .bind(code)
+        .bind(player_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| {
+            let used_total: i64 = r.try_get("used_total").map_err(internal)?;
+            let used_by_player: i64 = r.try_get("used_by_player").map_err(internal)?;
+            Ok((
+                coupon_from_row(&r)?,
+                used_total as u32,
+                used_by_player as u32,
+            ))
+        })
+        .transpose()
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::redeem`]. The coupon row is
+    /// locked `FOR UPDATE` for the check-then-insert, so concurrent redemptions
+    /// of the same code serialize and the caps cannot be oversubscribed; the
+    /// composite PK absorbs a same-(player, quest) retry idempotently.
+    pub async fn redeem(
+        &self,
+        code: &str,
+        player_id: &str,
+        quest_id: &str,
+        price: i64,
+    ) -> Result<CouponRedemption, AppError> {
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let row = sqlx::query(&format!(
+            "SELECT {COUPON_COLS} FROM coupons WHERE code = $1 FOR UPDATE"
+        ))
+        .bind(code)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal)?;
+        let coupon = match row {
+            Some(r) => coupon_from_row(&r)?,
+            None => return Err(AppError::NotFound("промокод не найден".into())),
+        };
+        let existing = sqlx::query(
+            "SELECT coupon_id, player_id, quest_id, amount_discounted, redeemed_at
+             FROM coupon_redemptions
+             WHERE coupon_id = $1 AND player_id = $2 AND quest_id = $3",
+        )
+        .bind(&coupon.coupon_id)
+        .bind(player_id)
+        .bind(quest_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(internal)?;
+        if let Some(r) = existing {
+            tx.commit().await.map_err(internal)?;
+            return redemption_from_row(&r);
+        }
+        let counts = sqlx::query(
+            "SELECT COUNT(*) AS used_total,
+                    COUNT(*) FILTER (WHERE player_id = $2) AS used_by_player
+             FROM coupon_redemptions WHERE coupon_id = $1",
+        )
+        .bind(&coupon.coupon_id)
+        .bind(player_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(internal)?;
+        let used_total: i64 = counts.try_get("used_total").map_err(internal)?;
+        let used_by_player: i64 = counts.try_get("used_by_player").map_err(internal)?;
+        let now = now_rfc3339();
+        crate::coupons::check_redeemable(
+            &coupon,
+            quest_id,
+            used_total as u32,
+            used_by_player as u32,
+            &now[..10],
+        )
+        .map_err(|reject| AppError::Conflict(reject.message().into()))?;
+        let redemption = CouponRedemption {
+            coupon_id: coupon.coupon_id.clone(),
+            player_id: player_id.to_string(),
+            quest_id: quest_id.to_string(),
+            amount_discounted: crate::coupons::discount_amount(&coupon.discount, price),
+            redeemed_at: now,
+        };
+        sqlx::query(
+            "INSERT INTO coupon_redemptions
+                 (coupon_id, player_id, quest_id, amount_discounted, redeemed_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(&redemption.coupon_id)
+        .bind(&redemption.player_id)
+        .bind(&redemption.quest_id)
+        .bind(redemption.amount_discounted)
+        .bind(&redemption.redeemed_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
+        Ok(redemption)
+    }
+}
+
+fn usage_from_row(row: &sqlx::postgres::PgRow) -> Result<CouponUsage, AppError> {
+    let used: i64 = row.try_get("used").map_err(internal)?;
+    let total: i64 = row.try_get("total_discounted").map_err(internal)?;
+    Ok(CouponUsage {
+        used: used as u32,
+        last_redeemed_at: row.try_get("last_redeemed_at").map_err(internal)?,
+        total_discounted: total,
+    })
 }
