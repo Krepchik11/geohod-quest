@@ -60,6 +60,16 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Extract the media hash from a stored-media reference: `https://…/{hash}` or
+/// `/api/media/{hash}` — anything whose last path segment (query/fragment
+/// stripped) is a 64-hex sha256. Suffix-based on purpose: the prefix differs
+/// per environment (in-memory, R2, a future custom domain), so references stay
+/// recognizable across environments — e.g. inside an exported archive.
+pub fn media_hash_in_ref(reference: &str) -> Option<&str> {
+    let tail = reference.split(['?', '#']).next()?.rsplit('/').next()?;
+    (tail.len() == 64 && tail.bytes().all(|b| b.is_ascii_hexdigit())).then_some(tail)
+}
+
 /// In-process content-addressed store (tests + local dev). Bytes are kept in a
 /// map and served back through the API at `GET /api/media/{hash}`.
 pub struct InMemoryMediaStore {
@@ -266,6 +276,21 @@ mod tests {
             sha256_hex(b""),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn media_hash_in_ref_extracts_sha256_tails_only() {
+        let h = "a".repeat(64);
+        assert_eq!(
+            media_hash_in_ref(&format!("https://media.geohod.ru/{h}")),
+            Some(h.as_str())
+        );
+        assert_eq!(
+            media_hash_in_ref(&format!("/api/media/{h}?x=1")),
+            Some(h.as_str())
+        );
+        assert_eq!(media_hash_in_ref("https://x/img.jpg"), None);
+        assert_eq!(media_hash_in_ref("data:image/png;base64,xxxx"), None);
     }
 
     #[test]
