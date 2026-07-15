@@ -2,12 +2,19 @@
 
 import React, { useMemo, useState } from 'react';
 import {
+  AGE_TARGET_OPTIONS,
+  COMPLEXITY_OPTIONS,
   CTOR_TEMPLATES,
+  DEFAULT_AGE_TARGET,
+  DEFAULT_COMPLEXITY,
+  SUGGESTED_TAGS,
   TPL_BY_KEY,
   computeGates,
   fmtTime,
   newStep,
   plural,
+  type CtorAgeTarget,
+  type CtorComplexity,
   serializeDraft,
   stepToGameStep,
   type CtorQuest,
@@ -38,6 +45,9 @@ const PREVIEW_META: CtorQuestMeta = {
   desc: '',
   price: 0,
   playersBonus: 0,
+  complexity: DEFAULT_COMPLEXITY,
+  ageTarget: DEFAULT_AGE_TARGET,
+  tags: [],
 };
 
 /** Краткий обобщённый текст-иллюстрация для каждого шаблона: показывает, как
@@ -106,9 +116,17 @@ function TemplatePickerModal({ onClose, onPick }: { onClose: () => void; onPick:
 
 /* ---------- Настройки квеста ---------- */
 
-function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: CtorQuestMeta) => void }) {
+export function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: CtorQuestMeta) => void }) {
   const m = quest.meta;
   const set = (patch: Partial<CtorQuestMeta>) => onMeta({ ...m, ...patch });
+  const [tagDraft, setTagDraft] = useState('');
+  const addTag = (raw: string) => {
+    const tag = raw.trim();
+    if (!tag || m.tags.includes(tag)) return;
+    set({ tags: [...m.tags, tag] });
+    setTagDraft('');
+  };
+  const suggestions = SUGGESTED_TAGS.filter((t) => !m.tags.includes(t));
   return (
     <div className="ed-form">
       <div className="wsp-edhead">
@@ -151,6 +169,85 @@ function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: Cto
           </p>
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
+      </WspBlock>
+      <WspBlock title="Атрибуты" aside="фильтры списка квестов">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label className="adm-label" htmlFor="qs-complexity">Сложность</label>
+            <select
+              id="qs-complexity"
+              className="input"
+              value={m.complexity}
+              onChange={(e) => set({ complexity: e.target.value as CtorComplexity })}
+            >
+              {COMPLEXITY_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="adm-label" htmlFor="qs-age">Возраст</label>
+            <select
+              id="qs-age"
+              className="input"
+              value={m.ageTarget}
+              onChange={(e) => set({ ageTarget: e.target.value as CtorAgeTarget })}
+            >
+              {AGE_TARGET_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="adm-label" htmlFor="qs-tag">Теги</label>
+          {m.tags.length ? (
+            <div className="wsp-tags">
+              {m.tags.map((t) => (
+                <span className="wsp-tag" key={t}>
+                  {t}
+                  <button
+                    type="button"
+                    aria-label={`Убрать тег «${t}»`}
+                    onClick={() => set({ tags: m.tags.filter((x) => x !== t) })}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              id="qs-tag"
+              className="input"
+              placeholder="Свой тег…"
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addTag(tagDraft);
+                }
+              }}
+            />
+            <button className="btn btn--secondary" type="button" onClick={() => addTag(tagDraft)}>
+              Добавить
+            </button>
+          </div>
+          {suggestions.length ? (
+            <div className="wsp-tags wsp-tags--suggest">
+              {suggestions.map((t) => (
+                <button className="wsp-tag wsp-tag--suggest" type="button" key={t} onClick={() => addTag(t)}>
+                  + {t}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+            Свободные теги для фильтрации в списке квестов: жанр, тема, настроение.
+          </p>
+        </div>
       </WspBlock>
       <WspBlock title="Обложка" aside="первый экран и карточка магазина">
         <ImageZone src={m.cover} label="обложка" hint="PNG/JPG — будет ужата до 1280px" width={240} onChange={(cover) => set({ cover })} />

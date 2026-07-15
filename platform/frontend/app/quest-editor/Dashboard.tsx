@@ -3,6 +3,14 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
+import {
+  AGE_TARGET_LABEL,
+  AGE_TARGET_OPTIONS,
+  COMPLEXITY_LABEL,
+  COMPLEXITY_OPTIONS,
+  type CtorAgeTarget,
+  type CtorComplexity,
+} from '../../lib/constructor-model';
 import StatusControl from './StatusControl';
 
 /**
@@ -90,24 +98,41 @@ export default function Dashboard({
 }: DashboardProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('Все');
+  // Attribute filters — '' means «any» (mirrors the status «Все»).
+  const [complexityFilter, setComplexityFilter] = useState('');
+  const [ageFilter, setAgeFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ConstructorQuestWire | null>(null);
 
   // The dashboard is a personal workspace: the server returns ONLY the acting
   // author's quests, so there is no author filter (it could only ever pick
-  // "yourself"). Search + status are the meaningful filters.
+  // "yourself"). Search + status + attributes are the meaningful filters.
   const filtered = useMemo(() => {
     const q0 = search.trim().toLowerCase();
     return quests.filter(
       (q) =>
         (statusFilter === 'Все' || STATUS_LABEL[q.status] === statusFilter) &&
+        (complexityFilter === '' || q.complexity === complexityFilter) &&
+        (ageFilter === '' || q.age_target === ageFilter) &&
+        (tagFilter === '' || q.tags.includes(tagFilter)) &&
         (q0 === '' || q.name.toLowerCase().includes(q0) || q.author.toLowerCase().includes(q0)),
     );
-  }, [quests, search, statusFilter]);
+  }, [quests, search, statusFilter, complexityFilter, ageFilter, tagFilter]);
+
+  // The tag filter offers exactly the tags that exist across the author's
+  // quests (sorted for a stable menu) — never a hardcoded list.
+  const allTags = useMemo(
+    () => Array.from(new Set(quests.flatMap((q) => q.tags))).sort((a, b) => a.localeCompare(b, 'ru')),
+    [quests],
+  );
 
   const clearFilters = () => {
     setSearch('');
     setStatusFilter('Все');
+    setComplexityFilter('');
+    setAgeFilter('');
+    setTagFilter('');
   };
 
   const showEmpty = !loading && quests.length === 0;
@@ -208,6 +233,57 @@ export default function Dashboard({
               <span className="qcd-chevron"><ChevronDown /></span>
             </div>
           </div>
+          <div className="qcd-field">
+            <label id="qcd-flt-complexity">Сложность</label>
+            <div className="qcd-field__wrap">
+              <select
+                className="qcd-select"
+                aria-labelledby="qcd-flt-complexity"
+                value={complexityFilter}
+                onChange={(e) => setComplexityFilter(e.target.value)}
+              >
+                <option value="">Любая</option>
+                {COMPLEXITY_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+              <span className="qcd-chevron"><ChevronDown /></span>
+            </div>
+          </div>
+          <div className="qcd-field">
+            <label id="qcd-flt-age">Возраст</label>
+            <div className="qcd-field__wrap">
+              <select
+                className="qcd-select"
+                aria-labelledby="qcd-flt-age"
+                value={ageFilter}
+                onChange={(e) => setAgeFilter(e.target.value)}
+              >
+                <option value="">Любой</option>
+                {AGE_TARGET_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+              <span className="qcd-chevron"><ChevronDown /></span>
+            </div>
+          </div>
+          <div className="qcd-field">
+            <label id="qcd-flt-tag">Тег</label>
+            <div className="qcd-field__wrap">
+              <select
+                className="qcd-select"
+                aria-labelledby="qcd-flt-tag"
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+              >
+                <option value="">Все теги</option>
+                {allTags.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <span className="qcd-chevron"><ChevronDown /></span>
+            </div>
+          </div>
         </div>
 
         {/* ===== Заголовок секции ===== */}
@@ -282,6 +358,9 @@ export default function Dashboard({
                       <span><IconDoc />{q.steps} стр.</span>
                       <span><IconCheck />{q.completed} прох.</span>
                       <span><IconCal />{fmtDate(q.created_at)}</span>
+                      <span>{COMPLEXITY_LABEL[q.complexity as CtorComplexity] ?? q.complexity}</span>
+                      <span>{AGE_TARGET_LABEL[q.age_target as CtorAgeTarget] ?? q.age_target}</span>
+                      {q.tags.length ? <span>{q.tags.join(' · ')}</span> : null}
                     </div>
                   </div>
                   <StatusControl

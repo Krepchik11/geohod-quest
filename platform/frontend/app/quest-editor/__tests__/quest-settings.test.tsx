@@ -1,0 +1,66 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import React from 'react';
+import { QuestSettings } from '../Builder';
+import { newQuest } from '../../../lib/constructor-model';
+
+/**
+ * Настройки квеста — attribute editing. Rules under test:
+ * - complexity / age selects show the stored values and patch meta on change;
+ * - a custom tag is added via the input (Enter or the add button), duplicates
+ *   and blanks are ignored;
+ * - suggested tags add on click and disappear once present;
+ * - a chip's remove button deletes the tag.
+ */
+function setup(metaPatch: Parameters<typeof newQuest>[0] = {}) {
+  const quest = newQuest({ title: 'X', ...metaPatch });
+  const onMeta = vi.fn();
+  render(<QuestSettings quest={quest} onMeta={onMeta} />);
+  return { quest, onMeta };
+}
+
+describe('QuestSettings attributes', () => {
+  it('shows stored complexity/age and patches meta on change', () => {
+    const { onMeta } = setup({ complexity: 'high', ageTarget: '18plus' });
+    const complexity = screen.getByLabelText('Сложность') as HTMLSelectElement;
+    const age = screen.getByLabelText('Возраст') as HTMLSelectElement;
+    expect(complexity.value).toBe('high');
+    expect(age.value).toBe('18plus');
+
+    fireEvent.change(complexity, { target: { value: 'low' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ complexity: 'low' }));
+    fireEvent.change(age, { target: { value: 'kids' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ ageTarget: 'kids' }));
+  });
+
+  it('adds a custom tag via Enter, ignoring blanks and duplicates', () => {
+    const { onMeta } = setup({ tags: ['юмор'] });
+    const input = screen.getByPlaceholderText('Свой тег…');
+
+    fireEvent.change(input, { target: { value: '  мистика  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['юмор', 'мистика'] }));
+
+    onMeta.mockClear();
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: 'юмор' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onMeta).not.toHaveBeenCalled();
+  });
+
+  it('adds a suggested tag on click and hides it once present', () => {
+    const { onMeta } = setup({ tags: ['хоррор'] });
+    // «хоррор» is already on the quest — its suggestion chip is gone.
+    expect(screen.queryByRole('button', { name: '+ хоррор' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '+ юмор' }));
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['хоррор', 'юмор'] }));
+  });
+
+  it('removes a tag via its chip button', () => {
+    const { onMeta } = setup({ tags: ['хоррор', 'юмор'] });
+    fireEvent.click(screen.getByRole('button', { name: 'Убрать тег «хоррор»' }));
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['юмор'] }));
+  });
+});

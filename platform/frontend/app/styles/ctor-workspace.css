@@ -70,6 +70,13 @@
 .wsp-edhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .wsp-tplchip { font: 600 12px/1 'Inter', sans-serif; color: var(--blue); background: rgba(59,113,254,.1); border-radius: 10px; padding: 9px 12px; white-space: nowrap; }
 .wsp-gatechip { font-size: 12px; font-weight: 700; border-radius: 8px; padding: 7px 10px; white-space: nowrap; }
+/* Теги квеста (настройки): пилюли в тоне wsp-tplchip + быстрые подсказки. */
+.wsp-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.wsp-tags--suggest { margin: 10px 0 8px; }
+.wsp-tag { display: inline-flex; align-items: center; gap: 7px; font: 600 12.5px/1 'Inter', sans-serif; color: var(--blue); background: rgba(59,113,254,.1); border-radius: 16px; padding: 8px 12px; white-space: nowrap; }
+.wsp-tag button { background: none; border: 0; padding: 0; color: var(--blue); font-size: 14px; line-height: 1; font-weight: 700; cursor: pointer; }
+.wsp-tag--suggest { background: #f1f3f7; color: var(--muted-2, #6b7280); border: 1px dashed #d7dbe2; cursor: pointer; }
+.wsp-tag--suggest:hover { color: var(--blue); border-color: var(--blue); background: rgba(59,113,254,.06); }
 .wsp-gatechip.ok { color: var(--green); background: rgba(31,138,91,.1); }
 .wsp-gatechip.err { color: var(--red); background: rgba(231,90,124,.12); }
 .wsp-pageerrs { background: rgba(231,90,124,.06); border: 1px solid rgba(231,90,124,.25); border-radius: 12px; padding: 12px 16px; font-size: 13px; color: var(--red); display: flex; flex-direction: column; gap: 6px; }
