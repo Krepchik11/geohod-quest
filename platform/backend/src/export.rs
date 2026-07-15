@@ -16,21 +16,15 @@ use std::io::Write;
 use serde_json::Value;
 
 use crate::errors::AppError;
-use crate::icons::cover_media_hash;
-use crate::media::MediaStores;
+use crate::media::{MediaStores, media_hash_in_ref};
 use crate::store::ConstructorQuest;
 
 pub const FORMAT_VERSION: u32 = 1;
 
-// Media URLs are recognized by their trailing sha256 segment via the shared
-// `icons::cover_media_hash` (rather than a configured public_base prefix),
-// which keeps this decoupled from where media is hosted — in-memory, R2, or a
-// future custom domain all differ in prefix but agree on this suffix.
-
 fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
     match value {
         Value::String(s) => {
-            if let Some(hash) = cover_media_hash(s) {
+            if let Some(hash) = media_hash_in_ref(s) {
                 out.insert(hash.to_string());
             }
         }
@@ -47,7 +41,7 @@ fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
 fn rewrite_media_urls(value: &mut Value, hash_to_path: &BTreeMap<String, String>) {
     match value {
         Value::String(s) => {
-            if let Some(path) = cover_media_hash(s).and_then(|h| hash_to_path.get(h)) {
+            if let Some(path) = media_hash_in_ref(s).and_then(|h| hash_to_path.get(h)) {
                 *s = path.clone();
             }
         }
@@ -85,7 +79,6 @@ pub async fn build_quest_export_zip(
     media: &MediaStores,
     quest: ConstructorQuest,
 ) -> Result<Vec<u8>, AppError> {
-    let quest_id = quest.quest_id.clone();
     let mut quest_json = serde_json::to_value(&quest)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize quest for export: {e}")))?;
 
@@ -101,25 +94,30 @@ pub async fn build_quest_export_zip(
         let media = media.clone();
         fetches.spawn(async move { (media.get(&hash).await, hash) });
     }
-    let mut hash_to_path = BTreeMap::new();
-    let mut media_by_path = BTreeMap::new();
+    let mut fetched = BTreeMap::new();
     while let Some(joined) = fetches.join_next().await {
         let (blob, hash) = joined
             .map_err(|e| AppError::Internal(anyhow::anyhow!("export media fetch panicked: {e}")))?;
         // A missing blob (orphaned reference) is skipped; see rewrite_media_urls.
         if let Some(blob) = blob? {
             let path = format!("media/{hash}.{}", extension_for(&blob.content_type));
-            hash_to_path.insert(hash, path.clone());
-            media_by_path.insert(path, blob.bytes);
+            fetched.insert(hash, (path, blob.bytes));
         }
     }
-    let media_files: Vec<(String, bytes::Bytes)> = media_by_path.into_iter().collect();
+    // Consumed in hash order (path embeds the hash, so path order matches):
+    // the archive layout is deterministic regardless of fetch completion order.
+    let mut hash_to_path = BTreeMap::new();
+    let mut media_files = Vec::with_capacity(fetched.len());
+    for (hash, (path, bytes)) in fetched {
+        hash_to_path.insert(hash, path.clone());
+        media_files.push((path, bytes));
+    }
     rewrite_media_urls(&mut quest_json, &hash_to_path);
 
     let manifest = ExportManifest {
         format_version: FORMAT_VERSION,
         exported_at: crate::store::now_secs(),
-        quest_id,
+        quest_id: quest.quest_id,
     };
 
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
@@ -164,8 +162,8 @@ fn write_zip(
 mod tests {
     use super::*;
 
-    // URL→hash extraction itself is covered by icons.rs tests (the shared
-    // `cover_media_hash`); here we only test the recursive walk + rewrite.
+    // URL→hash extraction itself is covered by media.rs tests (the shared
+    // `media_hash_in_ref`); here we only test the recursive walk + rewrite.
     #[test]
     fn collect_and_rewrite_round_trip_nested_urls() {
         let hash = "b".repeat(64);

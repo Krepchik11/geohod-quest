@@ -45,13 +45,6 @@ fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, String> {
     Ok(out.into_inner())
 }
 
-/// Extract the media hash from a cover reference: `https://…/{hash}` or
-/// `/api/media/{hash}` — anything whose last path segment is a 64-hex sha256.
-pub fn cover_media_hash(cover: &str) -> Option<&str> {
-    let tail = cover.split(['?', '#']).next()?.rsplit('/').next()?;
-    (tail.len() == 64 && tail.bytes().all(|b| b.is_ascii_hexdigit())).then_some(tail)
-}
-
 /// Decode a `data:image/…;base64,…` cover into raw bytes.
 pub fn cover_data_uri_bytes(cover: &str) -> Option<Vec<u8>> {
     use base64::Engine;
@@ -95,21 +88,6 @@ mod tests {
     #[test]
     fn compose_icon_rejects_garbage() {
         assert!(compose_icon(b"not an image", 192).is_err());
-    }
-
-    #[test]
-    fn cover_media_hash_extracts_sha256_tails_only() {
-        let h = "a".repeat(64);
-        assert_eq!(
-            cover_media_hash(&format!("https://media.geohod.ru/{h}")),
-            Some(h.as_str())
-        );
-        assert_eq!(
-            cover_media_hash(&format!("/api/media/{h}?x=1")),
-            Some(h.as_str())
-        );
-        assert_eq!(cover_media_hash("https://x/img.jpg"), None);
-        assert_eq!(cover_media_hash("data:image/png;base64,xxxx"), None);
     }
 
     #[test]

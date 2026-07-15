@@ -1525,7 +1525,7 @@ async fn get_quest_icon_handler(
         .ok_or_else(|| AppError::NotFound("quest has no cover".into()))?;
     let bytes: Vec<u8> = if let Some(data) = icons::cover_data_uri_bytes(cover) {
         data
-    } else if let Some(hash) = icons::cover_media_hash(cover) {
+    } else if let Some(hash) = media::media_hash_in_ref(cover) {
         state
             .media
             .get(hash)
