@@ -21,6 +21,7 @@ use crate::facts::{
     natural_key, project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
 };
 use crate::grants::{AccessGrant, GrantSource};
+use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
     AttemptMeta, AuthIdentity, ConstructorQuest, ConstructorQuestSummary, PublishedMeta,
     QuestAttributes, now_rfc3339, now_secs,
@@ -1951,4 +1952,139 @@ fn usage_from_row(row: &sqlx::postgres::PgRow) -> Result<CouponUsage, AppError> 
         last_redeemed_at: row.try_get("last_redeemed_at").map_err(internal)?,
         total_discounted: total,
     })
+}
+
+/// Pending redirect payments (YooKassa) on PostgreSQL.
+#[derive(Clone, Debug)]
+pub struct PgPaymentStore {
+    pool: PgPool,
+}
+
+const PAYMENT_COLS: &str = "id, provider_payment_id, player_id, quest_id, coupon_code, \
+                            amount, price, confirmation_url, status, created_at";
+
+fn payment_from_row(row: &sqlx::postgres::PgRow) -> Result<PendingPayment, AppError> {
+    let status: String = row.try_get("status").map_err(internal)?;
+    Ok(PendingPayment {
+        id: row.try_get("id").map_err(internal)?,
+        provider_payment_id: row.try_get("provider_payment_id").map_err(internal)?,
+        player_id: row.try_get("player_id").map_err(internal)?,
+        quest_id: row.try_get("quest_id").map_err(internal)?,
+        coupon_code: row.try_get("coupon_code").map_err(internal)?,
+        amount: row.try_get("amount").map_err(internal)?,
+        price: row.try_get("price").map_err(internal)?,
+        confirmation_url: row.try_get("confirmation_url").map_err(internal)?,
+        status: PendingStatus::parse(&status).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("unknown payment status in db: {status}"))
+        })?,
+        created_at: row.try_get("created_at").map_err(internal)?,
+    })
+}
+
+impl PgPaymentStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::insert`].
+    pub async fn insert(&self, p: PendingPayment) -> Result<(), AppError> {
+        sqlx::query(&format!(
+            "INSERT INTO pending_payments ({PAYMENT_COLS})
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+        ))
+        .bind(&p.id)
+        .bind(&p.provider_payment_id)
+        .bind(&p.player_id)
+        .bind(&p.quest_id)
+        .bind(&p.coupon_code)
+        .bind(p.amount)
+        .bind(p.price)
+        .bind(&p.confirmation_url)
+        .bind(p.status.as_str())
+        .bind(&p.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::get`].
+    pub async fn get(&self, id: &str) -> Result<Option<PendingPayment>, AppError> {
+        sqlx::query(&format!(
+            "SELECT {PAYMENT_COLS} FROM pending_payments WHERE id = $1"
+        ))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .as_ref()
+        .map(payment_from_row)
+        .transpose()
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::find_by_provider_id`].
+    pub async fn find_by_provider_id(
+        &self,
+        provider_payment_id: &str,
+    ) -> Result<Option<PendingPayment>, AppError> {
+        sqlx::query(&format!(
+            "SELECT {PAYMENT_COLS} FROM pending_payments WHERE provider_payment_id = $1"
+        ))
+        .bind(provider_payment_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .as_ref()
+        .map(payment_from_row)
+        .transpose()
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::find_pending_for`].
+    pub async fn find_pending_for(
+        &self,
+        player_id: &str,
+        quest_id: &str,
+    ) -> Result<Option<PendingPayment>, AppError> {
+        sqlx::query(&format!(
+            "SELECT {PAYMENT_COLS} FROM pending_payments
+             WHERE player_id = $1 AND quest_id = $2 AND status = 'pending'
+             LIMIT 1"
+        ))
+        .bind(player_id)
+        .bind(quest_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?
+        .as_ref()
+        .map(payment_from_row)
+        .transpose()
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::settle_succeeded`]. The CAS is
+    /// the WHERE clause: one row updated == this call won the transition.
+    pub async fn settle_succeeded(&self, id: &str) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            "UPDATE pending_payments SET status = 'succeeded'
+             WHERE id = $1 AND status = 'pending'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(res.rows_affected() == 1)
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::mark_canceled`].
+    pub async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE pending_payments SET status = 'canceled'
+             WHERE id = $1 AND status = 'pending'",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
 }

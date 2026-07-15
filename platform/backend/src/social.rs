@@ -139,7 +139,9 @@ impl OidcVerifier {
     /// extracts provider-specific claims from the returned JSON.
     pub async fn verify(&self, id_token: &str, now: u64) -> Result<serde_json::Value, AppError> {
         let header = decode_header(id_token).map_err(|_| unauthorized("malformed id token"))?;
-        let kid = header.kid.ok_or_else(|| unauthorized("id token has no kid"))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| unauthorized("id token has no kid"))?;
 
         let mut keys = self.keys(now, false).await?;
         if !keys.iter().any(|k| k.kid == kid) {
@@ -155,11 +157,7 @@ impl OidcVerifier {
 
     /// Verify a token against ONE JWK — the testable heart, no network. Enforces the
     /// signature (with the key's own algorithm), `aud`, `iss` and `exp`.
-    fn verify_with_jwk(
-        &self,
-        id_token: &str,
-        jwk: &Jwk,
-    ) -> Result<serde_json::Value, AppError> {
+    fn verify_with_jwk(&self, id_token: &str, jwk: &Jwk) -> Result<serde_json::Value, AppError> {
         let (key, alg) = jwk
             .decoding()
             .ok_or_else(|| unauthorized("unsupported signing key"))?;
@@ -344,11 +342,10 @@ impl TelegramClaims {
     pub fn from_claims(claims: serde_json::Value) -> Result<Self, AppError> {
         let c: RawTelegramClaims = serde_json::from_value(claims)
             .map_err(|_| unauthorized("telegram token is missing required claims"))?;
-        let subject = c
-            .id
-            .map(|id| id.to_string())
-            .or_else(|| c.sub.filter(|s| !s.trim().is_empty()))
-            .ok_or_else(|| unauthorized("telegram token has neither id nor sub"))?;
+        let subject =
+            c.id.map(|id| id.to_string())
+                .or_else(|| c.sub.filter(|s| !s.trim().is_empty()))
+                .ok_or_else(|| unauthorized("telegram token has neither id nor sub"))?;
         Ok(Self {
             subject,
             name: c.name.filter(|n| !n.trim().is_empty()),
@@ -365,7 +362,12 @@ impl TelegramClaims {
     /// A human display name: the profile `name`, else `@preferred_username`, else
     /// None (the account still works, just unnamed).
     pub fn display_name(&self) -> Option<String> {
-        if let Some(name) = self.name.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(name) = self
+            .name
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             return Some(name.to_string());
         }
         self.preferred_username.as_ref().map(|u| format!("@{u}"))
@@ -524,7 +526,11 @@ mod tests {
         let value = google_verifier()
             .verify_with_jwk(&token, &rsa_jwk())
             .expect("verify");
-        assert!(GoogleClaims::from_claims(value).expect("extract").email_verified);
+        assert!(
+            GoogleClaims::from_claims(value)
+                .expect("extract")
+                .email_verified
+        );
     }
 
     #[test]
@@ -535,7 +541,11 @@ mod tests {
             "sub": "u",
             "exp": now() + 3600,
         }));
-        assert!(google_verifier().verify_with_jwk(&token, &rsa_jwk()).is_err());
+        assert!(
+            google_verifier()
+                .verify_with_jwk(&token, &rsa_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -546,7 +556,11 @@ mod tests {
             "sub": "u",
             "exp": now() + 3600,
         }));
-        assert!(google_verifier().verify_with_jwk(&token, &rsa_jwk()).is_err());
+        assert!(
+            google_verifier()
+                .verify_with_jwk(&token, &rsa_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -557,7 +571,11 @@ mod tests {
             "sub": "u",
             "exp": now() - 3600, // already expired (beyond default leeway)
         }));
-        assert!(google_verifier().verify_with_jwk(&token, &rsa_jwk()).is_err());
+        assert!(
+            google_verifier()
+                .verify_with_jwk(&token, &rsa_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -574,7 +592,11 @@ mod tests {
         let first = sig.chars().next().unwrap();
         let swapped = if first == 'a' { 'b' } else { 'a' };
         let tampered = format!("{head}{swapped}{}", &sig[1..]);
-        assert!(google_verifier().verify_with_jwk(&tampered, &rsa_jwk()).is_err());
+        assert!(
+            google_verifier()
+                .verify_with_jwk(&tampered, &rsa_jwk())
+                .is_err()
+        );
     }
 
     // ---- Telegram (multi-algorithm OIDC) ----
@@ -666,7 +688,9 @@ mod tests {
             .verify_with_jwk(&token, &ec_jwk())
             .expect("verify");
         assert_eq!(
-            TelegramClaims::from_claims(value).expect("extract").subject(),
+            TelegramClaims::from_claims(value)
+                .expect("extract")
+                .subject(),
             "987654321"
         );
     }
@@ -682,7 +706,9 @@ mod tests {
             .verify_with_jwk(&token, &ec_jwk())
             .expect("verify");
         assert_eq!(
-            TelegramClaims::from_claims(value).expect("extract").subject(),
+            TelegramClaims::from_claims(value)
+                .expect("extract")
+                .subject(),
             "oidc-sub-xyz"
         );
     }
@@ -695,7 +721,9 @@ mod tests {
             .verify_with_jwk(&token, &ed_jwk())
             .expect("verify EdDSA");
         assert_eq!(
-            TelegramClaims::from_claims(value).expect("extract").subject(),
+            TelegramClaims::from_claims(value)
+                .expect("extract")
+                .subject(),
             "42"
         );
     }
@@ -705,7 +733,11 @@ mod tests {
         let mut claims = tg_claims(1);
         claims["aud"] = serde_json::json!("999999"); // a different bot
         let token = sign_es256(claims);
-        assert!(telegram_verifier().verify_with_jwk(&token, &ec_jwk()).is_err());
+        assert!(
+            telegram_verifier()
+                .verify_with_jwk(&token, &ec_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -713,7 +745,11 @@ mod tests {
         let mut claims = tg_claims(1);
         claims["iss"] = serde_json::json!("https://evil.example.com");
         let token = sign_es256(claims);
-        assert!(telegram_verifier().verify_with_jwk(&token, &ec_jwk()).is_err());
+        assert!(
+            telegram_verifier()
+                .verify_with_jwk(&token, &ec_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -721,7 +757,11 @@ mod tests {
         let mut claims = tg_claims(1);
         claims["exp"] = serde_json::json!(now() - 3600);
         let token = sign_es256(claims);
-        assert!(telegram_verifier().verify_with_jwk(&token, &ec_jwk()).is_err());
+        assert!(
+            telegram_verifier()
+                .verify_with_jwk(&token, &ec_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -732,7 +772,11 @@ mod tests {
         let first = sig.chars().next().unwrap();
         let swapped = if first == 'a' { 'b' } else { 'a' };
         let tampered = format!("{head}{swapped}{}", &sig[1..]);
-        assert!(telegram_verifier().verify_with_jwk(&tampered, &ec_jwk()).is_err());
+        assert!(
+            telegram_verifier()
+                .verify_with_jwk(&tampered, &ec_jwk())
+                .is_err()
+        );
     }
 
     #[test]
@@ -771,7 +815,11 @@ mod tests {
         assert!(es256k.decoding().is_none());
         // And a token "signed" under it fails closed rather than verifying.
         let token = sign_es256(tg_claims(1));
-        assert!(telegram_verifier().verify_with_jwk(&token, &es256k).is_err());
+        assert!(
+            telegram_verifier()
+                .verify_with_jwk(&token, &es256k)
+                .is_err()
+        );
     }
 
     #[test]

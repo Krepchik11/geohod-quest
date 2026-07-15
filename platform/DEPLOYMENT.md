@@ -323,6 +323,40 @@ One-time setup:
    curl -fsSI "https://media.quest.geohod.ru/<hash>"   # -> 200, content-type image/png
    ```
 
+## Payments (YooKassa)
+
+Checkout charges through YooKassa (redirect flow: the payer confirms on the
+YooKassa page, returns to the quest page, and the backend verifies the payment
+against the API before granting). Fail-closed: without credentials the API
+offers only the mock provider and `provider=yookassa` answers 501.
+
+One-time setup:
+
+1. **Secret key** — YooKassa dashboard -> Integration -> API keys. Store it as a
+   podman secret on the VPS (paste the key, press Enter, Ctrl-D):
+
+   ```bash
+   podman secret create geohod-quest-yookassa-secret-key -
+   ```
+
+2. **Shop ID** — dashboard -> Settings -> Shop. It is not a secret: set it as
+   `Environment=YOOKASSA_SHOP_ID=...` in `deploy/geohod-quest-api.container`,
+   and uncomment the `Secret=geohod-quest-yookassa-secret-key,...` line next to
+   it. Then `systemctl --user daemon-reload && systemctl --user restart
+   geohod-quest-api`.
+
+3. **Webhook** — dashboard -> Integration -> HTTP notifications:
+   `https://api.quest.geohod.ru/api/payments/yookassa/webhook`, events
+   `payment.succeeded` + `payment.canceled`. The endpoint never trusts the
+   notification body (it re-fetches the payment from the YooKassa API), so no
+   IP allowlisting is needed. The return-page poll also settles payments, so
+   the webhook is a resilience layer — it covers payers who close the browser
+   before returning.
+
+To rotate the key: issue a new one in the dashboard, then
+`podman secret rm geohod-quest-yookassa-secret-key`, re-create it with the new
+value, and restart the unit.
+
 ## Backups
 
 The database is Supabase — **managed backups come with the platform** (frequency

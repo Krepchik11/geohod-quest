@@ -1,5 +1,10 @@
 use std::net::SocketAddr;
 
+/// A non-empty environment variable ("" and whitespace read as unset).
+fn env_opt(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
 /// Application configuration loaded from environment.
 ///
 /// All values have safe defaults suitable for local development.
@@ -41,6 +46,43 @@ pub struct AppConfig {
     /// (501, fail-closed). Public (not a secret): id_token verification is against
     /// Telegram's public JWKS, so no bot token/secret is needed.
     pub telegram_client_id: Option<String>,
+    /// YooKassa shop credentials. `None` (env unset) → `provider=yookassa`
+    /// checkouts are disabled (501, fail-closed); the mock provider remains.
+    pub yookassa: Option<YookassaConfig>,
+}
+
+/// YooKassa credentials, resolved all-or-nothing from `YOOKASSA_SHOP_ID` +
+/// `YOOKASSA_SECRET_KEY` (a partial set is a misconfiguration and is logged
+/// loudly — MediaConfig pattern). `YOOKASSA_API_BASE` points the client at a
+/// local mock in tests; never set in production.
+#[derive(Debug, Clone)]
+pub struct YookassaConfig {
+    pub shop_id: String,
+    pub secret_key: String,
+    pub api_base: String,
+}
+
+impl YookassaConfig {
+    fn from_env() -> Option<Self> {
+        match (env_opt("YOOKASSA_SHOP_ID"), env_opt("YOOKASSA_SECRET_KEY")) {
+            (Some(shop_id), Some(secret_key)) => Some(Self {
+                shop_id,
+                secret_key,
+                api_base: env_opt("YOOKASSA_API_BASE")
+                    .map(|b| b.trim_end_matches('/').to_string())
+                    .unwrap_or_else(|| crate::yookassa::DEFAULT_API_BASE.to_string()),
+            }),
+            (None, None) => None,
+            _ => {
+                tracing::warn!(
+                    "YooKassa partially configured — set BOTH YOOKASSA_SHOP_ID and \
+                     YOOKASSA_SECRET_KEY to enable card payments. Falling back to \
+                     mock-only checkout."
+                );
+                None
+            }
+        }
+    }
 }
 
 impl AppConfig {
@@ -61,9 +103,7 @@ impl AppConfig {
 
         let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
 
-        let admin_token = std::env::var("ADMIN_TOKEN")
-            .ok()
-            .filter(|t| !t.trim().is_empty());
+        let admin_token = env_opt("ADMIN_TOKEN");
 
         let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
             .ok()
@@ -78,21 +118,15 @@ impl AppConfig {
 
         let media = MediaConfig::from_env(port);
 
-        let smtp_url = std::env::var("SMTP_URL")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let mail_from = std::env::var("MAIL_FROM")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "GEOHOD QUEST <no-reply@geohod.ru>".to_string());
-        let frontend_base = std::env::var("FRONTEND_BASE")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "http://localhost:3000".to_string());
+        let smtp_url = env_opt("SMTP_URL");
+        let mail_from =
+            env_opt("MAIL_FROM").unwrap_or_else(|| "GEOHOD QUEST <no-reply@geohod.ru>".to_string());
+        let frontend_base =
+            env_opt("FRONTEND_BASE").unwrap_or_else(|| "http://localhost:3000".to_string());
 
-        let env_opt = |k: &str| std::env::var(k).ok().filter(|s| !s.trim().is_empty());
         let google_client_id = env_opt("GOOGLE_CLIENT_ID");
         let telegram_client_id = env_opt("TELEGRAM_CLIENT_ID");
+        let yookassa = YookassaConfig::from_env();
 
         Ok(Self {
             addr,
@@ -105,6 +139,7 @@ impl AppConfig {
             frontend_base,
             google_client_id,
             telegram_client_id,
+            yookassa,
         })
     }
 }
@@ -146,7 +181,7 @@ impl MediaConfig {
     /// would silently disable R2 in production, so it is logged loudly before
     /// falling back to `Local`.
     fn from_env(port: u16) -> Self {
-        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        let var = env_opt;
         // Strip trailing '/' so refs built as "{base}/{hash}" never double-slash.
         let trim = |s: String| s.trim_end_matches('/').to_string();
 
