@@ -1,6 +1,8 @@
 //! Quest export: bundle a constructor quest's full record — attributes, the
-//! opaque authoring body (all steps), every media file it references, and
-//! play/rating stats — into a single self-contained zip archive.
+//! opaque authoring body (all steps) and every media file it references —
+//! into a single self-contained zip archive. Content only: play/rating stats
+//! are live projections of the fact log, not quest content, so they do not
+//! belong in a backup/migration artifact.
 //!
 //! Media discovery is structural, not a hardcoded field list: the quest JSON
 //! is scanned recursively for any string value whose last path segment is a
@@ -14,26 +16,21 @@ use std::io::Write;
 use serde_json::Value;
 
 use crate::errors::AppError;
-use crate::facts::PerVersionStats;
+use crate::icons::cover_media_hash;
 use crate::media::MediaStores;
-use crate::store::{ConstructorQuest, ReviewRow};
+use crate::store::ConstructorQuest;
 
 pub const FORMAT_VERSION: u32 = 1;
 
-/// A sha256 hex digest is exactly 64 lowercase hex chars. Matching it as the
-/// LAST path segment of a string (rather than requiring a configured
-/// public_base prefix) keeps this decoupled from where media is hosted —
-/// in-memory, R2, or a future custom domain all differ in prefix but agree on
-/// this suffix.
-fn media_hash_in_url(value: &str) -> Option<&str> {
-    let candidate = value.rsplit('/').next()?;
-    (candidate.len() == 64 && candidate.bytes().all(|b| b.is_ascii_hexdigit())).then_some(candidate)
-}
+// Media URLs are recognized by their trailing sha256 segment via the shared
+// `icons::cover_media_hash` (rather than a configured public_base prefix),
+// which keeps this decoupled from where media is hosted — in-memory, R2, or a
+// future custom domain all differ in prefix but agree on this suffix.
 
 fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
     match value {
         Value::String(s) => {
-            if let Some(hash) = media_hash_in_url(s) {
+            if let Some(hash) = cover_media_hash(s) {
                 out.insert(hash.to_string());
             }
         }
@@ -50,7 +47,7 @@ fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
 fn rewrite_media_urls(value: &mut Value, hash_to_path: &BTreeMap<String, String>) {
     match value {
         Value::String(s) => {
-            if let Some(path) = media_hash_in_url(s).and_then(|h| hash_to_path.get(h)) {
+            if let Some(path) = cover_media_hash(s).and_then(|h| hash_to_path.get(h)) {
                 *s = path.clone();
             }
         }
@@ -74,21 +71,6 @@ fn extension_for(content_type: &str) -> &'static str {
     }
 }
 
-/// Play/rating stats bundled alongside the quest record.
-#[derive(serde::Serialize)]
-struct ExportStats {
-    /// Completions of the constructor quest across all its snapshots (the
-    /// same "completed" count shown on the author dashboard).
-    completed: usize,
-    buyers: usize,
-    /// The live published snapshot version, if any (a draft or a quest that
-    /// was never published has none, and `version_stats` is then `None` too —
-    /// there is no snapshot to fold facts against).
-    published_version: Option<u32>,
-    reviews: Vec<ReviewRow>,
-    version_stats: Option<PerVersionStats>,
-}
-
 #[derive(serde::Serialize)]
 struct ExportManifest {
     format_version: u32,
@@ -96,57 +78,47 @@ struct ExportManifest {
     quest_id: String,
 }
 
-/// Everything the caller has already fetched, handed to the zip builder as
-/// plain data — this module does no store/media-store lookups of its own
-/// beyond fetching the referenced blobs, so it stays testable without a store.
-pub struct ExportInputs {
-    pub quest: ConstructorQuest,
-    pub completed: usize,
-    pub buyers: usize,
-    pub published_version: Option<u32>,
-    pub reviews: Vec<ReviewRow>,
-    pub version_stats: Option<PerVersionStats>,
-}
-
 /// Build the export zip: `manifest.json`, `quest.json` (the full constructor
 /// quest record with every discovered media URL rewritten to a zip-relative
-/// `media/<hash>.<ext>` path), `stats.json`, and the media files themselves.
+/// `media/<hash>.<ext>` path), and the media files themselves.
 pub async fn build_quest_export_zip(
     media: &MediaStores,
-    inputs: ExportInputs,
+    quest: ConstructorQuest,
 ) -> Result<Vec<u8>, AppError> {
-    let quest_id = inputs.quest.quest_id.clone();
-    let mut quest_json = serde_json::to_value(&inputs.quest)
+    let quest_id = quest.quest_id.clone();
+    let mut quest_json = serde_json::to_value(&quest)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize quest for export: {e}")))?;
 
     let mut hashes = BTreeSet::new();
     collect_media_hashes(&quest_json, &mut hashes);
 
-    let mut hash_to_path = BTreeMap::new();
-    let mut media_files: Vec<(String, bytes::Bytes)> = Vec::new();
-    for hash in &hashes {
-        let Some(blob) = media.get(hash).await? else {
-            continue;
-        };
-        let path = format!("media/{hash}.{}", extension_for(&blob.content_type));
-        hash_to_path.insert(hash.clone(), path.clone());
-        media_files.push((path, blob.bytes));
+    // Fetch the referenced blobs concurrently — on R2 each get is a network
+    // round-trip, and serializing tens of them would dominate export latency.
+    // BTreeMap keeps the archive ordering deterministic regardless of which
+    // fetch finishes first.
+    let mut fetches = tokio::task::JoinSet::new();
+    for hash in hashes {
+        let media = media.clone();
+        fetches.spawn(async move { (media.get(&hash).await, hash) });
     }
+    let mut hash_to_path = BTreeMap::new();
+    let mut media_by_path = BTreeMap::new();
+    while let Some(joined) = fetches.join_next().await {
+        let (blob, hash) = joined
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("export media fetch panicked: {e}")))?;
+        // A missing blob (orphaned reference) is skipped; see rewrite_media_urls.
+        if let Some(blob) = blob? {
+            let path = format!("media/{hash}.{}", extension_for(&blob.content_type));
+            hash_to_path.insert(hash, path.clone());
+            media_by_path.insert(path, blob.bytes);
+        }
+    }
+    let media_files: Vec<(String, bytes::Bytes)> = media_by_path.into_iter().collect();
     rewrite_media_urls(&mut quest_json, &hash_to_path);
 
-    let stats = ExportStats {
-        completed: inputs.completed,
-        buyers: inputs.buyers,
-        published_version: inputs.published_version,
-        reviews: inputs.reviews,
-        version_stats: inputs.version_stats,
-    };
     let manifest = ExportManifest {
         format_version: FORMAT_VERSION,
-        exported_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        exported_at: crate::store::now_secs(),
         quest_id,
     };
 
@@ -154,22 +126,17 @@ pub async fn build_quest_export_zip(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize export manifest: {e}")))?;
     let quest_bytes = serde_json::to_vec_pretty(&quest_json)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize export quest.json: {e}")))?;
-    let stats_bytes = serde_json::to_vec_pretty(&stats)
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize export stats: {e}")))?;
 
     // Zip compression is CPU-bound; run it on the blocking pool so it never
     // stalls the async runtime's worker threads for other requests.
-    tokio::task::spawn_blocking(move || {
-        write_zip(manifest_bytes, quest_bytes, stats_bytes, media_files)
-    })
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("export zip task panicked: {e}")))?
+    tokio::task::spawn_blocking(move || write_zip(manifest_bytes, quest_bytes, media_files))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("export zip task panicked: {e}")))?
 }
 
 fn write_zip(
     manifest_bytes: Vec<u8>,
     quest_bytes: Vec<u8>,
-    stats_bytes: Vec<u8>,
     media_files: Vec<(String, bytes::Bytes)>,
 ) -> Result<Vec<u8>, AppError> {
     let options = zip::write::SimpleFileOptions::default()
@@ -185,7 +152,6 @@ fn write_zip(
         };
     write_entry(&mut zip, "manifest.json", &manifest_bytes)?;
     write_entry(&mut zip, "quest.json", &quest_bytes)?;
-    write_entry(&mut zip, "stats.json", &stats_bytes)?;
     for (path, bytes) in &media_files {
         write_entry(&mut zip, path, bytes)?;
     }
@@ -198,20 +164,8 @@ fn write_zip(
 mod tests {
     use super::*;
 
-    #[test]
-    fn media_hash_in_url_matches_trailing_hex64() {
-        let hash = "a".repeat(64);
-        let url = format!("https://cdn.example.com/api/media/{hash}");
-        assert_eq!(media_hash_in_url(&url), Some(hash.as_str()));
-    }
-
-    #[test]
-    fn media_hash_in_url_rejects_short_or_non_hex() {
-        assert_eq!(media_hash_in_url("https://x/api/media/tooshort"), None);
-        assert_eq!(media_hash_in_url("plain text, no url here"), None);
-        assert_eq!(media_hash_in_url(&"g".repeat(64)), None);
-    }
-
+    // URL→hash extraction itself is covered by icons.rs tests (the shared
+    // `cover_media_hash`); here we only test the recursive walk + rewrite.
     #[test]
     fn collect_and_rewrite_round_trip_nested_urls() {
         let hash = "b".repeat(64);
@@ -235,7 +189,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_quest_export_zip_bundles_manifest_quest_stats_and_media() {
+    async fn build_quest_export_zip_bundles_manifest_quest_and_media() {
         let media = MediaStores::InMemory(std::sync::Arc::new(std::sync::Mutex::new(
             crate::media::InMemoryMediaStore::new("http://test.local/api/media".to_string()),
         )));
@@ -261,19 +215,7 @@ mod tests {
             }),
         };
 
-        let zip_bytes = build_quest_export_zip(
-            &media,
-            ExportInputs {
-                quest,
-                completed: 3,
-                buyers: 5,
-                published_version: Some(1),
-                reviews: vec![],
-                version_stats: None,
-            },
-        )
-        .await
-        .unwrap();
+        let zip_bytes = build_quest_export_zip(&media, quest).await.unwrap();
 
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
         let mut names: Vec<String> = (0..archive.len())
@@ -287,7 +229,6 @@ mod tests {
                 "manifest.json".to_string(),
                 expected_media_path.clone(),
                 "quest.json".to_string(),
-                "stats.json".to_string(),
             ]
         );
 

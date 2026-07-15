@@ -379,7 +379,7 @@ export default function Workspace() {
     }
   };
 
-  // Full backup download (record + steps + media + stats), same zip the
+  // Full backup download (record + steps + media), same zip the
   // backend export endpoint builds — triggers a normal browser file save via a
   // throwaway object URL, no navigation.
   const exportQuest = async () => {

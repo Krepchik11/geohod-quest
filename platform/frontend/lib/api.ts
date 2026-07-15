@@ -412,7 +412,7 @@ export const api = {
       { method: 'POST', headers: adminHeaders(), body: '{}' },
     ),
 
-  // Full quest backup (record + all steps + media + stats) as a zip. Binary
+  // Full quest backup (record + all steps + media) as a zip. Binary
   // response — apiFetch is JSON-only, so this does its own fetch, like uploadMedia.
   exportConstructorQuest: async (id: string): Promise<Blob> => {
     const path = `/api/constructor/quests/${encodeURIComponent(id)}/export`;

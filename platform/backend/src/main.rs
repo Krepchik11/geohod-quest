@@ -1091,51 +1091,17 @@ async fn get_constructor_quest_handler(
 
 /// GET /api/constructor/quests/{quest_id}/export — the full quest as a
 /// downloadable zip: quest record (all steps, attributes, cover — media URLs
-/// rewritten to point into the archive), the media files themselves, and play
-/// stats. Owner-or-admin gated, same as every other per-quest constructor
-/// route.
+/// rewritten to point into the archive) and the media files themselves.
+/// Content only — play/rating stats are live projections, not quest content.
+/// Owner-or-admin gated, same as every other per-quest constructor route.
 async fn export_constructor_quest_handler(
     State(state): State<AppState>,
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<axum::response::Response, AppError> {
     let quest = require_owned_constructor_quest(&state, &headers, &quest_id).await?;
-    let completed = state.store.completions_for_quest(&quest.quest_id).await?;
-    let buyers = state.grants.buyers_for_quest(&quest.quest_id).await?;
-    let reviews = state.store.reviews_for_quest(&quest.quest_id, None).await?;
-    let published = state
-        .grants
-        .list_published()
-        .await?
-        .into_iter()
-        .find(|p| p.quest_id == quest.quest_id);
-    let version_stats = match &published {
-        Some(p) => {
-            let grants_count = state.grants.list_all_grants().await?.len();
-            Some(
-                state
-                    .store
-                    .get_version_stats(&p.snapshot_id, grants_count)
-                    .await?,
-            )
-        }
-        None => None,
-    };
-    let published_version = published.as_ref().map(|p| p.snapshot_version);
-
     let filename = format!("quest-{}.zip", quest.quest_id);
-    let zip_bytes = export::build_quest_export_zip(
-        &state.media,
-        export::ExportInputs {
-            quest,
-            completed,
-            buyers,
-            published_version,
-            reviews,
-            version_stats,
-        },
-    )
-    .await?;
+    let zip_bytes = export::build_quest_export_zip(&state.media, quest).await?;
 
     axum::response::Response::builder()
         .header(header::CONTENT_TYPE, "application/zip")
@@ -1501,7 +1467,7 @@ async fn get_quest_product_handler(
         }
     };
     // §11 reviews: last quest_rated WITH text per attempt, newest first.
-    let review_rows = state.store.reviews_for_quest(&quest_id, Some(1000)).await?;
+    let review_rows = state.store.reviews_for_quest(&quest_id, 1000).await?;
     let reviews_total = review_rows.len();
     let page: Vec<store::ReviewRow> = review_rows.into_iter().take(10).collect();
     // Author display names in ONE round-trip (was one get_user per review — an N+1).
@@ -6117,10 +6083,11 @@ mod tests {
 
     /// GET .../export bundles `manifest.json` + `quest.json` (media URLs
     /// rewritten to zip-relative paths, wherever they appear in the body) +
-    /// `stats.json` + the media files themselves, download headers included.
-    /// Owner-or-admin gated like every other per-quest constructor route.
+    /// the media files themselves, download headers included. Content only —
+    /// no play/rating stats. Owner-or-admin gated like every other per-quest
+    /// constructor route.
     #[tokio::test]
-    async fn constructor_export_bundles_quest_media_and_stats() {
+    async fn constructor_export_bundles_quest_and_media() {
         let app = test_app();
         let owner: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
@@ -6209,7 +6176,6 @@ mod tests {
                 "manifest.json".to_string(),
                 expected_media_path.clone(),
                 "quest.json".to_string(),
-                "stats.json".to_string(),
             ]
         );
 
@@ -6232,15 +6198,6 @@ mod tests {
             expected_media_path
         );
         drop(quest_entry);
-
-        let mut stats_entry = archive.by_name("stats.json").unwrap();
-        let mut stats_str = String::new();
-        std::io::Read::read_to_string(&mut stats_entry, &mut stats_str).unwrap();
-        let stats: Value = serde_json::from_str(&stats_str).unwrap();
-        assert_eq!(stats["completed"], 0);
-        assert_eq!(stats["buyers"], 0);
-        assert!(stats["published_version"].is_null(), "never published");
-        drop(stats_entry);
 
         let mut media_entry = archive.by_name(&expected_media_path).unwrap();
         let mut media_out = Vec::new();
@@ -6875,9 +6832,9 @@ mod tests {
         assert_eq!(full["age_target"], "18plus");
         assert_eq!(full["tags"], json!(["хоррор", "юмор"]));
 
-        // export must work against the REAL SQL store: the "all reviews" fetch
-        // once smuggled usize::MAX through an `as i64` cast, becoming LIMIT -1
-        // (a PG error the in-memory store can never surface).
+        // export must work against the REAL SQL store — the in-memory suite
+        // cannot surface PG-only failures (an early version 500'd here on a
+        // negative LIMIT produced by an `as i64` cast in a store query).
         let res = app
             .clone()
             .oneshot(

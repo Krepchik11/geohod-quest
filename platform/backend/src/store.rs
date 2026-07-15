@@ -157,9 +157,8 @@ impl InMemoryFactStore {
 
     /// §11 reviews v1 — the last quest_rated fact WITH text per attempt of the
     /// quest, newest attempt first. Timestamped by the attempt (facts carry no
-    /// clock); the UI shows the month. `limit: None` returns every review (the
-    /// export path) — a first-class "all", never a numeric sentinel.
-    pub fn reviews_for_quest(&self, quest_id: &str, limit: Option<usize>) -> Vec<ReviewRow> {
+    /// clock); the UI shows the month.
+    pub fn reviews_for_quest(&self, quest_id: &str, limit: usize) -> Vec<ReviewRow> {
         let mut attempts: Vec<&AttemptMeta> = self
             .attempts
             .values()
@@ -189,7 +188,7 @@ impl InMemoryFactStore {
                 rating,
                 text: text.chars().take(500).collect(),
             });
-            if limit.is_some_and(|l| out.len() >= l) {
+            if out.len() >= limit {
                 break;
             }
         }
@@ -909,7 +908,7 @@ impl InMemoryAuthStore {
 }
 
 /// §11: one player review row (text attached to the finale rating).
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ReviewRow {
     pub player_id: String,
     pub created_at: u64,
@@ -941,7 +940,7 @@ impl FactStores {
     pub async fn reviews_for_quest(
         &self,
         quest_id: &str,
-        limit: Option<usize>,
+        limit: usize,
     ) -> Result<Vec<ReviewRow>, AppError> {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.reviews_for_quest(quest_id, limit)),
