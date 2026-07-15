@@ -65,6 +65,43 @@ export function hasAdminToken(): boolean {
   return Object.keys(adminHeaders()).length > 0;
 }
 
+/** One coupon as served by the admin coupon endpoints (coupons spec): the
+ *  stored record plus the DERIVED status and the usage fold. `quest_ids: null`
+ *  means «все квесты»; null limits mean unlimited. */
+export interface AdminCouponWire {
+  coupon_id: string;
+  code: string;
+  discount_type: 'percent' | 'fixed';
+  discount_value: number;
+  valid_until: string | null;
+  max_redemptions: number | null;
+  per_user_limit: number | null;
+  quest_ids: string[] | null;
+  paused: boolean;
+  status: 'active' | 'paused' | 'expired' | 'exhausted';
+  used: number;
+  last_redeemed_at: string | null;
+  total_discounted: number;
+  created_at: string;
+}
+
+/** Editable coupon fields as the admin form submits them (create + save). */
+export interface CouponPayload {
+  code: string;
+  discount_type: 'percent' | 'fixed';
+  discount_value: number;
+  valid_until: string | null;
+  max_redemptions: number | null;
+  per_user_limit: number | null;
+  quest_ids: string[] | null;
+  paused: boolean;
+}
+
+/** Verdict of POST /api/coupons/validate — always 200, never consumes. */
+export type CouponVerdict =
+  | { valid: true; code: string; price: number; discount_amount: number; final_price: number }
+  | { valid: false; message: string };
+
 /** One registered account as served by GET /api/admin/users (admin-users spec). */
 export interface AdminUserWire {
   player_id: string;
@@ -239,8 +276,16 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
 }
 
 export const api = {
-  checkout: (body: { player_id: string; quest_id: string; coupon_percent?: number }) =>
+  checkout: (body: { player_id: string; quest_id: string; coupon_code?: string }) =>
     apiFetch('/api/checkout', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Purchase-sheet promo preview: the discount lives in the server-side coupon
+  // registry — this never consumes the code and always resolves to a verdict.
+  validateCoupon: (body: { player_id: string; quest_id: string; code: string }) =>
+    apiFetch<CouponVerdict>('/api/coupons/validate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // Publishing is the editor capability (backend require_editor): the editor's
   // Bearer session (always sent by authHeaders) authorizes it. adminHeaders() is
@@ -289,6 +334,34 @@ export const api = {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ role }),
+    }),
+
+  // Admin coupon management (coupons spec) — same dual-credential gating as the
+  // user endpoints (role==admin session OR the shared ADMIN_TOKEN). Mutations are
+  // POST-only, matching the backend's GET+POST router surface.
+  adminListCoupons: () =>
+    apiFetch<AdminCouponWire[]>('/api/admin/coupons', { headers: adminHeaders() }),
+  adminGetCoupon: (couponId: string) =>
+    apiFetch<AdminCouponWire>(`/api/admin/coupons/${encodeURIComponent(couponId)}`, {
+      headers: adminHeaders(),
+    }),
+  adminCreateCoupon: (payload: CouponPayload) =>
+    apiFetch<AdminCouponWire>('/api/admin/coupons', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(payload),
+    }),
+  adminSaveCoupon: (couponId: string, payload: CouponPayload) =>
+    apiFetch<AdminCouponWire>(`/api/admin/coupons/${encodeURIComponent(couponId)}/save`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(payload),
+    }),
+  adminDeleteCoupon: (couponId: string) =>
+    apiFetch(`/api/admin/coupons/${encodeURIComponent(couponId)}/delete`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({}),
     }),
 
   // Published + grants (for cabinet/market live)

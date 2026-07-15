@@ -1,0 +1,134 @@
+/*
+ * Unified admin shell (Admin Coupons.dc.html «единый шелл») — the one header
+ * every admin page shares: site logo lockup + «АДМИНКА», Jost tabs like the
+ * public site-nav, and the site user menu. Desktop: single 72px row with
+ * centered tabs. Mobile (<768px): 60px brand row (logo-mark + stacked
+ * GEOHOD/АДМИНКА) with the tabs in a second row underneath.
+ */
+
+.ash-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #e4e6ea;
+  color: #1a2b48;
+}
+.ash-root *,
+.ash-root *::before,
+.ash-root *::after {
+  box-sizing: border-box;
+}
+
+.ash-header {
+  background: #fff;
+  border-bottom: 1px solid #ecedef;
+  flex: none;
+}
+.ash-bar {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 40px;
+}
+.ash-logo { display: flex; align-items: center; gap: 9px; flex: none; }
+.ash-divider { width: 1px; height: 26px; background: #e4e6ea; flex: none; }
+.ash-eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  color: #83858c;
+  white-space: nowrap;
+  flex: none;
+}
+/* The stacked GEOHOD/АДМИНКА lockup is the mobile brand; hidden on desktop. */
+.ash-logo-stack { display: none; }
+
+.ash-tabs a {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #1a2b48;
+  white-space: nowrap;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.ash-tabs a:hover { color: #3b71fe; }
+.ash-tabs a.is-active { color: #3b71fe; border-bottom-color: currentColor; }
+.ash-tabs--inline {
+  display: flex;
+  gap: 40px;
+  margin: 0 auto;
+}
+.ash-tabs--inline a { padding: 26px 0 24px; }
+.ash-tabs--row { display: none; }
+
+@media (max-width: 767px) {
+  .ash-bar { height: 60px; gap: 10px; padding: 0 16px; }
+  .ash-logo-text, .ash-divider, .ash-eyebrow, .ash-tabs--inline { display: none; }
+  .ash-logo-stack { display: flex; flex-direction: column; line-height: 1; }
+  .ash-logo-name {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    color: #122947;
+  }
+  .ash-logo-sub {
+    font-family: var(--font-display);
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    color: #83858c;
+    margin-top: 2px;
+  }
+  .ash-bar .user-menu { margin-left: auto; }
+  .ash-tabs--row {
+    display: flex;
+    gap: 26px;
+    padding: 0 16px;
+  }
+  .ash-tabs--row a { font-size: 12px; padding: 10px 0 12px; border-bottom-width: 2px; }
+}
+
+/* Page body under the shell: the admin-users frame keeps its own layout but
+ * must not re-add a viewport-height minimum below the header. */
+.ash-root > .au-root { flex: 1; min-height: 0; }
+.ash-root .au-frame { min-height: 100%; }
+
+/* ---- shared access-state screens (checking / denied / error) ---- */
+.ash-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 24px;
+  text-align: center;
+}
+.ash-state-title { font-size: 20px; font-weight: 600; color: #000f08; }
+.ash-state-text { max-width: 420px; font-size: 13.5px; line-height: 1.6; color: #5b6373; }
+.ash-state-link {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 26px;
+  border-radius: 22px;
+  background: #3b71fe;
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.ash-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #dfe3ea;
+  border-top-color: #3b71fe;
+  animation: ash-spin 0.8s linear infinite;
+}
+@keyframes ash-spin {
+  to { transform: rotate(360deg); }
+}

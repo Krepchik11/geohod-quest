@@ -15,6 +15,8 @@ import "./styles/admin-ctor.css";
 import "./styles/ctor-workspace.css";
 import "./styles/ctor-dashboard.css";
 import "./styles/admin-users.css";
+import "./styles/admin-shell.css";
+import "./styles/admin-coupons.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

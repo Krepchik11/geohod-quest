@@ -29,6 +29,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod auth;
 mod config;
+mod coupons;
 mod errors;
 mod facts;
 mod grants;
@@ -43,6 +44,7 @@ mod store;
 use std::sync::{Arc, Mutex};
 
 use config::AppConfig;
+use coupons::{Coupon, CouponUsage, Discount};
 use errors::AppError;
 use facts::{Fact, MigrationResult, ProjectedState};
 use grants::{AccessGrant, GrantSource};
@@ -50,8 +52,8 @@ use media::{MediaRef, MediaStores};
 use payments::{MockPaymentProvider, PaymentOutcome, PaymentProvider};
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
-    FactStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore, InMemoryFactStore,
-    InMemoryGrantStore, PublishedMeta,
+    CouponStores, FactStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
+    InMemoryCouponStore, InMemoryFactStore, InMemoryGrantStore, PublishedMeta,
 };
 
 /// Shared application state.
@@ -63,6 +65,8 @@ struct AppState {
     auth: AuthStores,
     /// Authoring-side quest registry (drafts + lifecycle) behind the constructor.
     constructor: ConstructorStores,
+    /// Admin-managed discount codes + their redemption log (coupons spec).
+    coupons: CouponStores,
     /// Content-addressed media blobs (Cloudflare R2 in prod; in-process otherwise).
     media: MediaStores,
     payments: Arc<dyn PaymentProvider>,
@@ -108,6 +112,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         constructor: ConstructorStores::InMemory(Arc::new(Mutex::new(
             InMemoryConstructorStore::new(),
         ))),
+        coupons: CouponStores::InMemory(Arc::new(Mutex::new(InMemoryCouponStore::new()))),
         media,
         payments: Arc::new(MockPaymentProvider),
         mailer,
@@ -419,7 +424,21 @@ fn build_router(state: AppState) -> Router {
             post(delete_constructor_quest_handler),
         )
         .route("/api/checkout", post(checkout_handler))
+        .route("/api/coupons/validate", post(validate_coupon_handler))
         .route("/api/grants", get(list_grants_handler))
+        .route(
+            "/api/admin/coupons",
+            get(list_coupons_handler).post(create_coupon_handler),
+        )
+        .route("/api/admin/coupons/{coupon_id}", get(get_coupon_handler))
+        .route(
+            "/api/admin/coupons/{coupon_id}/save",
+            post(save_coupon_handler),
+        )
+        .route(
+            "/api/admin/coupons/{coupon_id}/delete",
+            post(delete_coupon_handler),
+        )
         .route(
             "/api/admin/versions/{snapshot_id}/stats",
             get(get_version_stats_handler),
@@ -619,7 +638,9 @@ async fn get_state_handler(
 struct CheckoutRequest {
     player_id: String,
     quest_id: String,
-    coupon_percent: Option<u8>,
+    /// Server-validated promo code; the discount lives in the coupon registry,
+    /// never in the request (a client cannot name its own percentage).
+    coupon_code: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -628,28 +649,118 @@ struct CheckoutResponse {
     created: bool,
 }
 
-/// Checkout behind the PaymentProvider seam (mock approves everything). 100%
-/// coupon redeems as CouponRedemption and bypasses the provider; everything
-/// else charges the provider and grants as Payment with the payment_ref
-/// recorded for audit. Idempotent (first grant + first audit ref win).
+/// Checkout behind the PaymentProvider seam (mock approves everything).
+///
+/// With a coupon code the registry is consulted: the redemption is recorded
+/// atomically against the coupon's caps, and a discount that zeroes the price
+/// grants as CouponRedemption bypassing the provider; a partial discount still
+/// charges the provider and grants as Payment. Idempotent (first grant + first
+/// audit ref win), and a re-checkout of an owned quest never consumes a coupon.
 async fn checkout_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<CheckoutRequest>,
 ) -> Result<Json<CheckoutResponse>, AppError> {
     let player_id = resolve_player(&state, &headers, &req.player_id).await?;
-    let (source, source_ref) = if req.coupon_percent == Some(100) {
-        (GrantSource::CouponRedemption, None)
-    } else {
-        let PaymentOutcome::Approved { payment_ref } =
-            state.payments.charge(&player_id, &req.quest_id);
-        (GrantSource::Payment, Some(payment_ref))
+    if state.grants.has_grant(&player_id, &req.quest_id).await? {
+        // Already owned: return the stored grant unchanged (source is ignored
+        // on an idempotent hit) without charging or spending a coupon.
+        let (grant, created) = state
+            .grants
+            .create_grant_idemp(&player_id, &req.quest_id, GrantSource::Payment, None)
+            .await?;
+        return Ok(Json(CheckoutResponse { grant, created }));
+    }
+    let (source, source_ref) = match &req.coupon_code {
+        Some(raw) => {
+            let code = coupons::normalize_code(raw)?;
+            let price = state
+                .grants
+                .get_published(&req.quest_id)
+                .await?
+                .and_then(|meta| meta.price)
+                .filter(|p| *p > 0)
+                .ok_or_else(|| {
+                    AppError::Conflict(coupons::RedeemReject::NotApplicable.message().into())
+                })?;
+            let redemption = state
+                .coupons
+                .redeem(&code, &player_id, &req.quest_id, price)
+                .await?;
+            if redemption.amount_discounted >= price {
+                (GrantSource::CouponRedemption, None)
+            } else {
+                let PaymentOutcome::Approved { payment_ref } =
+                    state.payments.charge(&player_id, &req.quest_id);
+                (GrantSource::Payment, Some(payment_ref))
+            }
+        }
+        None => {
+            let PaymentOutcome::Approved { payment_ref } =
+                state.payments.charge(&player_id, &req.quest_id);
+            (GrantSource::Payment, Some(payment_ref))
+        }
     };
     let (grant, created) = state
         .grants
         .create_grant_idemp(&player_id, &req.quest_id, source, source_ref)
         .await?;
     Ok(Json(CheckoutResponse { grant, created }))
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateCouponRequest {
+    player_id: String,
+    quest_id: String,
+    code: String,
+}
+
+/// Purchase-sheet promo preview: never mutates, always 200 with a verdict.
+/// `{valid: true, ...}` carries the priced discount; `{valid: false, message}`
+/// carries the player-facing reason (unknown and deleted codes read the same).
+async fn validate_coupon_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ValidateCouponRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let player_id = resolve_player(&state, &headers, &req.player_id).await?;
+    let invalid = |message: &str| serde_json::json!({"valid": false, "message": message});
+    let Ok(code) = coupons::normalize_code(&req.code) else {
+        return Ok(Json(invalid("промокод не найден")));
+    };
+    let Some(price) = state
+        .grants
+        .get_published(&req.quest_id)
+        .await?
+        .and_then(|meta| meta.price)
+        .filter(|p| *p > 0)
+    else {
+        return Ok(Json(invalid(
+            coupons::RedeemReject::NotApplicable.message(),
+        )));
+    };
+    let Some((coupon, used_total, used_by_player)) =
+        state.coupons.preview(&code, &player_id).await?
+    else {
+        return Ok(Json(invalid("промокод не найден")));
+    };
+    if let Err(reject) = coupons::check_redeemable(
+        &coupon,
+        &req.quest_id,
+        used_total,
+        used_by_player,
+        &store::today_utc(),
+    ) {
+        return Ok(Json(invalid(reject.message())));
+    }
+    let discount_amount = coupons::discount_amount(&coupon.discount, price);
+    Ok(Json(serde_json::json!({
+        "valid": true,
+        "code": coupon.code,
+        "price": price,
+        "discount_amount": discount_amount,
+        "final_price": price - discount_amount,
+    })))
 }
 
 #[derive(serde::Deserialize)]
@@ -1682,7 +1793,10 @@ async fn complete_social_login(
     if ident.email_verified
         && let Some(email) = ident.email.as_ref()
     {
-        let _ = state.auth.attach_email(&target, email, store::now_secs()).await;
+        let _ = state
+            .auth
+            .attach_email(&target, email, store::now_secs())
+            .await;
     }
 
     issue_session_for(state, &target).await
@@ -2380,6 +2494,167 @@ async fn set_user_role_handler(
     Ok(Json(updated.into()))
 }
 
+/// Body for coupon create/save: the editable fields exactly as the admin form
+/// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
+#[derive(serde::Deserialize)]
+struct CouponPayload {
+    code: String,
+    #[serde(flatten)]
+    discount: Discount,
+    valid_until: Option<String>,
+    max_redemptions: Option<u32>,
+    per_user_limit: Option<u32>,
+    quest_ids: Option<Vec<String>>,
+    #[serde(default)]
+    paused: bool,
+}
+
+impl CouponPayload {
+    /// Validate every field and build the stored record. `coupon_id` and
+    /// `created_at` come from the caller: fresh for create, preserved for save.
+    fn into_coupon(self, coupon_id: String, created_at: String) -> Result<Coupon, AppError> {
+        let code = coupons::normalize_code(&self.code)?;
+        coupons::validate_discount(&self.discount)?;
+        if let Some(date) = &self.valid_until {
+            coupons::validate_date(date)?;
+        }
+        if self.max_redemptions == Some(0) || self.per_user_limit == Some(0) {
+            return Err(AppError::BadRequest(
+                "лимит использований должен быть больше нуля".into(),
+            ));
+        }
+        if self.quest_ids.as_ref().is_some_and(|q| q.is_empty()) {
+            return Err(AppError::BadRequest(
+                "выберите хотя бы один квест или переключитесь на «Все квесты»".into(),
+            ));
+        }
+        Ok(Coupon {
+            coupon_id,
+            code,
+            discount: self.discount,
+            valid_until: self.valid_until,
+            max_redemptions: self.max_redemptions,
+            per_user_limit: self.per_user_limit,
+            quest_ids: self.quest_ids,
+            paused: self.paused,
+            created_at,
+        })
+    }
+}
+
+/// One coupon as served to the admin UI: the stored record plus the DERIVED
+/// status and the usage fold (never persisted — always честный пересчёт).
+#[derive(serde::Serialize)]
+struct AdminCouponWire {
+    #[serde(flatten)]
+    coupon: Coupon,
+    status: coupons::CouponStatus,
+    #[serde(flatten)]
+    usage: CouponUsage,
+}
+
+impl AdminCouponWire {
+    fn build(coupon: Coupon, usage: CouponUsage, today: &str) -> Self {
+        let status = coupons::coupon_status(&coupon, usage.used, today);
+        Self {
+            coupon,
+            status,
+            usage,
+        }
+    }
+}
+
+/// Admin coupon list, newest first, each with derived status + usage.
+async fn list_coupons_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminCouponWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let today = store::today_utc();
+    let rows = state.coupons.list_with_usage().await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(c, u)| AdminCouponWire::build(c, u, &today))
+            .collect(),
+    ))
+}
+
+/// Create a coupon. 400 on any invalid field, 409 on a duplicate code.
+async fn create_coupon_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<CouponPayload>,
+) -> Result<Json<AdminCouponWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let coupon_id = format!("cpn-{}", &auth::generate_token()[..12]);
+    let coupon = payload.into_coupon(coupon_id, store::now_rfc3339())?;
+    let created = state.coupons.create(coupon).await?;
+    Ok(Json(AdminCouponWire::build(
+        created,
+        CouponUsage::default(),
+        &store::today_utc(),
+    )))
+}
+
+/// One coupon with usage (admin editor).
+async fn get_coupon_handler(
+    State(state): State<AppState>,
+    Path(coupon_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<AdminCouponWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let (coupon, usage) = state
+        .coupons
+        .get_with_usage(&coupon_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("unknown coupon '{coupon_id}'")))?;
+    Ok(Json(AdminCouponWire::build(
+        coupon,
+        usage,
+        &store::today_utc(),
+    )))
+}
+
+/// Save every editable field of a coupon (identity and created_at preserved;
+/// the redemption log is untouched, so usage stats survive edits and pauses).
+async fn save_coupon_handler(
+    State(state): State<AppState>,
+    Path(coupon_id): Path<String>,
+    headers: HeaderMap,
+    Json(payload): Json<CouponPayload>,
+) -> Result<Json<AdminCouponWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let existing = state
+        .coupons
+        .get(&coupon_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("unknown coupon '{coupon_id}'")))?;
+    let coupon = payload.into_coupon(existing.coupon_id, existing.created_at)?;
+    let updated = state.coupons.update(coupon).await?;
+    let (_, usage) = state
+        .coupons
+        .get_with_usage(&coupon_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("unknown coupon '{coupon_id}'")))?;
+    Ok(Json(AdminCouponWire::build(
+        updated,
+        usage,
+        &store::today_utc(),
+    )))
+}
+
+/// Delete a coupon and its redemption log. Already-granted quests stay owned
+/// («удаление необратимо; уже применённые скидки сохраняются»).
+async fn delete_coupon_handler(
+    State(state): State<AppState>,
+    Path(coupon_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    state.coupons.delete(&coupon_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Cross-attempt player statistics: storage gathers the logs, the pure
 /// projector folds them (player-stats spec; never re-folded in SQL).
 async fn get_my_stats_handler(
@@ -2474,7 +2749,10 @@ async fn main() -> anyhow::Result<()> {
                 store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
                 grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
                 auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-                constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
+                constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
+                    pool.clone(),
+                )),
+                coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool)),
                 media,
                 payments: Arc::new(MockPaymentProvider),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
@@ -2894,8 +3172,12 @@ mod tests {
     #[tokio::test]
     async fn telegram_creates_account_on_anonymous_id_preserving_it() {
         let app = test_app_social();
-        let (st, body) =
-            post_json(&app, "/api/auth/telegram", tg_payload("dev:keep-me", 500, "Ann")).await;
+        let (st, body) = post_json(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:keep-me", 500, "Ann"),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         // The account is keyed to the SAME anonymous id (coins/grants survive).
         assert_eq!(body["player_id"], "dev:keep-me");
@@ -2904,24 +3186,36 @@ mod tests {
         let token = body["token"].as_str().expect("token");
 
         // /me reports the telegram method and no email.
-        let (st, me) = get_json_h(&app, "/api/players/me", &[("authorization", &format!("Bearer {token}"))]).await;
+        let (st, me) = get_json_h(
+            &app,
+            "/api/players/me",
+            &[("authorization", &format!("Bearer {token}"))],
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["registered"], true);
         assert!(me["email"].is_null());
-        let methods: Vec<String> =
-            serde_json::from_value(me["methods"].clone()).expect("methods");
+        let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
         assert_eq!(methods, vec!["telegram".to_string()]);
     }
 
     #[tokio::test]
     async fn telegram_same_user_from_second_device_returns_first_account() {
         let app = test_app_social();
-        let (_, first) =
-            post_json(&app, "/api/auth/telegram", tg_payload("dev:one", 900, "Ann")).await;
+        let (_, first) = post_json(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:one", 900, "Ann"),
+        )
+        .await;
         assert_eq!(first["player_id"], "dev:one");
         // A different anonymous device signs in with the SAME telegram id.
-        let (st, second) =
-            post_json(&app, "/api/auth/telegram", tg_payload("dev:two", 900, "Ann")).await;
+        let (st, second) = post_json(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:two", 900, "Ann"),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         // It resolves to the existing account, not a new one on dev:two.
         assert_eq!(second["player_id"], "dev:one");
@@ -2961,8 +3255,12 @@ mod tests {
         assert_eq!(methods, vec!["email".to_string(), "telegram".to_string()]);
 
         // Telegram login from another device now reaches the email account.
-        let (_, elsewhere) =
-            post_json(&app, "/api/auth/telegram", tg_payload("dev:other", 4242, "Ann")).await;
+        let (_, elsewhere) = post_json(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:other", 4242, "Ann"),
+        )
+        .await;
         assert_eq!(elsewhere["player_id"], "dev:acct");
 
         // Unlink telegram is allowed (email remains).
@@ -2990,8 +3288,12 @@ mod tests {
     #[tokio::test]
     async fn telegram_only_account_cannot_unlink_its_sole_method() {
         let app = test_app_social();
-        let (_, acct) =
-            post_json(&app, "/api/auth/telegram", tg_payload("dev:solo", 77, "Solo")).await;
+        let (_, acct) = post_json(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:solo", 77, "Solo"),
+        )
+        .await;
         let token = acct["token"].as_str().expect("token");
         let (st, _) = post_json_h(
             &app,
@@ -3000,7 +3302,11 @@ mod tests {
             &[("authorization", &format!("Bearer {token}"))],
         )
         .await;
-        assert_eq!(st, StatusCode::CONFLICT, "sole sign-in method must not be removable");
+        assert_eq!(
+            st,
+            StatusCode::CONFLICT,
+            "sole sign-in method must not be removable"
+        );
     }
 
     #[tokio::test]
@@ -3009,7 +3315,10 @@ mod tests {
         let (st, body) = get_json_h(&app, "/api/auth/providers", &[]).await;
         assert_eq!(st, StatusCode::OK);
         assert!(body["google_client_id"].is_null());
-        assert_eq!(body["telegram_client_id"], social::test_support::TELEGRAM_CLIENT_ID);
+        assert_eq!(
+            body["telegram_client_id"],
+            social::test_support::TELEGRAM_CLIENT_ID
+        );
     }
 
     async fn post_json_h(
@@ -3172,7 +3481,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_percent": null}),
+            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -3481,26 +3790,50 @@ mod tests {
         let (_, v1) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_percent": null}),
+            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
         )
         .await;
         assert_eq!(v1["created"], true);
         assert_eq!(v1["grant"]["source"], "Payment");
 
+        // Re-checkout of an owned quest is idempotent and never consumes a
+        // coupon — the code is not even looked up.
         let (_, v2) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_percent": 100}),
+            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": "GHOST-1"}),
         )
         .await;
         assert_eq!(v2["created"], false, "idempotent");
         assert_eq!(v2["grant"]["source"], "Payment", "first source preserved");
 
+        // A full-discount coupon on a paid published quest bypasses the provider.
         let other_quest = format!("{}-coupon", ids.quest);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": other_quest, "name": "QC", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-c", ids.snap1),
+                   "price": 300}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        // Code derived from the run-unique quest id so the shared-Postgres
+        // suite never collides with an earlier run's coupon.
+        let code = format!("{}-FULL", ids.quest.to_ascii_uppercase());
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "percent", "discount_value": 100}),
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
         let (_, v3) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": other_quest, "coupon_percent": 100}),
+            json!({"player_id": ids.player, "quest_id": other_quest,
+                   "coupon_code": code.to_ascii_lowercase()}),
         )
         .await;
         assert_eq!(v3["grant"]["source"], "CouponRedemption");
@@ -4295,12 +4628,30 @@ mod tests {
             format!("mock-pay-{}-{}", ids.player, ids.quest)
         );
 
-        // Coupon 100% bypasses the provider: no ref.
+        // A coupon that zeroes the price bypasses the provider: no ref.
         let coupon_quest = format!("{}-coupon", ids.quest);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": coupon_quest, "name": "QC", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-audit-c", ids.snap1),
+                   "price": 200}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let code = format!("{}-A300", ids.quest.to_ascii_uppercase());
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "fixed", "discount_value": 300}),
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
         let (_, v2) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": coupon_quest, "coupon_percent": 100}),
+            json!({"player_id": ids.player, "quest_id": coupon_quest, "coupon_code": code}),
         )
         .await;
         assert_eq!(v2["grant"]["source"], "CouponRedemption");
@@ -4396,6 +4747,356 @@ mod tests {
     #[tokio::test]
     async fn admin_user_management_list_and_roles() {
         scenario_admin_users(&test_app(), &Ids::new("users")).await;
+    }
+
+    /// Admin coupon CRUD: create → list → get → save → delete, with the
+    /// derived status and validation/conflict/gating guards along the way.
+    /// Codes derive from the run-unique quest id (shared-Postgres safe).
+    async fn scenario_admin_coupons(app: &Router, ids: &Ids) {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let code = ids.quest.to_ascii_uppercase();
+
+        // Gating: no credential → opaque 403 on every verb.
+        let (st, _) = get_json(app, "/api/admin/coupons").await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = post_json(
+            app,
+            "/api/admin/coupons",
+            json!({"code": "X-10", "discount_type": "percent", "discount_value": 10}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+
+        // Validation: bad code, bad percent, bad date, zero limit, empty quest list.
+        for bad in [
+            json!({"code": "ab", "discount_type": "percent", "discount_value": 10}),
+            json!({"code": code, "discount_type": "percent", "discount_value": 0}),
+            json!({"code": code, "discount_type": "percent", "discount_value": 101}),
+            json!({"code": code, "discount_type": "fixed", "discount_value": 0}),
+            json!({"code": code, "discount_type": "percent", "discount_value": 10, "valid_until": "31.08.2026"}),
+            json!({"code": code, "discount_type": "percent", "discount_value": 10, "max_redemptions": 0}),
+            json!({"code": code, "discount_type": "percent", "discount_value": 10, "quest_ids": []}),
+        ] {
+            let (st, _) = post_json_h(app, "/api/admin/coupons", bad, &admin).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST);
+        }
+
+        // Create normalizes the code and derives an Active status.
+        let (st, created) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": format!("  {} ", code.to_ascii_lowercase()),
+                   "discount_type": "percent", "discount_value": 20,
+                   "valid_until": "2099-08-31", "max_redemptions": 100, "per_user_limit": 1}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["code"], code.as_str());
+        assert_eq!(created["status"], "active");
+        assert_eq!(created["used"], 0);
+        let id = created["coupon_id"].as_str().expect("id").to_string();
+
+        // Duplicate code → 409.
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": code.to_ascii_lowercase(), "discount_type": "fixed", "discount_value": 300}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+
+        // List contains it; get agrees.
+        let (st, list) = get_json_h(app, "/api/admin/coupons", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(
+            list.as_array()
+                .expect("array")
+                .iter()
+                .any(|c| c["coupon_id"] == id.as_str()),
+            "created coupon listed"
+        );
+        let (st, one) = get_json_h(app, &format!("/api/admin/coupons/{id}"), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(one["code"], code.as_str());
+
+        // Save: pause + switch to a fixed discount; identity/created_at survive.
+        let (st, saved) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/save"),
+            json!({"code": code, "discount_type": "fixed", "discount_value": 300,
+                   "paused": true}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(saved["coupon_id"], id.as_str());
+        assert_eq!(saved["status"], "paused");
+        assert_eq!(saved["created_at"], created["created_at"]);
+
+        // A past valid_until derives "expired" (paused loses to expired).
+        let (st, expired) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/save"),
+            json!({"code": code, "discount_type": "fixed", "discount_value": 300,
+                   "valid_until": "2020-01-01", "paused": true}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(expired["status"], "expired");
+
+        // Delete, then 404 on every follow-up.
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/delete"),
+            json!({}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (st, _) = get_json_h(app, &format!("/api/admin/coupons/{id}"), &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/delete"),
+            json!({}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn admin_coupons_crud_validation_and_gating() {
+        scenario_admin_coupons(&test_app(), &Ids::new("cpn-crud")).await;
+    }
+
+    /// The purchase-sheet preview: always 200, verdict in the body; the priced
+    /// discount matches what checkout will actually apply.
+    async fn scenario_coupon_validate(app: &Router, ids: &Ids) {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let code = ids.quest.to_ascii_uppercase();
+        let player = format!("dev:{}-preview", ids.player);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": 900}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "percent", "discount_value": 20,
+                   "per_user_limit": 1}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Valid: 20% off 900 → 720.
+        let (st, v) = post_json(
+            app,
+            "/api/coupons/validate",
+            json!({"player_id": player, "quest_id": ids.quest, "code": code.to_ascii_lowercase()}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["valid"], true);
+        assert_eq!(v["price"], 900);
+        assert_eq!(v["discount_amount"], 180);
+        assert_eq!(v["final_price"], 720);
+
+        // Unknown code and malformed code read the same.
+        for unknown in ["NOPE-1", "нет"] {
+            let (st, v) = post_json(
+                app,
+                "/api/coupons/validate",
+                json!({"player_id": player, "quest_id": ids.quest, "code": unknown}),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+            assert_eq!(v["valid"], false);
+            assert_eq!(v["message"], "промокод не найден");
+        }
+
+        // Unpublished (or free) quest: the coupon does not apply.
+        let (_, v) = post_json(
+            app,
+            "/api/coupons/validate",
+            json!({"player_id": player, "quest_id": "ghost-quest", "code": code}),
+        )
+        .await;
+        assert_eq!(v["valid"], false);
+
+        // Preview does not consume: checkout with the code still succeeds,
+        // and only then does the per-user limit bite the NEXT quest.
+        let (st, out) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": player, "quest_id": ids.quest, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            out["grant"]["source"], "Payment",
+            "partial discount still charges"
+        );
+
+        let other = format!("{}-b", ids.quest);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": other, "name": "Q2", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-b", ids.snap1),
+                   "price": 500}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = post_json(
+            app,
+            "/api/coupons/validate",
+            json!({"player_id": player, "quest_id": other, "code": code}),
+        )
+        .await;
+        assert_eq!(v["valid"], false);
+        assert_eq!(v["message"], "Вы уже использовали этот промокод");
+    }
+
+    #[tokio::test]
+    async fn coupon_validate_previews_without_consuming() {
+        scenario_coupon_validate(&test_app(), &Ids::new("cpn-preview")).await;
+    }
+
+    /// Checkout + coupons end to end: caps enforced atomically, usage recorded
+    /// for the admin stats, quest restriction honored, retries idempotent.
+    async fn scenario_coupon_redeem(app: &Router, ids: &Ids) {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let code = ids.quest.to_ascii_uppercase();
+        let p = |n: &str| format!("dev:{}-{n}", ids.player);
+        let quest_a = ids.quest.clone();
+        let quest_b = format!("{}-b", ids.quest);
+        for (quest, snap, price) in [
+            (&quest_a, ids.snap1.clone(), 900),
+            (&quest_b, format!("{}-b", ids.snap1), 200),
+        ] {
+            let (st, _) = publish(
+                app,
+                ids,
+                json!({"quest_id": quest, "name": "Q", "template_summary": "demo",
+                       "snapshot_version": 1, "snapshot_id": snap, "price": price}),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        // Fixed 300 ₽, total cap 2, restricted to quest_a and quest_b.
+        let (st, created) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "fixed", "discount_value": 300,
+                   "max_redemptions": 2, "quest_ids": [quest_a, quest_b]}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let coupon_id = created["coupon_id"].as_str().expect("id").to_string();
+
+        // Not applicable to a foreign quest.
+        let quest_c = format!("{}-c", ids.quest);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": quest_c, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-c", ids.snap1),
+                   "price": 100}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, body) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r1"), "quest_id": quest_c, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "Промокод не действует на этот квест");
+
+        // Partial discount on quest_a charges the provider (Payment)...
+        let (st, out) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r1"), "quest_id": quest_a, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(out["grant"]["source"], "Payment");
+        // ...while a clamped full discount on quest_b bypasses it entirely.
+        let (st, out) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r2"), "quest_id": quest_b, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(out["grant"]["source"], "CouponRedemption");
+
+        // Cap of 2 reached → third player gets the exhausted message.
+        let (st, body) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r3"), "quest_id": quest_a, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(
+            body["error"],
+            "Промокод больше не действует — лимит исчерпан"
+        );
+
+        // Usage folded for the admin: 2 uses, 300 + clamped 200 saved.
+        let (st, one) = get_json_h(app, &format!("/api/admin/coupons/{coupon_id}"), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(one["used"], 2);
+        assert_eq!(one["total_discounted"], 500);
+        assert_eq!(one["status"], "exhausted");
+        assert!(one["last_redeemed_at"].is_string());
+
+        // A paused coupon refuses new redemptions with its own message.
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{coupon_id}/save"),
+            json!({"code": code, "discount_type": "fixed", "discount_value": 300,
+                   "quest_ids": [quest_a, quest_b], "paused": true}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, body) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r4"), "quest_id": quest_a, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "Промокод временно не действует");
+
+        // Unknown code on a paid quest → 404 with the player-facing message.
+        let (st, body) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": p("r5"), "quest_id": quest_a, "coupon_code": "NOPE-9"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], "промокод не найден");
+    }
+
+    #[tokio::test]
+    async fn checkout_redeems_coupons_with_limits_and_stats() {
+        scenario_coupon_redeem(&test_app(), &Ids::new("cpn-redeem")).await;
     }
 
     /// v2 spec §9.1/§12.6 — the owner reports the dashboard status control fails
@@ -5709,7 +6410,10 @@ mod tests {
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
             auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-            constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(pool)),
+            constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
+                pool.clone(),
+            )),
+            coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool)),
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payments: Arc::new(MockPaymentProvider),
             mailer: m,
@@ -5918,6 +6622,9 @@ mod tests {
         scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
         scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
+        scenario_admin_coupons(&app, &Ids::new(&format!("cpncrud-{run}"))).await;
+        scenario_coupon_validate(&app, &Ids::new(&format!("cpnprev-{run}"))).await;
+        scenario_coupon_redeem(&app, &Ids::new(&format!("cpnrdm-{run}"))).await;
         scenario_publish_authz(&app, &Ids::new(&format!("pubauthz-{run}"))).await;
         scenario_ctor_status_lifecycle(&app, &Ids::new(&format!("ctorstatus-{run}"))).await;
         scenario_product_page(&app, &Ids::new(&format!("product-{run}"))).await;
