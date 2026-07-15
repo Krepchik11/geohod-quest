@@ -44,6 +44,51 @@ export interface CtorStep {
   nav: { on: boolean; coords: string };
 }
 
+/** Сложность квеста — закрытый набор (зеркалит backend COMPLEXITIES). */
+export type CtorComplexity = 'low' | 'medium' | 'high';
+/** Аудитория квеста — закрытый набор (зеркалит backend AGE_TARGETS). */
+export type CtorAgeTarget = 'kids' | 'everyone' | '18plus';
+
+export const DEFAULT_COMPLEXITY: CtorComplexity = 'medium';
+export const DEFAULT_AGE_TARGET: CtorAgeTarget = 'everyone';
+
+export const COMPLEXITY_OPTIONS: Array<{ key: CtorComplexity; label: string }> = [
+  { key: 'low', label: 'Низкая' },
+  { key: 'medium', label: 'Средняя' },
+  { key: 'high', label: 'Высокая' },
+];
+export const AGE_TARGET_OPTIONS: Array<{ key: CtorAgeTarget; label: string }> = [
+  { key: 'kids', label: 'Для детей' },
+  { key: 'everyone', label: 'Для всех' },
+  { key: '18plus', label: '18+' },
+];
+export const COMPLEXITY_LABEL = Object.fromEntries(
+  COMPLEXITY_OPTIONS.map((o) => [o.key, o.label]),
+) as Record<CtorComplexity, string>;
+export const AGE_TARGET_LABEL = Object.fromEntries(
+  AGE_TARGET_OPTIONS.map((o) => [o.key, o.label]),
+) as Record<CtorAgeTarget, string>;
+
+/** Стартовые подсказки для собственных тегов (теги — свободные строки). */
+export const SUGGESTED_TAGS = ['хоррор', 'научный', 'исторический', 'юмор', 'приключения'];
+
+const isComplexity = (v: unknown): v is CtorComplexity =>
+  COMPLEXITY_OPTIONS.some((o) => o.key === v);
+const isAgeTarget = (v: unknown): v is CtorAgeTarget =>
+  AGE_TARGET_OPTIONS.some((o) => o.key === v);
+
+/** Теги из недоверенного тела: только непустые строки, trim, дедуп с сохранением порядка. */
+function sanitizeTags(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const t of v) {
+    if (typeof t !== 'string') continue;
+    const tag = t.trim();
+    if (tag && !out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
 export interface CtorQuestMeta {
   title: string;
   city: string;
@@ -54,6 +99,10 @@ export interface CtorQuestMeta {
   /** Marketing padding added to the real completions for the public players
    *  counter (store card / product page). 0 = show only real completions. */
   playersBonus: number;
+  complexity: CtorComplexity;
+  ageTarget: CtorAgeTarget;
+  /** Собственные теги автора (свободные строки, без дублей). */
+  tags: string[];
 }
 
 export interface CtorVersion {
@@ -200,10 +249,39 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       desc: meta.desc || '',
       price: meta.price || 0,
       playersBonus: meta.playersBonus || 0,
+      complexity: meta.complexity || DEFAULT_COMPLEXITY,
+      ageTarget: meta.ageTarget || DEFAULT_AGE_TARGET,
+      tags: meta.tags || [],
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
     lastSaved: null,
+  };
+}
+
+/**
+ * Create/save payload for the constructor API: the denormalized list columns
+ * (name, cover, steps, attributes — the dashboard filters on them server-side
+ * of the body) + the full opaque body. One builder for every call site so the
+ * columns can never drift from the body.
+ */
+export function questUpsert(q: CtorQuest): {
+  name: string;
+  cover: string | null;
+  steps_count: number;
+  complexity: string;
+  age_target: string;
+  tags: string[];
+  body: CtorQuest;
+} {
+  return {
+    name: q.meta.title,
+    cover: q.meta.cover,
+    steps_count: q.steps.length,
+    complexity: q.meta.complexity,
+    age_target: q.meta.ageTarget,
+    tags: q.meta.tags,
+    body: q,
   };
 }
 
@@ -269,7 +347,15 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
   });
   // Тела, сохранённые до появления маркетингового счётчика игроков, не имеют
   // meta.playersBonus — нормализуем к 0, чтобы поле в настройках было управляемым.
-  const meta = { ...raw.meta, playersBonus: raw.meta.playersBonus ?? 0 };
+  // Атрибуты (сложность/возраст/теги) появились позже: отсутствующие или
+  // невалидные значения приводим к нейтральным, не доверяя хранимому телу.
+  const meta = {
+    ...raw.meta,
+    playersBonus: raw.meta.playersBonus ?? 0,
+    complexity: isComplexity(raw.meta.complexity) ? raw.meta.complexity : DEFAULT_COMPLEXITY,
+    ageTarget: isAgeTarget(raw.meta.ageTarget) ? raw.meta.ageTarget : DEFAULT_AGE_TARGET,
+    tags: sanitizeTags(raw.meta.tags),
+  };
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
   return { ...raw, meta, steps, id: serverId };
 }

@@ -1486,6 +1486,98 @@ pub fn validate_ctor_status(status: &str) -> Result<(), AppError> {
     }
 }
 
+/// Quest complexity — a closed set, same TEXT+CHECK+validate pattern as
+/// [`validate_ctor_status`].
+pub const COMPLEXITY_LOW: &str = "low";
+pub const COMPLEXITY_MEDIUM: &str = "medium";
+pub const COMPLEXITY_HIGH: &str = "high";
+pub const COMPLEXITIES: [&str; 3] = [COMPLEXITY_LOW, COMPLEXITY_MEDIUM, COMPLEXITY_HIGH];
+
+/// Audience of the quest — a closed set.
+pub const AGE_KIDS: &str = "kids";
+pub const AGE_EVERYONE: &str = "everyone";
+pub const AGE_18PLUS: &str = "18plus";
+pub const AGE_TARGETS: [&str; 3] = [AGE_KIDS, AGE_EVERYONE, AGE_18PLUS];
+
+/// Tag caps — validation limits, not silent truncation (over-limit input is a 400).
+pub const MAX_TAGS: usize = 20;
+pub const MAX_TAG_LEN: usize = 40;
+
+/// Author-facing quest attributes: complexity, audience, free-form tags. Stored
+/// as denormalized list columns on the constructor row (the dashboard filters on
+/// list rows), while the same values also live inside the opaque `body.meta` for
+/// the builder's working copy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct QuestAttributes {
+    pub complexity: String,
+    pub age_target: String,
+    pub tags: Vec<String>,
+}
+
+impl Default for QuestAttributes {
+    /// Neutral values for quests that never set attributes (old clients, old rows).
+    fn default() -> Self {
+        Self {
+            complexity: COMPLEXITY_MEDIUM.to_string(),
+            age_target: AGE_EVERYONE.to_string(),
+            tags: Vec::new(),
+        }
+    }
+}
+
+impl QuestAttributes {
+    /// Validate + normalize wire input. Absent fields fall back to the neutral
+    /// defaults (old clients that do not send attributes keep working); present
+    /// fields must belong to the closed sets. Tags are trimmed, blanks dropped,
+    /// order-preserving deduped; over-cap input is rejected, never truncated.
+    pub fn from_wire(
+        complexity: Option<String>,
+        age_target: Option<String>,
+        tags: Option<Vec<String>>,
+    ) -> Result<Self, AppError> {
+        let defaults = Self::default();
+        let complexity = complexity.unwrap_or(defaults.complexity);
+        if !COMPLEXITIES.contains(&complexity.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "invalid complexity '{complexity}' (expected one of: low, medium, high)"
+            )));
+        }
+        let age_target = age_target.unwrap_or(defaults.age_target);
+        if !AGE_TARGETS.contains(&age_target.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "invalid age_target '{age_target}' (expected one of: kids, everyone, 18plus)"
+            )));
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut normalized = Vec::new();
+        for tag in tags.unwrap_or_default() {
+            let tag = tag.trim();
+            if tag.is_empty() {
+                continue;
+            }
+            if tag.chars().count() > MAX_TAG_LEN {
+                return Err(AppError::BadRequest(format!(
+                    "tag '{tag}' is longer than {MAX_TAG_LEN} characters"
+                )));
+            }
+            if seen.insert(tag.to_string()) {
+                normalized.push(tag.to_string());
+            }
+        }
+        if normalized.len() > MAX_TAGS {
+            return Err(AppError::BadRequest(format!(
+                "too many tags ({}, max {MAX_TAGS})",
+                normalized.len()
+            )));
+        }
+        Ok(Self {
+            complexity,
+            age_target,
+            tags: normalized,
+        })
+    }
+}
+
 /// A constructor quest: the full editable authoring `body` (the CtorQuest JSON,
 /// opaque to the backend) plus the denormalized list columns the dashboard reads.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1497,6 +1589,8 @@ pub struct ConstructorQuest {
     pub status: String,
     pub cover: Option<String>,
     pub steps_count: u32,
+    /// Complexity / audience / tags — the dashboard's filterable columns.
+    pub attrs: QuestAttributes,
     pub created_at: u64,
     pub updated_at: u64,
     /// Full editable CtorQuest JSON — the builder's working copy.
@@ -1517,6 +1611,8 @@ pub struct ConstructorQuestSummary {
     pub name: String,
     pub status: String,
     pub steps_count: u32,
+    /// Complexity / audience / tags — the dashboard's filterable columns.
+    pub attrs: QuestAttributes,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -1531,6 +1627,7 @@ impl ConstructorQuest {
             name: self.name.clone(),
             status: self.status.clone(),
             steps_count: self.steps_count,
+            attrs: self.attrs.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -1591,6 +1688,7 @@ impl InMemoryConstructorStore {
         name: &str,
         cover: Option<String>,
         steps_count: u32,
+        attrs: QuestAttributes,
         body: serde_json::Value,
         updated_at: u64,
     ) -> Result<ConstructorQuestSummary, AppError> {
@@ -1600,6 +1698,7 @@ impl InMemoryConstructorStore {
         q.name = name.to_string();
         q.cover = cover;
         q.steps_count = steps_count;
+        q.attrs = attrs;
         q.body = body;
         q.updated_at = updated_at;
         Ok(q.summary())
@@ -1702,15 +1801,22 @@ impl ConstructorStores {
         name: &str,
         cover: Option<String>,
         steps_count: u32,
+        attrs: QuestAttributes,
         body: serde_json::Value,
         updated_at: u64,
     ) -> Result<ConstructorQuestSummary, AppError> {
         match self {
-            Self::InMemory(m) => {
-                Self::lock_inmem(m)?.save_body(quest_id, name, cover, steps_count, body, updated_at)
-            }
+            Self::InMemory(m) => Self::lock_inmem(m)?.save_body(
+                quest_id,
+                name,
+                cover,
+                steps_count,
+                attrs,
+                body,
+                updated_at,
+            ),
             Self::Postgres(pg) => {
-                pg.save_body(quest_id, name, cover, steps_count, body, updated_at)
+                pg.save_body(quest_id, name, cover, steps_count, attrs, body, updated_at)
                     .await
             }
         }
@@ -2401,6 +2507,7 @@ mod constructor_tests {
             status: CTOR_STATUS_DRAFT.into(),
             cover: None,
             steps_count: 2,
+            attrs: QuestAttributes::default(),
             created_at: created,
             updated_at: created,
             body: serde_json::json!({ "id": id, "steps": [] }),
@@ -2455,12 +2562,18 @@ mod constructor_tests {
     fn save_body_updates_list_fields_and_404s_unknown() {
         let mut s = InMemoryConstructorStore::new();
         s.create(quest("q1", "Name", 1)).expect("create");
+        let attrs = QuestAttributes {
+            complexity: "high".into(),
+            age_target: "18plus".into(),
+            tags: vec!["хоррор".into()],
+        };
         let updated = s
             .save_body(
                 "q1",
                 "Renamed",
                 Some("cover.png".into()),
                 7,
+                attrs.clone(),
                 serde_json::json!({ "id": "q1", "steps": [1, 2] }),
                 42,
             )
@@ -2468,14 +2581,24 @@ mod constructor_tests {
         assert_eq!(updated.name, "Renamed");
         assert_eq!(updated.steps_count, 7);
         assert_eq!(updated.updated_at, 42);
+        // Attributes are list columns: the dashboard filters on the summary row.
+        assert_eq!(updated.attrs, attrs);
         let full = s.get("q1").expect("present");
         // The cover lives on the full entity, not the (slimmed) list summary.
         assert_eq!(full.cover.as_deref(), Some("cover.png"));
         assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
 
         assert!(
-            s.save_body("ghost", "x", None, 0, serde_json::json!({}), 0)
-                .is_err()
+            s.save_body(
+                "ghost",
+                "x",
+                None,
+                0,
+                QuestAttributes::default(),
+                serde_json::json!({}),
+                0
+            )
+            .is_err()
         );
     }
 
@@ -2501,6 +2624,54 @@ mod constructor_tests {
         assert!(validate_ctor_status("published").is_ok());
         assert!(validate_ctor_status("live").is_err());
         assert!(validate_ctor_status("").is_err());
+    }
+
+    #[test]
+    fn attributes_closed_sets_are_enforced() {
+        assert!(QuestAttributes::from_wire(Some("high".into()), Some("kids".into()), None).is_ok());
+        assert!(QuestAttributes::from_wire(Some("extreme".into()), None, None).is_err());
+        assert!(QuestAttributes::from_wire(Some("".into()), None, None).is_err());
+        assert!(QuestAttributes::from_wire(None, Some("adults".into()), None).is_err());
+        assert!(QuestAttributes::from_wire(None, Some("".into()), None).is_err());
+    }
+
+    #[test]
+    fn attributes_default_when_absent() {
+        let a = QuestAttributes::from_wire(None, None, None).expect("defaults");
+        assert_eq!(a, QuestAttributes::default());
+        assert_eq!(a.complexity, "medium");
+        assert_eq!(a.age_target, "everyone");
+        assert!(a.tags.is_empty());
+    }
+
+    #[test]
+    fn attributes_tags_are_normalized_and_capped() {
+        // Trimmed, blanks dropped, order-preserving dedupe.
+        let a = QuestAttributes::from_wire(
+            None,
+            None,
+            Some(vec![
+                "  хоррор ".into(),
+                "".into(),
+                "   ".into(),
+                "юмор".into(),
+                "хоррор".into(),
+            ]),
+        )
+        .expect("tags normalize");
+        assert_eq!(a.tags, vec!["хоррор".to_string(), "юмор".to_string()]);
+
+        // Caps: too many tags / an over-long tag are 400s, not silent truncation.
+        let many: Vec<String> = (0..=MAX_TAGS).map(|i| format!("t{i}")).collect();
+        assert!(QuestAttributes::from_wire(None, None, Some(many)).is_err());
+        assert!(
+            QuestAttributes::from_wire(None, None, Some(vec!["я".repeat(MAX_TAG_LEN + 1)]))
+                .is_err(),
+            "length is measured in chars, not bytes"
+        );
+        assert!(
+            QuestAttributes::from_wire(None, None, Some(vec!["я".repeat(MAX_TAG_LEN)])).is_ok()
+        );
     }
 
     #[test]

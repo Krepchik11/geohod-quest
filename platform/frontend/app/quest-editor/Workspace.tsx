@@ -9,6 +9,7 @@ import {
   migrateQuest,
   newQuest,
   newStep,
+  questUpsert,
   removeStep as modelRemove,
   reorderSteps,
   serializeDraft,
@@ -126,12 +127,7 @@ export default function Workspace() {
     const quest = active;
     const t = setTimeout(() => {
       void api
-        .saveConstructorQuest(quest.id, {
-          name: quest.meta.title,
-          cover: quest.meta.cover,
-          steps_count: quest.steps.length,
-          body: quest,
-        })
+        .saveConstructorQuest(quest.id, questUpsert(quest))
         .then(() => {
           setSaveOk(true);
           setSaveFresh(true);
@@ -164,13 +160,7 @@ export default function Workspace() {
   const createQuest = async () => {
     const q = newQuest({});
     try {
-      await api.createConstructorQuest({
-        quest_id: q.id,
-        name: q.meta.title,
-        cover: q.meta.cover,
-        steps_count: q.steps.length,
-        body: q,
-      });
+      await api.createConstructorQuest({ quest_id: q.id, ...questUpsert(q) });
       setJustPublished(null);
       setPublishError(null);
       setSavedAt(null);
@@ -232,13 +222,7 @@ export default function Workspace() {
         return;
       }
       const copy = duplicateQuest(src, `q-${uid()}`);
-      await api.createConstructorQuest({
-        quest_id: copy.id,
-        name: copy.meta.title,
-        cover: copy.meta.cover,
-        steps_count: copy.steps.length,
-        body: copy,
-      });
+      await api.createConstructorQuest({ quest_id: copy.id, ...questUpsert(copy) });
       await refreshList();
       showToast('Квест дублирован — копия создана как «Проект»');
     } catch (e) {
@@ -337,12 +321,7 @@ export default function Workspace() {
     // Flush the latest draft so the list reflects the newest name/step count.
     if (active) {
       try {
-        await api.saveConstructorQuest(active.id, {
-          name: active.meta.title,
-          cover: active.meta.cover,
-          steps_count: active.steps.length,
-          body: active,
-        });
+        await api.saveConstructorQuest(active.id, questUpsert(active));
       } catch {
         /* best-effort; the list refresh below shows last persisted state */
       }

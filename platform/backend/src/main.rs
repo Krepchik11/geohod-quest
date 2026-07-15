@@ -900,6 +900,9 @@ struct ConstructorQuestWire {
     /// Live published snapshot version, if any. None ⇒ the coherence guard will
     /// reject `test`/`published`, so the UI routes into the publish panel.
     published_version: Option<u32>,
+    complexity: String,
+    age_target: String,
+    tags: Vec<String>,
     // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
     // cover image, so the base64 cover was dead weight that bloated the list
     // (megabytes for media-heavy quests). It stays on the GET-one full wire.
@@ -918,6 +921,9 @@ struct ConstructorQuestFullWire {
     steps: u32,
     completed: usize,
     cover: Option<String>,
+    complexity: String,
+    age_target: String,
+    tags: Vec<String>,
     created_at: u64,
     updated_at: u64,
     body: serde_json::Value,
@@ -939,6 +945,9 @@ fn ctor_wire(
         completed,
         buyers,
         published_version,
+        complexity: s.attrs.complexity,
+        age_target: s.attrs.age_target,
+        tags: s.attrs.tags,
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
@@ -1066,6 +1075,9 @@ async fn get_constructor_quest_handler(
         steps: q.steps_count,
         completed,
         cover: q.cover,
+        complexity: q.attrs.complexity,
+        age_target: q.attrs.age_target,
+        tags: q.attrs.tags,
         created_at: q.created_at,
         updated_at: q.updated_at,
         body: q.body,
@@ -1080,6 +1092,11 @@ struct CreateConstructorQuestRequest {
     name: String,
     cover: Option<String>,
     steps_count: u32,
+    /// Attributes are optional on the wire (old clients omit them) and fall back
+    /// to the neutral defaults; present values must belong to the closed sets.
+    complexity: Option<String>,
+    age_target: Option<String>,
+    tags: Option<Vec<String>>,
     body: serde_json::Value,
 }
 
@@ -1092,6 +1109,7 @@ async fn create_constructor_quest_handler(
     if req.quest_id.trim().is_empty() {
         return Err(AppError::BadRequest("quest_id is required".into()));
     }
+    let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
     let (author_id, author_name) = acting_author(&state, &headers).await?;
     let now = store::now_secs();
     let quest = ConstructorQuest {
@@ -1102,6 +1120,7 @@ async fn create_constructor_quest_handler(
         status: store::CTOR_STATUS_DRAFT.to_string(),
         cover: req.cover,
         steps_count: req.steps_count,
+        attrs,
         created_at: now,
         updated_at: now,
         body: req.body,
@@ -1124,6 +1143,10 @@ struct SaveConstructorQuestRequest {
     name: String,
     cover: Option<String>,
     steps_count: u32,
+    /// Same optional-with-defaults contract as on create.
+    complexity: Option<String>,
+    age_target: Option<String>,
+    tags: Option<Vec<String>>,
     body: serde_json::Value,
 }
 
@@ -1134,6 +1157,7 @@ async fn save_constructor_quest_handler(
     Json(req): Json<SaveConstructorQuestRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_owned_constructor_quest(&state, &headers, &quest_id).await?;
+    let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
     let now = store::now_secs();
     let s = state
         .constructor
@@ -1142,6 +1166,7 @@ async fn save_constructor_quest_handler(
             &req.name,
             req.cover,
             req.steps_count,
+            attrs,
             req.body,
             now,
         )
@@ -6027,6 +6052,118 @@ mod tests {
         assert_eq!(list.as_array().expect("array").len(), 0);
     }
 
+    /// Quest attributes (complexity / age target / tags): neutral defaults when the
+    /// client omits them (old clients keep working), full round-trip via save on
+    /// both the list row and GET-one, tag normalization, and closed-set rejection.
+    #[tokio::test]
+    async fn constructor_quest_attributes() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Create WITHOUT attributes → neutral defaults.
+        let (st, created) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-attrs",
+                "name": "Квест",
+                "cover": null,
+                "steps_count": 2,
+                "body": { "id": "q-attrs", "meta": {}, "steps": [], "versions": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["complexity"], "medium");
+        assert_eq!(created["age_target"], "everyone");
+        assert_eq!(created["tags"], json!([]));
+
+        // Save with explicit attributes → the list row carries them (the dashboard
+        // filters on list rows, so they must be there, not only in the body).
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-attrs/save",
+            json!({
+                "name": "Квест",
+                "cover": null,
+                "steps_count": 2,
+                "complexity": "high",
+                "age_target": "18plus",
+                "tags": ["хоррор", "  юмор  ", "", "хоррор"],
+                "body": { "id": "q-attrs", "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
+        assert_eq!(list[0]["complexity"], "high");
+        assert_eq!(list[0]["age_target"], "18plus");
+        assert_eq!(
+            list[0]["tags"],
+            json!(["хоррор", "юмор"]),
+            "tags come back trimmed, de-blanked, deduped"
+        );
+
+        // GET-one carries them too (the builder re-opens saved values).
+        let (_, full) = get_json_h(&app, "/api/constructor/quests/q-attrs", &admin).await;
+        assert_eq!(full["complexity"], "high");
+        assert_eq!(full["age_target"], "18plus");
+        assert_eq!(full["tags"], json!(["хоррор", "юмор"]));
+
+        // Closed sets are enforced on save…
+        let bad_save = json!({
+            "name": "Квест", "cover": null, "steps_count": 2,
+            "complexity": "extreme",
+            "body": { "id": "q-attrs", "steps": [] }
+        });
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests/q-attrs/save",
+            bad_save,
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        // …and on create.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-attrs-2", "name": "Квест", "cover": null, "steps_count": 1,
+                "age_target": "adults",
+                "body": { "id": "q-attrs-2", "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // A rejected save must not have clobbered the stored attributes.
+        let (_, full) = get_json_h(&app, "/api/constructor/quests/q-attrs", &admin).await;
+        assert_eq!(full["complexity"], "high");
+
+        // Create WITH attributes works end-to-end.
+        let (st, created) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-attrs-3", "name": "Детский", "cover": null, "steps_count": 1,
+                "complexity": "low",
+                "age_target": "kids",
+                "tags": ["приключения"],
+                "body": { "id": "q-attrs-3", "steps": [] }
+            }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["complexity"], "low");
+        assert_eq!(created["age_target"], "kids");
+        assert_eq!(created["tags"], json!(["приключения"]));
+    }
+
     /// Author scoping (the reported bug: an admin/editor saw EVERY author's quests
     /// in the constructor). The dashboard is a personal workspace, so two distinct
     /// authors — here two ops-token callers separated only by their device id —
@@ -6523,18 +6660,24 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(full["body"]["steps"].as_array().expect("steps").len(), 2);
 
-        // save updates name + step count
+        // save updates name + step count + attributes (real SQL round-trip for the
+        // TEXT + CHECK columns and the TEXT[] tags)
         let (st, _) = post_json_h(
             &app,
             &format!("/api/constructor/quests/{qid}/save"),
             json!({
                 "name": "CI renamed", "cover": "c.png", "steps_count": 4,
+                "complexity": "high", "age_target": "18plus", "tags": ["хоррор", "юмор"],
                 "body": { "id": qid.clone(), "steps": [1, 2, 3, 4] }
             }),
             &admin,
         )
         .await;
         assert_eq!(st, StatusCode::OK);
+        let (_, full) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
+        assert_eq!(full["complexity"], "high");
+        assert_eq!(full["age_target"], "18plus");
+        assert_eq!(full["tags"], json!(["хоррор", "юмор"]));
 
         // status: the coherence guard rejects test/published before a snapshot
         // exists (real SQL path for get_published returning None).

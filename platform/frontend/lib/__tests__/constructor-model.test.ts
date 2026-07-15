@@ -17,6 +17,7 @@ import {
   nextVersionNumber,
   parseCoords,
   plural,
+  questUpsert,
   removeStep,
   reorderSteps,
   serializeDraft,
@@ -76,6 +77,34 @@ describe('newQuest', () => {
     const q = newQuest({});
     expect(q.meta.title).toBe('Без названия');
     expect(q.meta.price).toBe(0);
+  });
+
+  it('defaults attributes to the neutral values', () => {
+    const q = newQuest({});
+    expect(q.meta.complexity).toBe('medium');
+    expect(q.meta.ageTarget).toBe('everyone');
+    expect(q.meta.tags).toEqual([]);
+  });
+
+  it('keeps explicit attributes', () => {
+    const q = newQuest({ complexity: 'high', ageTarget: '18plus', tags: ['хоррор'] });
+    expect(q.meta.complexity).toBe('high');
+    expect(q.meta.ageTarget).toBe('18plus');
+    expect(q.meta.tags).toEqual(['хоррор']);
+  });
+});
+
+describe('questUpsert', () => {
+  it('builds the create/save payload with the denormalized attributes', () => {
+    const q = newQuest({ title: 'X', complexity: 'low', ageTarget: 'kids', tags: ['приключения'] });
+    const p = questUpsert(q);
+    expect(p.name).toBe('X');
+    expect(p.cover).toBeNull();
+    expect(p.steps_count).toBe(2);
+    expect(p.complexity).toBe('low');
+    expect(p.age_target).toBe('kids');
+    expect(p.tags).toEqual(['приключения']);
+    expect(p.body).toBe(q);
   });
 });
 
@@ -497,6 +526,39 @@ describe('migrateQuest (legacy draft bodies)', () => {
   it('strips the legacy allowNote flag', () => {
     const q = migrateQuest(legacyBody(), 'q-old')!;
     expect('allowNote' in (q.steps[1] as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('normalizes absent attributes to the neutral defaults (pre-attributes bodies)', () => {
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    delete body.meta.complexity;
+    delete body.meta.ageTarget;
+    delete body.meta.tags;
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.meta.complexity).toBe('medium');
+    expect(q.meta.ageTarget).toBe('everyone');
+    expect(q.meta.tags).toEqual([]);
+  });
+
+  it('normalizes out-of-set attribute values instead of trusting the stored body', () => {
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    body.meta.complexity = 'extreme';
+    body.meta.ageTarget = 'adults';
+    body.meta.tags = 'хоррор';
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.meta.complexity).toBe('medium');
+    expect(q.meta.ageTarget).toBe('everyone');
+    expect(q.meta.tags).toEqual([]);
+  });
+
+  it('keeps valid stored attributes', () => {
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    body.meta.complexity = 'high';
+    body.meta.ageTarget = 'kids';
+    body.meta.tags = ['юмор', 'исторический'];
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.meta.complexity).toBe('high');
+    expect(q.meta.ageTarget).toBe('kids');
+    expect(q.meta.tags).toEqual(['юмор', 'исторический']);
   });
 
   it('is idempotent on a current-shape quest', () => {
