@@ -353,6 +353,7 @@ export interface BuilderActions {
   onPatchQuest: (fn: (q: CtorQuest) => CtorQuest) => void;
   onBack: () => void;
   onTest: (startPos: number) => void;
+  onExport: () => void;
   insertStep: (template: CtorTemplate) => void;
   removeStep: (id: string) => void;
   duplicateStep: (id: string) => void;
@@ -360,7 +361,17 @@ export interface BuilderActions {
   publish: () => void;
 }
 
-export function BuilderScreen({ quest, sel, saveOk, saveFresh, justPublished, publishError, publishing, actions }: {
+export function BuilderScreen({
+  quest,
+  sel,
+  saveOk,
+  saveFresh,
+  justPublished,
+  publishError,
+  publishing,
+  exporting,
+  actions,
+}: {
   quest: CtorQuest;
   sel: CtorSelection | null;
   saveOk: boolean;
@@ -369,6 +380,9 @@ export function BuilderScreen({ quest, sel, saveOk, saveFresh, justPublished, pu
   justPublished: number | null;
   publishError: string | null;
   publishing: boolean;
+  /** True while the export zip is being fetched — disables the button so a
+   *  double-click can't fire two downloads. */
+  exporting: boolean;
   actions: BuilderActions;
 }) {
   const gates: Gates = useMemo(() => computeGates(quest), [quest]);
@@ -413,6 +427,15 @@ export function BuilderScreen({ quest, sel, saveOk, saveFresh, justPublished, pu
             : 'Нет сети — правки не сохранены. Повторим автоматически.'}
         </span>
         <button className="btn btn--secondary btn--sm" type="button" onClick={() => actions.onTest(0)}>▶ Тест-игрок</button>
+        <button
+          className="btn btn--secondary btn--sm"
+          type="button"
+          disabled={exporting}
+          onClick={actions.onExport}
+          title="Скачать квест целиком: страницы, изображения и статистику одним zip-архивом"
+        >
+          {exporting ? 'Экспорт…' : 'Экспорт'}
+        </button>
         <button className="btn btn--md" type="button" onClick={() => actions.onSel({ type: 'publish' })}>
           {errN ? `Опубликовать · ${errN} ${plural(errN, 'ошибка', 'ошибки', 'ошибок')}` : 'Опубликовать'}
         </button>
