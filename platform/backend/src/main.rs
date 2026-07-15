@@ -1102,10 +1102,7 @@ async fn export_constructor_quest_handler(
     let quest = require_owned_constructor_quest(&state, &headers, &quest_id).await?;
     let completed = state.store.completions_for_quest(&quest.quest_id).await?;
     let buyers = state.grants.buyers_for_quest(&quest.quest_id).await?;
-    let reviews = state
-        .store
-        .reviews_for_quest(&quest.quest_id, usize::MAX)
-        .await?;
+    let reviews = state.store.reviews_for_quest(&quest.quest_id, None).await?;
     let published = state
         .grants
         .list_published()
@@ -1504,7 +1501,7 @@ async fn get_quest_product_handler(
         }
     };
     // §11 reviews: last quest_rated WITH text per attempt, newest first.
-    let review_rows = state.store.reviews_for_quest(&quest_id, 1000).await?;
+    let review_rows = state.store.reviews_for_quest(&quest_id, Some(1000)).await?;
     let reviews_total = review_rows.len();
     let page: Vec<store::ReviewRow> = review_rows.into_iter().take(10).collect();
     // Author display names in ONE round-trip (was one get_user per review — an N+1).
@@ -6877,6 +6874,23 @@ mod tests {
         assert_eq!(full["complexity"], "high");
         assert_eq!(full["age_target"], "18plus");
         assert_eq!(full["tags"], json!(["хоррор", "юмор"]));
+
+        // export must work against the REAL SQL store: the "all reviews" fetch
+        // once smuggled usize::MAX through an `as i64` cast, becoming LIMIT -1
+        // (a PG error the in-memory store can never surface).
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/constructor/quests/{qid}/export"))
+                    .header("x-admin-token", TEST_ADMIN_TOKEN)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK, "export on the PG store");
 
         // status: the coherence guard rejects test/published before a snapshot
         // exists (real SQL path for get_published returning None).

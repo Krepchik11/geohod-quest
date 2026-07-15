@@ -46,12 +46,15 @@ pub struct PgFactStore {
 impl PgFactStore {
     /// See [`crate::store::InMemoryFactStore::reviews_for_quest`] — DISTINCT ON
     /// keeps the last quest_rated per attempt; only rows with text qualify.
+    /// `limit: None` (the export path) emits no LIMIT clause at all — "all rows"
+    /// is expressed structurally, never as a sentinel squeezed through a cast
+    /// (usize::MAX as i64 is -1, which PG rejects as a negative LIMIT).
     pub async fn reviews_for_quest(
         &self,
         quest_id: &str,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Vec<crate::store::ReviewRow>, AppError> {
-        let rows = sqlx::query(
+        let sql = format!(
             "SELECT last_rated.player_id, last_rated.created_at, last_rated.data
              FROM (
                  SELECT DISTINCT ON (f.attempt_id)
@@ -63,13 +66,16 @@ impl PgFactStore {
              ) AS last_rated
              WHERE COALESCE(TRIM(last_rated.data->>'note'), '') <> ''
              ORDER BY last_rated.created_at DESC
-             LIMIT $2",
-        )
-        .bind(quest_id)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(internal)?;
+             {}",
+            if limit.is_some() { "LIMIT $2" } else { "" }
+        );
+        let mut query = sqlx::query(&sql).bind(quest_id);
+        if let Some(limit) = limit {
+            let limit = i64::try_from(limit)
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("review limit overflow: {e}")))?;
+            query = query.bind(limit);
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(internal)?;
         use sqlx::Row;
         rows.iter()
             .map(|r| {
