@@ -7,6 +7,7 @@ import { currentPlayerId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
 import { fmtRating, plural, ratingPlural, playersPlural } from '../../../../lib/storefront';
+import { pollPaymentSettlement } from '../../../../lib/payment-return';
 import PurchaseSheet from '../../../components/PurchaseSheet';
 import InstallQuestButton from '../../../components/InstallQuestButton';
 
@@ -54,6 +55,15 @@ export default function AboutClient({ questId }: { questId: string }) {
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
   const [dl, setDl] = useState<DownloadStage | null>(null);
+  // A ЮKassa return lands here with ?payment={id}; captured once at mount.
+  // (Lazy init is hydration-safe: the order card — the only consumer — renders
+  // after the client-side product fetch anyway.)
+  const [returnPaymentId] = useState(() =>
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('payment') : null,
+  );
+  // Poll verdict; `pending` = still processing after the finite poll schedule.
+  const [payOutcome, setPayOutcome] = useState<null | 'succeeded' | 'canceled' | 'pending'>(null);
+  const payResult = returnPaymentId && !payOutcome ? 'checking' : payOutcome;
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +112,29 @@ export default function AboutClient({ questId }: { questId: string }) {
     }
   };
 
+  // §3.3 results: each poll lets the backend settle against ЮKassa, so the
+  // happy path needs no webhook. The param is stripped immediately — a reload
+  // must not re-run a finished flow.
+  useEffect(() => {
+    if (!returnPaymentId) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('payment');
+    const query = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+    let cancelled = false;
+    void pollPaymentSettlement(returnPaymentId).then((outcome) => {
+      if (cancelled) return;
+      setPayOutcome(outcome);
+      if (outcome === 'succeeded') {
+        setOwned(true);
+        startDownload();
+      }
+    });
+    return () => { cancelled = true; };
+    // startDownload is stable in behavior; this effect runs once per return.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnPaymentId]);
+
   if (failed === 'notfound') {
     return (
       <main className="container qp qp--empty">
@@ -126,6 +159,7 @@ export default function AboutClient({ questId }: { questId: string }) {
 
   const orderCard = owned ? (
     <div className="qp-order card">
+      {payResult === 'succeeded' && <p className="qp-payok">Оплата прошла — квест ваш навсегда.</p>}
       <span className="qp-owned">✓ Квест куплен</span>
       <Link className="btn btn--block" href={playUrl}>Пройти квест</Link>
       {dl && dl !== 'done' && (
@@ -143,6 +177,23 @@ export default function AboutClient({ questId }: { questId: string }) {
     </div>
   ) : (
     <div className="qp-order card">
+      {payResult === 'checking' && (
+        <p className="qp-paywait">
+          <span className="psheet__spinner qp-dl__spin" aria-hidden />
+          Проверяем оплату…
+        </p>
+      )}
+      {payResult === 'canceled' && (
+        <p className="quest-card__error">
+          Оплата не прошла — деньги не списаны. Попробуйте ещё раз.
+        </p>
+      )}
+      {payResult === 'pending' && (
+        <p className="qp-paywait qp-paywait--long">
+          Платёж ещё обрабатывается. Обновите страницу через минуту — квест
+          откроется, как только банк подтвердит оплату.
+        </p>
+      )}
       <div className="qp-order__pricerow">
         <span>Квест целиком</span>
         <b>{free ? 'Бесплатно' : `${p.price ?? 0} ₽`}</b>

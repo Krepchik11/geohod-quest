@@ -63,6 +63,19 @@ Secret=geohod-quest-r2-secret-access-key,type=env,target=R2_SECRET_ACCESS_KEY
 # When the secret is absent, mails are logged instead of sent — remove the
 # Secret= line below until the secret exists, or the unit fails to start.
 Secret=geohod-quest-smtp-url,type=env,target=SMTP_URL
+# Payments — YooKassa (fail-closed: without BOTH values checkout offers only the
+# mock provider and provider=yookassa answers 501). The shop id is plain config
+# (dashboard > Settings > Shop); the secret API key lives in a podman secret.
+# Create it on the VPS with (paste the key, press Enter, Ctrl-D):
+#   podman secret create geohod-quest-yookassa-secret-key -
+# Then set the shop id below and uncomment both lines. Also register the webhook
+# in the YooKassa dashboard (Integration > HTTP notifications):
+#   https://api.quest.geohod.ru/api/payments/yookassa/webhook
+# with events payment.succeeded + payment.canceled. (The API also settles lazily
+# on the return-page poll, so the webhook is a resilience layer, not a hard
+# dependency — but register it: it covers payers who never return to the site.)
+# Environment=YOOKASSA_SHOP_ID=REPLACE_WITH_SHOP_ID
+# Secret=geohod-quest-yookassa-secret-key,type=env,target=YOOKASSA_SECRET_KEY
 # From header; its mailbox must be one the SMTP account is allowed to send as.
 Environment=MAIL_FROM=no-reply@geohod.ru
 # Public frontend origin baked into emailed reset/confirm links.

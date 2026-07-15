@@ -41,6 +41,7 @@ mod payments;
 mod pg_store;
 mod social;
 mod store;
+mod yookassa;
 
 use std::sync::{Arc, Mutex};
 
@@ -50,12 +51,14 @@ use errors::AppError;
 use facts::{Fact, MigrationResult, ProjectedState};
 use grants::{AccessGrant, GrantSource};
 use media::{MediaRef, MediaStores};
-use payments::{MockPaymentProvider, PaymentOutcome, PaymentProvider};
+use payments::{PendingPayment, PendingStatus};
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
     CouponStores, FactStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
-    InMemoryCouponStore, InMemoryFactStore, InMemoryGrantStore, PublishedMeta,
+    InMemoryCouponStore, InMemoryFactStore, InMemoryGrantStore, InMemoryPaymentStore,
+    PaymentStores, PublishedMeta,
 };
+use yookassa::YookassaGateway;
 
 /// Shared application state.
 #[derive(Clone)]
@@ -70,7 +73,11 @@ struct AppState {
     coupons: CouponStores,
     /// Content-addressed media blobs (Cloudflare R2 in prod; in-process otherwise).
     media: MediaStores,
-    payments: Arc<dyn PaymentProvider>,
+    /// In-flight redirect payments (YooKassa): checkout writes, settlement flips.
+    payment_rows: PaymentStores,
+    /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
+    /// disabled (501, fail-closed); tests inject the scripted fake.
+    yookassa: Option<YookassaGateway>,
     /// Transactional mail (§6.2/§6.3) — SMTP in prod, log fallback, recorder in tests.
     mailer: mailer::Mailer,
     /// Fixed-window rate limiter for abusable auth endpoints (§6.1 identify,
@@ -105,6 +112,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     let mailer = mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from);
     let google = build_google_verifier(&config);
     let telegram = build_telegram_verifier(&config);
+    let yookassa = config.yookassa.clone().map(YookassaGateway::Http);
     AppState {
         config,
         store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
@@ -115,7 +123,8 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         ))),
         coupons: CouponStores::InMemory(Arc::new(Mutex::new(InMemoryCouponStore::new()))),
         media,
-        payments: Arc::new(MockPaymentProvider),
+        payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
+        yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
         google,
@@ -429,6 +438,12 @@ fn build_router(state: AppState) -> Router {
             get(export_constructor_quest_handler),
         )
         .route("/api/checkout", post(checkout_handler))
+        .route("/api/payments/providers", get(payment_providers_handler))
+        .route(
+            "/api/payments/yookassa/webhook",
+            post(yookassa_webhook_handler),
+        )
+        .route("/api/payments/{payment_id}", get(payment_status_handler))
         .route("/api/coupons/validate", post(validate_coupon_handler))
         .route("/api/grants", get(list_grants_handler))
         .route(
@@ -646,21 +661,36 @@ struct CheckoutRequest {
     /// Server-validated promo code; the discount lives in the coupon registry,
     /// never in the request (a client cannot name its own percentage).
     coupon_code: Option<String>,
+    /// Payment provider: `"mock"` (default) settles instantly; `"yookassa"`
+    /// starts a redirect flow (501 when the deployment has no credentials).
+    provider: Option<String>,
 }
 
+/// Untagged: settled checkouts keep the historical `{grant, created}` shape;
+/// redirect checkouts answer `{payment: {payment_id, confirmation_url}}`.
 #[derive(serde::Serialize)]
-struct CheckoutResponse {
-    grant: AccessGrant,
-    created: bool,
+#[serde(untagged)]
+enum CheckoutResponse {
+    Settled { grant: AccessGrant, created: bool },
+    Redirect { payment: RedirectPayment },
 }
 
-/// Checkout behind the PaymentProvider seam (mock approves everything).
+/// The client's marching orders for a redirect provider: send the payer to
+/// `confirmation_url`, then poll `GET /api/payments/{payment_id}` on return.
+#[derive(serde::Serialize)]
+struct RedirectPayment {
+    payment_id: String,
+    confirmation_url: String,
+}
+
+/// Checkout, dispatched per request on `provider`: the mock settles instantly,
+/// YooKassa opens a redirect flow settled later by [`settle_payment`].
 ///
 /// With a coupon code the registry is consulted: the redemption is recorded
 /// atomically against the coupon's caps, and a discount that zeroes the price
-/// grants as CouponRedemption bypassing the provider; a partial discount still
-/// charges the provider and grants as Payment. Idempotent (first grant + first
-/// audit ref win), and a re-checkout of an owned quest never consumes a coupon.
+/// grants as CouponRedemption bypassing every provider; a partial discount
+/// still charges and grants as Payment. Idempotent (first grant + first audit
+/// ref win), and a re-checkout of an owned quest never consumes a coupon.
 async fn checkout_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -674,43 +704,319 @@ async fn checkout_handler(
             .grants
             .create_grant_idemp(&player_id, &req.quest_id, GrantSource::Payment, None)
             .await?;
-        return Ok(Json(CheckoutResponse { grant, created }));
+        return Ok(Json(CheckoutResponse::Settled { grant, created }));
     }
+    match req.provider.as_deref().unwrap_or("mock") {
+        "mock" => mock_checkout(&state, &player_id, &req).await,
+        "yookassa" => yookassa_checkout(&state, &player_id, &req).await,
+        other => Err(AppError::BadRequest(format!(
+            "unknown payment provider: {other}"
+        ))),
+    }
+}
+
+/// The historical synchronous path: the mock settles instantly, so the coupon
+/// is redeemed and the grant created in the same request.
+async fn mock_checkout(
+    state: &AppState,
+    player_id: &str,
+    req: &CheckoutRequest,
+) -> Result<Json<CheckoutResponse>, AppError> {
     let (source, source_ref) = match &req.coupon_code {
         Some(raw) => {
             let code = coupons::normalize_code(raw)?;
-            let price = state
-                .grants
-                .get_published(&req.quest_id)
-                .await?
-                .and_then(|meta| meta.price)
-                .filter(|p| *p > 0)
-                .ok_or_else(|| {
-                    AppError::Conflict(coupons::RedeemReject::NotApplicable.message().into())
-                })?;
+            let price = quest_price(state, &req.quest_id).await?.ok_or_else(|| {
+                AppError::Conflict(coupons::RedeemReject::NotApplicable.message().into())
+            })?;
             let redemption = state
                 .coupons
-                .redeem(&code, &player_id, &req.quest_id, price)
+                .redeem(&code, player_id, &req.quest_id, price)
                 .await?;
             if redemption.amount_discounted >= price {
                 (GrantSource::CouponRedemption, None)
             } else {
-                let PaymentOutcome::Approved { payment_ref } =
-                    state.payments.charge(&player_id, &req.quest_id);
+                let payment_ref = payments::mock_payment_ref(player_id, &req.quest_id);
                 (GrantSource::Payment, Some(payment_ref))
             }
         }
         None => {
-            let PaymentOutcome::Approved { payment_ref } =
-                state.payments.charge(&player_id, &req.quest_id);
+            let payment_ref = payments::mock_payment_ref(player_id, &req.quest_id);
             (GrantSource::Payment, Some(payment_ref))
         }
     };
     let (grant, created) = state
         .grants
-        .create_grant_idemp(&player_id, &req.quest_id, source, source_ref)
+        .create_grant_idemp(player_id, &req.quest_id, source, source_ref)
         .await?;
-    Ok(Json(CheckoutResponse { grant, created }))
+    Ok(Json(CheckoutResponse::Settled { grant, created }))
+}
+
+/// A quest's positive price; `None` for free (0), unpriced, or unpublished.
+async fn quest_price(state: &AppState, quest_id: &str) -> Result<Option<i64>, AppError> {
+    Ok(state
+        .grants
+        .get_published(quest_id)
+        .await?
+        .and_then(|meta| meta.price)
+        .filter(|p| *p > 0))
+}
+
+/// Quote a normalized coupon against a priced quest: preview + redeemability +
+/// the priced discount. Never consumes the code. The inner `Err` is the
+/// player-facing reason (unknown and deleted codes read the same, by design);
+/// `Ok` carries the coupon's canonical code and the discount in rubles.
+async fn quote_coupon(
+    state: &AppState,
+    code: &str,
+    player_id: &str,
+    quest_id: &str,
+    price: i64,
+) -> Result<Result<(String, i64), &'static str>, AppError> {
+    let Some((coupon, used_total, used_by_player)) = state.coupons.preview(code, player_id).await?
+    else {
+        return Ok(Err("промокод не найден"));
+    };
+    if let Err(reject) = coupons::check_redeemable(
+        &coupon,
+        quest_id,
+        used_total,
+        used_by_player,
+        &store::today_utc(),
+    ) {
+        return Ok(Err(reject.message()));
+    }
+    let discount = coupons::discount_amount(&coupon.discount, price);
+    Ok(Ok((coupon.code, discount)))
+}
+
+/// The configured YooKassa transport, or 501 (fail-closed) when absent.
+fn yookassa_gateway(state: &AppState) -> Result<&YookassaGateway, AppError> {
+    state.yookassa.as_ref().ok_or_else(|| {
+        AppError::NotImplemented("card payments are not configured on this deployment".into())
+    })
+}
+
+/// The redirect path: create a YooKassa payment and answer with its payer page.
+/// NOTHING settles here — the grant (and any coupon redemption) waits for a
+/// verified `succeeded` in [`settle_payment`]. Free and coupon-100% orders
+/// never reach the gateway (nothing to charge).
+async fn yookassa_checkout(
+    state: &AppState,
+    player_id: &str,
+    req: &CheckoutRequest,
+) -> Result<Json<CheckoutResponse>, AppError> {
+    let gateway = yookassa_gateway(state)?;
+    // An open payment for this order is replayed instead of double-creating at
+    // the gateway (the payer may have closed the tab mid-confirmation).
+    if let Some(open) = state
+        .payment_rows
+        .find_pending_for(player_id, &req.quest_id)
+        .await?
+    {
+        return Ok(Json(CheckoutResponse::Redirect {
+            payment: RedirectPayment {
+                payment_id: open.id,
+                confirmation_url: open.confirmation_url,
+            },
+        }));
+    }
+    let meta = state
+        .grants
+        .get_published(&req.quest_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
+    let Some(price) = meta.price.filter(|p| *p > 0) else {
+        // Free quest: nothing to charge — grant immediately, provider bypassed.
+        let (grant, created) = state
+            .grants
+            .create_grant_idemp(player_id, &req.quest_id, GrantSource::FreeQuest, None)
+            .await?;
+        return Ok(Json(CheckoutResponse::Settled { grant, created }));
+    };
+    // A coupon prices the charge now but is redeemed only at settlement — an
+    // abandoned payment must not burn the code. Coupon-100% has nothing to
+    // charge, so it settles instantly through the synchronous path (redeem +
+    // CouponRedemption grant), never reaching the gateway.
+    let (coupon_code, amount) = match &req.coupon_code {
+        Some(raw) => {
+            let code = coupons::normalize_code(raw)?;
+            let (_, discount) = quote_coupon(state, &code, player_id, &req.quest_id, price)
+                .await?
+                .map_err(|reason| AppError::Conflict(reason.into()))?;
+            if discount >= price {
+                return mock_checkout(state, player_id, req).await;
+            }
+            (Some(code), price - discount)
+        }
+        None => (None, price),
+    };
+    // Our id keys the poll endpoint, rides the return_url, and doubles as the
+    // YooKassa Idempotence-Key (64 hex chars — within the 64-char cap).
+    let payment_id = auth::generate_token();
+    let return_url = format!(
+        "{}/quest/{}/about?payment={}",
+        state.config.frontend_base.trim_end_matches('/'),
+        req.quest_id,
+        payment_id
+    );
+    let body = yookassa::build_create_payment(
+        amount,
+        &format!("Квест «{}»", meta.name),
+        &return_url,
+        player_id,
+        &req.quest_id,
+    );
+    let remote = gateway.create_payment(&payment_id, body).await?;
+    let confirmation_url = remote.confirmation_url.clone().ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "yookassa created payment {} without a confirmation_url",
+            remote.id
+        ))
+    })?;
+    state
+        .payment_rows
+        .insert(PendingPayment {
+            id: payment_id.clone(),
+            provider_payment_id: remote.id,
+            player_id: player_id.to_string(),
+            quest_id: req.quest_id.clone(),
+            coupon_code,
+            amount,
+            price,
+            confirmation_url: confirmation_url.clone(),
+            status: PendingStatus::Pending,
+            created_at: store::now_rfc3339(),
+        })
+        .await?;
+    Ok(Json(CheckoutResponse::Redirect {
+        payment: RedirectPayment {
+            payment_id,
+            confirmation_url,
+        },
+    }))
+}
+
+/// Re-check a pending payment against YooKassa and apply the outcome. Safe to
+/// call from the webhook and the owner poll concurrently: the status flip is a
+/// store CAS, the grant is `create_grant_idemp`, and only the CAS winner
+/// redeems the held coupon. The notification body is never trusted — this is
+/// the only place a redirect payment can mint a grant, and it always re-fetches
+/// the authoritative status from the API.
+async fn settle_payment(
+    state: &AppState,
+    row: &PendingPayment,
+) -> Result<(PendingStatus, Option<AccessGrant>), AppError> {
+    let status = match row.status {
+        PendingStatus::Pending => {
+            let remote = yookassa_gateway(state)?
+                .fetch_payment(&row.provider_payment_id)
+                .await?;
+            match remote.status {
+                yookassa::RemoteStatus::Succeeded => {
+                    let won = state.payment_rows.settle_succeeded(&row.id).await?;
+                    if won && let Some(code) = &row.coupon_code {
+                        // The money is taken: a cap exhausted since checkout
+                        // must not block the grant — log and move on.
+                        if let Err(e) = state
+                            .coupons
+                            .redeem(code, &row.player_id, &row.quest_id, row.price)
+                            .await
+                        {
+                            tracing::warn!(
+                                payment = %row.id,
+                                code,
+                                error = ?e,
+                                "coupon redemption failed at settlement; grant created anyway"
+                            );
+                        }
+                    }
+                    PendingStatus::Succeeded
+                }
+                yookassa::RemoteStatus::Canceled => {
+                    state.payment_rows.mark_canceled(&row.id).await?;
+                    PendingStatus::Canceled
+                }
+                yookassa::RemoteStatus::Pending | yookassa::RemoteStatus::WaitingForCapture => {
+                    PendingStatus::Pending
+                }
+            }
+        }
+        settled => settled,
+    };
+    if status != PendingStatus::Succeeded {
+        return Ok((status, None));
+    }
+    let (grant, _) = state
+        .grants
+        .create_grant_idemp(
+            &row.player_id,
+            &row.quest_id,
+            GrantSource::Payment,
+            Some(row.provider_payment_id.clone()),
+        )
+        .await?;
+    Ok((PendingStatus::Succeeded, Some(grant)))
+}
+
+#[derive(serde::Serialize)]
+struct PaymentStatusResponse {
+    status: &'static str,
+    grant: Option<AccessGrant>,
+}
+
+/// Owner poll for a redirect payment: lazily settles a still-pending row (the
+/// return page lands here before the webhook on local/dev deployments).
+async fn payment_status_handler(
+    State(state): State<AppState>,
+    Path(payment_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<PaymentStatusResponse>, AppError> {
+    let claimed = claimed_from_headers(&headers);
+    let player_id = resolve_player(&state, &headers, &claimed).await?;
+    let row = state
+        .payment_rows
+        .get(&payment_id)
+        .await?
+        // A foreign payment reads as absent — ids must not be probeable.
+        .filter(|p| p.player_id == player_id)
+        .ok_or_else(|| AppError::NotFound("payment not found".into()))?;
+    let (status, grant) = settle_payment(&state, &row).await?;
+    Ok(Json(PaymentStatusResponse {
+        status: status.as_str(),
+        grant,
+    }))
+}
+
+/// YooKassa HTTP notification. The body is only a pointer: settlement verifies
+/// against the API, so a forged notification is harmless (and still gets 200).
+/// Transient failures return 5xx so YooKassa keeps retrying (24h window).
+async fn yookassa_webhook_handler(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<StatusCode, AppError> {
+    let Some(provider_payment_id) = yookassa::notification_payment_id(&body) else {
+        return Ok(StatusCode::OK); // not a payment event — nothing to settle
+    };
+    let Some(row) = state
+        .payment_rows
+        .find_by_provider_id(&provider_payment_id)
+        .await?
+    else {
+        tracing::info!(payment = %provider_payment_id, "webhook for unknown payment ignored");
+        return Ok(StatusCode::OK);
+    };
+    settle_payment(&state, &row).await?;
+    Ok(StatusCode::OK)
+}
+
+/// Providers this deployment can charge through — drives the purchase sheet's
+/// payment-method choice (a single entry renders no selector).
+async fn payment_providers_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let mut providers = vec!["mock"];
+    if state.yookassa.is_some() {
+        providers.push("yookassa");
+    }
+    Json(serde_json::json!({ "providers": providers }))
 }
 
 #[derive(serde::Deserialize)]
@@ -744,24 +1050,14 @@ async fn validate_coupon_handler(
             coupons::RedeemReject::NotApplicable.message(),
         )));
     };
-    let Some((coupon, used_total, used_by_player)) =
-        state.coupons.preview(&code, &player_id).await?
-    else {
-        return Ok(Json(invalid("промокод не найден")));
-    };
-    if let Err(reject) = coupons::check_redeemable(
-        &coupon,
-        &req.quest_id,
-        used_total,
-        used_by_player,
-        &store::today_utc(),
-    ) {
-        return Ok(Json(invalid(reject.message())));
-    }
-    let discount_amount = coupons::discount_amount(&coupon.discount, price);
+    let (code, discount_amount) =
+        match quote_coupon(&state, &code, &player_id, &req.quest_id, price).await? {
+            Ok(quote) => quote,
+            Err(reason) => return Ok(Json(invalid(reason))),
+        };
     Ok(Json(serde_json::json!({
         "valid": true,
-        "code": coupon.code,
+        "code": code,
         "price": price,
         "discount_amount": discount_amount,
         "final_price": price - discount_amount,
@@ -2806,9 +3102,10 @@ async fn main() -> anyhow::Result<()> {
                 constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
                     pool.clone(),
                 )),
-                coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool)),
+                coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
                 media,
-                payments: Arc::new(MockPaymentProvider),
+                payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool)),
+                yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 google,
@@ -2912,6 +3209,7 @@ mod tests {
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
             telegram_client_id: None,
+            yookassa: None,
         }))
     }
 
@@ -2928,6 +3226,7 @@ mod tests {
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
             telegram_client_id: None,
+            yookassa: None,
         });
         let (m, outbox) = mailer::Mailer::recorder();
         state.mailer = m;
@@ -2947,6 +3246,7 @@ mod tests {
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
             telegram_client_id: None,
+            yookassa: None,
         }))
     }
 
@@ -3092,6 +3392,7 @@ mod tests {
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
             telegram_client_id: None,
+            yookassa: None,
         }));
 
         let preflight = |origin: &'static str| {
@@ -3168,6 +3469,7 @@ mod tests {
             frontend_base: "http://localhost:3000".to_string(),
             google_client_id: None,
             telegram_client_id: Some(social::test_support::TELEGRAM_CLIENT_ID.to_string()),
+            yookassa: None,
         });
         state.telegram = Some(Arc::new(social::test_support::seeded_telegram_verifier()));
         build_router(state)
@@ -6696,6 +6998,7 @@ mod tests {
                 frontend_base: "http://localhost:3000".to_string(),
                 google_client_id: None,
                 telegram_client_id: None,
+                yookassa: None,
             },
             store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
             grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
@@ -6703,9 +7006,10 @@ mod tests {
             constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
                 pool.clone(),
             )),
-            coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool)),
+            coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
-            payments: Arc::new(MockPaymentProvider),
+            payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool)),
+            yookassa: None,
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
             google: None,
@@ -7012,5 +7316,389 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["registered"], true);
         assert_eq!(me["player_id"], enforce_ids.player.as_str());
+    }
+    // ===== YooKassa redirect flow (scripted fake gateway — the real API is
+    // ===== never called from tests) =====
+
+    /// `test_app` + the scripted YooKassa fake injected into state.
+    fn test_app_yookassa() -> (Router, std::sync::Arc<Mutex<yookassa::FakeYookassa>>) {
+        let mut state = test_state(AppConfig {
+            addr: "0.0.0.0:0".parse().expect("test addr"),
+            version: "test-0.0.0",
+            admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
+            cors_allowed_origins: Vec::new(),
+            media: test_media_cfg(),
+            smtp_url: None,
+            mail_from: "test@geohod.test".to_string(),
+            frontend_base: "http://localhost:3000".to_string(),
+            google_client_id: None,
+            telegram_client_id: None,
+            yookassa: None,
+        });
+        let (gateway, fake) = YookassaGateway::fake();
+        state.yookassa = Some(gateway);
+        (build_router(state), fake)
+    }
+
+    /// Start a yookassa checkout for a freshly published paid quest; returns
+    /// `(our_payment_id, provider_payment_id, confirmation_url)`.
+    async fn start_yookassa_checkout(
+        app: &Router,
+        ids: &Ids,
+        price: i64,
+        coupon_code: Option<&str>,
+    ) -> (String, String, String) {
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({"quest_id": ids.quest, "name": "Платный квест", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": price}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let mut body = json!({"player_id": ids.player, "quest_id": ids.quest,
+                              "provider": "yookassa"});
+        if let Some(code) = coupon_code {
+            body["coupon_code"] = json!(code);
+        }
+        let (st, v) = post_json(app, "/api/checkout", body).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(v.get("grant").is_none(), "no grant before settlement: {v}");
+        let payment_id = v["payment"]["payment_id"]
+            .as_str()
+            .expect("payment_id")
+            .to_string();
+        let confirmation_url = v["payment"]["confirmation_url"]
+            .as_str()
+            .expect("confirmation_url")
+            .to_string();
+        // The fake mints sequential yk-N ids; extract from the confirmation URL.
+        let provider_id = confirmation_url.rsplit('/').next().expect("id").to_string();
+        (payment_id, provider_id, confirmation_url)
+    }
+
+    /// Owner poll for a payment (X-Player-Id identity, as the return page does).
+    async fn poll_payment(app: &Router, player: &str, payment_id: &str) -> (StatusCode, Value) {
+        get_json_h(
+            app,
+            &format!("/api/payments/{payment_id}"),
+            &[("x-player-id", player)],
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn yookassa_checkout_pends_reuses_and_poll_settles() {
+        let (app, fake) = test_app_yookassa();
+        let ids = Ids::new("yk-flow");
+        let (payment_id, provider_id, confirmation_url) =
+            start_yookassa_checkout(&app, &ids, 300, None).await;
+        assert!(confirmation_url.starts_with("https://yookassa.test/confirm/"));
+
+        // The create body priced the full amount and pointed back at the quest.
+        let body = fake
+            .lock()
+            .expect("fake")
+            .last_create_body
+            .clone()
+            .expect("create body");
+        assert_eq!(body["amount"]["value"], "300.00");
+        assert_eq!(body["capture"], true);
+        assert_eq!(
+            body["confirmation"]["return_url"],
+            format!(
+                "http://localhost:3000/quest/{}/about?payment={payment_id}",
+                ids.quest
+            )
+        );
+
+        // Pending: the poll reports it, and no grant exists yet.
+        let (st, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["status"], "pending");
+        assert!(v["grant"].is_null());
+        let (_, grants) = get_json_h(
+            &app,
+            &format!("/api/grants?player_id={}", ids.player),
+            &[("x-player-id", ids.player.as_str())],
+        )
+        .await;
+        assert_eq!(
+            grants.as_array().map(Vec::len),
+            Some(0),
+            "no grant while pending"
+        );
+
+        // A repeat checkout replays the SAME payment — no duplicate at the gateway.
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["payment"]["payment_id"], payment_id.as_str());
+
+        // A foreign player cannot probe the payment id.
+        let (st, _) = poll_payment(&app, "player-intruder", &payment_id).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+
+        // The payer pays; the poll settles and mints the audited grant.
+        fake.lock()
+            .expect("fake")
+            .set_status(&provider_id, yookassa::RemoteStatus::Succeeded);
+        let (st, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["status"], "succeeded");
+        assert_eq!(v["grant"]["source"], "Payment");
+        assert_eq!(v["grant"]["source_ref"], provider_id.as_str());
+
+        // Poll again: stable (idempotent), and checkout now short-circuits owned.
+        let (_, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(v["status"], "succeeded");
+        let (_, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+        )
+        .await;
+        assert_eq!(v["created"], false, "owned quest returns the stored grant");
+    }
+
+    #[tokio::test]
+    async fn yookassa_webhook_settles_but_forgery_is_harmless() {
+        let (app, fake) = test_app_yookassa();
+        let ids = Ids::new("yk-hook");
+        let (payment_id, provider_id, _) = start_yookassa_checkout(&app, &ids, 500, None).await;
+
+        let notification = json!({
+            "type": "notification", "event": "payment.succeeded",
+            "object": {"id": provider_id, "status": "succeeded"}
+        });
+        // Forged: the remote payment is still pending — the webhook re-checks
+        // the API, changes nothing, and still answers 200.
+        let (st, _) = post_json(&app, "/api/payments/yookassa/webhook", notification.clone()).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(
+            v["status"], "pending",
+            "forged notification must not settle"
+        );
+
+        // Genuine: remote succeeded — the same notification now settles.
+        fake.lock()
+            .expect("fake")
+            .set_status(&provider_id, yookassa::RemoteStatus::Succeeded);
+        let (st, _) = post_json(&app, "/api/payments/yookassa/webhook", notification).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(v["status"], "succeeded");
+        assert_eq!(v["grant"]["source_ref"], provider_id.as_str());
+
+        // Unknown payment and non-payment events are acknowledged and dropped.
+        let (st, _) = post_json(
+            &app,
+            "/api/payments/yookassa/webhook",
+            json!({"type": "notification", "event": "payment.succeeded",
+                   "object": {"id": "yk-ghost", "status": "succeeded"}}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(
+            &app,
+            "/api/payments/yookassa/webhook",
+            json!({"type": "notification", "event": "refund.succeeded", "object": {"id": "r-1"}}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn yookassa_canceled_grants_nothing_and_frees_a_retry() {
+        let (app, fake) = test_app_yookassa();
+        let ids = Ids::new("yk-cancel");
+        let (payment_id, provider_id, _) = start_yookassa_checkout(&app, &ids, 300, None).await;
+
+        fake.lock()
+            .expect("fake")
+            .set_status(&provider_id, yookassa::RemoteStatus::Canceled);
+        let (st, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["status"], "canceled");
+        assert!(v["grant"].is_null());
+
+        // A fresh checkout starts a NEW payment (the canceled one is closed).
+        let (_, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+        )
+        .await;
+        let second = v["payment"]["payment_id"].as_str().expect("payment_id");
+        assert_ne!(second, payment_id, "canceled payment is not replayed");
+    }
+
+    #[tokio::test]
+    async fn yookassa_coupon_prices_now_but_redeems_only_on_success() {
+        let (app, fake) = test_app_yookassa();
+        let ids = Ids::new("yk-promo");
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let code = format!("{}-HALF", ids.quest.to_ascii_uppercase());
+        let (st, coupon) = post_json_h(
+            &app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "percent", "discount_value": 50}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let coupon_id = coupon["coupon_id"].as_str().expect("coupon_id").to_string();
+
+        // Initiation charges the discounted amount but does NOT redeem.
+        let (payment_id, provider_id, _) =
+            start_yookassa_checkout(&app, &ids, 300, Some(&code)).await;
+        let body = fake
+            .lock()
+            .expect("fake")
+            .last_create_body
+            .clone()
+            .expect("create body");
+        assert_eq!(body["amount"]["value"], "150.00", "50% off 300");
+        let (_, usage) = get_json_h(&app, &format!("/api/admin/coupons/{coupon_id}"), &admin).await;
+        assert_eq!(usage["used"], 0, "not redeemed at initiation");
+
+        // Canceled: the code survives untouched.
+        fake.lock()
+            .expect("fake")
+            .set_status(&provider_id, yookassa::RemoteStatus::Canceled);
+        let (_, v) = poll_payment(&app, &ids.player, &payment_id).await;
+        assert_eq!(v["status"], "canceled");
+        let (_, usage) = get_json_h(&app, &format!("/api/admin/coupons/{coupon_id}"), &admin).await;
+        assert_eq!(usage["used"], 0, "canceled payment must not burn the code");
+
+        // Retry succeeds: settlement redeems exactly once (repeat polls stay 1).
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest,
+                   "provider": "yookassa", "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let retry_id = v["payment"]["payment_id"]
+            .as_str()
+            .expect("payment_id")
+            .to_string();
+        let retry_provider = v["payment"]["confirmation_url"]
+            .as_str()
+            .expect("url")
+            .rsplit('/')
+            .next()
+            .expect("id")
+            .to_string();
+        fake.lock()
+            .expect("fake")
+            .set_status(&retry_provider, yookassa::RemoteStatus::Succeeded);
+        let (_, v) = poll_payment(&app, &ids.player, &retry_id).await;
+        assert_eq!(v["status"], "succeeded");
+        let (_, usage) = get_json_h(&app, &format!("/api/admin/coupons/{coupon_id}"), &admin).await;
+        assert_eq!(usage["used"], 1, "settlement winner redeems once");
+        let (_, v) = poll_payment(&app, &ids.player, &retry_id).await;
+        assert_eq!(v["status"], "succeeded");
+        let (_, usage) = get_json_h(&app, &format!("/api/admin/coupons/{coupon_id}"), &admin).await;
+        assert_eq!(usage["used"], 1, "repeat settle does not double-redeem");
+    }
+
+    #[tokio::test]
+    async fn yookassa_full_coupon_and_free_quest_bypass_the_gateway() {
+        let (app, fake) = test_app_yookassa();
+        let ids = Ids::new("yk-bypass");
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": 300}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let code = format!("{}-FULL", ids.quest.to_ascii_uppercase());
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/coupons",
+            json!({"code": code, "discount_type": "percent", "discount_value": 100}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest,
+                   "provider": "yookassa", "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            v["grant"]["source"], "CouponRedemption",
+            "settled instantly"
+        );
+        assert!(
+            fake.lock().expect("fake").last_create_body.is_none(),
+            "gateway untouched"
+        );
+
+        // Free quest through the yookassa arm: granted immediately, no payment.
+        let free_quest = format!("{}-free", ids.quest);
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": free_quest, "name": "F", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-f", ids.snap1), "price": 0}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": free_quest, "provider": "yookassa"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["grant"]["source"], "FreeQuest");
+        assert!(
+            fake.lock().expect("fake").last_create_body.is_none(),
+            "gateway untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn yookassa_unconfigured_fails_closed_and_unknown_provider_rejected() {
+        let app = test_app();
+        let ids = Ids::new("yk-off");
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "paypal"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn payment_providers_reflect_deployment_config() {
+        let (st, v) = get_json(&test_app(), "/api/payments/providers").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["providers"], json!(["mock"]));
+        let (app, _) = test_app_yookassa();
+        let (_, v) = get_json(&app, "/api/payments/providers").await;
+        assert_eq!(v["providers"], json!(["mock", "yookassa"]));
     }
 }

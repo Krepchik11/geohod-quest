@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
@@ -49,7 +49,24 @@ export default function PurchaseSheet({
   const [applied, setApplied] = useState<AppliedPromo | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoChecking, setPromoChecking] = useState(false);
-  const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'pending' | 'redirect' | 'error'>('idle');
+  // Payment methods this deployment offers. Until the list arrives (or if it
+  // fails to load) the sheet behaves exactly as before: mock only, no selector.
+  const [providers, setProviders] = useState<string[]>(['mock']);
+  const [method, setMethod] = useState<'mock' | 'yookassa'>('mock');
+
+  useEffect(() => {
+    let cancelled = false;
+    api.paymentProviders()
+      .then(({ providers }) => {
+        if (cancelled) return;
+        setProviders(providers);
+        // Real money is the default whenever the deployment can take it.
+        if (providers.includes('yookassa')) setMethod('yookassa');
+      })
+      .catch(() => { /* selector stays hidden; checkout uses the backend default */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const price = quest.price ?? 0;
   const finalPrice = applied ? applied.finalPrice : price;
@@ -58,11 +75,20 @@ export default function PurchaseSheet({
   const confirm = async () => {
     setState('pending');
     try {
-      await api.checkout({
+      const result = await api.checkout({
         player_id: currentPlayerId(),
         quest_id: quest.quest_id,
         ...(applied ? { coupon_code: applied.code } : {}),
+        ...(method === 'yookassa' ? { provider: 'yookassa' } : {}),
       });
+      if (result.payment) {
+        // Redirect provider: hand the payer to ЮKassa. The return_url brings
+        // them back to the quest page with ?payment={id}, where the poll
+        // settles the purchase (AboutClient).
+        setState('redirect');
+        window.location.assign(result.payment.confirmation_url);
+        return;
+      }
       onPurchased();
     } catch {
       setState('error');
@@ -102,11 +128,14 @@ export default function PurchaseSheet({
     }
   };
 
+  // The sheet locks while a charge or a gateway hand-off is in flight.
+  const busy = state === 'pending' || state === 'redirect';
+
   // Portal to <body>: callers render the sheet from inside cards whose :hover
   // transform would otherwise become the containing block for this fixed
   // overlay (clipping the sheet into the card and flickering with hover).
   return createPortal(
-    <div className="psheet__ovl" onClick={state === 'pending' ? undefined : onClose}>
+    <div className="psheet__ovl" onClick={busy ? undefined : onClose}>
       <div className="psheet" role="dialog" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
         <span className="psheet__grabber" aria-hidden />
         <h3 className="psheet__title">Подтвердите покупку</h3>
@@ -124,6 +153,33 @@ export default function PurchaseSheet({
           <b>{finalPrice} ₽</b>
         </div>
 
+        {providers.length > 1 && (
+          <div className="psheet__methods" role="radiogroup" aria-label="Способ оплаты">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={method === 'yookassa'}
+              className={`psheet__method${method === 'yookassa' ? ' is-active' : ''}`}
+              onClick={() => setMethod('yookassa')}
+              disabled={busy}
+            >
+              <b>Банковская карта · СБП</b>
+              <span>через ЮKassa — переход на страницу оплаты</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={method === 'mock'}
+              className={`psheet__method${method === 'mock' ? ' is-active' : ''}`}
+              onClick={() => setMethod('mock')}
+              disabled={busy}
+            >
+              <b>Тестовая оплата</b>
+              <span>без списания денег</span>
+            </button>
+          </div>
+        )}
+
         {!promoOpen ? (
           <button className="psheet__promo-link" type="button" onClick={() => setPromoOpen(true)}>
             Есть промокод?
@@ -136,13 +192,13 @@ export default function PurchaseSheet({
                 placeholder="Промокод"
                 value={promoCode}
                 onChange={(e) => setPromoCode(e.target.value)}
-                disabled={state === 'pending' || promoChecking}
+                disabled={busy || promoChecking}
               />
               <button
                 className="btn btn--secondary btn--md"
                 type="button"
                 onClick={() => void applyPromo()}
-                disabled={state === 'pending' || promoChecking}
+                disabled={busy || promoChecking}
               >
                 {promoChecking ? 'Проверяем…' : 'Применить'}
               </button>
@@ -171,17 +227,21 @@ export default function PurchaseSheet({
           <div className="psheet__error">Не получилось оформить покупку — проверьте связь и попробуйте ещё раз.</div>
         )}
 
-        {state === 'pending' ? (
+        {busy ? (
           <button className="btn btn--block psheet__confirm is-pending" type="button" disabled>
             <span className="psheet__spinner" aria-hidden />
-            Оформляем покупку…
+            {state === 'redirect' ? 'Переходим к оплате…' : 'Оформляем покупку…'}
           </button>
         ) : (
           <button className="btn btn--block psheet__confirm" type="button" onClick={() => void confirm()}>
-            {state === 'error' ? `Повторить — ${finalPrice} ₽` : `Подтвердить — ${finalPrice} ₽`}
+            {state === 'error'
+              ? `Повторить — ${finalPrice} ₽`
+              : method === 'yookassa'
+                ? `Оплатить ${finalPrice} ₽`
+                : `Подтвердить — ${finalPrice} ₽`}
           </button>
         )}
-        <button className="psheet__cancel" type="button" onClick={onClose} disabled={state === 'pending'}>
+        <button className="psheet__cancel" type="button" onClick={onClose} disabled={busy}>
           Отмена
         </button>
       </div>

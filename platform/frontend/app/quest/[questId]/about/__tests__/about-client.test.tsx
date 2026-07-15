@@ -8,14 +8,21 @@ import React from 'react';
  * place (no redirect), free instant grant, delisted quest 404 state, chips
  * hidden when unknown, reviews aggregate until §11.
  */
-const { getProductMock, listGrantsMock, checkoutMock, downloadMock } = vi.hoisted(() => ({
+const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock } = vi.hoisted(() => ({
   getProductMock: vi.fn(),
   listGrantsMock: vi.fn(),
   checkoutMock: vi.fn(),
   downloadMock: vi.fn(async () => ({})),
+  pollMock: vi.fn(),
 }));
 vi.mock('../../../../../lib/api', () => ({
-  api: { getQuestProduct: getProductMock, listGrants: listGrantsMock, checkout: checkoutMock, getBundle: vi.fn() },
+  api: {
+    getQuestProduct: getProductMock,
+    listGrants: listGrantsMock,
+    checkout: checkoutMock,
+    getBundle: vi.fn(),
+    paymentProviders: vi.fn().mockResolvedValue({ providers: ['mock'] }),
+  },
 }));
 vi.mock('../../../../../lib/identity', () => ({
   currentPlayerId: () => 'dev:test',
@@ -23,6 +30,7 @@ vi.mock('../../../../../lib/identity', () => ({
   subscribeSession: () => () => {},
 }));
 vi.mock('../../../../../lib/download', () => ({ downloadBundle: downloadMock }));
+vi.mock('../../../../../lib/payment-return', () => ({ pollPaymentSettlement: pollMock }));
 
 import AboutClient, { productChips } from '../AboutClient';
 
@@ -41,6 +49,8 @@ beforeEach(() => {
   listGrantsMock.mockReset().mockResolvedValue([]);
   checkoutMock.mockReset();
   downloadMock.mockClear();
+  pollMock.mockReset();
+  window.history.replaceState(null, '', '/quest/q1/about');
 });
 
 describe('productChips', () => {
@@ -116,5 +126,37 @@ describe('AboutClient', () => {
     getProductMock.mockResolvedValue({ ...PRODUCT, rating_avg: 0, rating_count: 0 });
     render(<AboutClient questId="q1" />);
     await waitFor(() => expect(screen.getByText('Пока без отзывов — станьте первым')).toBeTruthy());
+  });
+});
+
+describe('AboutClient — ЮKassa return (?payment={id})', () => {
+  it('succeeded: settles via the poll, flips to owned, auto-downloads, strips the param', async () => {
+    pollMock.mockResolvedValue('succeeded');
+    window.history.replaceState(null, '', '/quest/q1/about?payment=pay-1');
+    render(<AboutClient questId="q1" />);
+    await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
+    expect(pollMock).toHaveBeenCalledWith('pay-1');
+    expect(screen.getByText('Оплата прошла — квест ваш навсегда.')).toBeTruthy();
+    expect(downloadMock).toHaveBeenCalled();
+    expect(window.location.search).toBe('');
+  });
+
+  it('canceled: «деньги не списаны» + the quest stays purchasable', async () => {
+    pollMock.mockResolvedValue('canceled');
+    window.history.replaceState(null, '', '/quest/q1/about?payment=pay-1');
+    render(<AboutClient questId="q1" />);
+    await waitFor(() =>
+      expect(screen.getByText(/Оплата не прошла — деньги не списаны/)).toBeTruthy(),
+    );
+    expect(screen.getByRole('button', { name: 'Купить за 890 ₽' })).toBeTruthy();
+    expect(downloadMock).not.toHaveBeenCalled();
+  });
+
+  it('still pending after the schedule: honest processing note, no grant claimed', async () => {
+    pollMock.mockResolvedValue('pending');
+    window.history.replaceState(null, '', '/quest/q1/about?payment=pay-1');
+    render(<AboutClient questId="q1" />);
+    await waitFor(() => expect(screen.getByText(/Платёж ещё обрабатывается/)).toBeTruthy());
+    expect(screen.queryByText('✓ Квест куплен')).toBeNull();
   });
 });
