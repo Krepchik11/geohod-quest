@@ -24,7 +24,10 @@ use crate::facts::{
     semantically_same,
 };
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
-use crate::pg_store::{PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgGrantStore};
+use crate::payments::{PendingPayment, PendingStatus};
+use crate::pg_store::{
+    PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgGrantStore, PgPaymentStore,
+};
 
 /// Unix seconds (0 on clock error; informational only).
 pub fn now_secs() -> u64 {
@@ -2112,6 +2115,148 @@ impl CouponStores {
         match self {
             Self::InMemory(m) => Self::lock_inmem(m)?.redeem(code, player_id, quest_id, price),
             Self::Postgres(pg) => pg.redeem(code, player_id, quest_id, price).await,
+        }
+    }
+}
+
+/// In-flight redirect payments (YooKassa), keyed by our id. See
+/// `migrations/0011_pending_payments.sql` for the model rationale.
+#[derive(Debug, Default)]
+pub struct InMemoryPaymentStore {
+    payments: HashMap<String, PendingPayment>,
+}
+
+impl InMemoryPaymentStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Persist a freshly created gateway payment (status = Pending).
+    pub fn insert(&mut self, payment: PendingPayment) {
+        self.payments.insert(payment.id.clone(), payment);
+    }
+
+    pub fn get(&self, id: &str) -> Option<&PendingPayment> {
+        self.payments.get(id)
+    }
+
+    /// Webhook lookup: notifications carry only the provider's payment id.
+    pub fn find_by_provider_id(&self, provider_payment_id: &str) -> Option<&PendingPayment> {
+        self.payments
+            .values()
+            .find(|p| p.provider_payment_id == provider_payment_id)
+    }
+
+    /// An open payment for (player, quest), replayed by checkout instead of
+    /// creating a duplicate at the gateway.
+    pub fn find_pending_for(&self, player_id: &str, quest_id: &str) -> Option<&PendingPayment> {
+        self.payments.values().find(|p| {
+            p.status == PendingStatus::Pending && p.player_id == player_id && p.quest_id == quest_id
+        })
+    }
+
+    /// Compare-and-set `Pending -> Succeeded`. Returns whether THIS call made
+    /// the transition — the winner (and only the winner) redeems the coupon.
+    pub fn settle_succeeded(&mut self, id: &str) -> bool {
+        match self.payments.get_mut(id) {
+            Some(p) if p.status == PendingStatus::Pending => {
+                p.status = PendingStatus::Succeeded;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Mark `Pending -> Canceled` (no-op unless pending): frees the player to
+    /// start a fresh checkout.
+    pub fn mark_canceled(&mut self, id: &str) {
+        if let Some(p) = self.payments.get_mut(id)
+            && p.status == PendingStatus::Pending
+        {
+            p.status = PendingStatus::Canceled;
+        }
+    }
+}
+
+/// Pending-payment storage behind the same enum-dispatch seam as the others.
+#[derive(Clone, Debug)]
+pub enum PaymentStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemoryPaymentStore>>),
+    /// Durable PostgreSQL.
+    Postgres(PgPaymentStore),
+}
+
+impl PaymentStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemoryPaymentStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryPaymentStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("payments lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryPaymentStore::insert`].
+    pub async fn insert(&self, payment: PendingPayment) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.insert(payment);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.insert(payment).await,
+        }
+    }
+
+    /// See [`InMemoryPaymentStore::get`].
+    pub async fn get(&self, id: &str) -> Result<Option<PendingPayment>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(id).cloned()),
+            Self::Postgres(pg) => pg.get(id).await,
+        }
+    }
+
+    /// See [`InMemoryPaymentStore::find_by_provider_id`].
+    pub async fn find_by_provider_id(
+        &self,
+        provider_payment_id: &str,
+    ) -> Result<Option<PendingPayment>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?
+                .find_by_provider_id(provider_payment_id)
+                .cloned()),
+            Self::Postgres(pg) => pg.find_by_provider_id(provider_payment_id).await,
+        }
+    }
+
+    /// See [`InMemoryPaymentStore::find_pending_for`].
+    pub async fn find_pending_for(
+        &self,
+        player_id: &str,
+        quest_id: &str,
+    ) -> Result<Option<PendingPayment>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?
+                .find_pending_for(player_id, quest_id)
+                .cloned()),
+            Self::Postgres(pg) => pg.find_pending_for(player_id, quest_id).await,
+        }
+    }
+
+    /// See [`InMemoryPaymentStore::settle_succeeded`].
+    pub async fn settle_succeeded(&self, id: &str) -> Result<bool, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.settle_succeeded(id)),
+            Self::Postgres(pg) => pg.settle_succeeded(id).await,
+        }
+    }
+
+    /// See [`InMemoryPaymentStore::mark_canceled`].
+    pub async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.mark_canceled(id);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.mark_canceled(id).await,
         }
     }
 }

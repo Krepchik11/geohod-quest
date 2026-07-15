@@ -196,3 +196,8 @@
 .qp-review__stars .is-off { color: #D9DDE4; }
 .qp-review__date { color: var(--muted); }
 .qp-review p { margin: 8px 0 0; font-size: 14px; line-height: 1.6; }
+
+/* ЮKassa return states in the order card (§3.3 results) */
+.qp-payok { font-size: 12.5px; font-weight: 600; color: var(--green); }
+.qp-paywait { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.qp-paywait--long { display: block; }

@@ -284,9 +284,47 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
   return res.json() as Promise<T>;
 }
 
+/**
+ * POST /api/checkout is grant-or-redirect: the mock provider (and free /
+ * coupon-100% orders) settles instantly with `{grant, created}`; a redirect
+ * provider (ЮKassa) answers `{payment}` — send the payer to `confirmation_url`,
+ * then poll `paymentStatus(payment_id)` on return.
+ */
+export type CheckoutResult =
+  | { grant: GrantWire; created: boolean; payment?: never }
+  | { payment: { payment_id: string; confirmation_url: string }; grant?: never };
+
+/** Verdict of GET /api/payments/{id} — the owner poll after a redirect. */
+export interface PaymentStatusWire {
+  status: 'pending' | 'succeeded' | 'canceled';
+  grant: GrantWire | null;
+}
+
+let providersPromise: Promise<{ providers: string[] }> | null = null;
+
 export const api = {
-  checkout: (body: { player_id: string; quest_id: string; coupon_code?: string }) =>
-    apiFetch('/api/checkout', { method: 'POST', body: JSON.stringify(body) }),
+  checkout: (body: {
+    player_id: string;
+    quest_id: string;
+    coupon_code?: string;
+    provider?: string;
+  }) => apiFetch<CheckoutResult>('/api/checkout', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Payment providers this deployment can charge through (drives the purchase
+  // sheet's method selector; "mock" is always present). Deployment-static, so
+  // one fetch per page load — repeat sheet opens resolve instantly.
+  paymentProviders: () =>
+    (providersPromise ??= apiFetch<{ providers: string[] }>('/api/payments/providers').catch(
+      (e: unknown) => {
+        providersPromise = null; // never cache a failure
+        throw e;
+      },
+    )),
+
+  // Owner poll for a redirect payment; the backend lazily settles a pending
+  // payment against ЮKassa, so polling alone completes the purchase.
+  paymentStatus: (paymentId: string) =>
+    apiFetch<PaymentStatusWire>(`/api/payments/${encodeURIComponent(paymentId)}`),
 
   // Purchase-sheet promo preview: the discount lives in the server-side coupon
   // registry — this never consumes the code and always resolves to a verdict.

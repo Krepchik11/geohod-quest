@@ -440,6 +440,12 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .psheet__quest-body span { font-size:12px; color:var(--muted); }
 .psheet__price { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--bg-subtle); border-radius:12px; font-size:14px; }
 .psheet__price b { font-size:20px; }
+.psheet__methods { display:flex; flex-direction:column; gap:8px; }
+.psheet__method { display:flex; flex-direction:column; gap:2px; align-items:flex-start; text-align:left; padding:10px 14px; border:1.5px solid var(--line, #E3E8F0); border-radius:12px; background:none; cursor:pointer; }
+.psheet__method b { font-size:13.5px; }
+.psheet__method span { font-size:12px; color:var(--muted); }
+.psheet__method.is-active { border-color:var(--blue); box-shadow:0 0 0 1px var(--blue) inset; }
+.psheet__method:disabled { opacity:.6; cursor:default; }
 .psheet__promo-link { align-self:flex-start; font-size:13px; color:var(--blue); font-weight:500; background:none; border:0; padding:0; cursor:pointer; }
 .psheet__promo { display:flex; gap:8px; }
 .psheet__promo .input { flex:1; height:48px; border-radius:12px; }

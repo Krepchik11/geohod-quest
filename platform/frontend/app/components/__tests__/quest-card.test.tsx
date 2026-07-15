@@ -17,7 +17,11 @@ const { checkoutMock, downloadMock } = vi.hoisted(() => ({
   downloadMock: vi.fn(async () => ({})),
 }));
 vi.mock('../../../lib/api', () => ({
-  api: { checkout: checkoutMock, getBundle: vi.fn() },
+  api: {
+    checkout: checkoutMock,
+    getBundle: vi.fn(),
+    paymentProviders: vi.fn().mockResolvedValue({ providers: ['mock'] }),
+  },
 }));
 vi.mock('../../../lib/identity', () => ({
   currentPlayerId: () => 'dev:test',

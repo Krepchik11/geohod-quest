@@ -15,13 +15,14 @@ import React from 'react';
  * - failure shows the in-sheet error box + «Повторить — {price} ₽»;
  * - charging happens ONLY on confirm.
  */
-const { checkoutMock, validateMock, sessionRef } = vi.hoisted(() => ({
+const { checkoutMock, validateMock, providersMock, sessionRef } = vi.hoisted(() => ({
   checkoutMock: vi.fn(),
   validateMock: vi.fn(),
+  providersMock: vi.fn(),
   sessionRef: { current: null as null | { token: string } },
 }));
 vi.mock('../../../lib/api', () => ({
-  api: { checkout: checkoutMock, validateCoupon: validateMock },
+  api: { checkout: checkoutMock, validateCoupon: validateMock, paymentProviders: providersMock },
 }));
 vi.mock('../../../lib/identity', () => ({
   currentPlayerId: () => 'dev:test',
@@ -50,6 +51,9 @@ function setup() {
 beforeEach(() => {
   checkoutMock.mockReset();
   validateMock.mockReset();
+  providersMock.mockReset();
+  // Default deployment: mock-only — no method selector, historical behavior.
+  providersMock.mockResolvedValue({ providers: ['mock'] });
   sessionRef.current = null;
 });
 
@@ -169,5 +173,63 @@ describe('PurchaseSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
     expect(onClose).toHaveBeenCalled();
     expect(checkoutMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('PurchaseSheet — ЮKassa redirect', () => {
+  const BOTH = { providers: ['mock', 'yookassa'] };
+
+  it('mock-only deployments render no method selector', async () => {
+    setup();
+    await waitFor(() => expect(providersMock).toHaveBeenCalled());
+    expect(screen.queryByRole('radiogroup', { name: 'Способ оплаты' })).toBeNull();
+  });
+
+  it('offers the method choice and defaults to the card when ЮKassa exists', async () => {
+    providersMock.mockResolvedValue(BOTH);
+    setup();
+    const card = await screen.findByRole('radio', { name: /Банковская карта/ });
+    expect(card.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radio', { name: /Тестовая оплата/ }).getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Оплатить 890 ₽' })).toBeTruthy();
+  });
+
+  it('confirming the card method sends provider=yookassa and redirects to the gateway', async () => {
+    providersMock.mockResolvedValue(BOTH);
+    checkoutMock.mockResolvedValue({
+      payment: { payment_id: 'pay-1', confirmation_url: 'https://yookassa.ru/confirm/x' },
+    });
+    const assign = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      value: { ...original, assign },
+      writable: true,
+      configurable: true,
+    });
+    try {
+      const { onPurchased } = setup();
+      fireEvent.click(await screen.findByRole('button', { name: 'Оплатить 890 ₽' }));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('https://yookassa.ru/confirm/x'));
+      expect(checkoutMock).toHaveBeenCalledWith({
+        player_id: 'dev:test',
+        quest_id: 'q1',
+        provider: 'yookassa',
+      });
+      // No premature success: settlement happens on the return page.
+      expect(onPurchased).not.toHaveBeenCalled();
+      expect(screen.getByText('Переходим к оплате…')).toBeTruthy();
+    } finally {
+      Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+    }
+  });
+
+  it('switching to the test method keeps the historical instant flow', async () => {
+    providersMock.mockResolvedValue(BOTH);
+    checkoutMock.mockResolvedValue({ grant: {}, created: true });
+    const { onPurchased } = setup();
+    fireEvent.click(await screen.findByRole('radio', { name: /Тестовая оплата/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' }));
+    await waitFor(() => expect(onPurchased).toHaveBeenCalled());
+    expect(checkoutMock).toHaveBeenCalledWith({ player_id: 'dev:test', quest_id: 'q1' });
   });
 });
