@@ -8,6 +8,7 @@
  * (see `resolveApiBase` for the production-safety guard against the localhost fallback).
  */
 
+import type { AdminFeatureWire } from './admin-features';
 import { authHeaders, type Session } from './identity';
 
 /** Which social sign-in providers this deployment has configured. Both `null`
@@ -381,6 +382,18 @@ export const api = {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ role }),
+    }),
+
+  // Admin feature toggles (features spec) — same dual-credential gating as the
+  // other admin endpoints. `enabled: null` clears the override (back to the
+  // code default); the mutation returns the updated row.
+  adminListFeatures: () =>
+    apiFetch<AdminFeatureWire[]>('/api/admin/features', { headers: adminHeaders() }),
+  adminSetFeature: (key: string, enabled: boolean | null) =>
+    apiFetch<AdminFeatureWire>(`/api/admin/features/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ enabled }),
     }),
 
   // Admin coupon management (coupons spec) — same dual-credential gating as the

@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 
 /** Shared workspace controls (design/ctor2/page-editor.jsx primitives). */
 
-export function WspToggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+export function WspToggle({ on, onClick, label, ariaLabel, disabled }: { on: boolean; onClick: () => void; label?: string; ariaLabel?: string; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -15,7 +15,9 @@ export function WspToggle({ on, onClick, label }: { on: boolean; onClick: () => 
       style={{ background: 'none', border: 'none', padding: 0 }}
       role="switch"
       aria-checked={on}
+      aria-label={ariaLabel}
       onClick={onClick}
+      disabled={disabled}
     >
       <span className="tk" />{label}
     </button>
