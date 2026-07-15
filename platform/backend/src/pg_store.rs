@@ -46,11 +46,15 @@ pub struct PgFactStore {
 impl PgFactStore {
     /// See [`crate::store::InMemoryFactStore::reviews_for_quest`] — DISTINCT ON
     /// keeps the last quest_rated per attempt; only rows with text qualify.
+    /// The limit converts via `i64::try_from`, never `as` — `usize::MAX as i64`
+    /// is -1, which PG rejects as a negative LIMIT (a shipped 500 once).
     pub async fn reviews_for_quest(
         &self,
         quest_id: &str,
         limit: usize,
     ) -> Result<Vec<crate::store::ReviewRow>, AppError> {
+        let limit = i64::try_from(limit)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("review limit overflow: {e}")))?;
         let rows = sqlx::query(
             "SELECT last_rated.player_id, last_rated.created_at, last_rated.data
              FROM (
@@ -66,7 +70,7 @@ impl PgFactStore {
              LIMIT $2",
         )
         .bind(quest_id)
-        .bind(limit as i64)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
         .map_err(internal)?;

@@ -432,7 +432,7 @@ export function BuilderScreen({
           type="button"
           disabled={exporting}
           onClick={actions.onExport}
-          title="Скачать квест целиком: страницы, изображения и статистику одним zip-архивом"
+          title="Скачать квест целиком: страницы, изображения и настройки одним zip-архивом"
         >
           {exporting ? 'Экспорт…' : 'Экспорт'}
         </button>
