@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
 import { currentPlayerId, getSession, subscribeSession } from '../../lib/identity';
@@ -101,7 +102,10 @@ export default function PurchaseSheet({
     }
   };
 
-  return (
+  // Portal to <body>: callers render the sheet from inside cards whose :hover
+  // transform would otherwise become the containing block for this fixed
+  // overlay (clipping the sheet into the card and flickering with hover).
+  return createPortal(
     <div className="psheet__ovl" onClick={state === 'pending' ? undefined : onClose}>
       <div className="psheet" role="dialog" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
         <span className="psheet__grabber" aria-hidden />
@@ -181,6 +185,7 @@ export default function PurchaseSheet({
           Отмена
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

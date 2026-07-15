@@ -54,6 +54,19 @@ beforeEach(() => {
 });
 
 describe('PurchaseSheet', () => {
+  it('portals to document.body — never a descendant of the caller DOM', () => {
+    // A card ancestor gains transform on :hover, which would make it the
+    // containing block for the fixed overlay and clip the sheet inside the
+    // card. Portaling to <body> removes that whole bug class.
+    const { container } = render(
+      <PurchaseSheet quest={QUEST} onClose={() => {}} onPurchased={() => {}} />,
+    );
+    expect(container.querySelector('.psheet__ovl')).toBeNull();
+    const overlay = document.body.querySelector('.psheet__ovl');
+    expect(overlay).toBeTruthy();
+    expect(overlay!.parentElement).toBe(document.body);
+  });
+
   it('renders the confirmation anatomy without charging', () => {
     setup();
     expect(screen.getByText('Подтвердите покупку')).toBeTruthy();
