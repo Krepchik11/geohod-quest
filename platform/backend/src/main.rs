@@ -31,6 +31,7 @@ mod auth;
 mod config;
 mod coupons;
 mod errors;
+mod export;
 mod facts;
 mod grants;
 mod icons;
@@ -422,6 +423,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/constructor/quests/{quest_id}/delete",
             post(delete_constructor_quest_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}/export",
+            get(export_constructor_quest_handler),
         )
         .route("/api/checkout", post(checkout_handler))
         .route("/api/coupons/validate", post(validate_coupon_handler))
@@ -1082,6 +1087,67 @@ async fn get_constructor_quest_handler(
         updated_at: q.updated_at,
         body: q.body,
     }))
+}
+
+/// GET /api/constructor/quests/{quest_id}/export — the full quest as a
+/// downloadable zip: quest record (all steps, attributes, cover — media URLs
+/// rewritten to point into the archive), the media files themselves, and play
+/// stats. Owner-or-admin gated, same as every other per-quest constructor
+/// route.
+async fn export_constructor_quest_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<axum::response::Response, AppError> {
+    let quest = require_owned_constructor_quest(&state, &headers, &quest_id).await?;
+    let completed = state.store.completions_for_quest(&quest.quest_id).await?;
+    let buyers = state.grants.buyers_for_quest(&quest.quest_id).await?;
+    let reviews = state
+        .store
+        .reviews_for_quest(&quest.quest_id, usize::MAX)
+        .await?;
+    let published = state
+        .grants
+        .list_published()
+        .await?
+        .into_iter()
+        .find(|p| p.quest_id == quest.quest_id);
+    let version_stats = match &published {
+        Some(p) => {
+            let grants_count = state.grants.list_all_grants().await?.len();
+            Some(
+                state
+                    .store
+                    .get_version_stats(&p.snapshot_id, grants_count)
+                    .await?,
+            )
+        }
+        None => None,
+    };
+    let published_version = published.as_ref().map(|p| p.snapshot_version);
+
+    let filename = format!("quest-{}.zip", quest.quest_id);
+    let zip_bytes = export::build_quest_export_zip(
+        &state.media,
+        export::ExportInputs {
+            quest,
+            completed,
+            buyers,
+            published_version,
+            reviews,
+            version_stats,
+        },
+    )
+    .await?;
+
+    axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(axum::body::Body::from(zip_bytes))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("export response build: {e}")))
 }
 
 /// Body for POST /api/constructor/quests. The client mints the id (the same id
@@ -6050,6 +6116,139 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND, "second delete is 404");
         let (_, list) = get_json_h(&app, "/api/constructor/quests", &admin).await;
         assert_eq!(list.as_array().expect("array").len(), 0);
+    }
+
+    /// GET .../export bundles `manifest.json` + `quest.json` (media URLs
+    /// rewritten to zip-relative paths, wherever they appear in the body) +
+    /// `stats.json` + the media files themselves, download headers included.
+    /// Owner-or-admin gated like every other per-quest constructor route.
+    #[tokio::test]
+    async fn constructor_export_bundles_quest_media_and_stats() {
+        let app = test_app();
+        let owner: [(&str, &str); 2] = [
+            ("x-admin-token", TEST_ADMIN_TOKEN),
+            ("x-player-id", "dev-owner"),
+        ];
+        let other: [(&str, &str); 2] = [
+            ("x-admin-token", TEST_ADMIN_TOKEN),
+            ("x-player-id", "dev-other"),
+        ];
+
+        // Upload the cover image the quest body will reference.
+        let img_bytes = vec![137u8, 80, 78, 71, 9, 9, 9];
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/media")
+                    .header("x-admin-token", TEST_ADMIN_TOKEN)
+                    .header("content-type", "image/png")
+                    .body(Body::from(img_bytes.clone()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let media_bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let media_ref: Value = serde_json::from_slice(&media_bytes).unwrap();
+        let cover_url = media_ref["url"].as_str().expect("url").to_string();
+        let hash = media_ref["hash"].as_str().expect("hash").to_string();
+
+        let body = json!({
+            "quest_id": "q-export",
+            "name": "Экспорт квест",
+            "cover": cover_url,
+            "steps_count": 1,
+            "body": {
+                "id": "q-export",
+                "meta": { "title": "Экспорт квест", "cover": cover_url },
+                "steps": [{ "image": cover_url }],
+            }
+        });
+        let (st, _) = post_json_h(&app, "/api/constructor/quests", body, &owner).await;
+        assert_eq!(st, StatusCode::OK);
+
+        // A different author gets the same opaque 404 as the rest of the constructor surface.
+        let (st, _) = get_json_h(&app, "/api/constructor/quests/q-export/export", &other).await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "cannot export another author's quest"
+        );
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/constructor/quests/q-export/export")
+                    .header("x-admin-token", TEST_ADMIN_TOKEN)
+                    .header("x-player-id", "dev-owner")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/zip"
+        );
+        assert_eq!(
+            res.headers().get("content-disposition").unwrap(),
+            "attachment; filename=\"quest-q-export.zip\""
+        );
+        let zip_bytes = res.into_body().collect().await.unwrap().to_bytes();
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes.to_vec())).unwrap();
+        let expected_media_path = format!("media/{hash}.png");
+        let mut names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "manifest.json".to_string(),
+                expected_media_path.clone(),
+                "quest.json".to_string(),
+                "stats.json".to_string(),
+            ]
+        );
+
+        let mut manifest_entry = archive.by_name("manifest.json").unwrap();
+        let mut manifest_str = String::new();
+        std::io::Read::read_to_string(&mut manifest_entry, &mut manifest_str).unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_str).unwrap();
+        assert_eq!(manifest["quest_id"], "q-export");
+        assert_eq!(manifest["format_version"], export::FORMAT_VERSION);
+        drop(manifest_entry);
+
+        let mut quest_entry = archive.by_name("quest.json").unwrap();
+        let mut quest_str = String::new();
+        std::io::Read::read_to_string(&mut quest_entry, &mut quest_str).unwrap();
+        let quest_value: Value = serde_json::from_str(&quest_str).unwrap();
+        assert_eq!(quest_value["cover"], expected_media_path);
+        assert_eq!(quest_value["body"]["meta"]["cover"], expected_media_path);
+        assert_eq!(
+            quest_value["body"]["steps"][0]["image"],
+            expected_media_path
+        );
+        drop(quest_entry);
+
+        let mut stats_entry = archive.by_name("stats.json").unwrap();
+        let mut stats_str = String::new();
+        std::io::Read::read_to_string(&mut stats_entry, &mut stats_str).unwrap();
+        let stats: Value = serde_json::from_str(&stats_str).unwrap();
+        assert_eq!(stats["completed"], 0);
+        assert_eq!(stats["buyers"], 0);
+        assert!(stats["published_version"].is_null(), "never published");
+        drop(stats_entry);
+
+        let mut media_entry = archive.by_name(&expected_media_path).unwrap();
+        let mut media_out = Vec::new();
+        std::io::Read::read_to_end(&mut media_entry, &mut media_out).unwrap();
+        assert_eq!(media_out, img_bytes);
     }
 
     /// Quest attributes (complexity / age target / tags): neutral defaults when the
