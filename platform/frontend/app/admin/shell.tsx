@@ -18,11 +18,12 @@ import { logoutAndReset } from '../../lib/session-actions';
  * entry to TABS when the page ships.
  */
 
-export type AdminTab = 'users' | 'coupons';
+export type AdminTab = 'users' | 'coupons' | 'features';
 
 const TABS: Array<{ key: AdminTab; label: string; href: string }> = [
   { key: 'users', label: 'Пользователи', href: '/admin' },
   { key: 'coupons', label: 'Купоны', href: '/admin/coupons' },
+  { key: 'features', label: 'Функции', href: '/admin/features' },
 ];
 
 export type AdminAccess = 'checking' | 'granted' | 'denied' | 'error';

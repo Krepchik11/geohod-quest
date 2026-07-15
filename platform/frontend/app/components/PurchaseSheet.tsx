@@ -131,6 +131,11 @@ export default function PurchaseSheet({
   // The sheet locks while a charge or a gateway hand-off is in flight.
   const busy = state === 'pending' || state === 'redirect';
 
+  // Every provider switched off (admin feature toggles) and something to
+  // charge: paying is impossible, say so instead of a doomed checkout. A free
+  // total (price 0 or a 100% promo) bypasses providers and stays purchasable.
+  const paymentUnavailable = providers.length === 0 && finalPrice > 0;
+
   // Portal to <body>: callers render the sheet from inside cards whose :hover
   // transform would otherwise become the containing block for this fixed
   // overlay (clipping the sheet into the card and flickering with hover).
@@ -223,6 +228,12 @@ export default function PurchaseSheet({
           </div>
         )}
 
+        {paymentUnavailable && (
+          <div className="psheet__error">
+            Оплата временно недоступна на этом сервере. Попробуйте позже.
+          </div>
+        )}
+
         {state === 'error' && (
           <div className="psheet__error">Не получилось оформить покупку — проверьте связь и попробуйте ещё раз.</div>
         )}
@@ -233,7 +244,12 @@ export default function PurchaseSheet({
             {state === 'redirect' ? 'Переходим к оплате…' : 'Оформляем покупку…'}
           </button>
         ) : (
-          <button className="btn btn--block psheet__confirm" type="button" onClick={() => void confirm()}>
+          <button
+            className="btn btn--block psheet__confirm"
+            type="button"
+            onClick={() => void confirm()}
+            disabled={paymentUnavailable}
+          >
             {state === 'error'
               ? `Повторить — ${finalPrice} ₽`
               : method === 'yookassa'
