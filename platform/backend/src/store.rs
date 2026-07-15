@@ -908,7 +908,7 @@ impl InMemoryAuthStore {
 }
 
 /// §11: one player review row (text attached to the finale rating).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ReviewRow {
     pub player_id: String,
     pub created_at: u64,

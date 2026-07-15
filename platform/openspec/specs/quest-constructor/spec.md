@@ -62,6 +62,17 @@ The Constructor SHALL support an import tab (YAML/JSON paste or file → strict 
 - **WHEN** author pastes a valid YAML/JSON quest definition (matching the goldens-clean structure) into the import tab
 - **THEN** it is parsed, validated against the model/gates, and loaded into the sortable step list for editing
 
+### Requirement: Full quest backup export (zip)
+The backend SHALL provide `GET /api/constructor/quests/{quest_id}/export`, owner-or-admin gated like every other per-quest constructor route, that returns a single zip archive containing the complete quest record: `manifest.json` (format version, export timestamp, quest id), `quest.json` (the full constructor quest — name, attributes, all steps, cover), `stats.json` (completions, buyers, published version, reviews, per-version play/rating stats when published), and every media file the quest references under `media/<hash>.<ext>`, with `quest.json`'s media URLs rewritten to those zip-relative paths so the archive is self-contained and portable between environments. This is a distinct capability from the "Export current as YAML" content-only round-trip above — it is a full backup/migration artifact, not an editor paste target.
+
+#### Scenario: Author downloads a full quest backup
+- **WHEN** the quest's author (or an admin) requests `GET /api/constructor/quests/{quest_id}/export`
+- **THEN** the response is a zip archive whose `quest.json` media fields point at `media/<hash>.<ext>` entries also present in the archive, and whose `stats.json` reports the quest's current completions, buyers, and (if published) version stats and reviews
+
+#### Scenario: Non-owner requests another author's export
+- **WHEN** a non-admin editor who does not own the quest requests its export
+- **THEN** the response is 404, the same opaque not-found every other per-quest constructor route returns for a non-owner
+
 ### Requirement: Small focused components and shared renderers
 All constructor UI SHALL be built from small, single-responsibility components with shared renderers (e.g., StepPreview, AnswerListEditor) that are also used by the player side, avoiding god objects and duplication.
 

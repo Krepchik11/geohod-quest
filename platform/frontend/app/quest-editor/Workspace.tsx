@@ -67,6 +67,7 @@ export default function Workspace() {
   const [justPublished, setJustPublished] = useState<number | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // ---- Тест-игрок (оверлей) ----
   const [test, setTest] = useState<{ quest: CtorQuest; startPos: number } | null>(null);
@@ -378,6 +379,27 @@ export default function Workspace() {
     }
   };
 
+  // Full backup download (record + steps + media + stats), same zip the
+  // backend export endpoint builds — triggers a normal browser file save via a
+  // throwaway object URL, no navigation.
+  const exportQuest = async () => {
+    if (!active || exporting) return;
+    setExporting(true);
+    try {
+      const blob = await api.exportConstructorQuest(active.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `quest-${active.id}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      showToast(errMessage(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const builderQuest = active ? { ...active, lastSaved: savedAt } : null;
 
   return (
@@ -392,11 +414,13 @@ export default function Workspace() {
             justPublished={justPublished}
             publishError={publishError}
             publishing={publishing}
+            exporting={exporting}
             actions={{
               onSel: selectIn,
               onPatchQuest: patchQuest,
               onBack: () => void backToList(),
               onTest: (startPos) => active && setTest({ quest: active, startPos }),
+              onExport: () => void exportQuest(),
               insertStep,
               removeStep,
               duplicateStep,

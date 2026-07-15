@@ -412,6 +412,20 @@ export const api = {
       { method: 'POST', headers: adminHeaders(), body: '{}' },
     ),
 
+  // Full quest backup (record + all steps + media + stats) as a zip. Binary
+  // response — apiFetch is JSON-only, so this does its own fetch, like uploadMedia.
+  exportConstructorQuest: async (id: string): Promise<Blob> => {
+    const path = `/api/constructor/quests/${encodeURIComponent(id)}/export`;
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { ...authHeaders(), ...adminHeaders() },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new ApiError(res.status, path, text || res.statusText);
+    }
+    return res.blob();
+  },
+
   // Upload a quest image (editor-gated). Sends RAW bytes (not JSON) — apiFetch is
   // JSON-only, so this does its own fetch — and the backend hashes them (sha256) and
   // stores them content-addressed in R2, returning the public URL the body
