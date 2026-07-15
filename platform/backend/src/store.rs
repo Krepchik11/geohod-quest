@@ -26,7 +26,8 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::pg_store::{
-    PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgGrantStore, PgPaymentStore,
+    PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgFlagStore, PgGrantStore,
+    PgPaymentStore,
 };
 
 /// Unix seconds (0 on clock error; informational only).
@@ -2257,6 +2258,98 @@ impl PaymentStores {
                 Ok(())
             }
             Self::Postgres(pg) => pg.mark_canceled(id).await,
+        }
+    }
+}
+
+/// Admin-set feature-toggle overrides, keyed by `Feature::key()` (the flag
+/// registry itself is code — `crate::features`). Absence of a key means "use
+/// the compiled-in default"; that is why `clear` exists as a first-class
+/// operation rather than storing the default as a row.
+#[derive(Debug, Default)]
+pub struct InMemoryFlagStore {
+    overrides: HashMap<String, bool>,
+}
+
+impl InMemoryFlagStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The stored override for `key`, or `None` when the default applies.
+    pub fn get(&self, key: &str) -> Option<bool> {
+        self.overrides.get(key).copied()
+    }
+
+    /// Every stored override at once (the registry is small; callers that
+    /// evaluate several flags read the store a single time).
+    pub fn all(&self) -> HashMap<String, bool> {
+        self.overrides.clone()
+    }
+
+    /// Upsert the override (last write wins — a single bool has no merge).
+    pub fn set(&mut self, key: &str, enabled: bool) {
+        self.overrides.insert(key.to_string(), enabled);
+    }
+
+    /// Remove the override so the flag reverts to its code default.
+    pub fn clear(&mut self, key: &str) {
+        self.overrides.remove(key);
+    }
+}
+
+/// Feature-override storage behind the same enum-dispatch seam as the others.
+#[derive(Clone, Debug)]
+pub enum FlagStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemoryFlagStore>>),
+    /// Durable PostgreSQL.
+    Postgres(PgFlagStore),
+}
+
+impl FlagStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemoryFlagStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryFlagStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("flags lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryFlagStore::get`].
+    pub async fn override_for(&self, key: &str) -> Result<Option<bool>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(key)),
+            Self::Postgres(pg) => pg.get(key).await,
+        }
+    }
+
+    /// See [`InMemoryFlagStore::all`] — one round trip for multi-flag callers.
+    pub async fn all_overrides(&self) -> Result<HashMap<String, bool>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.all()),
+            Self::Postgres(pg) => pg.all().await,
+        }
+    }
+
+    /// See [`InMemoryFlagStore::set`].
+    pub async fn set_override(&self, key: &str, enabled: bool) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.set(key, enabled);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.set(key, enabled).await,
+        }
+    }
+
+    /// See [`InMemoryFlagStore::clear`].
+    pub async fn clear_override(&self, key: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.clear(key);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.clear(key).await,
         }
     }
 }

@@ -2088,3 +2088,70 @@ impl PgPaymentStore {
         Ok(())
     }
 }
+
+/// Feature-toggle overrides on PostgreSQL (`feature_overrides`, migration 0012).
+#[derive(Clone, Debug)]
+pub struct PgFlagStore {
+    pool: PgPool,
+}
+
+impl PgFlagStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// See [`crate::store::InMemoryFlagStore::get`].
+    pub async fn get(&self, key: &str) -> Result<Option<bool>, AppError> {
+        let row = sqlx::query("SELECT enabled FROM feature_overrides WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.map(|r| r.try_get("enabled").map_err(internal))
+            .transpose()
+    }
+
+    /// See [`crate::store::InMemoryFlagStore::all`] — one SELECT, whole table.
+    pub async fn all(&self) -> Result<std::collections::HashMap<String, bool>, AppError> {
+        let rows = sqlx::query("SELECT key, enabled FROM feature_overrides")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok((
+                    r.try_get("key").map_err(internal)?,
+                    r.try_get("enabled").map_err(internal)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryFlagStore::set`].
+    pub async fn set(&self, key: &str, enabled: bool) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO feature_overrides (key, enabled, updated_at)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (key) DO UPDATE
+             SET enabled = EXCLUDED.enabled, updated_at = EXCLUDED.updated_at",
+        )
+        .bind(key)
+        .bind(enabled)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryFlagStore::clear`].
+    pub async fn clear(&self, key: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM feature_overrides WHERE key = $1")
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+}

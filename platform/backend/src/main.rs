@@ -33,6 +33,7 @@ mod coupons;
 mod errors;
 mod export;
 mod facts;
+mod features;
 mod grants;
 mod icons;
 mod mailer;
@@ -49,14 +50,15 @@ use config::AppConfig;
 use coupons::{Coupon, CouponUsage, Discount};
 use errors::AppError;
 use facts::{Fact, MigrationResult, ProjectedState};
+use features::Feature;
 use grants::{AccessGrant, GrantSource};
 use media::{MediaRef, MediaStores};
 use payments::{PendingPayment, PendingStatus};
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
-    CouponStores, FactStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
-    InMemoryCouponStore, InMemoryFactStore, InMemoryGrantStore, InMemoryPaymentStore,
-    PaymentStores, PublishedMeta,
+    CouponStores, FactStores, FlagStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
+    InMemoryCouponStore, InMemoryFactStore, InMemoryFlagStore, InMemoryGrantStore,
+    InMemoryPaymentStore, PaymentStores, PublishedMeta,
 };
 use yookassa::YookassaGateway;
 
@@ -75,6 +77,9 @@ struct AppState {
     media: MediaStores,
     /// In-flight redirect payments (YooKassa): checkout writes, settlement flips.
     payment_rows: PaymentStores,
+    /// Admin-set feature-toggle overrides (registry in `features.rs`; evaluation
+    /// in [`feature_enabled`] — code default unless overridden).
+    flags: FlagStores,
     /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
     /// disabled (501, fail-closed); tests inject the scripted fake.
     yookassa: Option<YookassaGateway>,
@@ -124,6 +129,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         coupons: CouponStores::InMemory(Arc::new(Mutex::new(InMemoryCouponStore::new()))),
         media,
         payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
+        flags: FlagStores::InMemory(Arc::new(Mutex::new(InMemoryFlagStore::new()))),
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -300,6 +306,27 @@ async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), App
     Err(AppError::Forbidden("editor access required".into()))
 }
 
+/// The runtime toggle verdict for a feature: the admin override when one is
+/// stored, the code default otherwise. This is only the *toggle* half of the
+/// evaluation — capability ([`feature_available`]) is enforced by the gated
+/// endpoints themselves, so a flag can never enable what the deployment
+/// cannot do.
+async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
+    Ok(feature.effective(state.flags.override_for(feature.key()).await?))
+}
+
+/// The capability half: whether this deployment is configured for the feature
+/// at all (credentials present). Reported to the admin panel so a switched-on
+/// but unconfigured flag is visibly inert.
+fn feature_available(state: &AppState, feature: Feature) -> bool {
+    match feature {
+        Feature::AuthGoogle => state.google.is_some(),
+        Feature::AuthTelegram => state.telegram.is_some(),
+        Feature::PaymentsMock => true,
+        Feature::PaymentsYookassa => state.yookassa.is_some(),
+    }
+}
+
 /// Health check response for probes and tests.
 #[derive(serde::Serialize)]
 struct HealthResponse {
@@ -472,6 +499,8 @@ fn build_router(state: AppState) -> Router {
             "/api/admin/users/{player_id}/role",
             post(set_user_role_handler),
         )
+        .route("/api/admin/features", get(list_features_handler))
+        .route("/api/admin/features/{key}", post(set_feature_handler))
         .route("/api/migrate/legacy", post(run_migration_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
         .route("/api/auth/register", post(register_handler))
@@ -706,12 +735,36 @@ async fn checkout_handler(
             .await?;
         return Ok(Json(CheckoutResponse::Settled { grant, created }));
     }
-    match req.provider.as_deref().unwrap_or("mock") {
-        "mock" => mock_checkout(&state, &player_id, &req).await,
-        "yookassa" => yookassa_checkout(&state, &player_id, &req).await,
+    let provider = req.provider.as_deref().unwrap_or("mock");
+    match provider {
+        "mock" => {
+            require_provider_enabled(&state, Feature::PaymentsMock, provider).await?;
+            mock_checkout(&state, &player_id, &req).await
+        }
+        "yookassa" => {
+            require_provider_enabled(&state, Feature::PaymentsYookassa, provider).await?;
+            yookassa_checkout(&state, &player_id, &req).await
+        }
         other => Err(AppError::BadRequest(format!(
             "unknown payment provider: {other}"
         ))),
+    }
+}
+
+/// Checkout gate for one payment provider's feature toggle. Same 501 as an
+/// unconfigured provider — the client treats "disabled by an admin toggle"
+/// and "deployment lacks credentials" identically.
+async fn require_provider_enabled(
+    state: &AppState,
+    feature: Feature,
+    provider: &str,
+) -> Result<(), AppError> {
+    if feature_enabled(state, feature).await? {
+        Ok(())
+    } else {
+        Err(AppError::NotImplemented(format!(
+            "payment provider {provider} is disabled on this server"
+        )))
     }
 }
 
@@ -1010,13 +1063,23 @@ async fn yookassa_webhook_handler(
 }
 
 /// Providers this deployment can charge through — drives the purchase sheet's
-/// payment-method choice (a single entry renders no selector).
-async fn payment_providers_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let mut providers = vec!["mock"];
-    if state.yookassa.is_some() {
+/// payment-method choice (a single entry renders no selector; an empty list
+/// disables paying). A provider is listed only when it is both configured
+/// (capability) and switched on (feature toggle).
+async fn payment_providers_handler(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let overrides = state.flags.all_overrides().await?;
+    let on =
+        |f: Feature| feature_available(&state, f) && f.effective(overrides.get(f.key()).copied());
+    let mut providers = Vec::new();
+    if on(Feature::PaymentsMock) {
+        providers.push("mock");
+    }
+    if on(Feature::PaymentsYookassa) {
         providers.push("yookassa");
     }
-    Json(serde_json::json!({ "providers": providers }))
+    Ok(Json(serde_json::json!({ "providers": providers })))
 }
 
 #[derive(serde::Deserialize)]
@@ -2037,6 +2100,11 @@ async fn google_auth_handler(
     headers: HeaderMap,
     Json(req): Json<GoogleAuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    if !feature_enabled(&state, Feature::AuthGoogle).await? {
+        return Err(AppError::NotImplemented(
+            "google sign-in is disabled on this server".into(),
+        ));
+    }
     let verifier = state.google.clone().ok_or_else(|| {
         AppError::NotImplemented("google sign-in is not configured on this server".into())
     })?;
@@ -2067,6 +2135,11 @@ async fn telegram_auth_handler(
     headers: HeaderMap,
     Json(req): Json<TelegramAuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    if !feature_enabled(&state, Feature::AuthTelegram).await? {
+        return Err(AppError::NotImplemented(
+            "telegram login is disabled on this server".into(),
+        ));
+    }
     let verifier = state.telegram.clone().ok_or_else(|| {
         AppError::NotImplemented("telegram login is not configured on this server".into())
     })?;
@@ -2211,13 +2284,21 @@ async fn issue_session_for(state: &AppState, player_id: &str) -> Result<AuthResp
 
 /// GET /api/auth/providers — which social buttons the client should render, and
 /// the PUBLIC client ids they need (Google client id for GIS, Telegram bot client
-/// id for `Telegram.Login.init`). Both `null` when unconfigured, so the UI hides
-/// the button.
-async fn auth_providers_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "google_client_id": state.config.google_client_id,
-        "telegram_client_id": state.config.telegram_client_id,
-    }))
+/// id for `Telegram.Login.init`). `null` when unconfigured OR switched off by
+/// the admin feature toggle — either way the UI hides the button.
+async fn auth_providers_handler(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let overrides = state.flags.all_overrides().await?;
+    let on = |f: Feature| f.effective(overrides.get(f.key()).copied());
+    Ok(Json(serde_json::json!({
+        "google_client_id": on(Feature::AuthGoogle)
+            .then(|| state.config.google_client_id.clone())
+            .flatten(),
+        "telegram_client_id": on(Feature::AuthTelegram)
+            .then(|| state.config.telegram_client_id.clone())
+            .flatten(),
+    })))
 }
 
 /// POST /api/auth/unlink — `{provider}`. Removes a linked social provider from the
@@ -2844,6 +2925,76 @@ async fn set_user_role_handler(
     Ok(Json(updated.into()))
 }
 
+/// One feature-toggle row for the admin panel: the registry facts (key,
+/// default) plus the runtime state (override, effective toggle) and whether
+/// the deployment is configured for it at all.
+#[derive(serde::Serialize)]
+struct FeatureWire {
+    key: &'static str,
+    default_enabled: bool,
+    /// The stored admin override; `null` = the code default applies.
+    #[serde(rename = "override")]
+    override_enabled: Option<bool>,
+    /// The toggle verdict (`override ?? default`) — what the gated endpoints
+    /// enforce. Independent of `available`.
+    effective: bool,
+    /// Capability: credentials configured. `effective && !available` means the
+    /// switch is on but the feature is inert on this deployment.
+    available: bool,
+}
+
+/// Assemble one wire row from an already-fetched override (callers own the
+/// store read: the list handler fetches all overrides once, the mutation
+/// already holds the value it just wrote).
+fn feature_wire(state: &AppState, feature: Feature, override_enabled: Option<bool>) -> FeatureWire {
+    FeatureWire {
+        key: feature.key(),
+        default_enabled: feature.default_enabled(),
+        override_enabled,
+        effective: feature.effective(override_enabled),
+        available: feature_available(state, feature),
+    }
+}
+
+/// GET /api/admin/features — every registered feature with its runtime state.
+async fn list_features_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<FeatureWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let overrides = state.flags.all_overrides().await?;
+    let rows = Feature::ALL
+        .into_iter()
+        .map(|f| feature_wire(&state, f, overrides.get(f.key()).copied()))
+        .collect();
+    Ok(Json(rows))
+}
+
+/// Body for the feature-toggle mutation: `enabled: true|false` stores an
+/// override, `enabled: null` clears it (back to the code default).
+#[derive(serde::Deserialize)]
+struct SetFeatureRequest {
+    enabled: Option<bool>,
+}
+
+/// POST /api/admin/features/{key} — set or clear a feature override. Unknown
+/// keys are 404 (the registry lives in code; nothing to create).
+async fn set_feature_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetFeatureRequest>,
+) -> Result<Json<FeatureWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let feature = Feature::parse(&key)
+        .ok_or_else(|| AppError::NotFound(format!("unknown feature: {key}")))?;
+    match req.enabled {
+        Some(enabled) => state.flags.set_override(feature.key(), enabled).await?,
+        None => state.flags.clear_override(feature.key()).await?,
+    }
+    Ok(Json(feature_wire(&state, feature, req.enabled)))
+}
+
 /// Body for coupon create/save: the editable fields exactly as the admin form
 /// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
 #[derive(serde::Deserialize)]
@@ -3104,7 +3255,8 @@ async fn main() -> anyhow::Result<()> {
                 )),
                 coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
                 media,
-                payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool)),
+                payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
+                flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
                 yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -7008,7 +7160,8 @@ mod tests {
             )),
             coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
-            payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool)),
+            payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
+            flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
             yookassa: None,
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -7700,5 +7853,214 @@ mod tests {
         let (app, _) = test_app_yookassa();
         let (_, v) = get_json(&app, "/api/payments/providers").await;
         assert_eq!(v["providers"], json!(["mock", "yookassa"]));
+    }
+
+    // ---- feature toggles (features.rs + /api/admin/features) ----------------
+
+    #[tokio::test]
+    async fn features_admin_gated_and_lists_registry_defaults() {
+        let app = test_app();
+        // No credential and a fail-closed (no ADMIN_TOKEN) deployment both 403.
+        let (st, _) = get_json(&app, "/api/admin/features").await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = get_json_h(&test_app_no_admin(), "/api/admin/features", &[]).await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, v) = get_json_h(&app, "/api/admin/features", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let rows = v.as_array().expect("feature list");
+        assert_eq!(rows.len(), features::Feature::ALL.len());
+        for row in rows {
+            // No overrides stored: every flag sits on its code default.
+            assert_eq!(row["override"], Value::Null);
+            assert_eq!(row["effective"], row["default_enabled"]);
+        }
+        // Capability on this unconfigured test app: only the mock is available.
+        let available: Vec<(&str, bool)> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r["key"].as_str().expect("key"),
+                    r["available"].as_bool().expect("available"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            available,
+            vec![
+                ("auth_google", false),
+                ("auth_telegram", false),
+                ("payments_mock", true),
+                ("payments_yookassa", false),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn feature_mutation_rejects_unknown_key_and_requires_admin() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/payments_paypal",
+            json!({ "enabled": false }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = post_json(
+            &app,
+            "/api/admin/features/payments_mock",
+            json!({ "enabled": false }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn disabling_mock_provider_gates_checkout_and_provider_list() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        let (st, row) = post_json_h(
+            &app,
+            "/api/admin/features/payments_mock",
+            json!({ "enabled": false }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(row["override"], json!(false));
+        assert_eq!(row["effective"], json!(false));
+
+        // The only configured provider is off: the list is empty and checkout 501s.
+        let (_, v) = get_json(&app, "/api/payments/providers").await;
+        assert_eq!(v["providers"], json!([]));
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+
+        // `enabled: null` clears the override — back to the code default (on).
+        let (st, row) = post_json_h(
+            &app,
+            "/api/admin/features/payments_mock",
+            json!({ "enabled": null }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(row["override"], Value::Null);
+        assert_eq!(row["effective"], json!(true));
+        let (_, v) = get_json(&app, "/api/payments/providers").await;
+        assert_eq!(v["providers"], json!(["mock"]));
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"player_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn disabling_social_auth_hides_provider_and_blocks_login() {
+        let app = test_app_social(); // telegram configured + seeded verifier
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Configured and on by default: the client id is public.
+        let (_, v) = get_json(&app, "/api/auth/providers").await;
+        assert!(v["telegram_client_id"].is_string());
+
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/auth_telegram",
+            json!({ "enabled": false }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Off: the button hides (null id) and a direct login POST is refused
+        // with the same 501 an unconfigured deployment answers.
+        let (_, v) = get_json(&app, "/api/auth/providers").await;
+        assert_eq!(v["telegram_client_id"], Value::Null);
+        let (st, _) = post_json(&app, "/api/auth/telegram", tg_payload("dev:ft", 7, "Ann")).await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+
+        // Back on: login works end to end again.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/auth_telegram",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(&app, "/api/auth/telegram", tg_payload("dev:ft", 7, "Ann")).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    /// Exercises the REAL PgFlagStore SQL (upsert / read / delete) through the
+    /// admin API. Self-skips without DATABASE_URL, like the other pg tests.
+    /// Feature keys are global (no run-unique ids possible), so the test always
+    /// restores the default by clearing the override it set.
+    #[tokio::test]
+    async fn pg_feature_override_round_trip() {
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_feature_override_round_trip: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let (app, _mails) = pg_app(pool);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Set an override, twice (second write exercises the upsert path).
+        for _ in 0..2 {
+            let (st, row) = post_json_h(
+                &app,
+                "/api/admin/features/payments_mock",
+                json!({ "enabled": false }),
+                &admin,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+            assert_eq!(row["override"], json!(false));
+            assert_eq!(row["effective"], json!(false));
+        }
+        let (st, v) = get_json_h(&app, "/api/admin/features", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let row = v
+            .as_array()
+            .expect("list")
+            .iter()
+            .find(|r| r["key"] == "payments_mock")
+            .expect("payments_mock row");
+        assert_eq!(row["override"], json!(false));
+
+        // Clear: the row is deleted and the default applies again.
+        let (st, row) = post_json_h(
+            &app,
+            "/api/admin/features/payments_mock",
+            json!({ "enabled": null }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(row["override"], Value::Null);
+        assert_eq!(row["effective"], json!(true));
     }
 }

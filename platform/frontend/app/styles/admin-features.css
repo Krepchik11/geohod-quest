@@ -1,0 +1,165 @@
+/*
+ * Admin Features screen — feature toggles under the unified admin shell.
+ * One card list, one row per flag: label/description left, state + switch
+ * right; mobile stacks the controls under the text. Palette mirrors
+ * admin-users.css / admin-coupons.css (navy #1A2B48 / blue #3B71FE /
+ * page #F7F8FA).
+ */
+
+.af-root {
+  flex: 1;
+  min-height: 0;
+  background: #f7f8fa;
+  color: #1a2b48;
+  font-family: var(--font-geist-sans), "Inter", system-ui, sans-serif;
+}
+.af-root *,
+.af-root *::before,
+.af-root *::after {
+  box-sizing: border-box;
+}
+
+.af-main {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 44px 40px 72px;
+  display: flex;
+  flex-direction: column;
+}
+
+.af-eyebrow {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.26em;
+  color: #83858c;
+}
+.af-title {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #000f08;
+}
+.af-lede {
+  margin: 10px 0 0;
+  max-width: 560px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #6b7280;
+}
+
+/* ---- list ---- */
+.af-list {
+  margin-top: 28px;
+  background: #fff;
+  border: 1px solid #e7e9ee;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.af-empty {
+  padding: 36px 28px;
+  font-size: 14px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.af-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 28px;
+}
+.af-row + .af-row {
+  border-top: 1px solid #eef0f4;
+}
+.af-row.is-off .af-row__label {
+  color: #6b7280;
+}
+
+.af-row__info {
+  min-width: 0;
+}
+.af-row__label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #000f08;
+}
+.af-row__desc {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.af-row__note {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #b45309;
+}
+
+.af-row__controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+.af-row__state {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: #83858c;
+  white-space: nowrap;
+}
+.af-row__reset {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  color: #3b71fe;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.af-row__reset:disabled {
+  color: #9aa3b2;
+  cursor: default;
+}
+
+/* Switch: the shared .adm-toggle (WspToggle, admin-ctor.css) — only the
+ * disabled state is added here, as no other surface toggles while busy. */
+.af-row .adm-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- toast ---- */
+.af-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: #1a2b48;
+  color: #fff;
+  font-size: 13.5px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.28);
+  z-index: 60;
+}
+
+/* ---- mobile ---- */
+@media (max-width: 767px) {
+  .af-main {
+    padding: 28px 18px 56px;
+  }
+  .af-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .af-row__controls {
+    justify-content: space-between;
+  }
+}
