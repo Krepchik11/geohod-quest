@@ -9,7 +9,9 @@
     "lint": "eslint",
     "lint:ds": "! grep -rEn \"className=\\\"[^\\\"]*\\b(s-btn|s-input|s-link|s-card|s-head|s-nav|s-avatar|adm-btn|adm-input|adm-select|adm-textarea|adm-card|adm-head|adm-nav|btn-ui|field-ui|textarea-ui)\\b\" app || (echo 'Deprecated DS class used — use canonical primitive (globals.css §0)'; exit 1)",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "idb": "^8.0.3",
@@ -18,6 +20,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@storybook/nextjs-vite": "^10.5.2",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -29,8 +32,10 @@
     "eslint-config-next": "16.2.9",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^26.1.0",
+    "storybook": "^10.5.2",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^7.3.6",
     "vitest": "^3"
   }
 }
