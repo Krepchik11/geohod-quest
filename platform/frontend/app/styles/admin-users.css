@@ -1,129 +1,19 @@
 /*
- * Admin Users screen (admin-users spec) — a faithful port of the Admin Users.dc.html
- * prototype to the real stack. Mobile-first 480px frame; navy/blue/#F7F8FA palette.
- * Body type uses the project sans (Geist) with Inter/system fallbacks so it matches
- * the rest of the app; display bits use Jost like the public site. All design pixel
- * values live here so the component markup stays semantic.
+ * Admin Users screen (admin-users spec) — the users list + role editor BODY.
+ * Page scaffolding (canvas, main column, head, confirm sheet, toast) is the
+ * shared `ap-*` layer (styles/admin-page.css + app/admin/ui.tsx), the same
+ * one every other admin tab uses; only what is unique to this tab — the
+ * master-detail split, search, role chips, cards, pager — lives here.
  */
 
-.au-root {
-  --au-ink: #1a2b48;
-  --au-blue: #3b71fe;
-  min-height: 100vh;
-  background: #e4e6ea;
-  display: flex;
-  justify-content: center;
-  font-family: var(--font-geist-sans), "Inter", system-ui, sans-serif;
-  color: var(--au-ink);
-}
-.au-root *,
-.au-root *::before,
-.au-root *::after {
-  box-sizing: border-box;
-}
-.au-root ::selection {
-  background: var(--au-blue);
-  color: #fff;
-}
-
-.au-frame {
-  width: min(480px, 100%);
-  min-height: 100vh;
-  background: #f7f8fa;
-  position: relative;
-  box-shadow: 0 0 60px rgba(20, 30, 50, 0.12);
-  display: flex;
-  flex-direction: column;
-}
-
-/* ---- header ---- */
-.au-header {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 60px;
-  padding: 0 16px;
-  background: #fff;
-  border-bottom: 1px solid #ecedef;
-}
-.au-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  text-decoration: none;
-}
-.au-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--au-ink);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-family: var(--font-jost), "Jost", sans-serif;
-  font-weight: 600;
-  font-size: 17px;
-}
-.au-brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1;
-  font-family: var(--font-jost), "Jost", sans-serif;
-}
-.au-brand-name {
-  font-weight: 500;
-  font-size: 14px;
-  letter-spacing: 0.16em;
-  color: var(--au-ink);
-}
-.au-brand-sub {
-  font-weight: 400;
-  font-size: 9px;
-  letter-spacing: 0.28em;
-  color: #83858c;
-  margin-top: 2px;
-}
-.au-avatar {
-  width: 38px;
-  height: 38px;
-  margin-left: auto;
-  border-radius: 50%;
-  border: 1px solid #dedede;
-  display: grid;
-  place-items: center;
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--au-ink);
-  background: #fff;
-  text-decoration: none;
-}
-
-/* ---- main ---- */
+/* ---- panes ---- */
 .au-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 22px 16px 40px;
+  padding: 22px 0 40px;
 }
-.au-eyebrow {
-  font-family: var(--font-jost), "Jost", sans-serif;
-  font-weight: 500;
-  font-size: 10px;
-  letter-spacing: 0.26em;
-  color: #83858c;
-}
-.au-title {
-  margin: 6px 0 0;
-  font-weight: 600;
-  font-size: 26px;
-  letter-spacing: -0.01em;
-  color: #000f08;
-}
-
 /* ---- search ---- */
 .au-search-row {
   display: flex;
@@ -173,11 +63,11 @@
   background: #fff;
   font: inherit;
   font-size: 15px;
-  color: var(--au-ink);
+  color: #1a2b48;
   outline: none;
 }
 .au-search-input:focus {
-  border-color: var(--au-blue);
+  border-color: #3b71fe;
 }
 .au-clear {
   position: absolute;
@@ -241,15 +131,15 @@
   border-radius: 18px;
   border: 1px solid #dedede;
   background: #fff;
-  color: var(--au-ink);
+  color: #1a2b48;
   font: inherit;
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
 }
 .au-chip.is-on {
-  border-color: var(--au-blue);
-  background: var(--au-blue);
+  border-color: #3b71fe;
+  background: #3b71fe;
   color: #fff;
 }
 .au-count {
@@ -280,7 +170,7 @@
 .au-empty-title {
   font-weight: 600;
   font-size: 16px;
-  color: var(--au-ink);
+  color: #1a2b48;
 }
 .au-empty-text {
   font-size: 13px;
@@ -410,7 +300,7 @@
   padding: 0 14px 0 8px;
   border: 0;
   border-radius: 19px;
-  color: var(--au-blue);
+  color: #3b71fe;
   font: inherit;
   font-weight: 600;
   font-size: 14px;
@@ -468,7 +358,7 @@
 .au-info-val {
   font-size: 14.5px;
   font-weight: 500;
-  color: var(--au-ink);
+  color: #1a2b48;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -506,7 +396,7 @@
   width: 100%;
 }
 .au-role-opt.is-sel {
-  border-color: var(--au-blue);
+  border-color: #3b71fe;
   background: #f2f7ff;
 }
 .au-radio {
@@ -519,7 +409,7 @@
   border: 2px solid #c7c9cf;
 }
 .au-role-opt.is-sel .au-radio {
-  border-color: var(--au-blue);
+  border-color: #3b71fe;
 }
 .au-dot {
   width: 10px;
@@ -528,12 +418,12 @@
   background: transparent;
 }
 .au-role-opt.is-sel .au-dot {
-  background: var(--au-blue);
+  background: #3b71fe;
 }
 .au-opt-label {
   font-size: 15.5px;
   font-weight: 600;
-  color: var(--au-ink);
+  color: #1a2b48;
 }
 .au-role-opt.is-sel .au-opt-label {
   color: #1b47b8;
@@ -554,7 +444,7 @@
   cursor: default;
 }
 .au-save.is-on {
-  background: var(--au-blue);
+  background: #3b71fe;
   color: #fff;
   cursor: pointer;
   box-shadow: 0 8px 20px rgba(59, 113, 254, 0.28);
@@ -563,182 +453,6 @@
   cursor: default;
 }
 
-/* ---- confirm sheet ---- */
-.au-sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: rgba(20, 30, 50, 0.4);
-  animation: au-fade-in 0.18s ease both;
-}
-.au-sheet {
-  width: min(480px, 100%);
-  background: #fff;
-  border-radius: 22px 22px 0 0;
-  padding: 24px 22px calc(24px + env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  animation: au-sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-.au-sheet-grip {
-  width: 42px;
-  height: 5px;
-  border-radius: 4px;
-  background: #e2e3e7;
-  margin: 0 auto 8px;
-}
-.au-sheet-title {
-  font-weight: 600;
-  font-size: 19px;
-  color: #000f08;
-}
-.au-sheet-text {
-  font-size: 14px;
-  color: #5b6270;
-  line-height: 1.45;
-}
-.au-sheet-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-.au-sheet-cancel,
-.au-sheet-apply {
-  height: 52px;
-  border: 0;
-  border-radius: 12px;
-  font: inherit;
-  font-weight: 700;
-  font-size: 15px;
-  cursor: pointer;
-}
-.au-sheet-cancel {
-  flex: 1;
-  background: #f0f1f3;
-  color: var(--au-ink);
-}
-.au-sheet-apply {
-  flex: 1.5;
-  background: var(--au-blue);
-  color: #fff;
-}
-.au-sheet-apply:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
-/* ---- toast ---- */
-.au-toast {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 20px;
-  border-radius: 26px;
-  background: var(--au-ink);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  box-shadow: 0 10px 30px rgba(20, 30, 50, 0.3);
-  animation: au-toast-in 0.22s ease both;
-}
-.au-toast-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #3dba6e;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  color: #fff;
-}
-.au-toast--error .au-toast-check {
-  background: #e2574c;
-}
-
-/* ---- gate states (loading / denied / error) ---- */
-.au-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 60px 24px;
-  text-align: center;
-}
-.au-state-title {
-  font-weight: 600;
-  font-size: 18px;
-  color: var(--au-ink);
-}
-.au-state-text {
-  font-size: 14px;
-  color: #5b6270;
-  max-width: 280px;
-  line-height: 1.5;
-}
-.au-state-link {
-  margin-top: 6px;
-  display: inline-flex;
-  align-items: center;
-  height: 44px;
-  padding: 0 20px;
-  border-radius: 12px;
-  background: var(--au-blue);
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  text-decoration: none;
-}
-.au-spinner {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 3px solid #d8dae0;
-  border-top-color: var(--au-blue);
-  animation: au-spin 0.8s linear infinite;
-}
-
-@keyframes au-sheet-up {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-@keyframes au-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@keyframes au-toast-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 12px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-@keyframes au-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 /* ---------- Admin v2 (§10) ---------- */
 /* §10.2 classic pagination */
@@ -758,10 +472,9 @@
   .au-split:not(.has-selected) .au-pane--detail { display: none; }
 }
 @media (min-width: 1024px) {
-  .au-frame { width: min(1180px, 100%); }
   .au-split { flex-direction: row; align-items: stretch; gap: 0; }
-  .au-pane--list { width: 460px; flex: none; border-right: 1px solid #e9ebef; }
-  .au-pane--detail { flex: 1; min-width: 0; }
+  .au-pane--list { width: 460px; flex: none; border-right: 1px solid #e9ebef; padding-right: 28px; }
+  .au-pane--detail { flex: 1; min-width: 0; padding-left: 28px; }
   .au-pane--detail .au-back { display: none; } /* the list stays visible — «назад» is meaningless */
   .au-card.is-selected { box-shadow: inset 3px 0 0 #3b71fe, 0 1px 2px rgba(20,30,50,.06); }
 }

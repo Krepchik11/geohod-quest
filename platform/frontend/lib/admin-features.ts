@@ -45,6 +45,11 @@ const META: Record<string, { label: string; description: string }> = {
     label: 'Оплата через ЮKassa',
     description: 'Реальные платежи через ЮKassa (переход на страницу оплаты).',
   },
+  player_back_button: {
+    label: 'Кнопка «назад» в квесте',
+    description:
+      'Системная кнопка «назад» (жест или кнопка на телефоне) листает шаги квеста на шаг назад, а не выходит из игры.',
+  },
 };
 
 export function toAdminFeature(w: AdminFeatureWire): AdminFeature {

@@ -8,7 +8,7 @@ import React from 'react';
  * user can't pick the wrong one — the old two-pill toggle and its 409 class
  * are gone by construction.
  */
-const { apiMock, sessionRef } = vi.hoisted(() => ({
+const { apiMock, sessionRef, routerMock } = vi.hoisted(() => ({
   apiMock: {
     me: vi.fn(async () => ({ role: 'player' })),
     authIdentify: vi.fn(),
@@ -18,6 +18,7 @@ const { apiMock, sessionRef } = vi.hoisted(() => ({
     getAuthProviders: vi.fn(async () => ({ google_client_id: null, telegram_client_id: null })),
   },
   sessionRef: { current: null as unknown },
+  routerMock: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
 }));
 vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
@@ -28,6 +29,7 @@ vi.mock('../../../lib/identity', () => ({
   subscribeSession: () => () => {},
 }));
 vi.mock('../../../lib/session-actions', () => ({ logoutAndReset: vi.fn(async () => {}) }));
+vi.mock('next/navigation', () => ({ useRouter: () => routerMock }));
 
 import AuthPage from '../page';
 
@@ -36,6 +38,7 @@ beforeEach(() => {
   apiMock.authLogin.mockReset();
   apiMock.authRegister.mockReset();
   apiMock.authRecover.mockReset();
+  routerMock.replace.mockReset();
   sessionRef.current = null;
 });
 
@@ -108,6 +111,25 @@ describe('AuthPage — email-first (§6.1)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Отправить ссылку' }));
     await waitFor(() => expect(screen.getByText('Письмо ушло')).toBeTruthy());
     expect(screen.getByText(/код и ссылку на an\*\*\*@gmail.com — действуют 30 минут/)).toBeTruthy();
+  });
+
+  it('successful login redirects straight to the main page — no interim card', async () => {
+    apiMock.authIdentify.mockResolvedValue({ exists: true, confirmed: true });
+    apiMock.authLogin.mockResolvedValue({ token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' });
+    render(<AuthPage />);
+    await enterEmail('anna@gmail.com');
+    await waitFor(() => screen.getByText('С возвращением!'));
+    fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct-pass-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    await waitFor(() => expect(routerMock.replace).toHaveBeenCalledWith('/'));
+    expect(screen.queryByText('Вы вошли')).toBeNull();
+  });
+
+  it('an already-signed-in visitor is redirected home instead of seeing a card', () => {
+    sessionRef.current = { token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
+    render(<AuthPage />);
+    expect(routerMock.replace).toHaveBeenCalledWith('/');
+    expect(screen.queryByText('Вы вошли')).toBeNull();
   });
 
   it('the ✕ link navigates home, never history.back()', () => {

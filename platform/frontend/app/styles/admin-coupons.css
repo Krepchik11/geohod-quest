@@ -6,50 +6,9 @@
  * (navy #1A2B48 / blue #3B71FE / page #F7F8FA).
  */
 
-.ac-root {
-  flex: 1;
-  min-height: 0;
-  background: #f7f8fa;
-  color: #1a2b48;
-  font-family: var(--font-geist-sans), "Inter", system-ui, sans-serif;
-}
-.ac-root *,
-.ac-root *::before,
-.ac-root *::after {
-  box-sizing: border-box;
-}
+/* Page scaffolding (canvas, main column, head, sheet, toast) is the shared
+   `ap-*` layer — styles/admin-page.css + app/admin/ui.tsx. */
 
-.ac-main {
-  width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 44px 40px 72px;
-  display: flex;
-  flex-direction: column;
-}
-
-.ac-eyebrow {
-  font-family: var(--font-display);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.26em;
-  color: #83858c;
-}
-.ac-title {
-  margin: 6px 0 0;
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #000f08;
-}
-
-/* ---- list: page head ---- */
-.ac-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-}
 .ac-new {
   display: inline-flex;
   align-items: center;
@@ -329,8 +288,7 @@
 }
 
 @media (max-width: 767px) {
-  .ac-main { padding: 22px 16px 40px; }
-  .ac-head .ac-new { padding: 0; width: 48px; justify-content: center; }
+  .ap-head .ac-new { padding: 0; width: 48px; justify-content: center; }
   .ac-new__label { display: none; }
   .ac-filters { margin-top: 16px; }
   .ac-search { width: 100%; }
@@ -410,7 +368,7 @@
   gap: 14px;
   flex-wrap: wrap;
 }
-.ac-editor-head .ac-title { margin: 0; }
+.ac-editor-head .ap-title { margin: 0; }
 
 .ac-editor {
   margin-top: 26px;
@@ -729,72 +687,3 @@
   .ac-save, .ac-cancel { flex: 1; height: 56px; font-size: 16px; border-radius: 28px; }
 }
 
-/* confirm sheet (delete) — bottom sheet on mobile, centered dialog on desktop */
-.ac-sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(10, 16, 28, 0.45);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 60;
-}
-.ac-sheet {
-  width: 100%;
-  max-width: 480px;
-  background: #fff;
-  border-radius: 20px 20px 0 0;
-  padding: 18px 20px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.ac-sheet-grip {
-  align-self: center;
-  width: 44px;
-  height: 4px;
-  border-radius: 2px;
-  background: #e2e4e9;
-}
-.ac-sheet-title { font-size: 17px; font-weight: 700; color: #000f08; }
-.ac-sheet-text { font-size: 13.5px; line-height: 1.55; color: #5b6373; }
-.ac-sheet-actions { display: flex; gap: 10px; margin-top: 6px; }
-.ac-sheet-cancel,
-.ac-sheet-apply {
-  flex: 1;
-  height: 48px;
-  border: 0;
-  border-radius: 24px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.ac-sheet-cancel { background: #fff; box-shadow: inset 0 0 0 1px #dedede; color: #1a2b48; }
-.ac-sheet-apply { background: #c0395c; color: #fff; }
-.ac-sheet-apply:disabled, .ac-sheet-cancel:disabled { opacity: 0.6; cursor: default; }
-@media (min-width: 768px) {
-  .ac-sheet-backdrop { align-items: center; padding: 24px; }
-  .ac-sheet { border-radius: 20px; max-width: 440px; }
-  .ac-sheet-grip { display: none; }
-}
-
-/* toast (mirrors .au-toast) */
-.ac-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 12px 18px;
-  border-radius: 24px;
-  background: #122947;
-  color: #fff;
-  font-size: 13.5px;
-  font-weight: 600;
-  box-shadow: 0 12px 32px rgba(18, 41, 71, 0.35);
-  z-index: 70;
-}
-.ac-toast--error { background: #c0395c; }

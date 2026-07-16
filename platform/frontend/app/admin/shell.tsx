@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError, hasAdminToken } from '../../lib/api';
-import UserMenu from '../components/UserMenu';
+import SpaceHeader from '../components/SpaceHeader';
 
 /**
  * Unified admin shell (Admin Coupons.dc.html, «единый шелл»): one header for
@@ -66,45 +66,7 @@ export default function AdminShell({
 }) {
   return (
     <div className="ash-root">
-      <header className="ash-header">
-        <div className="ash-bar">
-          <Link className="logo ash-logo" href="/" aria-label="GEOHOD QUEST — на главную">
-            <span className="ic logo-mark" />
-            <span className="ic logo-text ash-logo-text" />
-            <span className="ash-logo-stack">
-              <span className="ash-logo-name">GEOHOD</span>
-              <span className="ash-logo-sub">АДМИНКА</span>
-            </span>
-          </Link>
-          <span className="ash-divider" aria-hidden />
-          <span className="ash-eyebrow">АДМИНКА</span>
-          <nav className="ash-tabs ash-tabs--inline" aria-label="Разделы админки">
-            {TABS.map((t) => (
-              <Link
-                key={t.key}
-                href={t.href}
-                className={t.key === active ? 'is-active' : undefined}
-                aria-current={t.key === active ? 'page' : undefined}
-              >
-                {t.label}
-              </Link>
-            ))}
-          </nav>
-          <UserMenu siteLink />
-        </div>
-        <nav className="ash-tabs ash-tabs--row" aria-label="Разделы админки">
-          {TABS.map((t) => (
-            <Link
-              key={t.key}
-              href={t.href}
-              className={t.key === active ? 'is-active' : undefined}
-              aria-current={t.key === active ? 'page' : undefined}
-            >
-              {t.label}
-            </Link>
-          ))}
-        </nav>
-      </header>
+      <SpaceHeader eyebrow="АДМИНКА" tabs={TABS} active={active} tabsLabel="Разделы админки" />
       {children}
     </div>
   );
