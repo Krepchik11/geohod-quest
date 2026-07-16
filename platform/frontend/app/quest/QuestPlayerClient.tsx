@@ -24,9 +24,11 @@ import {
 } from '../../lib/queue';
 import { flushPending } from '../../lib/sync';
 import { currentPlayerId, getDeviceId } from '../../lib/identity';
+import { useClientFeature } from '../../lib/client-features';
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
+import { useHistoryBackTrap } from './useHistoryBackTrap';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
   PlayerFrame, StepView, TopBar, CoinToast, PCheck,
@@ -317,6 +319,26 @@ export default function QuestPlayerClient({
     setUi((u) => ({ ...u, wrong: false, answer: '' }));
     dispatch({ type: 'advance', to: stepIdx - 1 });
   }, [stepIdx, setUi]);
+
+  // player_back_button (feature flag, off by default): the system/browser back
+  // button rewinds in-page — overlay first, then catalog→finale, then one step
+  // back — and leaves the play screen only from step 0.
+  const historyBackOn = useClientFeature('player_back_button');
+  useHistoryBackTrap(historyBackOn, () => {
+    if (ui.menuOpen) {
+      setUi((u) => ({ ...u, menuOpen: false }));
+      return true;
+    }
+    if (ui.showCatalog) {
+      setUi((u) => ({ ...u, showCatalog: false }));
+      return true;
+    }
+    if (stepIdx > 0) {
+      doBack();
+      return true;
+    }
+    return false;
+  });
 
   const handlePhysicalConfirm = useCallback(() => {
     appendFact({
