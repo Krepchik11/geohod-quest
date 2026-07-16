@@ -603,7 +603,11 @@ mod tests {
     fn quest_rows_include_zero_activity_and_sort_by_starts() {
         let ev = sample_events();
         let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
-        let metas = vec![meta("q0", "Спящий"), meta("q1", "Тайны"), meta("q2", "Дозор")];
+        let metas = vec![
+            meta("q0", "Спящий"),
+            meta("q1", "Тайны"),
+            meta("q2", "Дозор"),
+        ];
         let rows = quest_rows(&metas, &ev, &r);
         assert_eq!(
             rows.iter().map(|r| r.quest_id.as_str()).collect::<Vec<_>>(),
@@ -622,7 +626,10 @@ mod tests {
         let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
         let rows = quest_rows(&[meta("q1", "Тайны")], &ev, &r);
         assert_eq!(rows.len(), 2);
-        let ghost = rows.iter().find(|row| row.quest_id == "q2").expect("q2 row");
+        let ghost = rows
+            .iter()
+            .find(|row| row.quest_id == "q2")
+            .expect("q2 row");
         assert!(!ghost.published);
         assert_eq!(ghost.name, "q2");
         assert_eq!(ghost.started, 1);

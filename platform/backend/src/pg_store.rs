@@ -23,8 +23,8 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
-    AttemptMeta, AuthIdentity, ConstructorQuest, ConstructorQuestSummary, PublishedMeta,
-    QuestAttributes, now_rfc3339, now_secs,
+    AttemptMeta, AuthIdentity, CatalogListing, ConstructorQuest, ConstructorQuestSummary,
+    PublishedMeta, QuestAttributes, now_rfc3339, now_secs,
 };
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
@@ -1719,20 +1719,32 @@ impl PgConstructorStore {
         self.fetch_summaries(None).await
     }
 
-    /// See [`crate::store::InMemoryConstructorStore::statuses_by_quest`]. A single
-    /// lightweight scan (quest_id + status only) backing the store-catalog filter.
-    pub async fn statuses_by_quest(
+    /// See [`crate::store::InMemoryConstructorStore::listings_by_quest`]. A single
+    /// lightweight scan (status + attributes) backing the store-catalog filter
+    /// and the store-page attribute filters.
+    pub async fn listings_by_quest(
         &self,
-    ) -> Result<std::collections::HashMap<String, String>, AppError> {
-        let rows = sqlx::query("SELECT quest_id, status FROM constructor_quests")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
+    ) -> Result<std::collections::HashMap<String, CatalogListing>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, status, complexity, age_target, tags FROM constructor_quests",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
         let mut out = std::collections::HashMap::new();
         for row in rows {
             let quest_id: String = row.try_get("quest_id").map_err(internal)?;
-            let status: String = row.try_get("status").map_err(internal)?;
-            out.insert(quest_id, status);
+            out.insert(
+                quest_id,
+                CatalogListing {
+                    status: row.try_get("status").map_err(internal)?,
+                    attrs: QuestAttributes {
+                        complexity: row.try_get("complexity").map_err(internal)?,
+                        age_target: row.try_get("age_target").map_err(internal)?,
+                        tags: row.try_get("tags").map_err(internal)?,
+                    },
+                },
+            );
         }
         Ok(out)
     }

@@ -26,3 +26,10 @@ export function canEditQuests(role: string | null | undefined): boolean {
 export function isAdmin(role: string | null | undefined): boolean {
   return role === 'admin';
 }
+
+/** Human (Russian) word for a role — the profile menu's subtitle. */
+export function roleWord(role: string | null | undefined): string {
+  if (role === 'admin') return 'администратор';
+  if (role === 'editor') return 'редактор';
+  return 'игрок';
+}

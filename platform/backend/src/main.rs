@@ -503,7 +503,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/admin/features", get(list_features_handler))
         .route("/api/admin/features/{key}", post(set_feature_handler))
         .route("/api/admin/stats", get(admin_stats_overview_handler))
-        .route("/api/admin/stats/{quest_id}", get(admin_stats_quest_handler))
+        .route(
+            "/api/admin/stats/{quest_id}",
+            get(admin_stats_quest_handler),
+        )
         .route("/api/migrate/legacy", post(run_migration_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
         .route("/api/auth/register", post(register_handler))
@@ -1681,6 +1684,11 @@ struct CatalogQuest {
     /// Public players counter: real distinct completions + the author's marketing
     /// `players_bonus`. The raw bonus is never sent on its own (see PublishedMeta).
     players: i64,
+    /// Author attributes from the constructor row (store-page filters); `None` /
+    /// empty for a legacy/direct publish that has no constructor row.
+    complexity: Option<String>,
+    age_target: Option<String>,
+    tags: Vec<String>,
 }
 
 async fn list_quests_handler(
@@ -1701,21 +1709,21 @@ async fn list_quests_handler(
     //
     // The two reads hit different tables with no data dependency, so run them
     // concurrently.
-    let (published, statuses) = tokio::join!(
+    let (published, listings) = tokio::join!(
         state.grants.list_published(),
-        state.constructor.statuses_by_quest(),
+        state.constructor.listings_by_quest(),
     );
     let published = published?;
-    let statuses = statuses?;
+    let mut listings = listings?;
     // Keep only visible quests: `published` status, or NO constructor row at all
     // (legacy/direct publish). A `test`/`draft` quest keeps its snapshot but leaves
     // the store.
     let visible: Vec<PublishedMeta> = published
         .into_iter()
         .filter(|meta| {
-            statuses
+            listings
                 .get(&meta.quest_id)
-                .map(String::as_str)
+                .map(|l| l.status.as_str())
                 .is_none_or(|s| s == store::CTOR_STATUS_PUBLISHED)
         })
         .collect();
@@ -1739,11 +1747,16 @@ async fn list_quests_handler(
             // Public players counter: real distinct completions + marketing bonus.
             let players =
                 completions.get(&meta.quest_id).copied().unwrap_or(0) as i64 + meta.players_bonus;
+            // Attributes from the constructor row; a legacy/direct publish has none.
+            let attrs = listings.remove(&meta.quest_id).map(|l| l.attrs);
             CatalogQuest {
                 meta,
                 rating_avg,
                 rating_count,
                 players,
+                complexity: attrs.as_ref().map(|a| a.complexity.clone()),
+                age_target: attrs.as_ref().map(|a| a.age_target.clone()),
+                tags: attrs.map(|a| a.tags).unwrap_or_default(),
             }
         })
         .collect();
@@ -2162,27 +2175,39 @@ async fn telegram_auth_handler(
 
 /// Link a verified social identity to an account and return a fresh session,
 /// preserving the caller's anonymous player_id where possible (player-identity
-/// spec): (1) an already-linked identity logs into its account; (2) a logged-in
-/// caller links it to their account; (3) a Google-verified email links to the
-/// matching existing account; (4) otherwise it attaches to the anonymous id,
-/// creating an account there so prior coins/grants survive.
+/// spec): (1) an already-linked identity logs into its account — unless the
+/// caller is logged into a DIFFERENT account, which is a 409, never a silent
+/// account switch; (2) a logged-in caller links it to their account; (3) a
+/// Google-verified email links to the matching existing account; (4) otherwise
+/// it attaches to the anonymous id, creating an account there so prior
+/// coins/grants survive.
 async fn complete_social_login(
     state: &AppState,
     headers: &HeaderMap,
     claimed_player_id: &str,
     ident: SocialIdentity,
 ) -> Result<AuthResponse, AppError> {
-    // 1. Existing identity → login to that account (any device).
+    let session = session_account(state, headers).await?;
+
+    // 1. Existing identity → login to that account (any device). A logged-in
+    // caller whose session is another account gets a conflict: honoring the
+    // login would drop them into the identity's account while the profile UI
+    // reports a successful "link" that never happened.
     if let Some(pid) = state
         .auth
         .find_identity(ident.provider, &ident.subject)
         .await?
     {
+        if session.as_ref().is_some_and(|a| a.player_id != pid) {
+            return Err(AppError::Conflict(
+                "этот способ входа уже привязан к другому аккаунту".into(),
+            ));
+        }
         return issue_session_for(state, &pid).await;
     }
 
     // Choose the account to attach the NEW identity to.
-    let target = if let Some(account) = session_account(state, headers).await? {
+    let target = if let Some(account) = session {
         // 2. Logged-in caller → link to their account.
         account.player_id
     } else if ident.email_verified
@@ -2209,8 +2234,20 @@ async fn complete_social_login(
         .await
     {
         Ok(()) => {}
-        // Racing request already linked this identity — fall through to a session.
-        Err(AppError::Conflict(_)) => {}
+        // Racing request linked this identity first. Absorb it as a login only
+        // when it landed on OUR target account; a foreign owner is the same
+        // conflict as above, not a success.
+        Err(AppError::Conflict(_)) => {
+            let owner = state
+                .auth
+                .find_identity(ident.provider, &ident.subject)
+                .await?;
+            if owner.as_deref() != Some(target.as_str()) {
+                return Err(AppError::Conflict(
+                    "этот способ входа уже привязан к другому аккаунту".into(),
+                ));
+            }
+        }
         Err(e) => return Err(e),
     }
 
@@ -3019,8 +3056,9 @@ async fn load_stats_window(
     q: &StatsRangeQuery,
     quest: Option<&str>,
 ) -> Result<(admin_stats::DayRange, bool, admin_stats::StatsEvents), AppError> {
-    let bad_day =
-        |field: &str| AppError::BadRequest(format!("некорректная дата {field}: ожидается ГГГГ-ММ-ДД"));
+    let bad_day = |field: &str| {
+        AppError::BadRequest(format!("некорректная дата {field}: ожидается ГГГГ-ММ-ДД"))
+    };
     let to_day = match &q.to {
         Some(t) => {
             admin_stats::parse_day(t).ok_or_else(|| bad_day("to"))?;
@@ -3030,9 +3068,15 @@ async fn load_stats_window(
     };
     let load = |from_secs: i64, to_secs_excl: i64| async move {
         let (purchases, starts, finishes) = tokio::try_join!(
-            state.grants.stats_purchase_events(from_secs, to_secs_excl, quest),
-            state.store.stats_start_events(from_secs, to_secs_excl, quest),
-            state.store.stats_finish_events(from_secs, to_secs_excl, quest),
+            state
+                .grants
+                .stats_purchase_events(from_secs, to_secs_excl, quest),
+            state
+                .store
+                .stats_start_events(from_secs, to_secs_excl, quest),
+            state
+                .store
+                .stats_finish_events(from_secs, to_secs_excl, quest),
         )?;
         Ok::<_, AppError>(admin_stats::StatsEvents {
             purchases,
@@ -3894,6 +3938,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn linking_identity_bound_to_another_account_is_a_conflict_not_a_switch() {
+        let app = test_app_social();
+        // Account A: telegram-only, created from an anonymous device.
+        let (_, a) = post_json(&app, "/api/auth/telegram", tg_payload("dev:a", 555, "Ann")).await;
+        assert_eq!(a["player_id"], "dev:a");
+
+        // Account B: email-registered and logged in.
+        let (_, reg) = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "player_id": "dev:b", "email": "b@example.com", "password": "supersecret" }),
+        )
+        .await;
+        let bearer = format!("Bearer {}", reg["token"].as_str().expect("token"));
+
+        // B tries to add the SAME telegram id from the profile. It must NOT
+        // silently switch B's session to account A — that reads as "bound" in
+        // the UI while B's account gains nothing.
+        let (st, body) = post_json_h(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:b", 555, "Ann"),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "got: {body}");
+
+        // B's methods are unchanged (email only) — nothing was moved or lost.
+        let (_, me) = get_json_h(&app, "/api/players/me", &[("authorization", &bearer)]).await;
+        let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
+        assert_eq!(methods, vec!["email".to_string()]);
+
+        // A still logs in with telegram.
+        let (st, again) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:c", 555, "Ann")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(again["player_id"], "dev:a");
+    }
+
+    #[tokio::test]
+    async fn relinking_own_identity_while_logged_in_is_idempotent() {
+        let app = test_app_social();
+        let (_, acct) =
+            post_json(&app, "/api/auth/telegram", tg_payload("dev:me", 888, "Me")).await;
+        let bearer = format!("Bearer {}", acct["token"].as_str().expect("token"));
+        let (st, body) = post_json_h(
+            &app,
+            "/api/auth/telegram",
+            tg_payload("dev:me", 888, "Me"),
+            &[("authorization", &bearer)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["player_id"], "dev:me");
+    }
+
+    #[tokio::test]
     async fn telegram_only_account_cannot_unlink_its_sole_method() {
         let app = test_app_social();
         let (_, acct) = post_json(
@@ -4471,6 +4572,11 @@ mod tests {
         // not a fake "5 (2 отзыва)". (Pure projection of finale facts.)
         assert_eq!(row["rating_count"], 0);
         assert_eq!(row["rating_avg"], 0.0);
+        // A direct/legacy publish has no constructor row, so no attributes: the
+        // catalog reports them honestly as unknown instead of fabricating defaults.
+        assert_eq!(row["complexity"], serde_json::Value::Null);
+        assert_eq!(row["age_target"], serde_json::Value::Null);
+        assert_eq!(row["tags"], json!([]));
 
         // /api/grants is caller-scoped: anonymous callers must claim an id, and
         // the response contains ONLY that player's grants (no cross-player leak).
@@ -4507,6 +4613,7 @@ mod tests {
             "/api/constructor/quests",
             json!({
                 "quest_id": ids.quest, "name": "Q", "cover": null, "steps_count": 1,
+                "complexity": "high", "age_target": "kids", "tags": ["логика", "город"],
                 "body": { "id": ids.quest, "meta": { "title": "Q" }, "steps": [1], "versions": [] }
             }),
             &auth,
@@ -4531,6 +4638,19 @@ mod tests {
             store_has(app, &ids.quest).await,
             "a published quest is listed"
         );
+
+        // The catalog row exposes the author's attributes (store-page filters).
+        let (_, list) = get_json(app, "/api/quests").await;
+        let item = list
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|q| q["quest_id"] == ids.quest.as_str())
+            .expect("listed quest")
+            .clone();
+        assert_eq!(item["complexity"], "high");
+        assert_eq!(item["age_target"], "kids");
+        assert_eq!(item["tags"], json!(["логика", "город"]));
 
         // → test: leaves the store (the snapshot stays, so it is still resolvable by
         // direct link — grant-gated — it is simply delisted).
@@ -5375,9 +5495,9 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
 
-        // Validation: bad code, bad percent, bad date, zero limit, empty quest list.
+        // Validation: empty code, bad percent, bad date, zero limit, empty quest list.
         for bad in [
-            json!({"code": "ab", "discount_type": "percent", "discount_value": 10}),
+            json!({"code": "   ", "discount_type": "percent", "discount_value": 10}),
             json!({"code": code, "discount_type": "percent", "discount_value": 0}),
             json!({"code": code, "discount_type": "percent", "discount_value": 101}),
             json!({"code": code, "discount_type": "fixed", "discount_value": 0}),
@@ -8128,11 +8248,17 @@ mod tests {
         let (app, _mails) = pg_app(pool);
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
 
+        // The pg suites share ONE database and run concurrently, so this test
+        // must not disable a feature another suite's behavior depends on —
+        // toggling `payments_mock` here used to 501 pg_full_suite's checkouts
+        // mid-run. `payments_yookassa` is behavior-inert on the pg app (no
+        // gateway configured → the yookassa path is 501 regardless), while the
+        // override rows still round-trip through the same store code.
         // Set an override, twice (second write exercises the upsert path).
         for _ in 0..2 {
             let (st, row) = post_json_h(
                 &app,
-                "/api/admin/features/payments_mock",
+                "/api/admin/features/payments_yookassa",
                 json!({ "enabled": false }),
                 &admin,
             )
@@ -8147,14 +8273,14 @@ mod tests {
             .as_array()
             .expect("list")
             .iter()
-            .find(|r| r["key"] == "payments_mock")
-            .expect("payments_mock row");
+            .find(|r| r["key"] == "payments_yookassa")
+            .expect("payments_yookassa row");
         assert_eq!(row["override"], json!(false));
 
         // Clear: the row is deleted and the default applies again.
         let (st, row) = post_json_h(
             &app,
-            "/api/admin/features/payments_mock",
+            "/api/admin/features/payments_yookassa",
             json!({ "enabled": null }),
             &admin,
         )
@@ -8212,7 +8338,11 @@ mod tests {
     async fn seed_stats_fixture(state: &AppState) {
         state
             .grants
-            .register_published("q1", stats_meta("q1", "Тайны старого города"), Some(stats_snapshot()))
+            .register_published(
+                "q1",
+                stats_meta("q1", "Тайны старого города"),
+                Some(stats_snapshot()),
+            )
             .await
             .expect("publish");
         state
@@ -8270,8 +8400,14 @@ mod tests {
         let uri = format!("/api/admin/stats?from={today}&to={today}");
         let (st, v) = get_json_h(&app, &uri, &admin).await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["totals"], json!({ "purchased": 1, "started": 1, "finished": 1 }));
-        assert_eq!(v["prev"], json!({ "purchased": 0, "started": 0, "finished": 0 }));
+        assert_eq!(
+            v["totals"],
+            json!({ "purchased": 1, "started": 1, "finished": 1 })
+        );
+        assert_eq!(
+            v["prev"],
+            json!({ "purchased": 0, "started": 0, "finished": 0 })
+        );
         let daily = v["daily"].as_array().expect("daily");
         assert_eq!(daily.len(), 1);
         assert_eq!(daily[0]["date"], json!(today));

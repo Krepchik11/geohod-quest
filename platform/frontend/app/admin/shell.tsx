@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, ApiError, hasAdminToken } from '../../lib/api';
-import { getSession, subscribeSession } from '../../lib/identity';
-import { logoutAndReset } from '../../lib/session-actions';
+import UserMenu from '../components/UserMenu';
 
 /**
  * Unified admin shell (Admin Coupons.dc.html, «единый шелл»): one header for
@@ -91,7 +90,7 @@ export default function AdminShell({
               </Link>
             ))}
           </nav>
-          <AdminUserMenu />
+          <UserMenu siteLink />
         </div>
         <nav className="ash-tabs ash-tabs--row" aria-label="Разделы админки">
           {TABS.map((t) => (
@@ -107,60 +106,6 @@ export default function AdminShell({
         </nav>
       </header>
       {children}
-    </div>
-  );
-}
-
-/**
- * The site-style user menu in the admin header (design: «меню пользователя как
- * на сайте»): avatar button with the presence dot, dropdown with мой профиль /
- * на сайт / выйти. An operator build without a session still gets the menu
- * (minus «выйти» — there is no session to end) so «на сайт» stays reachable.
- */
-function AdminUserMenu() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const session = useSyncExternalStore(subscribeSession, getSession, () => null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDoc = () => setMenuOpen(false);
-    document.addEventListener('click', onDoc);
-    return () => document.removeEventListener('click', onDoc);
-  }, [menuOpen]);
-
-  const handleLogout = () => {
-    setMenuOpen(false);
-    void logoutAndReset().finally(() => {
-      window.location.href = '/';
-    });
-  };
-
-  return (
-    <div className={`user-menu ${menuOpen ? 'is-open' : ''}`}>
-      <button
-        className="user-menu__btn"
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        title="Профиль"
-        onClick={(e) => {
-          e.stopPropagation();
-          setMenuOpen((v) => !v);
-        }}
-      >
-        <span className="user-icon">
-          <span className="head" />
-          <span className="body" />
-        </span>
-        {session && <span className="user-menu__dot" aria-hidden />}
-      </button>
-      <div className="user-menu__dropdown" role="menu">
-        <Link href="/profile" role="menuitem">мой профиль</Link>
-        <Link href="/" role="menuitem">на сайт</Link>
-        {session && (
-          <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
-        )}
-      </div>
     </div>
   );
 }

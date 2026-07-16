@@ -5,12 +5,12 @@ import Link from 'next/link';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
 import {
   AGE_TARGET_LABEL,
-  AGE_TARGET_OPTIONS,
   COMPLEXITY_LABEL,
-  COMPLEXITY_OPTIONS,
   type CtorAgeTarget,
   type CtorComplexity,
 } from '../../lib/constructor-model';
+import QuestFilters, { matchesAttrs, type QuestFiltersValue } from '../components/QuestFilters';
+import UserMenu from '../components/UserMenu';
 import StatusControl from './StatusControl';
 
 /**
@@ -42,16 +42,7 @@ function fmtDate(unixSecs: number): string {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function roleWord(role: string): string {
-  if (role === 'admin') return 'администратор';
-  if (role === 'editor') return 'редактор';
-  return 'автор';
-}
-
 /* ---------- мелкие иконки (инлайн SVG из дизайна) ---------- */
-const ChevronDown = ({ stroke = '#1a2b48' }: { stroke?: string }) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke={stroke} strokeWidth="1.8" /></svg>
-);
 const IconUser = ({ s = '#9098a6' }: { s?: string }) => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3" stroke={s} strokeWidth="1.7" /><path d="M6 19c0-3 2.7-5 6-5s6 2 6 5" stroke={s} strokeWidth="1.7" /></svg>
 );
@@ -74,51 +65,46 @@ export interface DashboardActions {
   onStatusChange: (q: ConstructorQuestWire, status: CtorStatus) => void;
   /** §9.1: draft→test/published without a snapshot routes into the publish panel. */
   onOpenPublish: (q: ConstructorQuestWire) => void;
-  onLogout: () => void;
 }
 
 export interface DashboardProps {
   quests: ConstructorQuestWire[];
   loading: boolean;
   error: string | null;
-  profileName: string;
-  profileRole: string;
   toast: string | null;
   actions: DashboardActions;
 }
+
+const EMPTY_FILTERS: QuestFiltersValue = {
+  search: '',
+  status: 'Все',
+  complexity: '',
+  age: '',
+  tag: '',
+};
 
 export default function Dashboard({
   quests,
   loading,
   error,
-  profileName,
-  profileRole,
   toast,
   actions,
 }: DashboardProps) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Все');
-  // Attribute filters — '' means «any» (mirrors the status «Все»).
-  const [complexityFilter, setComplexityFilter] = useState('');
-  const [ageFilter, setAgeFilter] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [filters, setFilters] = useState<QuestFiltersValue>(EMPTY_FILTERS);
   const [deleteTarget, setDeleteTarget] = useState<ConstructorQuestWire | null>(null);
 
   // The dashboard is a personal workspace: the server returns ONLY the acting
   // author's quests, so there is no author filter (it could only ever pick
   // "yourself"). Search + status + attributes are the meaningful filters.
   const filtered = useMemo(() => {
-    const q0 = search.trim().toLowerCase();
+    const q0 = filters.search.trim().toLowerCase();
     return quests.filter(
       (q) =>
-        (statusFilter === 'Все' || STATUS_LABEL[q.status] === statusFilter) &&
-        (complexityFilter === '' || q.complexity === complexityFilter) &&
-        (ageFilter === '' || q.age_target === ageFilter) &&
-        (tagFilter === '' || q.tags.includes(tagFilter)) &&
+        (filters.status === 'Все' || STATUS_LABEL[q.status] === filters.status) &&
+        matchesAttrs(filters, q) &&
         (q0 === '' || q.name.toLowerCase().includes(q0) || q.author.toLowerCase().includes(q0)),
     );
-  }, [quests, search, statusFilter, complexityFilter, ageFilter, tagFilter]);
+  }, [quests, filters]);
 
   // The tag filter offers exactly the tags that exist across the author's
   // quests (sorted for a stable menu) — never a hardcoded list.
@@ -127,13 +113,7 @@ export default function Dashboard({
     [quests],
   );
 
-  const clearFilters = () => {
-    setSearch('');
-    setStatusFilter('Все');
-    setComplexityFilter('');
-    setAgeFilter('');
-    setTagFilter('');
-  };
+  const clearFilters = () => setFilters(EMPTY_FILTERS);
 
   const showEmpty = !loading && quests.length === 0;
   const showNoResults = !loading && quests.length > 0 && filtered.length === 0;
@@ -155,41 +135,7 @@ export default function Dashboard({
           <span className="qcd-brand__name">Конструктор квестов</span>
         </div>
 
-        <div className="qcd-profile">
-          <button
-            className="qcd-profile__btn"
-            type="button"
-            title="Профиль"
-            aria-haspopup="menu"
-            aria-expanded={profileOpen}
-            onClick={(e) => {
-              e.stopPropagation();
-              setProfileOpen((v) => !v);
-            }}
-          >
-            <svg width="23" height="23" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="#1a2b48" strokeWidth="1.5" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="#1a2b48" strokeWidth="1.5" /></svg>
-          </button>
-          {profileOpen ? (
-            <div className="qcd-menu" role="menu">
-              <div className="qcd-menu__head">
-                <div className="qcd-menu__name">{profileName}</div>
-                <div className="qcd-menu__role">Автор · {roleWord(profileRole)}</div>
-              </div>
-              <Link href="/profile" className="qcd-menu__item" role="menuitem">Мой профиль</Link>
-              <button
-                className="qcd-menu__item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setProfileOpen(false);
-                  actions.onLogout();
-                }}
-              >
-                Выход
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <UserMenu siteLink />
       </header>
 
       <main className="qcd-main">
@@ -205,86 +151,13 @@ export default function Dashboard({
         {error ? <div className="qcd-error-banner">{error}</div> : null}
 
         {/* ===== Фильтры ===== */}
-        <div className="qcd-filters">
-          <div className="qcd-field">
-            <label>Поиск</label>
-            <div className="qcd-field__wrap">
-              <svg className="qcd-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#9aa0ab" strokeWidth="1.8" /><path d="M20 20l-3.6-3.6" stroke="#9aa0ab" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              <input
-                className="qcd-input"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Название или автор…"
-              />
-            </div>
-          </div>
-          <div className="qcd-field">
-            <label>Статус</label>
-            <div className="qcd-field__wrap">
-              <select
-                className="qcd-select"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                {['Все', 'Опубликован', 'Тест', 'Проект'].map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-              <span className="qcd-chevron"><ChevronDown /></span>
-            </div>
-          </div>
-          <div className="qcd-field">
-            <label id="qcd-flt-complexity">Сложность</label>
-            <div className="qcd-field__wrap">
-              <select
-                className="qcd-select"
-                aria-labelledby="qcd-flt-complexity"
-                value={complexityFilter}
-                onChange={(e) => setComplexityFilter(e.target.value)}
-              >
-                <option value="">Любая</option>
-                {COMPLEXITY_OPTIONS.map((o) => (
-                  <option key={o.key} value={o.key}>{o.label}</option>
-                ))}
-              </select>
-              <span className="qcd-chevron"><ChevronDown /></span>
-            </div>
-          </div>
-          <div className="qcd-field">
-            <label id="qcd-flt-age">Возраст</label>
-            <div className="qcd-field__wrap">
-              <select
-                className="qcd-select"
-                aria-labelledby="qcd-flt-age"
-                value={ageFilter}
-                onChange={(e) => setAgeFilter(e.target.value)}
-              >
-                <option value="">Любой</option>
-                {AGE_TARGET_OPTIONS.map((o) => (
-                  <option key={o.key} value={o.key}>{o.label}</option>
-                ))}
-              </select>
-              <span className="qcd-chevron"><ChevronDown /></span>
-            </div>
-          </div>
-          <div className="qcd-field">
-            <label id="qcd-flt-tag">Тег</label>
-            <div className="qcd-field__wrap">
-              <select
-                className="qcd-select"
-                aria-labelledby="qcd-flt-tag"
-                value={tagFilter}
-                onChange={(e) => setTagFilter(e.target.value)}
-              >
-                <option value="">Все теги</option>
-                {allTags.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <span className="qcd-chevron"><ChevronDown /></span>
-            </div>
-          </div>
-        </div>
+        <QuestFilters
+          value={filters}
+          onChange={setFilters}
+          tags={allTags}
+          statusOptions={['Все', 'Опубликован', 'Тест', 'Проект']}
+          searchPlaceholder="Название или автор…"
+        />
 
         {/* ===== Заголовок секции ===== */}
         <div className="qcd-sechead">
@@ -421,9 +294,6 @@ export default function Dashboard({
           </div>
         </div>
       ) : null}
-
-      {/* ===== Клик-вне для меню профиля ===== */}
-      {profileOpen ? <div className="qcd-clickaway" onClick={() => setProfileOpen(false)} /> : null}
 
       {/* ===== Тост ===== */}
       {toast ? <div className="qcd-toast">{toast}</div> : null}

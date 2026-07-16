@@ -15,14 +15,22 @@ import React from 'react';
  * - failure shows the in-sheet error box + «Повторить — {price} ₽»;
  * - charging happens ONLY on confirm.
  */
-const { checkoutMock, validateMock, providersMock, sessionRef } = vi.hoisted(() => ({
-  checkoutMock: vi.fn(),
-  validateMock: vi.fn(),
-  providersMock: vi.fn(),
-  sessionRef: { current: null as null | { token: string } },
-}));
+const { checkoutMock, validateMock, providersMock, paymentStatusMock, sessionRef } = vi.hoisted(
+  () => ({
+    checkoutMock: vi.fn(),
+    validateMock: vi.fn(),
+    providersMock: vi.fn(),
+    paymentStatusMock: vi.fn(),
+    sessionRef: { current: null as null | { token: string } },
+  }),
+);
 vi.mock('../../../lib/api', () => ({
-  api: { checkout: checkoutMock, validateCoupon: validateMock, paymentProviders: providersMock },
+  api: {
+    checkout: checkoutMock,
+    validateCoupon: validateMock,
+    paymentProviders: providersMock,
+    paymentStatus: paymentStatusMock,
+  },
 }));
 vi.mock('../../../lib/identity', () => ({
   currentPlayerId: () => 'dev:test',
@@ -52,6 +60,7 @@ beforeEach(() => {
   checkoutMock.mockReset();
   validateMock.mockReset();
   providersMock.mockReset();
+  paymentStatusMock.mockReset();
   // Default deployment: mock-only — no method selector, historical behavior.
   providersMock.mockResolvedValue({ providers: ['mock'] });
   sessionRef.current = null;
@@ -220,6 +229,75 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
       expect(screen.getByText('Переходим к оплате…')).toBeTruthy();
     } finally {
       Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+    }
+  });
+
+  /** Drive the sheet into the 'redirect' lock, then simulate the browser Back
+   *  button restoring the page from the bfcache (pageshow with persisted). */
+  async function redirectThenComeBack() {
+    providersMock.mockResolvedValue(BOTH);
+    checkoutMock.mockResolvedValue({
+      payment: { payment_id: 'pay-1', confirmation_url: 'https://yookassa.ru/confirm/x' },
+    });
+    const assign = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      value: { ...original, assign },
+      writable: true,
+      configurable: true,
+    });
+    const restore = () =>
+      Object.defineProperty(window, 'location', {
+        value: original,
+        writable: true,
+        configurable: true,
+      });
+    const hosts = setup();
+    fireEvent.click(await screen.findByRole('button', { name: 'Оплатить 890 ₽' }));
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    const pageshow = new Event('pageshow');
+    Object.defineProperty(pageshow, 'persisted', { value: true });
+    window.dispatchEvent(pageshow);
+    return { ...hosts, restore };
+  }
+
+  it('browser Back with a settled payment completes the purchase', async () => {
+    paymentStatusMock.mockResolvedValue({ status: 'succeeded', grant: {} });
+    const { onPurchased, restore } = await redirectThenComeBack();
+    try {
+      await waitFor(() => expect(onPurchased).toHaveBeenCalled());
+      expect(paymentStatusMock).toHaveBeenCalledWith('pay-1');
+    } finally {
+      restore();
+    }
+  });
+
+  it('browser Back with the payment still pending unlocks the sheet for a retry', async () => {
+    paymentStatusMock.mockResolvedValue({ status: 'pending', grant: null });
+    const { onPurchased, restore } = await redirectThenComeBack();
+    try {
+      await waitFor(() =>
+        expect(screen.getByText(/Оплата не завершена/)).toBeTruthy(),
+      );
+      // The lock is gone: pay and cancel are live again.
+      expect(screen.getByRole('button', { name: 'Оплатить 890 ₽' })).toBeTruthy();
+      const cancel = screen.getByRole('button', { name: 'Отмена' }) as HTMLButtonElement;
+      expect(cancel.disabled).toBe(false);
+      expect(onPurchased).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('browser Back after a canceled payment unlocks the sheet and says so', async () => {
+    paymentStatusMock.mockResolvedValue({ status: 'canceled', grant: null });
+    const { onPurchased, restore } = await redirectThenComeBack();
+    try {
+      await waitFor(() => expect(screen.getByText(/Оплата отменена/)).toBeTruthy());
+      expect(screen.getByRole('button', { name: 'Оплатить 890 ₽' })).toBeTruthy();
+      expect(onPurchased).not.toHaveBeenCalled();
+    } finally {
+      restore();
     }
   });
 

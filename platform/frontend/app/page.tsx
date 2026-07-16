@@ -1,9 +1,10 @@
 'use client'; // narrow island ONLY for the live catalog + owned set (§2)
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import SiteHeader from './SiteHeader';
 import SiteFooter from './components/SiteFooter';
 import QuestCard from './components/QuestCard';
+import QuestFilters, { matchesAttrs, type QuestFiltersValue } from './components/QuestFilters';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { currentPlayerId } from '../lib/identity';
 import { catalogFacts, factsLine } from '../lib/storefront';
@@ -25,6 +26,8 @@ const FEATURES = [
   { label: 'фото: скрытый двор / место', title: 'Маршруты к необычным местам', text: 'Ведём туда, мимо чего проходят даже местные.' },
 ];
 
+const EMPTY_FILTERS: QuestFiltersValue = { search: '', complexity: '', age: '', tag: '' };
+
 export default function GeoQuestHome() {
   // `market` is the loaded list, or null on a catalog FAILURE; `marketLoading`
   // keeps the initial render distinct from a failure so loading never flashes
@@ -32,6 +35,30 @@ export default function GeoQuestHome() {
   const [market, setMarket] = useState<PublishedQuestWire[] | null>(null);
   const [marketLoading, setMarketLoading] = useState(true);
   const [owned, setOwned] = useState<Record<string, boolean>>({});
+  // Store filters — the same bar as the constructor dashboard (QuestFilters);
+  // no status here because the store lists only published quests.
+  const [filters, setFilters] = useState<QuestFiltersValue>(EMPTY_FILTERS);
+
+  const filtered = useMemo(() => {
+    if (!market) return [];
+    const q0 = filters.search.trim().toLowerCase();
+    return market.filter(
+      (q) =>
+        matchesAttrs(filters, q) &&
+        (q0 === '' ||
+          q.name.toLowerCase().includes(q0) ||
+          (q.city ?? '').toLowerCase().includes(q0)),
+    );
+  }, [market, filters]);
+
+  // Tag options are the tags that actually exist across the catalog.
+  const allTags = useMemo(
+    () =>
+      market
+        ? Array.from(new Set(market.flatMap((q) => q.tags))).sort((a, b) => a.localeCompare(b, 'ru'))
+        : [],
+    [market],
+  );
 
   // Catalog and grants load INDEPENDENTLY: the catalog is public and
   // identity-free; a grants failure merely leaves the owned-set empty.
@@ -104,7 +131,7 @@ export default function GeoQuestHome() {
       </section>
 
       {/* §2.1/§2.2 store grid — live quests, purchase status inside the cards */}
-      <section className="container" id="shop" style={{ paddingTop: 90 }} data-screen-label="Главная — магазин квестов">
+      <section className="container container--wide" id="shop" style={{ paddingTop: 90 }} data-screen-label="Главная — магазин квестов">
         <h2 className="section-title display">магазин квестов</h2>
         {marketLoading ? (
           <p className="shop-note">Загружаем магазин…</p>
@@ -115,11 +142,30 @@ export default function GeoQuestHome() {
         ) : market.length === 0 ? (
           <p className="shop-note">Скоро здесь появятся квесты.</p>
         ) : (
-          <div className="quest-grid" style={{ marginTop: 48 }}>
-            {market.map((q) => (
-              <QuestCard key={q.quest_id} quest={q} owned={!!owned[q.quest_id]} />
-            ))}
-          </div>
+          <>
+            <div style={{ marginTop: 48 }}>
+              <QuestFilters
+                value={filters}
+                onChange={setFilters}
+                tags={allTags}
+                searchPlaceholder="Название или город…"
+              />
+            </div>
+            {filtered.length === 0 ? (
+              <p className="shop-note">
+                Ничего не нашлось.{' '}
+                <button type="button" className="shop-note__reset" onClick={() => setFilters(EMPTY_FILTERS)}>
+                  Сбросить фильтры
+                </button>
+              </p>
+            ) : (
+              <div className="quest-grid" style={{ marginTop: 48 }}>
+                {filtered.map((q) => (
+                  <QuestCard key={q.quest_id} quest={q} owned={!!owned[q.quest_id]} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </section>
 
