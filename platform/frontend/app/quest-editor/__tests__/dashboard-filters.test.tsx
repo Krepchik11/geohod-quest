@@ -47,15 +47,12 @@ function setup(quests: ConstructorQuestWire[] = QUESTS) {
     onDelete: vi.fn(),
     onStatusChange: vi.fn(),
     onOpenPublish: vi.fn(),
-    onLogout: vi.fn(),
   };
   render(
     <Dashboard
       quests={quests}
       loading={false}
       error={null}
-      profileName="Мария"
-      profileRole="editor"
       toast={null}
       actions={actions}
     />,
