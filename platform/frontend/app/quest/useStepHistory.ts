@@ -53,12 +53,11 @@ export function useStepHistory(
   // Always read the latest callbacks/state — step state changes every advance
   // and a stale closure would rewind to the wrong step.
   const cbsRef = useRef(cbs);
+  const enabledRef = useRef(enabled);
   useEffect(() => {
     cbsRef.current = cbs;
+    enabledRef.current = enabled;
   });
-
-  const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
 
   const advance = useCallback((from: number, to: number) => {
     if (!enabledRef.current) return;
