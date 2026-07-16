@@ -20,6 +20,7 @@ import {
   type CouponFilter,
 } from '../../../lib/admin-coupons';
 import AdminShell, { AdminGate, useAdminAccess } from '../shell';
+import { AdminConfirmSheet, AdminPageHead, AdminToast } from '../ui';
 
 /**
  * Admin · Coupons list (Admin Coupons.dc.html §1a/§1c): search by code, status
@@ -118,18 +119,14 @@ export default function AdminCouponsPage() {
   return (
     <AdminShell active="coupons">
       <AdminGate access={access}>
-        <div className="ac-root">
-          <main className="ac-main">
-            <div className="ac-head">
-              <div>
-                <div className="ac-eyebrow">УПРАВЛЕНИЕ</div>
-                <h1 className="ac-title">Купоны</h1>
-              </div>
+        <div className="ap-root">
+          <main className="ap-main">
+            <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Купоны">
               <button type="button" className="ac-new" onClick={() => router.push('/admin/coupons/new')}>
                 <span className="ac-new__plus" aria-hidden>+</span>
                 <span className="ac-new__label">Новый купон</span>
               </button>
-            </div>
+            </AdminPageHead>
 
             <div className="ac-filters">
               <div className="ac-search">
@@ -210,46 +207,20 @@ export default function AdminCouponsPage() {
           </main>
 
           {confirmDelete && (
-            <div
-              className="ac-sheet-backdrop"
-              role="presentation"
-              onClick={() => busyId === null && setConfirmDelete(null)}
-            >
-              <div
-                className="ac-sheet"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Удалить купон"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="ac-sheet-grip" aria-hidden />
-                <div className="ac-sheet-title">Удалить купон {confirmDelete.code}?</div>
-                <div className="ac-sheet-text">
-                  Удаление необратимо. Уже применённые скидки и покупки сохраняются.
-                </div>
-                <div className="ac-sheet-actions">
-                  <button
-                    type="button"
-                    className="ac-sheet-cancel"
-                    disabled={busyId !== null}
-                    onClick={() => setConfirmDelete(null)}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    type="button"
-                    className="ac-sheet-apply"
-                    disabled={busyId !== null}
-                    onClick={() => void deleteCoupon(confirmDelete)}
-                  >
-                    {busyId !== null ? 'Удаляем…' : 'Удалить'}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <AdminConfirmSheet
+              label="Удалить купон"
+              title={`Удалить купон ${confirmDelete.code}?`}
+              text="Удаление необратимо. Уже применённые скидки и покупки сохраняются."
+              applyLabel="Удалить"
+              busyLabel="Удаляем…"
+              busy={busyId !== null}
+              danger
+              onCancel={() => setConfirmDelete(null)}
+              onApply={() => void deleteCoupon(confirmDelete)}
+            />
           )}
 
-          {toast && <div className="ac-toast" role="status">{toast}</div>}
+          {toast && <AdminToast text={toast} />}
         </div>
       </AdminGate>
     </AdminShell>

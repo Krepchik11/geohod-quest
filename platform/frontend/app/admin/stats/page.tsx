@@ -23,6 +23,7 @@ import {
   type StatsRangeKey,
 } from '../../../lib/admin-stats';
 import AdminShell, { AdminGate, useAdminAccess } from '../shell';
+import { AdminPageHead } from '../ui';
 
 /**
  * Admin · Статистика (Admin Stats.dc.html): KPI cards + trend chart + the
@@ -91,8 +92,8 @@ export default function AdminStatsPage() {
   return (
     <AdminShell active="stats">
       <AdminGate access={access}>
-        <div className="ast-root">
-          <main className="ast-main">
+        <div className="ap-root">
+          <main className="ap-main">
             {selectedId ? (
               <QuestDetail
                 detail={detail}
@@ -220,10 +221,7 @@ function Overview({
   const vm = overview ? overviewVm(overview) : null;
   return (
     <div>
-      <div className="ast-head">
-        <div className="ast-eyebrow">АНАЛИТИКА</div>
-        <h1 className="ast-title">Статистика</h1>
-      </div>
+      <AdminPageHead eyebrow="АНАЛИТИКА" title="Статистика" />
 
       <RangeFilter
         rangeKey={rangeKey}
@@ -404,18 +402,16 @@ function DetailBody({ detail }: { detail: AdminStatsQuestWire }) {
   const funnel = funnelVm(detail);
   return (
     <>
-      <div className="ast-head ast-head--detail">
-        <div className="ast-eyebrow">КОНВЕРСИЯ ПО ШАГАМ</div>
-        <h1 className="ast-title">{detail.name}</h1>
-        <div className="ast-detail-meta">
-          {questMetaLine({
-            city: detail.city,
-            pages: detail.pages,
-            template_summary: detail.template_summary,
-          })}{' '}
-          · {periodLabel(detail.from, detail.to)}
-        </div>
-      </div>
+      <AdminPageHead
+        className="ast-head--detail"
+        eyebrow="КОНВЕРСИЯ ПО ШАГАМ"
+        title={detail.name}
+        lede={`${questMetaLine({
+          city: detail.city,
+          pages: detail.pages,
+          template_summary: detail.template_summary,
+        })} · ${periodLabel(detail.from, detail.to)}`}
+      />
 
       <KpiCards kpis={kpisFor(detail.totals, detail.prev)} />
 

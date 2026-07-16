@@ -26,15 +26,19 @@ pub enum Feature {
     PaymentsMock,
     /// The YooKassa redirect payment provider.
     PaymentsYookassa,
+    /// Player runtime: the browser/system back button rewinds one quest step
+    /// instead of leaving the play screen.
+    PlayerBackButton,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
         Self::PaymentsYookassa,
+        Self::PlayerBackButton,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -45,14 +49,23 @@ impl Feature {
             Self::AuthTelegram => "auth_telegram",
             Self::PaymentsMock => "payments_mock",
             Self::PaymentsYookassa => "payments_yookassa",
+            Self::PlayerBackButton => "player_back_button",
         }
     }
 
-    /// Compiled-in default, used when no override is stored. All current
-    /// flags ship on; turn this into a per-variant match when the first
-    /// default-off flag appears.
+    /// Whether the flag's effective verdict is served to unauthenticated
+    /// clients via GET /api/features. Only flags the client *runtime* keys
+    /// behavior off belong here — server-enforced flags (auth, payments)
+    /// already reach the client through their provider capability endpoints.
+    pub fn client_visible(self) -> bool {
+        matches!(self, Self::PlayerBackButton)
+    }
+
+    /// Compiled-in default, used when no override is stored. Every flag ships
+    /// OFF — enabling a feature is always an explicit admin decision (a stored
+    /// override). Nothing seeds overrides, so a fresh deployment starts fully off.
     pub fn default_enabled(self) -> bool {
-        true
+        false
     }
 
     /// Inverse of [`Self::key`]: `None` for unknown keys (admin API answers 404).
@@ -91,17 +104,28 @@ mod tests {
     }
 
     #[test]
-    fn all_current_flags_default_on() {
+    fn all_flags_default_off() {
         for f in Feature::ALL {
-            assert!(f.default_enabled(), "{} must default on", f.key());
+            assert!(!f.default_enabled(), "{} must default off", f.key());
         }
     }
 
     #[test]
     fn effective_is_override_or_default() {
-        let f = Feature::PaymentsMock; // defaults on
-        assert!(f.effective(None));
+        let f = Feature::PaymentsMock; // defaults off, like every flag
+        assert!(!f.effective(None));
         assert!(f.effective(Some(true)));
         assert!(!f.effective(Some(false)));
     }
+
+    /// The player back-button flag: registered, off by default, not seeded on
+    /// (it postdates the default-off policy), and exposed to the client — the
+    /// player runtime reads it from GET /api/features.
+    #[test]
+    fn player_back_button_registered_off_and_client_visible() {
+        let f = Feature::parse("player_back_button").expect("registered");
+        assert!(!f.default_enabled());
+        assert!(f.client_visible());
+    }
+
 }

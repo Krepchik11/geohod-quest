@@ -621,6 +621,10 @@ export const api = {
   // Which social buttons to render + the public ids they need. Both null → hidden.
   getAuthProviders: () =>
     apiFetch<AuthProviders>('/api/auth/providers'),
+  // Public effective verdicts of the client-visible feature flags (the player
+  // runtime keys UI behavior off these; see lib/client-features.ts).
+  getPublicFeatures: () =>
+    apiFetch<Record<string, boolean>>('/api/features'),
   // Auth v2 (§6): the email-first step + recovery R1 + soft confirmation.
   authIdentify: (email: string) =>
     apiFetch<{ exists: boolean; confirmed: boolean }>('/api/auth/identify', {

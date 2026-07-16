@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api';
 import AdminShell, { AdminGate, useAdminAccess } from './shell';
+import { AdminConfirmSheet, AdminPageHead, AdminToast } from './ui';
 import {
   contactsOf,
   detectHint,
@@ -18,10 +19,11 @@ import {
 } from '../../lib/admin-users';
 
 /**
- * Admin · Users (admin-users spec) — a faithful build of Admin Users.dc.html in the
- * real stack: a searchable, role-filterable list → tap → profile with a role editor,
- * a confirm sheet, and a success toast. Mobile-first 480px frame (styles/admin-users.css)
- * under the unified admin shell (app/admin/shell.tsx: logo + tabs + user menu).
+ * Admin · Users (admin-users spec) — a searchable, role-filterable list → tap →
+ * profile with a role editor, a confirm sheet, and a success toast. Wears the
+ * shared admin-page scaffolding (app/admin/ui.tsx + styles/admin-page.css) under
+ * the unified shell, like every other tab; the master-detail split is its own
+ * (styles/admin-users.css).
  *
  * Access is gated twice: the backend authorizes every /api/admin/* call (role==admin
  * session OR the shared ADMIN_TOKEN), and useAdminAccess checks /api/players/me up
@@ -152,17 +154,13 @@ export default function AdminUsersPage() {
   return (
     <AdminShell active="users">
       <AdminGate access={access}>
-        <div className="au-root">
-          <div className="au-frame">
+        <div className="ap-root">
+          <main className="ap-main">
+            <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Пользователи" />
             {/* §10.3: ≥1024px master-detail — list left (460px, selected row gets a
                 blue bar), profile right; below 1024 the panes swap like screens. */}
             <div className={`au-split${selected ? ' has-selected' : ''}`}>
-              <main className="au-main au-pane au-pane--list">
-                <div>
-                  <div className="au-eyebrow">УПРАВЛЕНИЕ</div>
-                  <h1 className="au-title">Пользователи</h1>
-                </div>
-
+              <div className="au-main au-pane au-pane--list">
                 <div className="au-search-row">
                   <div className="au-search">
                     <span className="au-search-icon" aria-hidden />
@@ -291,7 +289,7 @@ export default function AdminUsersPage() {
                     </div>
                   </div>
                 )}
-              </main>
+              </div>
               <aside className="au-main au-pane au-pane--detail">
                 {selected ? (
                   <>
@@ -363,54 +361,20 @@ export default function AdminUsersPage() {
             </div>
 
             {confirmOpen && selected && draftRole && (
-              <div
-                className="au-sheet-backdrop"
-                role="presentation"
-                onClick={() => !saving && setConfirmOpen(false)}
-              >
-                <div
-                  className="au-sheet"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label="Сменить роль"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="au-sheet-grip" aria-hidden />
-                  <div className="au-sheet-title">Сменить роль?</div>
-                  <div className="au-sheet-text">
-                    {titleOf(selected)} получит роль «{ROLE_LABELS[draftRole]}». Доступ изменится сразу.
-                  </div>
-                  <div className="au-sheet-actions">
-                    <button
-                      type="button"
-                      className="au-sheet-cancel"
-                      disabled={saving}
-                      onClick={() => setConfirmOpen(false)}
-                    >
-                      Отмена
-                    </button>
-                    <button
-                      type="button"
-                      className="au-sheet-apply"
-                      disabled={saving}
-                      onClick={applyRole}
-                    >
-                      {saving ? 'Сохраняем…' : 'Назначить'}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <AdminConfirmSheet
+                label="Сменить роль"
+                title="Сменить роль?"
+                text={`${titleOf(selected)} получит роль «${ROLE_LABELS[draftRole]}». Доступ изменится сразу.`}
+                applyLabel="Назначить"
+                busyLabel="Сохраняем…"
+                busy={saving}
+                onCancel={() => setConfirmOpen(false)}
+                onApply={() => void applyRole()}
+              />
             )}
 
-            {toast && (
-              <div className={`au-toast${toast.error ? ' au-toast--error' : ''}`} role="status">
-                <span className="au-toast-check" aria-hidden>
-                  {toast.error ? '!' : '✓'}
-                </span>
-                {toast.text}
-              </div>
-            )}
-          </div>
+            {toast && <AdminToast text={toast.text} error={toast.error} />}
+          </main>
         </div>
       </AdminGate>
     </AdminShell>

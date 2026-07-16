@@ -17,6 +17,7 @@ frontend/next-env.d.ts
 frontend/*.tsbuildinfo
 frontend/.vercel/
 frontend/.turbo/
+frontend/storybook-static/
 
 # Root level (if any extra builds)
 .next/

@@ -1,9 +1,11 @@
 /*
- * Unified admin shell (Admin Coupons.dc.html «единый шелл») — the one header
- * every admin page shares: site logo lockup + «АДМИНКА», Jost tabs like the
- * public site-nav, and the site user menu. Desktop: single 72px row with
- * centered tabs. Mobile (<768px): 60px brand row (logo-mark + stacked
- * GEOHOD/АДМИНКА) with the tabs in a second row underneath.
+ * App-shell header (`ash-*`, born as the Admin Coupons.dc.html «единый шелл»)
+ * — the ONE back-office top bar, rendered by components/SpaceHeader for both
+ * the admin space and the constructor dashboard: site logo lockup + space
+ * eyebrow («АДМИНКА»/«КОНСТРУКТОР»), Jost tabs like the public site-nav, and
+ * the site user menu. Desktop: single 72px row with centered tabs. Mobile
+ * (<768px): 60px brand row (logo-mark + stacked GEOHOD/<eyebrow>) with the
+ * tabs in a second row underneath.
  */
 
 .ash-root {
@@ -91,10 +93,6 @@
   .ash-tabs--row a { font-size: 12px; padding: 10px 0 12px; border-bottom-width: 2px; }
 }
 
-/* Page body under the shell: the admin-users frame keeps its own layout but
- * must not re-add a viewport-height minimum below the header. */
-.ash-root > .au-root { flex: 1; min-height: 0; }
-.ash-root .au-frame { min-height: 100%; }
 
 /* ---- shared access-state screens (checking / denied / error) ---- */
 .ash-state {

@@ -16,6 +16,7 @@ import "./styles/ctor-workspace.css";
 import "./styles/ctor-dashboard.css";
 import "./styles/admin-users.css";
 import "./styles/admin-shell.css";
+import "./styles/admin-page.css";
 import "./styles/admin-coupons.css";
 import "./styles/admin-features.css";
 import "./styles/admin-stats.css";

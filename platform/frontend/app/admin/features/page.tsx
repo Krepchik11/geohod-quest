@@ -10,6 +10,7 @@ import {
 } from '../../../lib/admin-features';
 import { WspToggle } from '../../quest-editor/controls';
 import AdminShell, { AdminGate, useAdminAccess } from '../shell';
+import { AdminPageHead, AdminToast } from '../ui';
 
 /**
  * Admin · Feature toggles: one row per registered flag (the registry lives in
@@ -74,17 +75,13 @@ export default function AdminFeaturesPage() {
   return (
     <AdminShell active="features">
       <AdminGate access={access}>
-        <div className="af-root">
-          <main className="af-main">
-            <div className="af-head">
-              <div className="af-eyebrow">УПРАВЛЕНИЕ</div>
-              <h1 className="af-title">Функции</h1>
-              <p className="af-lede">
-                Включение и выключение возможностей платформы на лету. Список функций задаётся
-                кодом; здесь хранится только переопределение — сброшенная функция возвращается к
-                значению по умолчанию.
-              </p>
-            </div>
+        <div className="ap-root">
+          <main className="ap-main ap-main--narrow">
+            <AdminPageHead
+              eyebrow="УПРАВЛЕНИЕ"
+              title="Функции"
+              lede="Включение и выключение возможностей платформы на лету. Список функций задаётся кодом; здесь хранится только переопределение — сброшенная функция возвращается к значению по умолчанию."
+            />
 
             {loadError ? (
               <div className="af-list">
@@ -107,7 +104,7 @@ export default function AdminFeaturesPage() {
             )}
           </main>
 
-          {toast && <div className="af-toast" role="status">{toast}</div>}
+          {toast && <AdminToast text={toast} />}
         </div>
       </AdminGate>
     </AdminShell>

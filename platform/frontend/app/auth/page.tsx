@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import SiteHeader from '../SiteHeader';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api } from '../../lib/api';
@@ -13,7 +14,6 @@ import {
   subscribeSession,
   type Session,
 } from '../../lib/identity';
-import { logoutAndReset } from '../../lib/session-actions';
 
 /**
  * Auth v2 (§6.1/§6.2) — ONE email-first form instead of the two-pill toggle.
@@ -106,6 +106,13 @@ export default function AuthPage() {
   const [fieldError, setFieldError] = useState<React.ReactNode>(null);
   const [loading, setLoading] = useState(false);
   const session: Session | null = useSyncExternalStore(subscribeSession, getSession, () => null);
+  const router = useRouter();
+
+  // Signed in — whether just now or on arrival — means this page has nothing
+  // left to do: go straight to the main page (no interim «Вы вошли» card).
+  useEffect(() => {
+    if (session) router.replace('/');
+  }, [session, router]);
 
   const applySession = useCallback((s: Session | null) => {
     if (s) setSession(s);
@@ -199,24 +206,7 @@ export default function AuthPage() {
     }
   };
 
-  if (session) {
-    return (
-      <div className="site" style={{ background: 'var(--bg-subtle)' }}>
-        <SiteHeader />
-        <div className="auth-wrap">
-          <div className="af-card card">
-            <h2 className="af-title">Вы вошли</h2>
-            <p className="af-sub"><b>{session.email ?? session.display_name ?? 'Аккаунт подключён'}</b><br />Покупки и монеты привязаны к аккаунту — войдите с любого устройства.</p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Link className="btn btn--md" href="/profile">Мой профиль</Link>
-              <Link className="btn btn--md btn--secondary" href="/my-quests">Мои квесты</Link>
-              <button className="btn btn--md btn--quiet" type="button" onClick={() => { void logoutAndReset(); setPassword(''); toEmailStep(); }}>Выйти</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (session) return null; // redirecting (effect above)
 
   return (
     <div className="site" style={{ background: 'var(--bg-subtle)' }}>

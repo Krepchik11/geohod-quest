@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import Link from 'next/link';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
 import {
   AGE_TARGET_LABEL,
@@ -10,13 +9,14 @@ import {
   type CtorComplexity,
 } from '../../lib/constructor-model';
 import QuestFilters, { matchesAttrs, type QuestFiltersValue } from '../components/QuestFilters';
-import UserMenu from '../components/UserMenu';
+import SpaceHeader from '../components/SpaceHeader';
 import StatusControl from './StatusControl';
 
 /**
  * Конструктор-дашборд — главная страница конструктора. Точный порт дизайна
- * «Quest Constructor Dashboard.dc.html» (claude.ai/design): шапка «на главную ·
- * заголовок · профиль», приветствие + «создать», фильтры (поиск/автор/статус),
+ * «Quest Constructor Dashboard.dc.html» (claude.ai/design): общий топ-бар
+ * бэк-офиса (SpaceHeader, как в админке), приветствие + «создать», фильтры
+ * (поиск/автор/статус),
  * список созданных квестов с редактируемым статусом и действиями
  * (редактировать/запустить/дублировать/удалить), модалка удаления и тосты.
  *
@@ -121,22 +121,8 @@ export default function Dashboard({
 
   return (
     <div className="qcd-root">
-      {/* ===== Шапка ===== */}
-      <header className="qcd-header">
-        <Link href="/" className="qcd-home" aria-label="На главную">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M5 12l7-7M5 12l7 7" stroke="var(--blue)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          На главную
-        </Link>
-
-        <div className="qcd-brand">
-          <span className="qcd-brand__mark">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.4 7-11a7 7 0 10-14 0c0 4.6 7 11 7 11z" stroke="#fff" strokeWidth="1.7" /><circle cx="12" cy="10" r="2.4" stroke="#fff" strokeWidth="1.7" /></svg>
-          </span>
-          <span className="qcd-brand__name">Конструктор квестов</span>
-        </div>
-
-        <UserMenu siteLink />
-      </header>
+      {/* ===== Шапка — общий топ-бар бэк-офиса (как в админке) ===== */}
+      <SpaceHeader eyebrow="КОНСТРУКТОР" />
 
       <main className="qcd-main">
         {/* §9.3: заголовок страницы + создание — без Prata-приветствия. */}

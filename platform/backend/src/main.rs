@@ -325,6 +325,8 @@ fn feature_available(state: &AppState, feature: Feature) -> bool {
         Feature::AuthTelegram => state.telegram.is_some(),
         Feature::PaymentsMock => true,
         Feature::PaymentsYookassa => state.yookassa.is_some(),
+        // Pure client behavior — nothing to configure server-side.
+        Feature::PlayerBackButton => true,
     }
 }
 
@@ -502,6 +504,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/admin/features", get(list_features_handler))
         .route("/api/admin/features/{key}", post(set_feature_handler))
+        .route("/api/features", get(public_features_handler))
         .route("/api/admin/stats", get(admin_stats_overview_handler))
         .route(
             "/api/admin/stats/{quest_id}",
@@ -3008,6 +3011,26 @@ async fn list_features_handler(
         .map(|f| feature_wire(&state, f, overrides.get(f.key()).copied()))
         .collect();
     Ok(Json(rows))
+}
+
+/// GET /api/features — effective verdicts of the client-visible flags only
+/// (`Feature::client_visible`). Public by design: the player runtime keys UI
+/// behavior off these without credentials; server-enforced flags never appear.
+async fn public_features_handler(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let overrides = state.flags.all_overrides().await?;
+    let map: serde_json::Map<String, serde_json::Value> = Feature::ALL
+        .into_iter()
+        .filter(|f| f.client_visible())
+        .map(|f| {
+            (
+                f.key().to_string(),
+                f.effective(overrides.get(f.key()).copied()).into(),
+            )
+        })
+        .collect();
+    Ok(Json(map.into()))
 }
 
 /// Body for the feature-toggle mutation: `enabled: true|false` stores an
@@ -8092,9 +8115,12 @@ mod tests {
         let rows = v.as_array().expect("feature list");
         assert_eq!(rows.len(), features::Feature::ALL.len());
         for row in rows {
-            // No overrides stored: every flag sits on its code default.
-            assert_eq!(row["override"], Value::Null);
-            assert_eq!(row["effective"], row["default_enabled"]);
+            // A fresh deployment stores no overrides, so every flag reads
+            // its code default — off.
+            let key = row["key"].as_str().expect("key");
+            assert_eq!(row["default_enabled"], json!(false), "{key} defaults off");
+            assert_eq!(row["override"], Value::Null, "{key} has no override");
+            assert_eq!(row["effective"], json!(false), "{key} is off");
         }
         // Capability on this unconfigured test app: only the mock is available.
         let available: Vec<(&str, bool)> = rows
@@ -8113,8 +8139,32 @@ mod tests {
                 ("auth_telegram", false),
                 ("payments_mock", true),
                 ("payments_yookassa", false),
+                ("player_back_button", true),
             ]
         );
+    }
+
+    /// GET /api/features is public and serves ONLY the client-visible flags'
+    /// effective verdicts — the player runtime keys behavior off it without
+    /// admin credentials, and server-side flags never leak through it.
+    #[tokio::test]
+    async fn public_features_endpoint_serves_client_visible_flags() {
+        let app = test_app();
+        let (st, v) = get_json(&app, "/api/features").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v, json!({ "player_back_button": false }));
+
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/player_back_button",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v, json!({ "player_back_button": true }));
     }
 
     #[tokio::test]
@@ -8165,7 +8215,8 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
 
-        // `enabled: null` clears the override — back to the code default (on).
+        // `enabled: null` clears the override — back to the code default,
+        // which is OFF for every flag since the default-off policy.
         let (st, row) = post_json_h(
             &app,
             "/api/admin/features/payments_mock",
@@ -8175,6 +8226,19 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(row["override"], Value::Null);
+        assert_eq!(row["effective"], json!(false));
+        let (_, v) = get_json(&app, "/api/payments/providers").await;
+        assert_eq!(v["providers"], json!([]));
+
+        // Switching it explicitly on restores checkout.
+        let (st, row) = post_json_h(
+            &app,
+            "/api/admin/features/payments_mock",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
         assert_eq!(row["effective"], json!(true));
         let (_, v) = get_json(&app, "/api/payments/providers").await;
         assert_eq!(v["providers"], json!(["mock"]));
@@ -8277,7 +8341,7 @@ mod tests {
             .expect("payments_yookassa row");
         assert_eq!(row["override"], json!(false));
 
-        // Clear: the row is deleted and the default applies again.
+        // Clear: the row is deleted and the code default (off) applies again.
         let (st, row) = post_json_h(
             &app,
             "/api/admin/features/payments_yookassa",
@@ -8287,6 +8351,18 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(row["override"], Value::Null);
+        assert_eq!(row["effective"], json!(false));
+
+        // Leave the shared database as migration 0015 seeded it (override on),
+        // so reruns and the other pg suites see the launch-era state.
+        let (st, row) = post_json_h(
+            &app,
+            "/api/admin/features/payments_yookassa",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
         assert_eq!(row["effective"], json!(true));
     }
 

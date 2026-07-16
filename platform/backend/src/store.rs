@@ -2447,14 +2447,24 @@ impl PaymentStores {
 /// registry itself is code — `crate::features`). Absence of a key means "use
 /// the compiled-in default"; that is why `clear` exists as a first-class
 /// operation rather than storing the default as a row.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InMemoryFlagStore {
     overrides: HashMap<String, bool>,
 }
 
+impl Default for InMemoryFlagStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryFlagStore {
+    /// A fresh store holds no overrides, so every flag reads its code default —
+    /// the in-memory twin of an empty `feature_overrides` table.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            overrides: HashMap::new(),
+        }
     }
 
     /// The stored override for `key`, or `None` when the default applies.
@@ -2538,6 +2548,18 @@ impl FlagStores {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh store holds NO overrides: every flag is off until an admin turns
+    /// it on — the in-memory twin of an empty `feature_overrides` table.
+    #[test]
+    fn fresh_flag_store_has_no_overrides() {
+        let mut store = InMemoryFlagStore::new();
+        assert!(store.all().is_empty(), "a fresh store stores nothing");
+        store.set(crate::features::Feature::PaymentsMock.key(), true);
+        assert_eq!(store.get("payments_mock"), Some(true));
+        store.clear(crate::features::Feature::PaymentsMock.key());
+        assert_eq!(store.get("payments_mock"), None);
+    }
 
     fn fact(kind: FactKind, step: i32, delta: i32) -> Fact {
         Fact {

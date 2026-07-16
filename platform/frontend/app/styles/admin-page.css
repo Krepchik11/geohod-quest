@@ -1,0 +1,183 @@
+/*
+ * Shared admin-page scaffolding (`ap-*`) — rendered by app/admin/ui.tsx and
+ * the per-tab containers, so every tab under the app-shell header wears the
+ * SAME page chrome: grey #f7f8fa canvas, centered main column, eyebrow+h1
+ * head, confirm bottom-sheet (centered modal on desktop) and status toast.
+ * Per-tab stylesheets keep only what is unique to that tab's body.
+ */
+
+.ap-root {
+  flex: 1;
+  min-height: 0;
+  background: #f7f8fa;
+  color: #1a2b48;
+  font-family: var(--font-geist-sans), "Inter", system-ui, sans-serif;
+}
+.ap-root *,
+.ap-root *::before,
+.ap-root *::after {
+  box-sizing: border-box;
+}
+
+.ap-main {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 44px 40px 72px;
+  display: flex;
+  flex-direction: column;
+}
+/* Single-column tabs (features) read better narrow. */
+.ap-main--narrow { max-width: 860px; }
+
+/* ---- page head: eyebrow + h1 (+ lede) left, actions right ---- */
+.ap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ap-eyebrow {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.26em;
+  color: #83858c;
+}
+.ap-title {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #000f08;
+}
+.ap-lede {
+  margin: 10px 0 0;
+  max-width: 560px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #5b6373;
+}
+
+/* ---- confirm sheet (bottom sheet; centered modal ≥768px) ---- */
+.ap-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(20, 30, 50, 0.4);
+  animation: ap-fade-in 0.18s ease both;
+}
+.ap-sheet {
+  width: min(480px, 100%);
+  background: #fff;
+  border-radius: 22px 22px 0 0;
+  padding: 24px 22px calc(24px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: ap-sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.ap-sheet-grip {
+  width: 42px;
+  height: 5px;
+  border-radius: 4px;
+  background: #e2e3e7;
+  margin: 0 auto 8px;
+}
+.ap-sheet-title {
+  font-weight: 600;
+  font-size: 19px;
+  color: #000f08;
+}
+.ap-sheet-text {
+  font-size: 14px;
+  color: #5b6270;
+  line-height: 1.45;
+}
+.ap-sheet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.ap-sheet-cancel,
+.ap-sheet-apply {
+  height: 52px;
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+.ap-sheet-cancel {
+  flex: 1;
+  background: #f0f1f3;
+  color: #1a2b48;
+}
+.ap-sheet-apply {
+  flex: 1.5;
+  background: #3b71fe;
+  color: #fff;
+}
+.ap-sheet-apply--danger { background: #c0395c; }
+.ap-sheet-apply:disabled,
+.ap-sheet-cancel:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+@media (min-width: 768px) {
+  .ap-sheet-backdrop { align-items: center; padding: 24px; }
+  .ap-sheet { border-radius: 20px; max-width: 440px; }
+  .ap-sheet-grip { display: none; }
+}
+
+/* ---- status toast ---- */
+.ap-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 20px;
+  border-radius: 26px;
+  background: #1a2b48;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 10px 30px rgba(20, 30, 50, 0.3);
+  animation: ap-toast-in 0.22s ease both;
+}
+.ap-toast-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3dba6e;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: #fff;
+}
+.ap-toast--error .ap-toast-check { background: #e2574c; }
+
+@keyframes ap-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ap-sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes ap-toast-in {
+  from { transform: translate(-50%, 10px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+@media (max-width: 767px) {
+  .ap-main { padding: 22px 16px 40px; }
+}
