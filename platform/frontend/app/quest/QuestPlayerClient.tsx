@@ -28,7 +28,7 @@ import { useClientFeature } from '../../lib/client-features';
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
-import { useHistoryBackTrap } from './useHistoryBackTrap';
+import { useStepHistory } from './useStepHistory';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
   PlayerFrame, StepView, TopBar, CoinToast, PCheck,
@@ -307,38 +307,45 @@ export default function QuestPlayerClient({
     [steps, facts, appendFact, showToast, ui.soundOn]
   );
 
+  // player_back_button (feature flag, off by default): every advance pushes a
+  // real history entry, so the system/browser back button traverses steps
+  // natively — consecutive presses rewind all the way to step 0, then one
+  // press leaves. An open overlay (menu, post-finale catalog) eats the press.
+  // See useStepHistory for why entries-mirror-steps is the only design the
+  // browsers' anti-trapping rules allow.
+  const historyBackOn = useClientFeature('player_back_button');
+  const stepHistory = useStepHistory(historyBackOn, {
+    stepIdx,
+    // View follows the traversed entry, clamped: entries can outlive the
+    // attempt that made them (replay reloads the page but keeps history), and
+    // maxStepIdx caps a stale redo at the furthest step actually reached.
+    onGoToStep: (idx) => {
+      const to = Math.max(0, Math.min(idx, maxStepIdx, steps.length - 1));
+      setUi((u) => ({ ...u, wrong: false, answer: '' }));
+      dispatch({ type: 'advance', to });
+    },
+    isOverlayOpen: () => ui.menuOpen || ui.showCatalog,
+    onCloseOverlay: () =>
+      setUi((u) => (u.menuOpen ? { ...u, menuOpen: false } : { ...u, showCatalog: false })),
+  });
+
   const doAdvance = useCallback(() => {
-    dispatch({ type: 'advance', to: Math.min(stepIdx + 1, steps.length - 1) });
-  }, [stepIdx, steps.length]);
+    const to = Math.min(stepIdx + 1, steps.length - 1);
+    if (to === stepIdx) return;
+    stepHistory.advance(stepIdx, to);
+    dispatch({ type: 'advance', to });
+  }, [stepIdx, steps.length, stepHistory]);
 
   // Back is a VIEW rewind only: the fact log is append-only and every completion
   // side effect (gift, bonus, attempt_completed) is idempotency-guarded, so
   // rereading and re-advancing through already-passed steps never double-fires.
+  // The on-screen back button moves the view directly (no history traversal);
+  // the entry it diverges from is healed by the next advance's replaceState.
   const doBack = useCallback(() => {
     if (stepIdx === 0) return;
     setUi((u) => ({ ...u, wrong: false, answer: '' }));
     dispatch({ type: 'advance', to: stepIdx - 1 });
   }, [stepIdx, setUi]);
-
-  // player_back_button (feature flag, off by default): the system/browser back
-  // button rewinds in-page — overlay first, then catalog→finale, then one step
-  // back — and leaves the play screen only from step 0.
-  const historyBackOn = useClientFeature('player_back_button');
-  useHistoryBackTrap(historyBackOn, () => {
-    if (ui.menuOpen) {
-      setUi((u) => ({ ...u, menuOpen: false }));
-      return true;
-    }
-    if (ui.showCatalog) {
-      setUi((u) => ({ ...u, showCatalog: false }));
-      return true;
-    }
-    if (stepIdx > 0) {
-      doBack();
-      return true;
-    }
-    return false;
-  });
 
   const handlePhysicalConfirm = useCallback(() => {
     appendFact({
