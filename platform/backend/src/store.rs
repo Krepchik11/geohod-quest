@@ -2447,14 +2447,27 @@ impl PaymentStores {
 /// registry itself is code — `crate::features`). Absence of a key means "use
 /// the compiled-in default"; that is why `clear` exists as a first-class
 /// operation rather than storing the default as a row.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InMemoryFlagStore {
     overrides: HashMap<String, bool>,
 }
 
+impl Default for InMemoryFlagStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryFlagStore {
+    /// A fresh store carries the launch-era ON overrides — the in-memory twin
+    /// of migration `0015_seed_feature_overrides.sql` (see `Feature::SEEDED_ON`).
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            overrides: crate::features::Feature::SEEDED_ON
+                .into_iter()
+                .map(|f| (f.key().to_string(), true))
+                .collect(),
+        }
     }
 
     /// The stored override for `key`, or `None` when the default applies.
@@ -2538,6 +2551,19 @@ impl FlagStores {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh in-memory store carries the launch-era ON overrides — the
+    /// in-memory twin of migration 0015 (see `Feature::SEEDED_ON`).
+    #[test]
+    fn fresh_flag_store_seeds_launch_flags_on() {
+        let store = InMemoryFlagStore::new();
+        for f in crate::features::Feature::SEEDED_ON {
+            assert_eq!(store.get(f.key()), Some(true), "{} must seed on", f.key());
+        }
+        let mut store = store;
+        store.clear(crate::features::Feature::PaymentsMock.key());
+        assert_eq!(store.get("payments_mock"), None);
+    }
 
     fn fact(kind: FactKind, step: i32, delta: i32) -> Fact {
         Fact {
