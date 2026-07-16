@@ -153,6 +153,9 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 
 /* SITE — fluid shell (§1): no width floor, clamp gutters */
 .container { max-width:1240px; margin-inline:auto; padding-inline:clamp(20px, 4vw, 42px); }
+/* The store section alone: wide enough for the grid's five 303px columns
+   (+4 gaps + side padding); everything else keeps the 1240px design width. */
+.container--wide { max-width:calc(5 * 303px + 4 * 24.5px + 2 * 42px); }
 
 .site-header { position:relative; z-index:20; display:flex; align-items:center; height:96px; gap:24px; }
 /* §2.5 header auth slot: anonymous = text pill; signed-in = avatar with presence dot */
@@ -184,6 +187,9 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .user-menu__dropdown a, .user-menu__dropdown button { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--text); }
 .user-menu__dropdown button { background:none; border:0; padding:0; margin:0; text-align:left; cursor:pointer; }
 .user-menu__dropdown a:hover, .user-menu__dropdown button:hover { color:var(--blue); }
+.user-menu__head { display:flex; flex-direction:column; gap:2px; padding-bottom:10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+.user-menu__name { font-size:13px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+.user-menu__role { font-size:11.5px; color:var(--muted); }
 
 .hero { position:relative; height:480px; background:center/cover no-repeat; }
 .hero::before { content:""; position:absolute; inset:0; background:rgba(26,43,72,.05); }
@@ -207,7 +213,9 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .feature h3 { font-size:16px; line-height:1.2; }
 .feature p { margin-top:8px; font-size:14px; }
 
-.quest-grid { display:flex; gap:24.5px; justify-content:center; }
+/* Real rows: fixed-width card columns that wrap, centered, and capped at five
+   per row (the max-width is exactly 5 columns + 4 gaps) on any viewport. */
+.quest-grid { display:grid; grid-template-columns:repeat(auto-fill, 303px); gap:24.5px; justify-content:center; max-width:calc(5 * 303px + 4 * 24.5px); margin-left:auto; margin-right:auto; }
 .quest-card { position:relative; width:303px; overflow:hidden; transition:transform .15s ease,box-shadow .15s ease; }
 .quest-card:hover { transform:translateY(-4px); box-shadow:0 16px 24px rgba(0,0,0,.08),1px 2px 15px rgba(0,0,0,.08); }
 .quest-card__photo { position:relative; display:block; height:220px; background:center/cover no-repeat; border-radius:var(--r-card) var(--r-card) 0 0; }
@@ -266,10 +274,13 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 .site-footer__links a:hover { text-decoration:underline; }
 .site-footer__copy { font-size:12px; opacity:.55; }
 
+.shop-note__reset { background:none; border:0; padding:0; color:var(--blue); font:inherit; cursor:pointer; text-decoration:underline; }
+
 /* §1.2 mobile bottom tab bar — desktop hides it entirely */
 .tab-bar { display:none; }
 @media (max-width: 767px) {
-  .tab-bar { position:fixed; left:0; right:0; bottom:0; z-index:50; display:grid; grid-template-columns:1fr 1fr 1fr; height:calc(64px + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:var(--white); box-shadow:0 -4px 20px rgba(26,43,72,.08); }
+  /* equal columns for however many tabs the viewer's role shows (3–5) */
+  .tab-bar { position:fixed; left:0; right:0; bottom:0; z-index:50; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; height:calc(64px + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:var(--white); box-shadow:0 -4px 20px rgba(26,43,72,.08); }
   /* keep content clear of the fixed bar on the pages that show it */
   body:has(.tab-bar) { padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
   .tab-bar__tab { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:var(--muted); font-size:11px; font-weight:500; }
@@ -278,6 +289,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .tab-bar__ic--shop span { width:7px; height:7px; border-radius:2px; background:currentColor; }
   .tab-bar__ic--list { display:flex; flex-direction:column; gap:3px; }
   .tab-bar__ic--list span { width:16px; height:2.5px; border-radius:2px; background:currentColor; }
+  .tab-bar__ic--svg { display:grid; place-items:center; width:22px; height:22px; }
   .tab-bar__ic--user { display:flex; flex-direction:column; align-items:center; gap:1px; }
   .tab-bar__ic--user span:first-child { width:7px; height:7px; border-radius:50%; background:currentColor; }
   .tab-bar__ic--user span:last-child { width:14px; height:7px; border-radius:7px 7px 2px 2px; background:currentColor; }
@@ -286,7 +298,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 /* §1.1 storefront restacks — the only media queries the site layer keeps */
 @media (max-width: 1240px) {
   html, body { overflow-x:hidden; }
-  .quest-grid { flex-wrap:wrap; gap:24px; }
+  .quest-grid { gap:24px; }
   .features { grid-template-columns:repeat(2, minmax(0, 360px)); }
 }
 @media (max-width: 900px) {
@@ -302,7 +314,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .hero__subtitle { margin-top:12px; }
   .hero__inner .btn { margin-top:24px; width:100%; }
   .section-title { font-size:16px; }
-  .quest-grid { gap:20px; }
+  .quest-grid { gap:20px; grid-template-columns:minmax(0, 360px); }
   .quest-card { width:100%; max-width:360px; margin-left:auto; margin-right:auto; }
   .site-footer__grid { grid-template-columns:1fr; gap:20px; }
   .site-footer__links { justify-self:start; }

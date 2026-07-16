@@ -19,7 +19,6 @@ import {
   type CtorTemplate,
 } from '../../lib/constructor-model';
 import { api, ApiError, type ConstructorQuestWire, type CtorStatus } from '../../lib/api';
-import { logoutAndReset } from '../../lib/session-actions';
 import { BuilderScreen } from './Builder';
 import Dashboard from './Dashboard';
 import { TestOverlay } from './TestPlayer';
@@ -48,8 +47,6 @@ export default function Workspace() {
   const [list, setList] = useState<ConstructorQuestWire[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState('Редактор');
-  const [profileRole, setProfileRole] = useState('editor');
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -98,23 +95,11 @@ export default function Workspace() {
     }
   }, []);
 
-  // Mount: identity (for the profile menu) + the quest list.
+  // Mount: the quest list (identity lives in the shared UserMenu). The
+  // microtask hop keeps the fetch's setState out of the synchronous effect body.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const me = await api.me();
-        if (!cancelled) {
-          setProfileName(me.display_name || me.email || 'Редактор');
-          setProfileRole(me.role || 'editor');
-        }
-      } catch {
-        /* keep defaults — the gate already granted access */
-      }
-      await refreshList();
-    })();
+    void Promise.resolve().then(refreshList);
     return () => {
-      cancelled = true;
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, [refreshList]);
@@ -263,12 +248,6 @@ export default function Workspace() {
         showToast(errMessage(e));
       }
     }
-  };
-
-  const onLogout = () => {
-    void logoutAndReset().finally(() => {
-      window.location.href = '/';
-    });
   };
 
   // ---- Builder actions ----
@@ -438,8 +417,6 @@ export default function Workspace() {
             quests={list}
             loading={listLoading}
             error={listError}
-            profileName={profileName}
-            profileRole={profileRole}
             toast={toast}
             actions={{
               onCreate: () => void createQuest(),
@@ -449,7 +426,6 @@ export default function Workspace() {
               onDelete: (q) => void deleteQuest(q),
               onStatusChange: (q, status) => void changeStatus(q, status),
               onOpenPublish: (q) => void openPublish(q.quest_id),
-              onLogout,
             }}
           />
           {test ? (

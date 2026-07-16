@@ -110,25 +110,15 @@ impl RedeemReject {
     }
 }
 
-/// Max coupon code length (matches the DB CHECK in `0009_coupons.sql`).
-pub const CODE_MAX_LEN: usize = 32;
-/// Min coupon code length.
-pub const CODE_MIN_LEN: usize = 3;
-
-/// Normalize and validate a coupon code: trim, uppercase, then require
-/// 3–32 chars of latin letters, digits and dashes with at least one
-/// letter/digit («Латиница и цифры, без пробелов»).
+/// Normalize a coupon code: trim and uppercase (Unicode-aware, so codes stay
+/// case-insensitive in any alphabet). The only rule is that the trimmed code
+/// must be non-empty.
 pub fn normalize_code(raw: &str) -> Result<String, AppError> {
-    let code = raw.trim().to_ascii_uppercase();
-    let len_ok = (CODE_MIN_LEN..=CODE_MAX_LEN).contains(&code.chars().count());
-    let charset_ok = code
-        .chars()
-        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-');
-    let has_alnum = code.chars().any(|c| c.is_ascii_alphanumeric());
-    if !len_ok || !charset_ok || !has_alnum {
-        return Err(AppError::BadRequest(format!(
-            "код купона — {CODE_MIN_LEN}–{CODE_MAX_LEN} символов: латиница, цифры и дефис"
-        )));
+    let code = raw.trim().to_uppercase();
+    if code.is_empty() {
+        return Err(AppError::BadRequest(
+            "код купона не может быть пустым".into(),
+        ));
     }
     Ok(code)
 }
@@ -149,11 +139,13 @@ pub fn validate_discount(discount: &Discount) -> Result<(), AppError> {
 /// Validity itself has ONE definition — [`crate::admin_stats::parse_day`] —
 /// this wrapper only maps the failure to the coupon form's error message.
 pub fn validate_date(date: &str) -> Result<(), AppError> {
-    crate::admin_stats::parse_day(date).map(|_| ()).ok_or_else(|| {
-        AppError::BadRequest(format!(
-            "некорректная дата '{date}' (нужен формат ГГГГ-ММ-ДД)"
-        ))
-    })
+    crate::admin_stats::parse_day(date)
+        .map(|_| ())
+        .ok_or_else(|| {
+            AppError::BadRequest(format!(
+                "некорректная дата '{date}' (нужен формат ГГГГ-ММ-ДД)"
+            ))
+        })
 }
 
 /// True when the coupon's last valid date lies strictly before `today`
@@ -253,14 +245,28 @@ mod tests {
     }
 
     #[test]
-    fn code_normalizes_and_validates() {
+    fn code_normalizes_and_rejects_only_empty() {
         assert_eq!(normalize_code("  leto-20 ").unwrap(), "LETO-20");
         assert_eq!(normalize_code("GEOHOD300").unwrap(), "GEOHOD300");
-        assert!(normalize_code("ab").is_err(), "too short");
-        assert!(normalize_code(&"A".repeat(33)).is_err(), "too long");
-        assert!(normalize_code("ЛЕТО-20").is_err(), "cyrillic rejected");
-        assert!(normalize_code("A B").is_err(), "space rejected");
-        assert!(normalize_code("---").is_err(), "needs a letter or digit");
+        assert_eq!(
+            normalize_code("лето-20").unwrap(),
+            "ЛЕТО-20",
+            "cyrillic allowed"
+        );
+        assert_eq!(normalize_code("ab").unwrap(), "AB", "short allowed");
+        assert_eq!(
+            normalize_code(&"A".repeat(64)).unwrap(),
+            "A".repeat(64),
+            "long allowed"
+        );
+        assert_eq!(normalize_code("A B").unwrap(), "A B", "inner space allowed");
+        assert_eq!(
+            normalize_code("---").unwrap(),
+            "---",
+            "any characters allowed"
+        );
+        assert!(normalize_code("").is_err(), "empty rejected");
+        assert!(normalize_code("   ").is_err(), "whitespace-only rejected");
     }
 
     #[test]

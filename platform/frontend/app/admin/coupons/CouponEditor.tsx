@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, ApiError, type CouponPayload, type PublishedQuestWire } from '../../../lib/api';
+import { api, ApiError, apiErrorMessage, type CouponPayload, type PublishedQuestWire } from '../../../lib/api';
 import {
   STATUS_LABELS,
   formatRubles,
@@ -36,6 +36,7 @@ interface FormState {
   validUntil: string;
   noLimit: boolean;
   maxRedemptions: string;
+  noPerUserLimit: boolean;
   perUserLimit: string;
   allQuests: boolean;
   questIds: string[];
@@ -50,7 +51,8 @@ const EMPTY_FORM: FormState = {
   validUntil: '',
   noLimit: true,
   maxRedemptions: '',
-  perUserLimit: '1',
+  noPerUserLimit: true,
+  perUserLimit: '',
   allQuests: true,
   questIds: [],
   paused: false,
@@ -65,6 +67,7 @@ function formFrom(c: AdminCoupon): FormState {
     validUntil: c.validUntil ?? '',
     noLimit: c.maxRedemptions === null,
     maxRedemptions: c.maxRedemptions === null ? '' : String(c.maxRedemptions),
+    noPerUserLimit: c.perUserLimit === null,
     perUserLimit: c.perUserLimit === null ? '' : String(c.perUserLimit),
     allQuests: c.questIds === null,
     questIds: c.questIds ?? [],
@@ -90,9 +93,9 @@ export function buildPayload(f: FormState): { payload: CouponPayload } | { error
   if (maxRedemptions !== null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return { error: 'Лимит использований — целое число больше нуля, либо «Без лимита».' };
   }
-  const perUser = f.perUserLimit.trim() === '' ? null : Number(f.perUserLimit);
+  const perUser = f.noPerUserLimit ? null : Number(f.perUserLimit);
   if (perUser !== null && (!Number.isInteger(perUser) || perUser <= 0)) {
-    return { error: 'Лимит на пользователя — целое число больше нуля, либо пустое поле.' };
+    return { error: 'Лимит на пользователя — целое число больше нуля, либо «Без лимита».' };
   }
   if (!f.allQuests && f.questIds.length === 0) {
     return { error: 'Выберите хотя бы один квест или переключитесь на «Все квесты».' };
@@ -113,15 +116,7 @@ export function buildPayload(f: FormState): { payload: CouponPayload } | { error
 
 /** The backend's {"error": msg} body, or a generic fallback. */
 function serverMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(err.body) as { error?: string };
-      if (parsed.error) return parsed.error;
-    } catch {
-      /* non-JSON body — fall through */
-    }
-  }
-  return 'Не удалось сохранить купон. Проверьте соединение и попробуйте ещё раз.';
+  return apiErrorMessage(err, 'Не удалось сохранить купон. Проверьте соединение и попробуйте ещё раз.');
 }
 
 export default function CouponEditor({ couponId }: { couponId?: string }) {
@@ -288,14 +283,13 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                             placeholder="LETO-20"
                             autoComplete="off"
                             spellCheck={false}
-                            maxLength={32}
                           />
                           <button type="button" className="ac-gen" onClick={generate}>
                             Сгенерировать
                           </button>
                         </div>
                         <div className="ac-field-hint">
-                          Латиница и цифры, без пробелов. Игрок вводит код в окне покупки.
+                          Любой непустой код. Игрок вводит его в окне покупки.
                         </div>
                       </div>
                       <div className="ac-grid-2">
@@ -390,12 +384,19 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                             className="ac-input ac-input--num"
                             inputMode="numeric"
                             value={form.perUserLimit}
+                            disabled={form.noPerUserLimit}
                             onChange={(e) => set('perUserLimit', e.target.value.replace(/\D/g, ''))}
                             placeholder="1"
                           />
-                          <div className="ac-field-hint">
-                            Сколько раз один игрок может применить код. Пусто — без лимита.
-                          </div>
+                          <label className="ac-check">
+                            <input
+                              type="checkbox"
+                              checked={form.noPerUserLimit}
+                              onChange={(e) => set('noPerUserLimit', e.target.checked)}
+                            />
+                            <span className="ac-check__box" aria-hidden />
+                            Без лимита
+                          </label>
                         </div>
                       </div>
                     </section>

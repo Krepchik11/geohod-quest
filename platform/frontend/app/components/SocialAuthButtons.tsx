@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type AuthProviders } from '../../lib/api';
+import { api, apiErrorMessage, type AuthProviders } from '../../lib/api';
 import { anonymousPlayerId, type Session } from '../../lib/identity';
 
 /**
@@ -233,7 +233,9 @@ export default function SocialAuthButtons({
           setBusy(false);
           onSession(s);
         })
-        .catch(() => fail('Не удалось войти через Google — попробуйте ещё раз.'));
+        .catch((err: unknown) =>
+          fail(apiErrorMessage(err, 'Не удалось войти через Google — попробуйте ещё раз.')),
+        );
     },
     [onSession, fail],
   );
@@ -248,7 +250,9 @@ export default function SocialAuthButtons({
           setBusy(false);
           onSession(s);
         })
-        .catch(() => fail('Не удалось войти через Telegram — попробуйте ещё раз.'));
+        .catch((err: unknown) =>
+          fail(apiErrorMessage(err, 'Не удалось войти через Telegram — попробуйте ещё раз.')),
+        );
     },
     [onSession, fail],
   );
