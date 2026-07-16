@@ -146,30 +146,14 @@ pub fn validate_discount(discount: &Discount) -> Result<(), AppError> {
 }
 
 /// Validate a `"YYYY-MM-DD"` calendar date (proleptic Gregorian, leap-aware).
+/// Validity itself has ONE definition — [`crate::admin_stats::parse_day`] —
+/// this wrapper only maps the failure to the coupon form's error message.
 pub fn validate_date(date: &str) -> Result<(), AppError> {
-    let bad = || {
+    crate::admin_stats::parse_day(date).map(|_| ()).ok_or_else(|| {
         AppError::BadRequest(format!(
             "некорректная дата '{date}' (нужен формат ГГГГ-ММ-ДД)"
         ))
-    };
-    let bytes = date.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return Err(bad());
-    }
-    let num = |s: &str| s.parse::<u32>().map_err(|_| bad());
-    let (y, m, d) = (num(&date[0..4])?, num(&date[5..7])?, num(&date[8..10])?);
-    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let days_in_month = match m {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return Err(bad()),
-    };
-    if d == 0 || d > days_in_month {
-        return Err(bad());
-    }
-    Ok(())
+    })
 }
 
 /// True when the coupon's last valid date lies strictly before `today`

@@ -58,7 +58,7 @@ pub fn today_utc() -> String {
 /// Uses Howard Hinnant's civil-from-days algorithm (epoch shifted to 0000-03-01
 /// so leap days fall at the end of the era), which is exact for every day in the
 /// proleptic Gregorian calendar.
-fn rfc3339_from_unix(secs: u64) -> String {
+pub(crate) fn rfc3339_from_unix(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let tod = secs % 86_400;
     let (hour, minute, second) = (tod / 3600, (tod % 3600) / 60, tod % 60);
@@ -92,6 +92,13 @@ pub struct AttemptMeta {
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryFactStore {
     fact_logs: HashMap<String, Vec<Fact>>,
+    /// Storage-level receive instants, parallel to `fact_logs` (mirrors the
+    /// Postgres `facts.recorded_at` column; never part of the wire shape or the
+    /// dedup key). INVARIANT: `fact_times[a][i]` is the receive time of
+    /// `fact_logs[a][i]` — both vectors are only ever appended together in
+    /// [`Self::append_idempotent`] and dropped together, keeping the wire log
+    /// borrowable by the pure projectors with zero copies.
+    fact_times: HashMap<String, Vec<u64>>,
     attempts: HashMap<String, AttemptMeta>,
     next_attempt_seq: u64,
     /// Idempotency marks for the one-time legacy migration job (phase 4).
@@ -154,6 +161,10 @@ impl InMemoryFactStore {
                 .entry(attempt_id.to_string())
                 .or_default()
                 .push(f.clone());
+            self.fact_times
+                .entry(attempt_id.to_string())
+                .or_default()
+                .push(now_secs());
             accepted.push(f);
         }
         Some(accepted)
@@ -210,6 +221,7 @@ impl InMemoryFactStore {
         for id in attempt_ids {
             self.attempts.remove(&id);
             self.fact_logs.remove(&id);
+            self.fact_times.remove(&id);
         }
     }
 
@@ -372,6 +384,73 @@ impl InMemoryFactStore {
             .map(|meta| meta.player_id.clone())
             .collect::<HashSet<String>>()
             .len()
+    }
+
+    /// Start events (one per attempt) with `created_at` in `[from, to_excl)` —
+    /// the «начато» stream behind `/api/admin/stats`. `quest = Some(id)`
+    /// restricts to one quest (the drill-down endpoint).
+    pub fn stats_start_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Vec<crate::admin_stats::StatEvent> {
+        self.attempts
+            .values()
+            .filter(|m| {
+                (from..to_excl).contains(&(m.created_at as i64))
+                    && quest.is_none_or(|q| m.quest_id == q)
+            })
+            .map(|m| crate::admin_stats::StatEvent {
+                quest_id: m.quest_id.clone(),
+                at: m.created_at as i64,
+            })
+            .collect()
+    }
+
+    /// Finish events: AT MOST ONE per attempt — the earliest
+    /// `attempt_completed` fact's receive time. Facts dedup by natural key
+    /// (which includes `step_position`), so one attempt CAN hold several
+    /// completion facts; counting facts would let «завершено» exceed «начато».
+    pub fn stats_finish_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Vec<crate::admin_stats::StatEvent> {
+        self.attempts
+            .values()
+            .filter(|m| quest.is_none_or(|q| m.quest_id == q))
+            .filter_map(|m| {
+                let log = self.fact_logs.get(&m.attempt_id)?;
+                let times = self.fact_times.get(&m.attempt_id)?;
+                let at = log
+                    .iter()
+                    .zip(times)
+                    .filter(|(f, _)| f.kind == FactKind::AttemptCompleted)
+                    .map(|(_, t)| *t as i64)
+                    .min()?;
+                (from..to_excl).contains(&at).then(|| {
+                    crate::admin_stats::StatEvent {
+                        quest_id: m.quest_id.clone(),
+                        at,
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Wire fact logs of every attempt bound to `snapshot_id` and STARTED in
+    /// `[from, to_excl)` — the funnel input (zero-fact attempts included, so
+    /// the funnel denominator is honest).
+    pub fn funnel_logs(&self, snapshot_id: &str, from: i64, to_excl: i64) -> Vec<Vec<Fact>> {
+        self.attempts
+            .values()
+            .filter(|m| {
+                m.snapshot_id == snapshot_id && (from..to_excl).contains(&(m.created_at as i64))
+            })
+            .map(|m| self.fact_logs.get(&m.attempt_id).cloned().unwrap_or_default())
+            .collect()
     }
 }
 
@@ -539,6 +618,31 @@ impl InMemoryGrantStore {
         let before = self.grants.len();
         self.grants.retain(|(p, _), _| p != player_id);
         before - self.grants.len()
+    }
+
+    /// Purchase events (one per grant, any source) with `granted_at` in
+    /// `[from, to_excl)` Unix seconds — the «куплено» stream behind
+    /// `/api/admin/stats`. Grants whose timestamp fails to parse are skipped
+    /// (defensive; the store only ever writes `now_rfc3339`).
+    pub fn stats_purchase_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Vec<crate::admin_stats::StatEvent> {
+        self.grants
+            .values()
+            .filter(|g| quest.is_none_or(|q| g.quest_id == q))
+            .filter_map(|g| {
+                let at = crate::admin_stats::parse_rfc3339_utc(&g.granted_at)?;
+                (from..to_excl).contains(&at).then(|| {
+                    crate::admin_stats::StatEvent {
+                        quest_id: g.quest_id.clone(),
+                        at,
+                    }
+                })
+            })
+            .collect()
     }
 
     /// Grants owned by a single player — the only grant view safe to return to a
@@ -1032,6 +1136,47 @@ impl FactStores {
         }
     }
 
+    /// See [`InMemoryFactStore::stats_start_events`].
+    pub async fn stats_start_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.stats_start_events(from, to_excl, quest)),
+            Self::Postgres(pg) => pg.stats_start_events(from, to_excl, quest).await,
+        }
+    }
+
+    /// See [`InMemoryFactStore::stats_finish_events`].
+    pub async fn stats_finish_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Ok(Self::lock_inmem(m)?.stats_finish_events(from, to_excl, quest))
+            }
+            Self::Postgres(pg) => pg.stats_finish_events(from, to_excl, quest).await,
+        }
+    }
+
+    /// See [`InMemoryFactStore::funnel_logs`].
+    pub async fn funnel_logs(
+        &self,
+        snapshot_id: &str,
+        from: i64,
+        to_excl: i64,
+    ) -> Result<Vec<Vec<Fact>>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.funnel_logs(snapshot_id, from, to_excl)),
+            Self::Postgres(pg) => pg.funnel_logs(snapshot_id, from, to_excl).await,
+        }
+    }
+
     /// See [`InMemoryFactStore::run_legacy_migration`].
     pub async fn run_legacy_migration(
         &self,
@@ -1412,6 +1557,21 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Self::lock_inmem(m)?.register_published(quest_id, meta, snapshot),
             Self::Postgres(pg) => pg.register_published(quest_id, meta, snapshot).await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::stats_purchase_events`].
+    pub async fn stats_purchase_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Ok(Self::lock_inmem(m)?.stats_purchase_events(from, to_excl, quest))
+            }
+            Self::Postgres(pg) => pg.stats_purchase_events(from, to_excl, quest).await,
         }
     }
 
