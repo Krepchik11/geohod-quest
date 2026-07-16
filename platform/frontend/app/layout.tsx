@@ -18,6 +18,7 @@ import "./styles/admin-users.css";
 import "./styles/admin-shell.css";
 import "./styles/admin-coupons.css";
 import "./styles/admin-features.css";
+import "./styles/admin-stats.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

@@ -13,17 +13,15 @@ import { logoutAndReset } from '../../lib/session-actions';
  * выйти) instead of the old bare avatar link. Desktop is a single 72px row
  * with centered tabs; mobile stacks the tabs into a second row.
  *
- * «Статистика» from the prototype's tab set is deliberately absent: no stats
- * page exists yet, and a dead tab is worse than a missing one — add the tab
- * entry to TABS when the page ships.
  */
 
-export type AdminTab = 'users' | 'coupons' | 'features';
+export type AdminTab = 'users' | 'coupons' | 'features' | 'stats';
 
 const TABS: Array<{ key: AdminTab; label: string; href: string }> = [
   { key: 'users', label: 'Пользователи', href: '/admin' },
   { key: 'coupons', label: 'Купоны', href: '/admin/coupons' },
   { key: 'features', label: 'Функции', href: '/admin/features' },
+  { key: 'stats', label: 'Статистика', href: '/admin/stats' },
 ];
 
 export type AdminAccess = 'checking' | 'granted' | 'denied' | 'error';

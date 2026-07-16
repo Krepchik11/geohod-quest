@@ -66,6 +66,76 @@ export function hasAdminToken(): boolean {
   return Object.keys(adminHeaders()).length > 0;
 }
 
+/** Query string for the admin stats endpoints (inclusive UTC day range). */
+function statsRangeQuery(range: { from?: string; to?: string }): string {
+  const params = new URLSearchParams();
+  if (range.from) params.set('from', range.from);
+  if (range.to) params.set('to', range.to);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** Raw counters for one admin-stats period (`GET /api/admin/stats*`). */
+export interface AdminStatsTotalsWire {
+  purchased: number;
+  started: number;
+  finished: number;
+}
+
+export interface AdminStatsDailyWire {
+  date: string;
+  started: number;
+  finished: number;
+}
+
+export interface AdminStatsQuestRowWire {
+  quest_id: string;
+  name: string;
+  city: string | null;
+  template_summary: string;
+  pages: number | null;
+  /** false = delisted quest kept for reconciliation; no detail page exists. */
+  published: boolean;
+  purchased: number;
+  started: number;
+  finished: number;
+}
+
+export interface AdminStatsOverviewWire {
+  from: string;
+  to: string;
+  totals: AdminStatsTotalsWire;
+  /** Same-length previous window; null for «Всё время». */
+  prev: AdminStatsTotalsWire | null;
+  daily: AdminStatsDailyWire[];
+  quests: AdminStatsQuestRowWire[];
+}
+
+export interface AdminStatsFunnelStepWire {
+  position: number;
+  title: string;
+  template: string;
+  reached: number;
+}
+
+export interface AdminStatsQuestWire {
+  quest_id: string;
+  name: string;
+  city: string | null;
+  template_summary: string;
+  /** Step-count chip frozen at publish; same field as the overview rows. */
+  pages: number | null;
+  from: string;
+  to: string;
+  totals: AdminStatsTotalsWire;
+  prev: AdminStatsTotalsWire | null;
+  snapshot_id: string;
+  snapshot_version: number;
+  /** Funnel denominator: attempts of the current snapshot started in range. */
+  funnel_started: number;
+  funnel: AdminStatsFunnelStepWire[];
+}
+
 /** One coupon as served by the admin coupon endpoints (coupons spec): the
  *  stored record plus the DERIVED status and the usage fold. `quest_ids: null`
  *  means «все квесты»; null limits mean unlimited. */
@@ -395,6 +465,19 @@ export const api = {
       headers: adminHeaders(),
       body: JSON.stringify({ enabled }),
     }),
+
+  // Admin statistics (admin-stats spec) — same dual-credential gating. Raw
+  // counters over an inclusive UTC day range; omitting `from` = «Всё время»
+  // (the backend anchors the range at the earliest recorded event).
+  adminStatsOverview: (range: { from?: string; to?: string }) =>
+    apiFetch<AdminStatsOverviewWire>(`/api/admin/stats${statsRangeQuery(range)}`, {
+      headers: adminHeaders(),
+    }),
+  adminStatsQuest: (questId: string, range: { from?: string; to?: string }) =>
+    apiFetch<AdminStatsQuestWire>(
+      `/api/admin/stats/${encodeURIComponent(questId)}${statsRangeQuery(range)}`,
+      { headers: adminHeaders() },
+    ),
 
   // Admin coupon management (coupons spec) — same dual-credential gating as the
   // user endpoints (role==admin session OR the shared ADMIN_TOKEN). Mutations are

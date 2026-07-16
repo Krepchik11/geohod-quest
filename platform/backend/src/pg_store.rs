@@ -198,13 +198,15 @@ impl PgFactStore {
             let key = natural_key_string(&f)?;
             let data = serde_json::to_value(&f).map_err(internal)?;
             let inserted = sqlx::query(
-                "INSERT INTO facts (attempt_id, natural_key, data) VALUES ($1, $2, $3)
+                "INSERT INTO facts (attempt_id, natural_key, data, recorded_at)
+                 VALUES ($1, $2, $3, $4)
                  ON CONFLICT DO NOTHING
                  RETURNING seq",
             )
             .bind(attempt_id)
             .bind(&key)
             .bind(&data)
+            .bind(now_secs() as i64)
             .fetch_optional(&mut *tx)
             .await
             .map_err(internal)?;
@@ -451,6 +453,119 @@ impl PgFactStore {
             .try_get("n")
             .map_err(internal)?;
         Ok(n.max(0) as usize)
+    }
+
+    /// See [`crate::store::InMemoryFactStore::stats_start_events`].
+    pub async fn stats_start_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, created_at FROM attempts
+             WHERE created_at >= $1 AND created_at < $2
+               AND ($3::text IS NULL OR quest_id = $3)",
+        )
+        .bind(from)
+        .bind(to_excl)
+        .bind(quest)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok(crate::admin_stats::StatEvent {
+                    quest_id: r.try_get("quest_id").map_err(internal)?,
+                    at: r.try_get("created_at").map_err(internal)?,
+                })
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryFactStore::stats_finish_events`]: at most
+    /// one event per attempt — the earliest completion fact (facts dedup by
+    /// natural key incl. step_position, so an attempt can hold several
+    /// `attempt_completed` rows; counting rows would overcount finishes).
+    /// `recorded_at` is NOT NULL since migration 0013's total backfill.
+    pub async fn stats_finish_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT a.quest_id, MIN(f.recorded_at) AS at
+             FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE f.data->>'type' = 'attempt_completed'
+               AND ($3::text IS NULL OR a.quest_id = $3)
+             GROUP BY f.attempt_id, a.quest_id
+             HAVING MIN(f.recorded_at) >= $1 AND MIN(f.recorded_at) < $2",
+        )
+        .bind(from)
+        .bind(to_excl)
+        .bind(quest)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok(crate::admin_stats::StatEvent {
+                    quest_id: r.try_get("quest_id").map_err(internal)?,
+                    at: r.try_get("at").map_err(internal)?,
+                })
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryFactStore::funnel_logs`]. Same two-pass
+    /// shape as [`Self::load_snapshot_logs`]: seed every in-range attempt with
+    /// an empty log (zero-fact attempts count in the funnel denominator), then
+    /// ONE round-trip for all their facts.
+    pub async fn funnel_logs(
+        &self,
+        snapshot_id: &str,
+        from: i64,
+        to_excl: i64,
+    ) -> Result<Vec<Vec<Fact>>, AppError> {
+        let attempt_rows = sqlx::query(
+            "SELECT attempt_id FROM attempts
+             WHERE snapshot_id = $1 AND created_at >= $2 AND created_at < $3",
+        )
+        .bind(snapshot_id)
+        .bind(from)
+        .bind(to_excl)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut logs: std::collections::HashMap<String, Vec<Fact>> =
+            std::collections::HashMap::with_capacity(attempt_rows.len());
+        for row in &attempt_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            logs.insert(att, Vec::new());
+        }
+        let fact_rows = sqlx::query(
+            "SELECT f.attempt_id, f.data FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE a.snapshot_id = $1 AND a.created_at >= $2 AND a.created_at < $3
+             ORDER BY f.seq",
+        )
+        .bind(snapshot_id)
+        .bind(from)
+        .bind(to_excl)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        for row in fact_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
+            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
+            if let Some(log) = logs.get_mut(&att) {
+                log.push(fact);
+            }
+        }
+        Ok(logs.into_values().collect())
     }
 
     /// See [`crate::store::InMemoryFactStore::run_legacy_migration`].
@@ -780,6 +895,43 @@ impl PgGrantStore {
         .try_get("n")
         .map_err(internal)?;
         Ok(n.max(0) as usize)
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::stats_purchase_events`].
+    /// `granted_at` is a canonical RFC3339 UTC string, so lexicographic range
+    /// compare IS chronological compare; parsing to seconds happens in Rust via
+    /// the same helper the in-memory backend uses.
+    pub async fn stats_purchase_events(
+        &self,
+        from: i64,
+        to_excl: i64,
+        quest: Option<&str>,
+    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, granted_at FROM access_grants
+             WHERE granted_at >= $1 AND granted_at < $2
+               AND ($3::text IS NULL OR quest_id = $3)",
+        )
+        .bind(crate::store::rfc3339_from_unix(from.max(0) as u64))
+        .bind(crate::store::rfc3339_from_unix(to_excl.max(0) as u64))
+        .bind(quest)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let quest_id: String = r.try_get("quest_id").map_err(internal)?;
+                let granted_at: String = r.try_get("granted_at").map_err(internal)?;
+                // The store only ever writes now_rfc3339; anything unparsable
+                // is data corruption and must surface, not silently undercount.
+                let at = crate::admin_stats::parse_rfc3339_utc(&granted_at).ok_or_else(|| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "unparsable access_grants.granted_at: {granted_at:?}"
+                    ))
+                })?;
+                Ok(crate::admin_stats::StatEvent { quest_id, at })
+            })
+            .collect()
     }
 
     /// See [`crate::store::InMemoryGrantStore::grants_for_player`].

@@ -27,6 +27,7 @@ use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod admin_stats;
 mod auth;
 mod config;
 mod coupons;
@@ -501,6 +502,8 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/admin/features", get(list_features_handler))
         .route("/api/admin/features/{key}", post(set_feature_handler))
+        .route("/api/admin/stats", get(admin_stats_overview_handler))
+        .route("/api/admin/stats/{quest_id}", get(admin_stats_quest_handler))
         .route("/api/migrate/legacy", post(run_migration_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
         .route("/api/auth/register", post(register_handler))
@@ -2995,6 +2998,120 @@ async fn set_feature_handler(
     Ok(Json(feature_wire(&state, feature, req.enabled)))
 }
 
+/// Query for the admin statistics endpoints: an inclusive UTC day range.
+/// Both bounds optional — `to` defaults to today, absent `from` means
+/// «Всё время» (left bound = earliest recorded event, no previous-period
+/// comparison).
+#[derive(serde::Deserialize)]
+struct StatsRangeQuery {
+    from: Option<String>,
+    to: Option<String>,
+}
+
+/// Resolve the requested range and load the three event streams behind it.
+///
+/// Bounded requests load one window covering the previous period too (the
+/// folds re-filter, so one load serves both totals). Unbounded («Всё время»)
+/// requests load everything up to `to` and anchor the range at the earliest
+/// event of `quest` (or of any quest for the overview).
+async fn load_stats_window(
+    state: &AppState,
+    q: &StatsRangeQuery,
+    quest: Option<&str>,
+) -> Result<(admin_stats::DayRange, bool, admin_stats::StatsEvents), AppError> {
+    let bad_day =
+        |field: &str| AppError::BadRequest(format!("некорректная дата {field}: ожидается ГГГГ-ММ-ДД"));
+    let to_day = match &q.to {
+        Some(t) => {
+            admin_stats::parse_day(t).ok_or_else(|| bad_day("to"))?;
+            t.clone()
+        }
+        None => store::today_utc(),
+    };
+    let load = |from_secs: i64, to_secs_excl: i64| async move {
+        let (purchases, starts, finishes) = tokio::try_join!(
+            state.grants.stats_purchase_events(from_secs, to_secs_excl, quest),
+            state.store.stats_start_events(from_secs, to_secs_excl, quest),
+            state.store.stats_finish_events(from_secs, to_secs_excl, quest),
+        )?;
+        Ok::<_, AppError>(admin_stats::StatsEvents {
+            purchases,
+            starts,
+            finishes,
+        })
+    };
+    match &q.from {
+        Some(from_day) => {
+            admin_stats::parse_day(from_day).ok_or_else(|| bad_day("from"))?;
+            let range = admin_stats::DayRange::new(from_day, &to_day).ok_or_else(|| {
+                AppError::BadRequest("начало периода позже его конца".to_string())
+            })?;
+            let ev = load(range.prev().start_secs(), range.end_secs_excl()).await?;
+            Ok((range, true, ev))
+        }
+        None => {
+            let to_excl = admin_stats::parse_day(&to_day).ok_or_else(|| bad_day("to"))? + 86_400;
+            let ev = load(0, to_excl).await?;
+            let from_day =
+                admin_stats::earliest_event_day(&ev, quest).unwrap_or_else(|| to_day.clone());
+            // Defensive min: an event later than `to` must not invert the range.
+            let from_day = if from_day.as_str() <= to_day.as_str() {
+                from_day
+            } else {
+                to_day.clone()
+            };
+            let range = admin_stats::DayRange::new(&from_day, &to_day)
+                .ok_or_else(|| AppError::Internal(anyhow::anyhow!("all-time range invariant")))?;
+            Ok((range, false, ev))
+        }
+    }
+}
+
+/// GET /api/admin/stats — the admin analytics overview: KPI totals (+ previous
+/// same-length window for bounded ranges), a zero-filled daily trend, and the
+/// per-quest table over every published quest.
+async fn admin_stats_overview_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<StatsRangeQuery>,
+) -> Result<Json<admin_stats::OverviewResponse>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let (range, with_prev, ev) = load_stats_window(&state, &q, None).await?;
+    let metas = state.grants.list_published().await?;
+    Ok(Json(admin_stats::project_overview(
+        &metas, &ev, &range, with_prev,
+    )))
+}
+
+/// GET /api/admin/stats/{quest_id} — per-quest KPIs plus the step funnel over
+/// the CURRENT published snapshot (labels are frozen per version).
+async fn admin_stats_quest_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+    Query(q): Query<StatsRangeQuery>,
+) -> Result<Json<admin_stats::QuestStatsResponse>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let (meta, snapshot) = state
+        .grants
+        .get_bundle(&quest_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("quest '{quest_id}' is not published")))?;
+    let (range, with_prev, ev) = load_stats_window(&state, &q, Some(&quest_id)).await?;
+    let funnel_logs = state
+        .store
+        .funnel_logs(&meta.snapshot_id, range.start_secs(), range.end_secs_excl())
+        .await?;
+    Ok(Json(admin_stats::project_quest_detail(
+        &meta,
+        snapshot.as_ref(),
+        &ev,
+        &range,
+        with_prev,
+        &funnel_logs,
+    )))
+}
+
 /// Body for coupon create/save: the editable fields exactly as the admin form
 /// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
 #[derive(serde::Deserialize)]
@@ -3349,8 +3466,9 @@ mod tests {
         in_memory_state(config, media)
     }
 
-    fn test_app() -> Router {
-        build_router(test_state(AppConfig {
+    /// The shared test config (admin secret set) — helpers tweak fields off it.
+    fn test_config() -> AppConfig {
+        AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
@@ -3362,24 +3480,16 @@ mod tests {
             google_client_id: None,
             telegram_client_id: None,
             yookassa: None,
-        }))
+        }
+    }
+
+    fn test_app() -> Router {
+        build_router(test_state(test_config()))
     }
 
     /// Router + captured outbox — flows that need the mailed token (§6).
     fn test_app_with_mail() -> (Router, std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>) {
-        let mut state = test_state(AppConfig {
-            addr: "0.0.0.0:0".parse().expect("test addr"),
-            version: "test-0.0.0",
-            admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
-            cors_allowed_origins: Vec::new(),
-            media: test_media_cfg(),
-            smtp_url: None,
-            mail_from: "test@geohod.test".to_string(),
-            frontend_base: "http://localhost:3000".to_string(),
-            google_client_id: None,
-            telegram_client_id: None,
-            yookassa: None,
-        });
+        let mut state = test_state(test_config());
         let (m, outbox) = mailer::Mailer::recorder();
         state.mailer = m;
         (build_router(state), outbox)
@@ -3387,19 +3497,9 @@ mod tests {
 
     /// Router with NO admin secret configured — admin surfaces must fail closed.
     fn test_app_no_admin() -> Router {
-        build_router(test_state(AppConfig {
-            addr: "0.0.0.0:0".parse().expect("test addr"),
-            version: "test-0.0.0",
-            admin_token: None,
-            cors_allowed_origins: Vec::new(),
-            media: test_media_cfg(),
-            smtp_url: None,
-            mail_from: "test@geohod.test".to_string(),
-            frontend_base: "http://localhost:3000".to_string(),
-            google_client_id: None,
-            telegram_client_id: None,
-            yookassa: None,
-        }))
+        let mut config = test_config();
+        config.admin_token = None;
+        build_router(test_state(config))
     }
 
     // ---- CORS allowlist -----------------------------------------------------
@@ -8062,5 +8162,175 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(row["override"], Value::Null);
         assert_eq!(row["effective"], json!(true));
+    }
+
+    // ---- admin statistics (overview + per-quest funnel) ---------------------
+
+    fn stats_meta(quest_id: &str, name: &str) -> PublishedMeta {
+        PublishedMeta {
+            quest_id: quest_id.to_string(),
+            name: name.to_string(),
+            primary_comic: None,
+            template_summary: "3 steps".to_string(),
+            snapshot_version: 1,
+            snapshot_id: format!("{quest_id}-v1"),
+            city: Some("Казань".to_string()),
+            duration: None,
+            price: Some(500),
+            description: None,
+            pages: Some(3),
+            tasks: Some(1),
+            paid_hints: None,
+            players_bonus: 0,
+        }
+    }
+
+    fn stats_snapshot() -> Value {
+        json!({
+            "steps": [
+                { "template": "start", "rich_content": { "title": "Старт: у башни" } },
+                { "template": "task_answer", "rich_content": { "title": "Задание: герб" } },
+                { "template": "congrats", "rich_content": { "title": "Финал" } }
+            ]
+        })
+    }
+
+    fn stats_fact(kind: FactKind, step: i32, correct: bool) -> Fact {
+        Fact {
+            kind,
+            step_position: step,
+            submitted_value: None,
+            local_is_correct: correct,
+            coins_delta: 0,
+            note: None,
+            device_id: "d1".to_string(),
+        }
+    }
+
+    /// Publish q1, grant it to p1, run one attempt to completion. Everything is
+    /// stamped «now», so today's range covers all events.
+    async fn seed_stats_fixture(state: &AppState) {
+        state
+            .grants
+            .register_published("q1", stats_meta("q1", "Тайны старого города"), Some(stats_snapshot()))
+            .await
+            .expect("publish");
+        state
+            .grants
+            .create_grant_idemp("p1", "q1", GrantSource::Payment, None)
+            .await
+            .expect("grant");
+        let att = state
+            .store
+            .create_attempt("p1", "q1", "q1-v1")
+            .await
+            .expect("attempt");
+        state
+            .store
+            .append_idempotent(
+                &att.attempt_id,
+                vec![
+                    stats_fact(FactKind::PhysicalConfirmed, 0, false),
+                    stats_fact(FactKind::AnswerSubmitted, 1, true),
+                    stats_fact(FactKind::AttemptCompleted, 2, false),
+                    // A second completion at another position is a legal store
+                    // state (natural key includes step_position). «Завершено»
+                    // must still count the ATTEMPT once, not the facts.
+                    stats_fact(FactKind::AttemptCompleted, 3, false),
+                ],
+            )
+            .await
+            .expect("append")
+            .expect("known attempt");
+    }
+
+    #[tokio::test]
+    async fn admin_stats_fails_closed_without_credentials() {
+        let app = test_app();
+        for uri in ["/api/admin/stats", "/api/admin/stats/q1"] {
+            let (st, _) = get_json(&app, uri).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{uri} without token");
+            let (st, _) = get_json_h(&app, uri, &[("x-admin-token", "wrong")]).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{uri} wrong token");
+        }
+        // No secret configured at all: fail closed too.
+        let (st, _) = get_json(&test_app_no_admin(), "/api/admin/stats").await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn admin_stats_overview_counts_daily_and_quests() {
+        let state = test_state(test_config());
+        seed_stats_fixture(&state).await;
+        let app = build_router(state);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let today = store::today_utc();
+
+        // Bounded range: totals + zero prev + one daily point + the quest row.
+        let uri = format!("/api/admin/stats?from={today}&to={today}");
+        let (st, v) = get_json_h(&app, &uri, &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["totals"], json!({ "purchased": 1, "started": 1, "finished": 1 }));
+        assert_eq!(v["prev"], json!({ "purchased": 0, "started": 0, "finished": 0 }));
+        let daily = v["daily"].as_array().expect("daily");
+        assert_eq!(daily.len(), 1);
+        assert_eq!(daily[0]["date"], json!(today));
+        assert_eq!(daily[0]["started"], json!(1));
+        assert_eq!(daily[0]["finished"], json!(1));
+        let quests = v["quests"].as_array().expect("quests");
+        assert_eq!(quests.len(), 1);
+        assert_eq!(quests[0]["quest_id"], json!("q1"));
+        assert_eq!(quests[0]["name"], json!("Тайны старого города"));
+        assert_eq!(quests[0]["pages"], json!(3));
+        assert_eq!(quests[0]["purchased"], json!(1));
+
+        // «Всё время»: no prev, range anchored at the earliest event (today).
+        let (st, v) = get_json_h(&app, "/api/admin/stats", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["prev"], Value::Null);
+        assert_eq!(v["from"], json!(today));
+        assert_eq!(v["to"], json!(today));
+    }
+
+    #[tokio::test]
+    async fn admin_stats_quest_detail_returns_labelled_funnel() {
+        let state = test_state(test_config());
+        seed_stats_fixture(&state).await;
+        let app = build_router(state);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        let (st, v) = get_json_h(&app, "/api/admin/stats/q1", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["quest_id"], json!("q1"));
+        assert_eq!(v["snapshot_id"], json!("q1-v1"));
+        assert_eq!(v["funnel_started"], json!(1));
+        assert_eq!(v["totals"]["finished"], json!(1));
+        let funnel = v["funnel"].as_array().expect("funnel");
+        assert_eq!(funnel.len(), 3);
+        assert_eq!(funnel[0]["title"], json!("Старт: у башни"));
+        assert_eq!(funnel[0]["template"], json!("start"));
+        // The single attempt completed everything: every step reached.
+        for step in funnel {
+            assert_eq!(step["reached"], json!(1), "step {}", step["position"]);
+        }
+
+        // Unknown quest: honest 404.
+        let (st, _) = get_json_h(&app, "/api/admin/stats/nope", &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn admin_stats_rejects_malformed_ranges() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        for uri in [
+            "/api/admin/stats?from=2026-99-01&to=2026-07-16",
+            "/api/admin/stats?from=garbage",
+            "/api/admin/stats?to=2026-02-30",
+            "/api/admin/stats?from=2026-07-16&to=2026-07-10",
+        ] {
+            let (st, _) = get_json_h(&app, uri, &admin).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{uri}");
+        }
     }
 }
