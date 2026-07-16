@@ -28,6 +28,7 @@ vi.mock('../../../lib/identity', () => ({
   subscribeSession: () => () => {},
 }));
 vi.mock('../../../lib/session-actions', () => ({ logoutAndReset: vi.fn(async () => {}) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }) }));
 
 import AuthPage from '../page';
 
