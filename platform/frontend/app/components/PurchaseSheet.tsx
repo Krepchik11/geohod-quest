@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
 import { currentPlayerId, getSession, subscribeSession } from '../../lib/identity';
+import { pollPaymentSettlement } from '../../lib/payment-return';
 import { coverCss } from '../../lib/cover';
 
 /**
@@ -49,7 +50,11 @@ export default function PurchaseSheet({
   const [applied, setApplied] = useState<AppliedPromo | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoChecking, setPromoChecking] = useState(false);
-  const [state, setState] = useState<'idle' | 'pending' | 'redirect' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'pending' | 'redirect' | 'settling' | 'error'>('idle');
+  // The pending redirect payment, so a Back-button return can settle it.
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  // Outcome message after an unfinished gateway round-trip (Back button).
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
   // Payment methods this deployment offers. Until the list arrives (or if it
   // fails to load) the sheet behaves exactly as before: mock only, no selector.
   const [providers, setProviders] = useState<string[]>(['mock']);
@@ -74,6 +79,7 @@ export default function PurchaseSheet({
 
   const confirm = async () => {
     setState('pending');
+    setReturnNotice(null);
     try {
       const result = await api.checkout({
         player_id: currentPlayerId(),
@@ -85,6 +91,7 @@ export default function PurchaseSheet({
         // Redirect provider: hand the payer to ЮKassa. The return_url brings
         // them back to the quest page with ?payment={id}, where the poll
         // settles the purchase (AboutClient).
+        setPaymentId(result.payment.payment_id);
         setState('redirect');
         window.location.assign(result.payment.confirmation_url);
         return;
@@ -94,6 +101,34 @@ export default function PurchaseSheet({
       setState('error');
     }
   };
+
+  // The browser Back button on the gateway page restores THIS page from the
+  // bfcache with the sheet still locked in 'redirect' — pageshow(persisted) is
+  // the only signal that happened. One authoritative status check (the backend
+  // re-fetches from ЮKassa) either completes the purchase or unlocks the sheet;
+  // an abandoned pending payment is replayed by the next checkout, so retrying
+  // never double-charges.
+  useEffect(() => {
+    if (state !== 'redirect' || !paymentId) return;
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      setState('settling');
+      void pollPaymentSettlement(paymentId, { delays: [0] }).then((outcome) => {
+        if (outcome === 'succeeded') {
+          onPurchased();
+          return;
+        }
+        setState('idle');
+        setReturnNotice(
+          outcome === 'canceled'
+            ? 'Оплата отменена. Можно попробовать ещё раз.'
+            : 'Оплата не завершена. Можно попробовать ещё раз.',
+        );
+      });
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [state, paymentId, onPurchased]);
 
   const applyPromo = async () => {
     const code = promoCode.trim();
@@ -128,8 +163,9 @@ export default function PurchaseSheet({
     }
   };
 
-  // The sheet locks while a charge or a gateway hand-off is in flight.
-  const busy = state === 'pending' || state === 'redirect';
+  // The sheet locks while a charge, a gateway hand-off or a return-settlement
+  // check is in flight.
+  const busy = state === 'pending' || state === 'redirect' || state === 'settling';
 
   // Every provider switched off (admin feature toggles) and something to
   // charge: paying is impossible, say so instead of a doomed checkout. A free
@@ -238,10 +274,18 @@ export default function PurchaseSheet({
           <div className="psheet__error">Не получилось оформить покупку — проверьте связь и попробуйте ещё раз.</div>
         )}
 
+        {returnNotice && !busy && (
+          <div className="psheet__error">{returnNotice}</div>
+        )}
+
         {busy ? (
           <button className="btn btn--block psheet__confirm is-pending" type="button" disabled>
             <span className="psheet__spinner" aria-hidden />
-            {state === 'redirect' ? 'Переходим к оплате…' : 'Оформляем покупку…'}
+            {state === 'redirect'
+              ? 'Переходим к оплате…'
+              : state === 'settling'
+                ? 'Проверяем оплату…'
+                : 'Оформляем покупку…'}
           </button>
         ) : (
           <button

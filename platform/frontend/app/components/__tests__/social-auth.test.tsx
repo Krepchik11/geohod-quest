@@ -15,7 +15,11 @@ const { apiMock } = vi.hoisted(() => ({
     authGoogle: vi.fn(),
   },
 }));
-vi.mock('../../../lib/api', () => ({ api: apiMock }));
+vi.mock('../../../lib/api', () => ({
+  api: apiMock,
+  // Real helper shape: server message when present, fallback otherwise.
+  apiErrorMessage: (_err: unknown, fallback: string) => fallback,
+}));
 vi.mock('../../../lib/identity', () => ({ anonymousPlayerId: () => 'dev:anon-1' }));
 
 import SocialAuthButtons from '../SocialAuthButtons';

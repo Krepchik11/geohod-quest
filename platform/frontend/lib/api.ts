@@ -205,6 +205,11 @@ export interface PublishedQuestWire {
   /** Public players counter = real distinct completions + the author's marketing
    *  bonus (set in the constructor). Server-computed; the raw bonus never ships. */
   players: number;
+  /** Author attributes from the constructor row (store filters); null/empty for
+   *  a legacy/direct publish that has no constructor row. */
+  complexity: string | null;
+  age_target: string | null;
+  tags: string[];
 }
 
 /** Product page payload (§3.1) — the published card + live rating + author
@@ -333,6 +338,20 @@ export class ApiError extends Error {
     this.path = path;
     this.body = body;
   }
+}
+
+/** The backend's `{"error": msg}` body when present, else the fallback — for
+ *  surfacing the server's human (Russian) message instead of a generic one. */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.body) as { error?: string };
+      if (parsed.error) return parsed.error;
+    } catch {
+      /* non-JSON body — fall through */
+    }
+  }
+  return fallback;
 }
 
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {

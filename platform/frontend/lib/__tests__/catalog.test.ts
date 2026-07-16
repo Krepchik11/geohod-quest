@@ -24,6 +24,9 @@ const wire = (
   rating_avg: 0,
   rating_count: 0,
   players: 0,
+  complexity: null,
+  age_target: null,
+  tags: [],
 });
 
 describe('nextQuestsForCatalog (post-finale catalog selection)', () => {

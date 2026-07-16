@@ -7,7 +7,8 @@ function q(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
     quest_id: 'q', name: 'n', primary_comic: null, template_summary: '',
     snapshot_version: 1, snapshot_id: 's', city: null, duration: null,
-    price: null, rating_avg: 0, rating_count: 0, players: 0, ...over,
+    price: null, rating_avg: 0, rating_count: 0, players: 0,
+    complexity: null, age_target: null, tags: [], ...over,
   };
 }
 

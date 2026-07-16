@@ -430,12 +430,12 @@ impl InMemoryFactStore {
                     .filter(|(f, _)| f.kind == FactKind::AttemptCompleted)
                     .map(|(_, t)| *t as i64)
                     .min()?;
-                (from..to_excl).contains(&at).then(|| {
-                    crate::admin_stats::StatEvent {
+                (from..to_excl)
+                    .contains(&at)
+                    .then(|| crate::admin_stats::StatEvent {
                         quest_id: m.quest_id.clone(),
                         at,
-                    }
-                })
+                    })
             })
             .collect()
     }
@@ -449,7 +449,12 @@ impl InMemoryFactStore {
             .filter(|m| {
                 m.snapshot_id == snapshot_id && (from..to_excl).contains(&(m.created_at as i64))
             })
-            .map(|m| self.fact_logs.get(&m.attempt_id).cloned().unwrap_or_default())
+            .map(|m| {
+                self.fact_logs
+                    .get(&m.attempt_id)
+                    .cloned()
+                    .unwrap_or_default()
+            })
             .collect()
     }
 }
@@ -635,12 +640,12 @@ impl InMemoryGrantStore {
             .filter(|g| quest.is_none_or(|q| g.quest_id == q))
             .filter_map(|g| {
                 let at = crate::admin_stats::parse_rfc3339_utc(&g.granted_at)?;
-                (from..to_excl).contains(&at).then(|| {
-                    crate::admin_stats::StatEvent {
+                (from..to_excl)
+                    .contains(&at)
+                    .then(|| crate::admin_stats::StatEvent {
                         quest_id: g.quest_id.clone(),
                         at,
-                    }
-                })
+                    })
             })
             .collect()
     }
@@ -1157,9 +1162,7 @@ impl FactStores {
         quest: Option<&str>,
     ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
         match self {
-            Self::InMemory(m) => {
-                Ok(Self::lock_inmem(m)?.stats_finish_events(from, to_excl, quest))
-            }
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.stats_finish_events(from, to_excl, quest)),
             Self::Postgres(pg) => pg.stats_finish_events(from, to_excl, quest).await,
         }
     }
@@ -1678,6 +1681,15 @@ pub struct QuestAttributes {
     pub tags: Vec<String>,
 }
 
+/// Store-catalog projection of a constructor row: the lifecycle status that
+/// governs marketplace visibility plus the author's attributes (the store page
+/// filters on them). One scan feeds both concerns.
+#[derive(Clone, Debug)]
+pub struct CatalogListing {
+    pub status: String,
+    pub attrs: QuestAttributes,
+}
+
 impl Default for QuestAttributes {
     /// Neutral values for quests that never set attributes (old clients, old rows).
     fn default() -> Self {
@@ -1893,15 +1905,24 @@ impl InMemoryConstructorStore {
         v
     }
 
-    /// `quest_id` → lifecycle status for every constructor quest. The store catalog
-    /// consults this so marketplace visibility is a function of the AUTHORITATIVE
-    /// status (a single source of truth), not the mere presence of a frozen
-    /// snapshot — a quest the author moved to `test`/`draft` keeps its snapshot
-    /// (still resolvable by direct link, grant-gated) but leaves the store.
-    pub fn statuses_by_quest(&self) -> HashMap<String, String> {
+    /// `quest_id` → catalog listing info for every constructor quest. The store
+    /// catalog consults this so marketplace visibility is a function of the
+    /// AUTHORITATIVE status (a single source of truth), not the mere presence of a
+    /// frozen snapshot — a quest the author moved to `test`/`draft` keeps its
+    /// snapshot (still resolvable by direct link, grant-gated) but leaves the
+    /// store. The attributes ride along for the store-page filters.
+    pub fn listings_by_quest(&self) -> HashMap<String, CatalogListing> {
         self.quests
             .iter()
-            .map(|(id, q)| (id.clone(), q.status.clone()))
+            .map(|(id, q)| {
+                (
+                    id.clone(),
+                    CatalogListing {
+                        status: q.status.clone(),
+                        attrs: q.attrs.clone(),
+                    },
+                )
+            })
             .collect()
     }
 
@@ -2007,11 +2028,11 @@ impl ConstructorStores {
         }
     }
 
-    /// See [`InMemoryConstructorStore::statuses_by_quest`].
-    pub async fn statuses_by_quest(&self) -> Result<HashMap<String, String>, AppError> {
+    /// See [`InMemoryConstructorStore::listings_by_quest`].
+    pub async fn listings_by_quest(&self) -> Result<HashMap<String, CatalogListing>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.statuses_by_quest()),
-            Self::Postgres(pg) => pg.statuses_by_quest().await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.listings_by_quest()),
+            Self::Postgres(pg) => pg.listings_by_quest().await,
         }
     }
 
