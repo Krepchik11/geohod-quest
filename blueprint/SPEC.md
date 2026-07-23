@@ -31,8 +31,8 @@ GameStep {
   // terminal behaviour comes from supporting.terminal, not from completion.
   supporting: {
     gift?: { coins: number, narrative_text: string },
-    hint?: { cost_coins: number, reveal_text?: string },  // content = reveal_text and/or media.images.hint; present only when it has content
-    navigator?: { lat, lng, label? },                     // system-maps handoff only
+    hint?: { cost_coins: number, reveal_text?: string },  // content = reveal_text and/or media.images.hint; present only when enabled and it has content
+    navigator?: { lat, lng, label? },                     // system-maps handoff only (the player's address line and the store's «Место старта» open it)
     terminal?: boolean, is_start?: boolean
   }
 }
@@ -44,10 +44,10 @@ All amounts and lists freeze verbatim in the snapshot at publish.
 |---|---|---|
 | start | — (advance) | CTA «начать квест»; meta from store settings |
 | video | — (advance) | video block; CTA «продолжить» |
-| task_no | physical | confirm «Я на месте», navigator ON |
-| task_answer | answer | prompt «Введите ответ», hint cost 5 (no toggle — hint ships when it has text and/or image), gift 5 |
+| task_no | physical | confirm «Я на месте» |
+| task_answer | answer | prompt «Введите ответ», hint toggle ON at cost 5 (ships when enabled AND has text and/or image), gift 5 |
 | continue | — (advance) | CTA «продолжить» |
-| route_video | — (advance) | video block + navigator; CTA «в путь» |
+| route_video | — (advance) | video block; CTA «в путь» |
 | congrats | — (terminal) | supporting.terminal; completion bonus +5; inline rating block |
 
 ## Answer Matching (single shared implementation)
@@ -160,13 +160,15 @@ Frame: 360×740 design canvas; media block uses `flex: 0 1 auto` so CTAs never c
   single 4:3 step image (required on tasks; non-4:3 uploads open a drag-to-pan crop, compressed
   to ≤100 KB); AnswerListEditor (rows + add + «Вставить строками» replace + live «Тест ответа»
   via shared matcher with «зачтено/не зачтено» verdict); gift subform with freeze note; hint
-  subform — no toggle: cost + text + optional 4:3 image, the hint publishes when it has text
-  and/or image; navigator toggle revealing a single Google-Maps-format coords field; live phone
+  subform — toggle (default ON): cost + text + optional 4:3 image, the hint publishes when
+  enabled AND it has text and/or image; «Адрес и расстояние» toggle revealing name + optional
+  distance + a single Google-Maps-format coords field (the player renders «name · distance» as
+  a pin line that opens system maps on tap — there is no separate navigator button); live phone
   preview (real player components) + «показать с купленной подсказкой» toggle; save note:
   changes reach players only via next published version.
 - **Publish gates** (errors block, warnings don't): structure (start first, terminal exists);
-  task image present on all task templates; non-empty acceptable lists; navigator enabled ⇒
-  coordinates set; bundle size estimate vs 5 MB target (warning); dry-run serialize passes.
+  task image present on all task templates; non-empty acceptable lists; address enabled ⇒
+  name and coordinates set; bundle size estimate vs 5 MB target (warning); dry-run serialize passes.
 - **Publish modal**: creates immutable version N; freezes texts/images/answers/amounts; new
   attempts start on N, active attempts keep theirs; no rollback — fix forward.
 

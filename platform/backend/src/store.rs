@@ -592,6 +592,12 @@ impl InMemoryGrantStore {
         Some((meta, data))
     }
 
+    /// Frozen snapshot JSON by id — for callers that already hold the meta
+    /// (skips the published-row fetch `get_bundle` would repeat).
+    pub fn get_snapshot(&self, snapshot_id: &str) -> Option<serde_json::Value> {
+        self.snapshots.get(snapshot_id).cloned().flatten()
+    }
+
     /// All grants — internal/admin use only (exposes every player's purchases
     /// and payment refs; never serve to player-scoped callers).
     pub fn list_all_grants(&self) -> Vec<AccessGrant> {
@@ -1628,6 +1634,17 @@ impl GrantStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_bundle(quest_id)),
             Self::Postgres(pg) => pg.get_bundle(quest_id).await,
+        }
+    }
+
+    /// See [`InMemoryGrantStore::get_snapshot`].
+    pub async fn get_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<Option<serde_json::Value>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_snapshot(snapshot_id)),
+            Self::Postgres(pg) => pg.get_snapshot(snapshot_id).await,
         }
     }
 }

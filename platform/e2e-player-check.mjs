@@ -47,9 +47,9 @@ await page.locator('.pframe .p-btn', { hasText: 'продолжить' }).click(
 // continue (завязка)
 check('continue step', (await page.locator('.pframe').innerText()).includes('1913 год'));
 await page.locator('.pframe .p-btn', { hasText: 'продолжить' }).click();
-// task_no: physical confirm with navigator
-check('task_no with navigator + place', (await page.locator('.pframe').innerText()).includes('Николаевска порта'));
-check('navigator button present', await page.locator('.pframe .p-btn--ghost').count() >= 1);
+// task_no: physical confirm; the address line itself opens maps (no navigator button)
+check('task_no with place', (await page.locator('.pframe').innerText()).includes('Николаевска порта'));
+check('address line is the map link', await page.locator('.pframe .p-place--link').count() >= 1);
 await page.locator('.pframe .p-btn', { hasText: 'Я на месте, нашёл' }).click();
 // gift toast +3
 await page.locator('.p-toast').waitFor({ timeout: 3000 });

@@ -183,6 +183,15 @@
   font-size: 13.5px; color: var(--p-muted);
 }
 .p-place svg { flex: none; margin-top: 1px; }
+/* Кликабельный адрес — сама строка открывает системные карты (кнопки «навигатор» нет). */
+.p-place--link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--p-body); text-align: left;
+  color: var(--p-ink);
+  text-decoration: underline; text-underline-offset: 3px;
+  text-decoration-color: var(--p-line);
+}
+.p-place--link:hover { text-decoration-color: var(--p-ink); }
 .p-meta { display: flex; justify-content: center; gap: 26px; font-size: 14px; }
 .p-meta span { display: inline-flex; align-items: center; gap: 7px; }
 

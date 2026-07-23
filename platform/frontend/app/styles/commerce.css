@@ -136,6 +136,9 @@
 .qp-title { margin-top: 14px; font-size: 30px; line-height: 1.25; letter-spacing: .12em; }
 .qp-desc { margin-top: 16px; font-size: 15px; line-height: 1.7; }
 .qp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* «Место старта»: компактная вторичная кнопка-ссылка в левой колонке. */
+.qp-startpoint { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; }
+.qp-startpoint .ic { width: 15px; height: 15px; }
 .qp-chips span { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--border); font-size: 13px; }
 .qp-author { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border: 1px dashed var(--border); border-radius: 14px; }
 .qp-author__avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--navy); color: #fff; display: grid; place-items: center; font-family: var(--font-serif); font-size: 20px; }
