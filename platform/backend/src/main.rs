@@ -59,7 +59,7 @@ use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
     CouponStores, FactStores, FlagStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
     InMemoryCouponStore, InMemoryFactStore, InMemoryFlagStore, InMemoryGrantStore,
-    InMemoryPaymentStore, PaymentStores, PublishedMeta,
+    InMemoryModerationStore, InMemoryPaymentStore, ModerationStores, PaymentStores, PublishedMeta,
 };
 use yookassa::YookassaGateway;
 
@@ -81,6 +81,10 @@ struct AppState {
     /// Admin-set feature-toggle overrides (registry in `features.rs`; evaluation
     /// in [`feature_enabled`] — code default unless overridden).
     flags: FlagStores,
+    /// Mutable moderation overlay (content-moderation) — hidden reviews +
+    /// feedback resolution watermarks, kept entirely separate from the immutable
+    /// fact log. Admin-only reads/writes; the read-side folds consult it.
+    moderation: ModerationStores,
     /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
     /// disabled (501, fail-closed); tests inject the scripted fake.
     yookassa: Option<YookassaGateway>,
@@ -131,6 +135,9 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         media,
         payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
         flags: FlagStores::InMemory(Arc::new(Mutex::new(InMemoryFlagStore::new()))),
+        moderation: ModerationStores::InMemory(Arc::new(
+            Mutex::new(InMemoryModerationStore::new()),
+        )),
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -496,6 +503,21 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/api/admin/versions/{snapshot_id}/feedbacks",
             get(get_version_feedbacks_handler),
+        )
+        .route("/api/admin/reviews", get(admin_list_reviews_handler))
+        .route("/api/admin/reviews/hide", post(admin_hide_review_handler))
+        .route(
+            "/api/admin/reviews/unhide",
+            post(admin_unhide_review_handler),
+        )
+        .route("/api/admin/feedback", get(admin_list_feedback_handler))
+        .route(
+            "/api/admin/feedback/resolve",
+            post(admin_resolve_feedback_handler),
+        )
+        .route(
+            "/api/admin/feedback/reopen",
+            post(admin_reopen_feedback_handler),
         )
         .route("/api/admin/users", get(list_users_handler))
         .route(
@@ -1757,23 +1779,36 @@ async fn list_quests_handler(
                 .is_none_or(|s| s == store::CTOR_STATUS_PUBLISHED)
         })
         .collect();
-    // Ratings for EVERY visible quest in ONE round-trip (was a per-quest
-    // `get_version_stats` N+1 that dominated this endpoint's latency).
-    let snap_ids: Vec<String> = visible.iter().map(|m| m.snapshot_id.clone()).collect();
-    // Ratings (per snapshot) and completions (per quest) are independent aggregate
-    // reads — run them concurrently. Completions is ONE GROUP BY over the whole set
-    // (never a per-quest N+1), matching the ratings round-trip.
-    let (ratings, completions) = tokio::join!(
-        state.store.rating_stats_for_snapshots(&snap_ids),
+    // Ratings for EVERY visible quest: per-player, all-versions, hide-aware
+    // (content-moderation) — one effective rating per (player, quest), dropping
+    // hidden pairs. Ratings, completions, and the hidden set are independent reads,
+    // run concurrently; the fold then groups the rows by quest.
+    let quest_ids: Vec<String> = visible.iter().map(|m| m.quest_id.clone()).collect();
+    let (rating_rows, completions, hidden) = tokio::join!(
+        state.store.quest_rating_rows(Some(&quest_ids)),
         state.store.completions_by_quest(),
+        state.moderation.hidden_review_keys(),
     );
-    let ratings = ratings?;
+    let rating_rows = rating_rows?;
     let completions = completions?;
+    let hidden = hidden?;
+    let mut rows_by_quest: std::collections::HashMap<String, Vec<facts::PlayerRatingRow>> =
+        std::collections::HashMap::new();
+    for row in rating_rows {
+        rows_by_quest
+            .entry(row.quest_id.clone())
+            .or_default()
+            .push(row);
+    }
+    let ratings: std::collections::HashMap<String, (f64, usize)> = rows_by_quest
+        .into_iter()
+        .map(|(q, rows)| (q, facts::fold_rating_rows(&rows, &hidden)))
+        .collect();
     let out: Vec<CatalogQuest> = visible
         .into_iter()
         .map(|meta| {
             let (rating_avg, rating_count) =
-                ratings.get(&meta.snapshot_id).copied().unwrap_or((0.0, 0));
+                ratings.get(&meta.quest_id).copied().unwrap_or((0.0, 0));
             // Public players counter: real distinct completions + marketing bonus.
             let players =
                 completions.get(&meta.quest_id).copied().unwrap_or(0) as i64 + meta.players_bonus;
@@ -1860,7 +1895,6 @@ async fn get_quest_product_handler(
     {
         return Err(not_found());
     }
-    let stats = state.store.get_version_stats(&meta.snapshot_id, 0).await?;
     let (author_name, author_published_count) = match &ctor {
         None => (None, 0),
         Some(q) => {
@@ -1874,10 +1908,25 @@ async fn get_quest_product_handler(
             (Some(q.author_name.clone()), published)
         }
     };
-    // §11 reviews: last quest_rated WITH text per attempt, newest first.
-    let review_rows = state.store.reviews_for_quest(&quest_id, 1000).await?;
-    let reviews_total = review_rows.len();
-    let page: Vec<store::ReviewRow> = review_rows.into_iter().take(10).collect();
+    // Ratings: one effective rating per (player, quest) across all versions, with
+    // hidden pairs dropped (content-moderation). The public page and the backend
+    // admin list fold identically here; the frontend hide-preview is a same-grain
+    // TS mirror kept in step by tests. These reads — ratings, the hidden overlay,
+    // the completions counter, and the frozen snapshot — are independent, so run
+    // them concurrently (public hot path).
+    let (rating_rows, hidden, completions, snapshot) = tokio::join!(
+        state
+            .store
+            .quest_rating_rows(Some(std::slice::from_ref(&quest_id))),
+        state.moderation.hidden_review_keys(),
+        state.store.completions_for_quest(&quest_id),
+        state.grants.get_snapshot(&meta.snapshot_id),
+    );
+    let rating_rows = rating_rows?;
+    let hidden = hidden?;
+    let (rating_avg, rating_count) = facts::fold_rating_rows(&rating_rows, &hidden);
+    let reviews_total = facts::quest_reviews_total(&rating_rows, &hidden);
+    let page = facts::quest_reviews(&rating_rows, &hidden, 10);
     // Author display names in ONE round-trip (was one get_user per review — an N+1).
     let author_ids: Vec<String> = page.iter().map(|r| r.player_id.clone()).collect();
     let authors = state.auth.get_users_by_ids(&author_ids).await?;
@@ -1896,20 +1945,14 @@ async fn get_quest_product_handler(
         .collect();
     // Public players counter: real distinct completions + marketing bonus, same
     // basis as the store card so the two never disagree.
-    let players = state.store.completions_for_quest(&quest_id).await? as i64 + meta.players_bonus;
+    let players = completions? as i64 + meta.players_bonus;
     // «Место старта»: derived from the frozen snapshot on read (kept out of
     // PublishedMeta so no storage migration is needed for old publishes).
-    let start_point = snapshot_start_point(
-        state
-            .grants
-            .get_snapshot(&meta.snapshot_id)
-            .await?
-            .as_ref(),
-    );
+    let start_point = snapshot_start_point(snapshot?.as_ref());
     Ok(Json(ProductPageWire {
         meta,
-        rating_avg: stats.rating_avg,
-        rating_count: stats.rating_count,
+        rating_avg,
+        rating_count,
         players,
         author_name,
         author_published_count,
@@ -2006,6 +2049,363 @@ async fn get_version_feedbacks_handler(
     Ok(Json(
         state.store.list_feedbacks_for_version(&snapshot_id).await?,
     ))
+}
+
+// ==================== Content moderation (Отзывы + Обратная связь) ====================
+// Two admin-only surfaces over the immutable facts: a global reviews list with a
+// per-(player,quest) hide, and a global feedback inbox grouped by (quest, version,
+// step) with an open/resolved watermark. All gated by `require_admin_actor`; the
+// read-side folds live in `facts` + `store` and never mutate a fact.
+
+/// Resolved author identity for an admin surface: a display name, a provider
+/// `kind`, and a single reachable contact — email (`mailto:`) for an email/Google
+/// account, a Telegram `@username` (`t.me/…`) otherwise. Anonymous players (no
+/// account row) carry no contact.
+#[derive(serde::Serialize, Clone)]
+struct AdminIdentityWire {
+    player_id: String,
+    display_name: Option<String>,
+    /// "google" | "telegram" | "email" | "anon".
+    kind: &'static str,
+    /// Present (for `mailto:`) only when `kind` is google/email.
+    email: Option<String>,
+    /// Present (for `t.me/<username>`) only when `kind` is telegram with a handle.
+    telegram_username: Option<String>,
+}
+
+/// Resolve one player to an admin identity from a PRE-FETCHED account + its linked
+/// identities (batched by the caller — never a per-row store hit). `kind` priority:
+/// google > email > telegram > anon, arranged so a google/email kind always has an
+/// email and a telegram kind never does — keeping the single contact unambiguous.
+fn resolve_admin_identity(
+    player_id: &str,
+    account: Option<&auth::UserAccount>,
+    identities: &[store::AuthIdentity],
+) -> AdminIdentityWire {
+    let has_google = identities
+        .iter()
+        .any(|i| i.provider == auth::PROVIDER_GOOGLE);
+    let telegram = identities
+        .iter()
+        .find(|i| i.provider == auth::PROVIDER_TELEGRAM);
+    let email = account.and_then(|a| a.email.clone());
+    // One chain co-locates each kind with the single contact it surfaces, so a
+    // newly added kind can never silently fall through to "no contact".
+    let (kind, email, telegram_username) = if has_google && email.is_some() {
+        ("google", email, None)
+    } else if email.is_some() {
+        ("email", email, None)
+    } else if let Some(tg) = telegram {
+        ("telegram", None, tg.username.clone())
+    } else {
+        ("anon", None, None)
+    };
+    AdminIdentityWire {
+        player_id: player_id.to_string(),
+        display_name: account.and_then(|a| a.display_name.clone()),
+        kind,
+        email,
+        telegram_username,
+    }
+}
+
+/// Index published metas by quest id — the marketplace label lookup shared by the
+/// two admin moderation list handlers.
+fn published_by_quest(
+    metas: Vec<PublishedMeta>,
+) -> std::collections::HashMap<String, PublishedMeta> {
+    metas.into_iter().map(|m| (m.quest_id.clone(), m)).collect()
+}
+
+/// Batch-resolve identities for many players in exactly two store reads (accounts +
+/// linked identities) — never an N+1. Returns `player_id -> identity`.
+async fn resolve_admin_identities(
+    state: &AppState,
+    player_ids: &[String],
+) -> Result<std::collections::HashMap<String, AdminIdentityWire>, AppError> {
+    // Independent reads over the same ids — run concurrently (one RTT, not two).
+    let (accounts, identities) = tokio::join!(
+        state.auth.get_users_by_ids(player_ids),
+        state.auth.identities_for_players(player_ids),
+    );
+    let accounts = accounts?;
+    let identities = identities?;
+    let empty: Vec<store::AuthIdentity> = Vec::new();
+    Ok(player_ids
+        .iter()
+        .map(|pid| {
+            let wire = resolve_admin_identity(
+                pid,
+                accounts.get(pid),
+                identities.get(pid).unwrap_or(&empty),
+            );
+            (pid.clone(), wire)
+        })
+        .collect())
+}
+
+/// One row of the global reviews list: an effective per-`(player, quest)` rating
+/// (star-only included), whether it is hidden, and the resolved author identity.
+#[derive(serde::Serialize)]
+struct AdminReviewWire {
+    quest_id: String,
+    quest_name: String,
+    quest_city: Option<String>,
+    rating: i64,
+    /// `None` for a star-only rating (counts toward the average, no text).
+    text: Option<String>,
+    created_at: u64,
+    hidden: bool,
+    identity: AdminIdentityWire,
+}
+
+#[derive(serde::Serialize)]
+struct AdminReviewsResponse {
+    reviews: Vec<AdminReviewWire>,
+}
+
+async fn admin_list_reviews_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AdminReviewsResponse>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    // Independent reads — the fold rows, the hidden set, and quest labels — concurrently.
+    let (rows, hidden, published) = tokio::join!(
+        state.store.quest_rating_rows(None),
+        state.moderation.hidden_review_keys(),
+        state.grants.list_published(),
+    );
+    let rows = rows?;
+    let hidden = hidden?;
+    let published = published_by_quest(published?);
+    let player_ids: Vec<String> = rows.iter().map(|r| r.player_id.clone()).collect();
+    let identities = resolve_admin_identities(&state, &player_ids).await?;
+    let mut reviews: Vec<AdminReviewWire> = rows
+        .into_iter()
+        .map(|r| {
+            let is_hidden = hidden.contains(&(r.player_id.clone(), r.quest_id.clone()));
+            let meta = published.get(&r.quest_id);
+            let identity = identities
+                .get(&r.player_id)
+                .cloned()
+                .unwrap_or_else(|| resolve_admin_identity(&r.player_id, None, &[]));
+            AdminReviewWire {
+                quest_name: meta
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| r.quest_id.clone()),
+                quest_city: meta.and_then(|m| m.city.clone()),
+                quest_id: r.quest_id,
+                rating: r.rating,
+                text: r.text,
+                created_at: r.created_at,
+                hidden: is_hidden,
+                identity,
+            }
+        })
+        .collect();
+    // Worst-first, then newest — the design's default moderation order.
+    reviews.sort_by(|a, b| {
+        a.rating
+            .cmp(&b.rating)
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
+    Ok(Json(AdminReviewsResponse { reviews }))
+}
+
+/// Body for hide/unhide — the `(player, quest)` the moderation decision keys on.
+#[derive(serde::Deserialize)]
+struct ReviewHideRequest {
+    player_id: String,
+    quest_id: String,
+}
+
+async fn admin_hide_review_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ReviewHideRequest>,
+) -> Result<StatusCode, AppError> {
+    let actor = require_admin_actor(&state, &headers).await?;
+    let by = actor.player_id.unwrap_or_else(|| "ops-token".to_string());
+    state
+        .moderation
+        .hide_review(&req.player_id, &req.quest_id, store::now_secs(), &by)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_unhide_review_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ReviewHideRequest>,
+) -> Result<StatusCode, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    state
+        .moderation
+        .unhide_review(&req.player_id, &req.quest_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// One report inside a feedback group — its note, server time, and author identity.
+#[derive(serde::Serialize)]
+struct AdminReportWire {
+    note: String,
+    recorded_at: u64,
+    identity: AdminIdentityWire,
+}
+
+/// A feedback group `(quest, snapshot, step)` with its resolution status, the frozen
+/// step label, its human version number, whether it is the current version, and its
+/// reports newest-first.
+#[derive(serde::Serialize)]
+struct AdminFeedbackGroupWire {
+    quest_id: String,
+    quest_name: String,
+    quest_city: Option<String>,
+    snapshot_id: String,
+    version: Option<u32>,
+    step_position: i32,
+    step_title: Option<String>,
+    step_template: Option<String>,
+    current: bool,
+    resolved: bool,
+    reports: Vec<AdminReportWire>,
+}
+
+#[derive(serde::Serialize)]
+struct AdminFeedbackResponse {
+    groups: Vec<AdminFeedbackGroupWire>,
+}
+
+async fn admin_list_feedback_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AdminFeedbackResponse>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    // Independent reads — reports, resolutions, and quest labels — run concurrently.
+    let (reports, resolutions, published) = tokio::join!(
+        state.store.all_feedback_reports(),
+        state.moderation.feedback_resolutions(),
+        state.grants.list_published(),
+    );
+    let core = facts::group_feedback(reports?, &resolutions?);
+    let published = published_by_quest(published?);
+    // Identities in one batch across every report.
+    let player_ids: Vec<String> = core
+        .iter()
+        .flat_map(|g| g.reports.iter().map(|r| r.player_id.clone()))
+        .collect();
+    let identities = resolve_admin_identities(&state, &player_ids).await?;
+    // Frozen snapshot JSON per DISTINCT snapshot (for version + step labels).
+    let mut snapshots: std::collections::HashMap<String, Option<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for g in &core {
+        if !snapshots.contains_key(&g.snapshot_id) {
+            let snap = state.grants.get_snapshot(&g.snapshot_id).await?;
+            snapshots.insert(g.snapshot_id.clone(), snap);
+        }
+    }
+
+    let groups = core
+        .into_iter()
+        .map(|g| {
+            let meta = published.get(&g.quest_id);
+            let current = meta.map(|m| m.snapshot_id.as_str()) == Some(g.snapshot_id.as_str());
+            let snap = snapshots.get(&g.snapshot_id).and_then(|o| o.as_ref());
+            let version = snap
+                .and_then(|s| s.get("snapshot_version"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            let steps = snap.map(admin_stats::snapshot_steps).unwrap_or_default();
+            let (step_title, step_template) = usize::try_from(g.step_position)
+                .ok()
+                .and_then(|i| steps.get(i))
+                .map(|(t, tmpl)| (Some(t.clone()), Some(tmpl.clone())))
+                .unwrap_or((None, None));
+            let reports = g
+                .reports
+                .into_iter()
+                .map(|r| AdminReportWire {
+                    note: r.note,
+                    recorded_at: r.recorded_at,
+                    identity: identities
+                        .get(&r.player_id)
+                        .cloned()
+                        .unwrap_or_else(|| resolve_admin_identity(&r.player_id, None, &[])),
+                })
+                .collect();
+            AdminFeedbackGroupWire {
+                quest_name: meta
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| g.quest_id.clone()),
+                quest_city: meta.and_then(|m| m.city.clone()),
+                quest_id: g.quest_id,
+                snapshot_id: g.snapshot_id,
+                version,
+                step_position: g.step_position,
+                step_title,
+                step_template,
+                current,
+                resolved: g.resolved,
+                reports,
+            }
+        })
+        .collect();
+    Ok(Json(AdminFeedbackResponse { groups }))
+}
+
+/// Body for resolve/reopen — the `(quest, snapshot, step)` group key.
+#[derive(serde::Deserialize)]
+struct FeedbackResolveRequest {
+    quest_id: String,
+    snapshot_id: String,
+    step_position: i32,
+}
+
+async fn admin_resolve_feedback_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<FeedbackResolveRequest>,
+) -> Result<StatusCode, AppError> {
+    let actor = require_admin_actor(&state, &headers).await?;
+    let by = actor.player_id.unwrap_or_else(|| "ops-token".to_string());
+    // Acknowledge exactly the reports currently in this (quest, snapshot, step)
+    // group; a later report grows the count past this watermark and reopens it.
+    let acknowledged = state
+        .store
+        .all_feedback_reports()
+        .await?
+        .into_iter()
+        .filter(|r| {
+            r.quest_id == req.quest_id
+                && r.snapshot_id == req.snapshot_id
+                && r.step_position == req.step_position
+        })
+        .count() as u64;
+    state
+        .moderation
+        .resolve_feedback(
+            &req.quest_id,
+            &req.snapshot_id,
+            req.step_position,
+            acknowledged,
+            &by,
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn admin_reopen_feedback_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<FeedbackResolveRequest>,
+) -> Result<StatusCode, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    state
+        .moderation
+        .reopen_feedback(&req.quest_id, &req.snapshot_id, req.step_position)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(serde::Deserialize)]
@@ -2144,6 +2544,9 @@ struct SocialIdentity {
     /// a verified email may auto-link to an existing same-email account.
     email_verified: bool,
     display_name: Option<String>,
+    /// Telegram `@username` (handle, no `@`); `None` for Google and for a
+    /// handleless Telegram user. Persisted so admins get a `t.me/<username>` contact.
+    username: Option<String>,
 }
 
 /// POST /api/auth/google — `{credential, player_id}` where `credential` is a
@@ -2175,6 +2578,7 @@ async fn google_auth_handler(
         email: claims.email,
         email_verified: claims.email_verified,
         display_name: claims.name,
+        username: None,
     };
     complete_social_login(&state, &headers, &req.player_id, ident)
         .await
@@ -2210,6 +2614,7 @@ async fn telegram_auth_handler(
         email: None,
         email_verified: false,
         display_name: claims.display_name(),
+        username: claims.preferred_username.clone(),
     };
     complete_social_login(&state, &headers, &req.player_id, ident)
         .await
@@ -2246,6 +2651,12 @@ async fn complete_social_login(
                 "этот способ входа уже привязан к другому аккаунту".into(),
             ));
         }
+        // Keep a re-used identity's stored contact current (e.g. a changed
+        // Telegram @username); an absent claim leaves the prior value untouched.
+        state
+            .auth
+            .set_identity_username(ident.provider, &ident.subject, ident.username.clone())
+            .await?;
         return issue_session_for(state, &pid).await;
     }
 
@@ -2272,6 +2683,7 @@ async fn complete_social_login(
             subject: ident.subject.clone(),
             player_id: target.clone(),
             email: ident.email.clone(),
+            username: ident.username.clone(),
             created_at: store::now_secs(),
         })
         .await
@@ -3480,6 +3892,9 @@ async fn main() -> anyhow::Result<()> {
                 coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
                 media,
                 payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
+                moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(
+                    pool.clone(),
+                )),
                 flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
                 yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
@@ -3663,7 +4078,10 @@ mod tests {
         let no_nav = json!({ "steps": [ { "template": "start" }, { "template": "congrats" } ] });
         assert_eq!(snapshot_start_point(Some(&no_nav)), None);
         assert_eq!(snapshot_start_point(None), None);
-        assert_eq!(snapshot_start_point(Some(&json!({ "steps": "мусор" }))), None);
+        assert_eq!(
+            snapshot_start_point(Some(&json!({ "steps": "мусор" }))),
+            None
+        );
         // A malformed navigator (missing lat) is skipped, not a crash — and the
         // NEXT navigator wins.
         let mixed = json!({ "steps": [
@@ -3672,7 +4090,11 @@ mod tests {
         ] });
         assert_eq!(
             snapshot_start_point(Some(&mixed)),
-            Some(StartPointWire { lat: 1.5, lng: 2.5, label: None })
+            Some(StartPointWire {
+                lat: 1.5,
+                lng: 2.5,
+                label: None
+            })
         );
     }
 
@@ -3853,7 +4275,10 @@ mod tests {
     /// — its verifier needs live JWKS, covered by unit tests). The verifier's JWKS
     /// cache is pre-seeded with a local key so `telegram_id_token`s verify offline
     /// over the REAL signature/aud/iss/exp path. Mirrors `test_app` otherwise.
-    fn test_app_social() -> Router {
+    /// State with the Telegram verifier seeded (offline JWKS). Returned (not just a
+    /// Router) so a test can also inspect the shared Arc<Mutex> stores after driving
+    /// the handler — e.g. read back a persisted identity username.
+    fn social_state() -> AppState {
         let mut state = test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
             version: "test-0.0.0",
@@ -3868,7 +4293,11 @@ mod tests {
             yookassa: None,
         });
         state.telegram = Some(Arc::new(social::test_support::seeded_telegram_verifier()));
-        build_router(state)
+        state
+    }
+
+    fn test_app_social() -> Router {
+        build_router(social_state())
     }
 
     /// A `/api/auth/telegram` request body: a locally-signed OIDC id_token (name is
@@ -3949,6 +4378,88 @@ mod tests {
         assert!(me["email"].is_null());
         let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
         assert_eq!(methods, vec!["telegram".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn telegram_username_is_captured_and_refreshed() {
+        let state = social_state();
+        let app = build_router(state.clone());
+
+        // 1. Sign in with a @username → it is captured on the identity.
+        let (st, body) = post_json(
+            &app,
+            "/api/auth/telegram",
+            json!({
+                "player_id": "dev:tg-user",
+                "id_token": social::test_support::telegram_id_token(900, "Milan", Some("milan_bg"), 3600),
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let pid = body["player_id"].as_str().expect("player_id").to_string();
+        let ids = state
+            .auth
+            .identities_for_player(&pid)
+            .await
+            .expect("identities");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].username.as_deref(), Some("milan_bg"));
+
+        // 2. Re-sign-in with a CHANGED handle → the stored username is refreshed.
+        let (st, _) = post_json(
+            &app,
+            "/api/auth/telegram",
+            json!({
+                "player_id": "dev:tg-user",
+                "id_token": social::test_support::telegram_id_token(900, "Milan", Some("milan_new"), 3600),
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        assert_eq!(
+            ids[0].username.as_deref(),
+            Some("milan_new"),
+            "a changed handle overwrites the stored one"
+        );
+
+        // 3. Re-sign-in with NO handle → the prior value is left untouched.
+        let (st, _) = post_json(
+            &app,
+            "/api/auth/telegram",
+            json!({
+                "player_id": "dev:tg-user",
+                "id_token": social::test_support::telegram_id_token(900, "Milan", None, 3600),
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        assert_eq!(
+            ids[0].username.as_deref(),
+            Some("milan_new"),
+            "an absent claim leaves the prior value untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_handleless_user_has_no_username() {
+        let state = social_state();
+        let app = build_router(state.clone());
+        let (st, body) = post_json(
+            &app,
+            "/api/auth/telegram",
+            json!({
+                "player_id": "dev:no-handle",
+                "id_token": social::test_support::telegram_id_token(901, "Guest", None, 3600),
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let pid = body["player_id"].as_str().expect("player_id").to_string();
+        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].username, None, "no handle → no stored username");
     }
 
     #[tokio::test]
@@ -7489,6 +8000,7 @@ mod tests {
             coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
+            moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(pool.clone())),
             flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
             yookassa: None,
             mailer: m,
@@ -8204,9 +8716,7 @@ mod tests {
             // the seeded ON override (the in-memory twin of migration 0015).
             assert_eq!(row["default_enabled"], json!(false));
             let key = row["key"].as_str().expect("key");
-            let seeded = features::Feature::SEEDED_ON
-                .iter()
-                .any(|f| f.key() == key);
+            let seeded = features::Feature::SEEDED_ON.iter().any(|f| f.key() == key);
             if seeded {
                 assert_eq!(row["override"], json!(true), "{key} must seed on");
                 assert_eq!(row["effective"], json!(true));
@@ -8622,6 +9132,315 @@ mod tests {
         // Unknown quest: honest 404.
         let (st, _) = get_json_h(&app, "/api/admin/stats/nope", &admin).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    // ---------------- content moderation (Отзывы + Обратная связь) ----------------
+
+    fn mod_snapshot() -> Value {
+        json!({
+            "snapshot_version": 1,
+            "steps": [
+                { "template": "start", "rich_content": { "title": "Старт" } },
+                { "template": "task_answer", "rich_content": { "title": "Фонтан у театра" } },
+                { "template": "congrats", "rich_content": { "title": "Финал" } }
+            ]
+        })
+    }
+
+    fn rate_fact(stars: &str, text: Option<&str>) -> Fact {
+        Fact {
+            kind: FactKind::QuestRated,
+            step_position: 2,
+            submitted_value: Some(stars.into()),
+            local_is_correct: true,
+            coins_delta: 0,
+            note: text.map(str::to_string),
+            device_id: "d".into(),
+        }
+    }
+
+    fn report_fact(note: &str) -> Fact {
+        Fact {
+            kind: FactKind::FeedbackReported,
+            step_position: 1,
+            submitted_value: None,
+            local_is_correct: true,
+            coins_delta: 0,
+            note: Some(note.into()),
+            device_id: "d".into(),
+        }
+    }
+
+    /// Publish q1 and seed four raters (google / email / telegram / anon) plus three
+    /// reporters on step 1, each with a distinct identity kind.
+    async fn seed_moderation(state: &AppState) {
+        state
+            .grants
+            .register_published(
+                "q1",
+                stats_meta("q1", "Ирония судьбы"),
+                Some(mod_snapshot()),
+            )
+            .await
+            .expect("publish");
+        state
+            .auth
+            .create_social_account(
+                "acct-google",
+                Some("anna@gmail.com".into()),
+                Some("Анна".into()),
+                None,
+            )
+            .await
+            .expect("google account");
+        state
+            .auth
+            .create_identity(store::AuthIdentity {
+                provider: "google".into(),
+                subject: "g1".into(),
+                player_id: "acct-google".into(),
+                email: Some("anna@gmail.com".into()),
+                username: None,
+                created_at: 0,
+            })
+            .await
+            .expect("google identity");
+        state
+            .auth
+            .create_social_account(
+                "acct-email",
+                Some("igor@mail.ru".into()),
+                Some("Игорь".into()),
+                None,
+            )
+            .await
+            .expect("email account");
+        state
+            .auth
+            .create_social_account("acct-tg", None, Some("Milan".into()), None)
+            .await
+            .expect("telegram account");
+        state
+            .auth
+            .create_identity(store::AuthIdentity {
+                provider: "telegram".into(),
+                subject: "t1".into(),
+                player_id: "acct-tg".into(),
+                email: None,
+                username: Some("milan_bg".into()),
+                created_at: 0,
+            })
+            .await
+            .expect("telegram identity");
+
+        for (pid, fact) in [
+            ("acct-google", rate_fact("5", Some("Отлично"))),
+            ("acct-email", rate_fact("4", Some("Норм"))),
+            ("acct-tg", rate_fact("5", Some("Супер"))),
+            ("dev-anon", rate_fact("2", None)), // star-only, anonymous
+        ] {
+            let a = state
+                .store
+                .create_attempt(pid, "q1", "q1-v1")
+                .await
+                .expect("attempt");
+            state
+                .store
+                .append_idempotent(&a.attempt_id, vec![fact])
+                .await
+                .expect("append")
+                .expect("known attempt");
+        }
+        for (pid, note) in [
+            ("acct-email", "Ответ не принят"),
+            ("acct-tg", "not accepted"),
+            ("dev-anon", "баг"),
+        ] {
+            let a = state
+                .store
+                .create_attempt(pid, "q1", "q1-v1")
+                .await
+                .expect("attempt");
+            state
+                .store
+                .append_idempotent(&a.attempt_id, vec![report_fact(note)])
+                .await
+                .expect("append")
+                .expect("known attempt");
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_reviews_list_identities_star_only_and_hide_from_average() {
+        let state = test_state(test_config());
+        seed_moderation(&state).await;
+        let app = build_router(state);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        let (st, v) = get_json_h(&app, "/api/admin/reviews", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let reviews = v["reviews"].as_array().expect("reviews");
+        assert_eq!(
+            reviews.len(),
+            4,
+            "one row per (player, quest), star-only included"
+        );
+        assert_eq!(reviews[0]["rating"], json!(2), "worst first");
+        assert_eq!(
+            reviews[0]["text"],
+            Value::Null,
+            "a star-only rating has no text"
+        );
+        assert_eq!(reviews[0]["identity"]["kind"], json!("anon"));
+        let by_kind = |k: &str| {
+            reviews
+                .iter()
+                .find(|r| r["identity"]["kind"] == json!(k))
+                .unwrap_or_else(|| panic!("no {k} review"))
+        };
+        assert_eq!(
+            by_kind("telegram")["identity"]["telegram_username"],
+            json!("milan_bg")
+        );
+        assert!(by_kind("telegram")["identity"]["email"].is_null());
+        assert_eq!(
+            by_kind("google")["identity"]["email"],
+            json!("anna@gmail.com")
+        );
+        assert_eq!(by_kind("email")["identity"]["email"], json!("igor@mail.ru"));
+        assert_eq!(by_kind("google")["quest_name"], json!("Ирония судьбы"));
+        assert!(reviews.iter().all(|r| r["hidden"] == json!(false)));
+
+        // Product page average over all four: (5 + 4 + 5 + 2) / 4 = 4.0, count 4.
+        let (_, p) = get_json(&app, "/api/quests/q1").await;
+        assert_eq!(p["rating_count"], json!(4));
+        assert!((p["rating_avg"].as_f64().expect("avg") - 4.0).abs() < 1e-9);
+
+        // Hide the anonymous 2★ → dropped from the average and flagged; idempotent.
+        let hide = json!({ "player_id": "dev-anon", "quest_id": "q1" });
+        for _ in 0..2 {
+            let (st, _) = post_json_h(&app, "/api/admin/reviews/hide", hide.clone(), &admin).await;
+            assert_eq!(st, StatusCode::NO_CONTENT);
+        }
+        let (_, p) = get_json(&app, "/api/quests/q1").await;
+        assert_eq!(p["rating_count"], json!(3));
+        assert!(
+            (p["rating_avg"].as_f64().expect("avg") - 14.0 / 3.0).abs() < 1e-9,
+            "hidden 2★ dropped from the average"
+        );
+        let (_, v) = get_json_h(&app, "/api/admin/reviews", &admin).await;
+        assert!(
+            v["reviews"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["identity"]["kind"] == json!("anon") && r["hidden"] == json!(true))
+        );
+
+        // Unhide restores the average.
+        let (st, _) = post_json_h(&app, "/api/admin/reviews/unhide", hide, &admin).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (_, p) = get_json(&app, "/api/quests/q1").await;
+        assert_eq!(p["rating_count"], json!(4));
+        assert!((p["rating_avg"].as_f64().expect("avg") - 4.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn admin_feedback_groups_resolve_and_reopen_on_new_report() {
+        let state = test_state(test_config());
+        seed_moderation(&state).await;
+        let app = build_router(state.clone());
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        let (st, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let groups = v["groups"].as_array().expect("groups");
+        assert_eq!(groups.len(), 1, "one (quest, snapshot, step) group");
+        let g = &groups[0];
+        assert_eq!(g["quest_id"], json!("q1"));
+        assert_eq!(g["snapshot_id"], json!("q1-v1"));
+        assert_eq!(g["step_position"], json!(1));
+        assert_eq!(g["step_title"], json!("Фонтан у театра"));
+        assert_eq!(g["step_template"], json!("task_answer"));
+        assert_eq!(g["version"], json!(1));
+        assert_eq!(g["current"], json!(true));
+        assert_eq!(g["quest_name"], json!("Ирония судьбы"));
+        assert_eq!(g["resolved"], json!(false));
+        assert_eq!(g["reports"].as_array().unwrap().len(), 3);
+        assert!(
+            g["reports"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["identity"]["telegram_username"] == json!("milan_bg"))
+        );
+
+        let key = json!({ "quest_id": "q1", "snapshot_id": "q1-v1", "step_position": 1 });
+        let (st, _) = post_json_h(&app, "/api/admin/feedback/resolve", key.clone(), &admin).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(v["groups"][0]["resolved"], json!(true));
+
+        // A NEW report pushes the count past the acknowledged watermark → reopens.
+        let a = state
+            .store
+            .create_attempt("acct-email", "q1", "q1-v1")
+            .await
+            .expect("attempt");
+        state
+            .store
+            .append_idempotent(&a.attempt_id, vec![report_fact("ещё раз не работает")])
+            .await
+            .expect("append")
+            .expect("known attempt");
+        let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(
+            v["groups"][0]["resolved"],
+            json!(false),
+            "a later report reopens the group"
+        );
+        assert_eq!(v["groups"][0]["reports"].as_array().unwrap().len(), 4);
+
+        // Resolve again, then a manual reopen with no new report.
+        let _ = post_json_h(&app, "/api/admin/feedback/resolve", key.clone(), &admin).await;
+        let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(v["groups"][0]["resolved"], json!(true));
+        let (st, _) = post_json_h(&app, "/api/admin/feedback/reopen", key, &admin).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(v["groups"][0]["resolved"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn moderation_endpoints_require_admin() {
+        let state = test_state(test_config());
+        seed_moderation(&state).await;
+        let app = build_router(state);
+        let key = json!({ "quest_id": "q1", "snapshot_id": "q1-v1", "step_position": 1 });
+        let hide = json!({ "player_id": "dev-anon", "quest_id": "q1" });
+        for uri in ["/api/admin/reviews", "/api/admin/feedback"] {
+            let (st, _) = get_json(&app, uri).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{uri} without admin");
+            let (st, _) = get_json_h(&app, uri, &[("x-admin-token", "wrong")]).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{uri} wrong token");
+        }
+        for (uri, body) in [
+            ("/api/admin/reviews/hide", hide.clone()),
+            ("/api/admin/reviews/unhide", hide),
+            ("/api/admin/feedback/resolve", key.clone()),
+            ("/api/admin/feedback/reopen", key),
+        ] {
+            let (st, _) = post_json(&app, uri, body).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{uri} without admin");
+        }
+        // The admin token unlocks the same read.
+        let (st, _) = get_json_h(
+            &app,
+            "/api/admin/reviews",
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
     }
 
     #[tokio::test]

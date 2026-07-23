@@ -401,6 +401,74 @@ export interface PaymentStatusWire {
 
 let providersPromise: Promise<{ providers: string[] }> | null = null;
 
+/**
+ * Resolved author identity for an admin moderation surface (content-moderation):
+ * a display name, a provider `kind`, and a single reachable contact — email for an
+ * email/Google account, a Telegram `@username` otherwise; anonymous players carry none.
+ */
+export interface AdminIdentityWire {
+  player_id: string;
+  display_name: string | null;
+  kind: 'google' | 'telegram' | 'email' | 'anon';
+  email: string | null;
+  telegram_username: string | null;
+}
+
+/** One global reviews-moderation row: a per-`(player,quest)` rating (star-only when `text` is null). */
+export interface AdminReviewWire {
+  quest_id: string;
+  quest_name: string;
+  quest_city: string | null;
+  rating: number;
+  text: string | null;
+  created_at: number;
+  hidden: boolean;
+  identity: AdminIdentityWire;
+}
+
+export interface AdminReviewsResponse {
+  reviews: AdminReviewWire[];
+}
+
+/** One report inside a feedback group. */
+export interface AdminReportWire {
+  note: string;
+  recorded_at: number;
+  identity: AdminIdentityWire;
+}
+
+/** A feedback group `(quest, snapshot, step)` with its resolution status + reports. */
+export interface AdminFeedbackGroupWire {
+  quest_id: string;
+  quest_name: string;
+  quest_city: string | null;
+  snapshot_id: string;
+  version: number | null;
+  step_position: number;
+  step_title: string | null;
+  step_template: string | null;
+  current: boolean;
+  resolved: boolean;
+  reports: AdminReportWire[];
+}
+
+export interface AdminFeedbackResponse {
+  groups: AdminFeedbackGroupWire[];
+}
+
+/** Body for the review hide/unhide — the `(player, quest)` the decision keys on. */
+export interface ReviewHideBody {
+  player_id: string;
+  quest_id: string;
+}
+
+/** Body for the feedback resolve/reopen — the `(quest, snapshot, step)` group key. */
+export interface FeedbackResolveBody {
+  quest_id: string;
+  snapshot_id: string;
+  step_position: number;
+}
+
 export const api = {
   checkout: (body: {
     player_id: string;
@@ -506,6 +574,38 @@ export const api = {
       `/api/admin/stats/${encodeURIComponent(questId)}${statsRangeQuery(range)}`,
       { headers: adminHeaders() },
     ),
+
+  // Content moderation (Отзывы + Обратная связь) — same dual-credential gating as
+  // the other admin endpoints. The list GETs return every rating / feedback group
+  // with resolved author identity; the mutations answer 204 (apiFetch → {}).
+  adminListReviews: () =>
+    apiFetch<AdminReviewsResponse>('/api/admin/reviews', { headers: adminHeaders() }),
+  adminHideReview: (body: ReviewHideBody) =>
+    apiFetch<void>('/api/admin/reviews/hide', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminUnhideReview: (body: ReviewHideBody) =>
+    apiFetch<void>('/api/admin/reviews/unhide', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminListFeedback: () =>
+    apiFetch<AdminFeedbackResponse>('/api/admin/feedback', { headers: adminHeaders() }),
+  adminResolveFeedback: (body: FeedbackResolveBody) =>
+    apiFetch<void>('/api/admin/feedback/resolve', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminReopenFeedback: (body: FeedbackResolveBody) =>
+    apiFetch<void>('/api/admin/feedback/reopen', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
 
   // Admin coupon management (coupons spec) — same dual-credential gating as the
   // user endpoints (role==admin session OR the shared ADMIN_TOKEN). Mutations are
