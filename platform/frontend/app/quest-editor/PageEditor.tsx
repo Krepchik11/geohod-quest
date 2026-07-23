@@ -138,45 +138,73 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const set = (patch: Partial<typeof h>) => onPatch({ hint: { ...h, ...patch } });
   return (
     <WspBlock title="Подсказка" gateField="hint" aside="попап после 2-й ошибки ответа">
-      <div className="wsp-trow">
-        <div>
-          <label className="adm-label">Стоимость, монет</label>
-          <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
-        </div>
-        <div className="wsp-grow">
-          <label className="adm-label">Текст подсказки<small>останется открытым до конца шага</small></label>
-          <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
-        </div>
-      </div>
-      <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-        <ImageZone
-          src={h.image}
-          label="изображение подсказки"
-          aspect43
-          onChange={(image) => set({ image })}
-        />
-      </div>
-      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подсказка может быть текстом, изображением или обоими сразу; игрок увидит её попапом и под вопросом. Без текста и изображения подсказка не продаётся.</p>
-      <p className="freeze-note">Стоимость заморозится при публикации. Баланс игрока может уйти в минус — покупка никогда не блокируется.</p>
+      <WspToggle on={h.on} onClick={() => set({ on: !h.on })} label="Подсказка на этом шаге" />
+      {h.on ? (
+        <>
+          <div className="wsp-trow">
+            <div>
+              <label className="adm-label">Стоимость, монет</label>
+              <input className="input input--compact" type="number" min={0} value={h.cost} onChange={(e) => set({ cost: Math.max(0, +e.target.value || 0) })} />
+            </div>
+            <div className="wsp-grow">
+              <label className="adm-label">Текст подсказки<small>останется открытым до конца шага</small></label>
+              <input className="input" value={h.text} onChange={(e) => set({ text: e.target.value })} />
+            </div>
+          </div>
+          <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+            <ImageZone
+              src={h.image}
+              label="изображение подсказки"
+              aspect43
+              onChange={(image) => set({ image })}
+            />
+          </div>
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подсказка может быть текстом, изображением или обоими сразу; игрок увидит её попапом и под вопросом. Без текста и изображения подсказка не продаётся.</p>
+          <p className="freeze-note">Стоимость заморозится при публикации. Баланс игрока может уйти в минус — покупка никогда не блокируется.</p>
+        </>
+      ) : (
+        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подсказка выключена — игрок решает задание без покупки помощи.</p>
+      )}
     </WspBlock>
   );
 }
 
-function NavBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
-  const n = step.nav;
-  const set = (patch: Partial<typeof n>) => onPatch({ nav: { ...n, ...patch } });
-  const bad = n.on && !parseCoords(n.coords);
+/** Красная строка незакрытого гейта под контролом («✗ … — публикация будет заблокирована»). */
+function GateNote({ children }: { children: React.ReactNode }) {
   return (
-    <WspBlock title="Навигатор" gateField="nav" aside="передача в системные карты, без маршрута в бандле">
-      <WspToggle on={n.on} onClick={() => set({ on: !n.on })} label="Кнопка навигатора на странице" />
-      {n.on ? (
+    <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>
+      ✗ {children} — публикация будет заблокирована.
+    </p>
+  );
+}
+
+function AddressBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
+  const a = step.address;
+  const set = (patch: Partial<typeof a>) => onPatch({ address: { ...a, ...patch } });
+  const badCoords = a.on && !parseCoords(a.coords);
+  const badName = a.on && !a.name.trim();
+  return (
+    <WspBlock title="Адрес и расстояние" gateField="address" aside="строка с булавкой; клик открывает системные карты">
+      <WspToggle on={a.on} onClick={() => set({ on: !a.on })} label="Адрес на странице" />
+      {a.on ? (
         <>
+          <div className="wsp-trow">
+            <div className="wsp-grow">
+              <label className="adm-label">Название<small>например «ул. Николаевска порта 2»; оно же — подпись точки на карте</small></label>
+              <input className="input" value={a.name} onChange={(e) => set({ name: e.target.value })} />
+            </div>
+            <div>
+              <label className="adm-label">Расстояние<small>необязательно</small></label>
+              <input className="input input--compact" placeholder="400 м отсюда" value={a.distance} onChange={(e) => set({ distance: e.target.value })} />
+            </div>
+          </div>
           <div>
             <label className="adm-label">Координаты<small>вставьте из Google Maps: правый клик по точке → первая строка</small></label>
-            <input className="input" placeholder="45.2651377918879, 19.865664144668212" value={n.coords} onChange={(e) => set({ coords: e.target.value })} />
+            <input className="input" placeholder="45.2651377918879, 19.865664144668212" value={a.coords} onChange={(e) => set({ coords: e.target.value })} />
           </div>
-          {bad ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>✗ Координаты не заданы — публикация будет заблокирована.</p> : null}
-          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подписью точки служит адрес из блока «Контент».</p>
+          {badName ? <GateNote>Название не задано</GateNote> : null}
+          {badCoords ? <GateNote>Координаты не заданы</GateNote> : null}
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Игрок увидит «название · расстояние»; нажатие на строку передаёт координаты в системные карты — маршрута в бандле нет.</p>
         </>
       ) : null}
     </WspBlock>
@@ -223,10 +251,6 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
       <div>
         <label className="adm-label">Текст задания</label>
         <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
-      </div>
-      <div>
-        <label className="adm-label">Адрес<small>строка с булавкой, например «ул. Николаевска порта 2 · 400 м отсюда»; он же — подпись точки в навигаторе</small></label>
-        <input className="input" value={step.place} onChange={(e) => set({ place: e.target.value })} />
       </div>
       <div>
         <label className="adm-label">Действие на месте<small>необязательно</small></label>
@@ -295,6 +319,8 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
         </div>
       </WspBlock>
 
+      <StepImageBlock step={step} onPatch={set} />
+
       {tpl === 'start' ? <StartContent quest={quest} step={step} set={set} onSettings={onSettings} /> : null}
 
       {tpl === 'video' || tpl === 'route_video' ? (
@@ -316,10 +342,6 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
           <div>
             <label className="adm-label">Текст задания</label>
             <textarea className="textarea" value={step.text} onChange={(e) => set({ text: e.target.value })} />
-          </div>
-          <div>
-            <label className="adm-label">Адрес<small>необязательно; он же — подпись точки в навигаторе</small></label>
-            <input className="input" value={step.place} onChange={(e) => set({ place: e.target.value })} />
           </div>
           <div>
             <label className="adm-label">Вопрос<small>показывается над полем ответа</small></label>
@@ -356,12 +378,10 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
         </>
       ) : null}
 
-      <StepImageBlock step={step} onPatch={set} />
-
       {tpl === 'task_answer' ? <AnswersBlock step={step} onPatch={set} /> : null}
       {tpl === 'task_no' || tpl === 'task_answer' ? <GiftBlock step={step} onPatch={set} /> : null}
       {tpl === 'task_answer' ? <HintBlock step={step} onPatch={set} /> : null}
-      {tpl === 'task_no' || tpl === 'task_answer' || tpl === 'route_video' || tpl === 'video' ? <NavBlock step={step} onPatch={set} /> : null}
+      {tpl === 'task_no' || tpl === 'task_answer' || tpl === 'route_video' || tpl === 'video' ? <AddressBlock step={step} onPatch={set} /> : null}
 
       <p className="adm-helper" style={{ textAlign: 'left', margin: 0 }}>Автосохранение в черновик. Игроки увидят изменения только после публикации новой версии.</p>
     </div>

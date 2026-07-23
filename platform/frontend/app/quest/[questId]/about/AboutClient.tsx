@@ -8,6 +8,7 @@ import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
 import { fmtRating, plural, ratingPlural, playersPlural } from '../../../../lib/storefront';
 import { pollPaymentSettlement } from '../../../../lib/payment-return';
+import { mapsSearchUrl } from '../../../../lib/maps';
 import PurchaseSheet from '../../../components/PurchaseSheet';
 import InstallQuestButton from '../../../components/InstallQuestButton';
 
@@ -245,6 +246,20 @@ export default function AboutClient({ questId }: { questId: string }) {
           <div className="qp-chips">
             {productChips(p).map((c) => <span key={c}>{c}</span>)}
           </div>
+
+          {/* «Место старта» — first map point of the published quest; opens
+              system maps in a new tab. Hidden when the quest has no coordinates. */}
+          {p.start_point && (
+            <a
+              className="btn btn--secondary btn--md qp-startpoint"
+              href={mapsSearchUrl(p.start_point.lat, p.start_point.lng)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} />
+              Место старта{p.start_point.label ? ` — ${p.start_point.label}` : ''}
+            </a>
+          )}
 
           {p.author_name && (
             <div className="qp-author">

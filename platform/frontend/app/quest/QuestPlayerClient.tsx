@@ -24,6 +24,7 @@ import {
 } from '../../lib/queue';
 import { flushPending } from '../../lib/sync';
 import { currentPlayerId, getDeviceId } from '../../lib/identity';
+import { mapsSearchUrl } from '../../lib/maps';
 import { useClientFeature } from '../../lib/client-features';
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
@@ -433,7 +434,7 @@ export default function QuestPlayerClient({
       coins_delta: 0,
       note: nav.label || null,
     });
-    window.open(`https://www.google.com/maps/search/?api=1&query=${nav.lat},${nav.lng}`, '_blank');
+    window.open(mapsSearchUrl(nav.lat, nav.lng), '_blank');
   }, [stepIdx, currentStep, appendFact]);
 
   // Emit attempt_completed + completion bonus once on entering the terminal step.

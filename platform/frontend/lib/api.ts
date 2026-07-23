@@ -227,6 +227,15 @@ export interface ProductPageWire extends PublishedQuestWire {
   /** §11 reviews v1: newest-first, first 10; total with text for the header. */
   reviews: ReviewWire[];
   reviews_total: number;
+  /** «Место старта» — the quest's first map point; null hides the button. */
+  start_point: StartPointWire | null;
+}
+
+/** The quest start point (first navigator point of the published snapshot). */
+export interface StartPointWire {
+  lat: number;
+  lng: number;
+  label: string | null;
 }
 
 /** §11: one public review (author first name only, month-precision date). */

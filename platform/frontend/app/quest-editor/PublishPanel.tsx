@@ -31,9 +31,9 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   if (answers.length && answers.every((s) => s.acceptable.some((a) => a.trim()))) {
     rows.push({ st: 'ok', text: 'Списки ответов заполнены у всех «Заданий с ответом»' });
   }
-  const navs = quest.steps.filter((s) => s.nav.on);
-  if (navs.length && navs.every((s) => parseCoords(s.nav.coords))) {
-    rows.push({ st: 'ok', text: `Навигатор: координаты заданы у всех включённых точек (${navs.length})` });
+  const addresses = quest.steps.filter((s) => s.address.on);
+  if (addresses.length && addresses.every((s) => s.address.name.trim() && parseCoords(s.address.coords))) {
+    rows.push({ st: 'ok', text: `Адреса: название и координаты заданы у всех включённых точек (${addresses.length})` });
   }
   gates.errors.forEach((e) => rows.push({ st: 'err', text: e.text, pageId: e.pageId, field: e.field }));
   gates.warnings.forEach((w) => rows.push({ st: 'warn', text: w.text, pageId: w.pageId, field: w.field }));

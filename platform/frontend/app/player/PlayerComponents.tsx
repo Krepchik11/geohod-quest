@@ -44,15 +44,6 @@ export function PClock({ size = 14 }: { size?: number }) {
   );
 }
 
-export function PCompass({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="9" cy="9" r="7.6" fill="none" stroke="currentColor" strokeWidth="1.6"></circle>
-      <polygon points="9,4.5 11,9 9,13.5 7,9" fill="currentColor"></polygon>
-    </svg>
-  );
-}
-
 export function PBurger() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
@@ -171,7 +162,6 @@ export interface StepCopy {
   next?: string;
   onward?: string;
   submit?: string;
-  navigator?: string;
   wrong1?: string;
   /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
   final?: string;
@@ -313,6 +303,23 @@ export function MediaBlock({ image, imageLabel, video, onPlay }: {
   return <div className="p-media p-media--ph"><span>{imageLabel || "комикс-иллюстрация"}</span></div>;
 }
 
+/** Address line with the pin. When the step carries map coordinates (`nav`) the
+ *  whole line is the map affordance — tapping it opens system maps (the old
+ *  separate «навигатор» button is gone; the address itself is the button). */
+export function PlaceLine({ place, nav, onOpen }: {
+  place?: string;
+  nav?: DesignStep['nav'];
+  onOpen?: () => void;
+}) {
+  if (!place) return null;
+  if (!nav) return <p className="p-place"><PPin />{place}</p>;
+  return (
+    <button className="p-place p-place--link" type="button" onClick={onOpen} aria-label={`Открыть в картах: ${place}`}>
+      <PPin />{place}
+    </button>
+  );
+}
+
 /* Basic step renderer for 7 templates (lifted from design/player/components + screens) */
 export function StepView({ step, quest, copy, st, on }: {
   step: DesignStep;
@@ -351,8 +358,8 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock video={step.video} onPlay={h.play || noop} />
         <p className="p-text">{step.text}</p>
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
         <div className="p-actions">
-          {step.nav && <button className="p-btn p-btn--ghost" onClick={h.navigator || noop}><PCompass />{copy?.navigator || "навигатор"}</button>}
           <button className="p-btn p-btn--solid" onClick={h.next || noop}>{step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}</button>
         </div>
       </div>
@@ -364,10 +371,9 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        {step.place && <p className="p-place"><PPin />{step.place}</p>}
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
         {step.action && <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)" }}>{step.action.desc}</p>}
         <div className="p-actions">
-          {step.nav && <button className="p-btn p-btn--ghost" onClick={h.navigator || noop}><PCompass />Навигатор</button>}
           <button className="p-btn p-btn--solid" onClick={() => (h.confirm ? h.confirm() : (h.next || noop)())}>{step.action?.confirmLabel || "Я на месте"}</button>
         </div>
       </div>
@@ -387,6 +393,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
         {question && <p className="p-prompt">{question}</p>}
         {stateIn.hintRevealed ? (
           <div className="p-hintbox">

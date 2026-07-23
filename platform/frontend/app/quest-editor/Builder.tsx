@@ -72,7 +72,7 @@ function previewStepFor(template: CtorTemplate): { step: DesignStep; pos: number
   if (template === 'task_no' || template === 'task_answer') {
     s.image = '/assets/img/quest-card.png';
   }
-  if (template === 'task_no') s.place = 'адрес точки · 300 м';
+  if (template === 'task_no') s.address = { on: true, name: 'адрес точки', distance: '300 м', coords: '' };
   const idx = CTOR_TEMPLATES.findIndex((t) => t.key === template);
   return {
     step: toDesignStep(stepToGameStep(s, PREVIEW_META)),

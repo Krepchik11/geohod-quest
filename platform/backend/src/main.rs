@@ -1195,6 +1195,33 @@ fn snapshot_chips(
     (Some(pages), Some(tasks), Some(paid_hints))
 }
 
+/// The quest's start point for the product page's «Место старта» button: the
+/// first step (snapshot order) that carries a navigator point. None when the
+/// quest has no coordinates at all — the UI then hides the button.
+fn snapshot_start_point(snapshot: Option<&serde_json::Value>) -> Option<StartPointWire> {
+    let steps = snapshot?.get("steps")?.as_array()?;
+    steps.iter().find_map(|st| {
+        let nav = st.get("supporting")?.get("navigator")?;
+        Some(StartPointWire {
+            lat: nav.get("lat")?.as_f64()?,
+            lng: nav.get("lng")?.as_f64()?,
+            label: nav
+                .get("label")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string),
+        })
+    })
+}
+
+/// Wire shape of the quest start point (see [`snapshot_start_point`]).
+#[derive(serde::Serialize, Debug, PartialEq)]
+struct StartPointWire {
+    lat: f64,
+    lng: f64,
+    label: Option<String>,
+}
+
 async fn publish_quest_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1787,6 +1814,9 @@ struct ProductPageWire {
     reviews: Vec<ReviewWire>,
     /// Total ratings that carry text («{M} с отзывом»).
     reviews_total: usize,
+    /// «Место старта» — the first navigator point of the published snapshot;
+    /// None (button hidden) when the quest carries no coordinates.
+    start_point: Option<StartPointWire>,
 }
 
 /// §11: one public review — author FIRST NAME only (display name's first word;
@@ -1867,6 +1897,15 @@ async fn get_quest_product_handler(
     // Public players counter: real distinct completions + marketing bonus, same
     // basis as the store card so the two never disagree.
     let players = state.store.completions_for_quest(&quest_id).await? as i64 + meta.players_bonus;
+    // «Место старта»: derived from the frozen snapshot on read (kept out of
+    // PublishedMeta so no storage migration is needed for old publishes).
+    let start_point = snapshot_start_point(
+        state
+            .grants
+            .get_snapshot(&meta.snapshot_id)
+            .await?
+            .as_ref(),
+    );
     Ok(Json(ProductPageWire {
         meta,
         rating_avg: stats.rating_avg,
@@ -1876,6 +1915,7 @@ async fn get_quest_product_handler(
         author_published_count,
         reviews,
         reviews_total,
+        start_point,
     }))
 }
 
@@ -3597,6 +3637,43 @@ mod tests {
     #[test]
     fn origin_allowed_empty_list_rejects_everything() {
         assert!(!origin_allowed(&[], "https://app.geohod.ru"));
+    }
+
+    // ---- start point («Место старта») ---------------------------------------
+
+    #[test]
+    fn start_point_is_first_navigator_in_snapshot_order() {
+        let snap = json!({ "steps": [
+            { "template": "start", "supporting": { "is_start": true } },
+            { "template": "task_no", "supporting": { "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Церковь" } } },
+            { "template": "task_answer", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0, "label": "Дальше" } } }
+        ] });
+        assert_eq!(
+            snapshot_start_point(Some(&snap)),
+            Some(StartPointWire {
+                lat: 45.2551,
+                lng: 19.8451,
+                label: Some("Церковь".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn start_point_absent_without_coordinates_and_tolerant_of_foreign_shapes() {
+        let no_nav = json!({ "steps": [ { "template": "start" }, { "template": "congrats" } ] });
+        assert_eq!(snapshot_start_point(Some(&no_nav)), None);
+        assert_eq!(snapshot_start_point(None), None);
+        assert_eq!(snapshot_start_point(Some(&json!({ "steps": "мусор" }))), None);
+        // A malformed navigator (missing lat) is skipped, not a crash — and the
+        // NEXT navigator wins.
+        let mixed = json!({ "steps": [
+            { "template": "task_no", "supporting": { "navigator": { "lng": 19.8 } } },
+            { "template": "task_no", "supporting": { "navigator": { "lat": 1.5, "lng": 2.5, "label": "" } } }
+        ] });
+        assert_eq!(
+            snapshot_start_point(Some(&mixed)),
+            Some(StartPointWire { lat: 1.5, lng: 2.5, label: None })
+        );
     }
 
     // ---- media upload (content-addressed blobs) ----------------------------
@@ -6004,7 +6081,10 @@ mod tests {
                 "description": "Прогулка по кварталам, которых нет на открытках.",
                 "snapshot": { "steps": [
                     { "template": "start", "supporting": { "is_start": true } },
-                    { "template": "task_answer", "supporting": { "hint": { "cost_coins": 5, "reveal_text": "x" } } },
+                    { "template": "task_answer", "supporting": {
+                        "hint": { "cost_coins": 5, "reveal_text": "x" },
+                        "navigator": { "lat": 44.8176, "lng": 20.4569, "label": "Калемегдан" }
+                    } },
                     { "template": "congrats", "supporting": { "terminal": true } }
                 ] }
             }),
@@ -6025,6 +6105,11 @@ mod tests {
         assert_eq!(v["pages"], 3, "chips derive from the snapshot");
         assert_eq!(v["tasks"], 1);
         assert_eq!(v["paid_hints"], true);
+        assert_eq!(
+            v["start_point"],
+            json!({ "lat": 44.8176, "lng": 20.4569, "label": "Калемегдан" }),
+            "«Место старта» derives from the snapshot's first navigator"
+        );
         assert_eq!(v["rating_count"], 0);
         assert!(
             v["author_name"].as_str().is_some(),
