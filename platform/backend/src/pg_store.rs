@@ -978,6 +978,20 @@ impl PgGrantStore {
             }
         }
     }
+
+    /// Frozen snapshot JSON by id — for callers that already hold the meta
+    /// (skips the published-row join `get_bundle` would repeat).
+    pub async fn get_snapshot(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<Option<serde_json::Value>, AppError> {
+        let row = sqlx::query("SELECT data FROM snapshots WHERE snapshot_id = $1")
+            .bind(snapshot_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.map(|r| r.try_get("data").map_err(internal)).transpose()
+    }
 }
 
 /// Identity (the `users` table + sessions) on PostgreSQL.

@@ -28,62 +28,6 @@ function PClock({ size = 14 }) {
     </svg>
   );
 }
-function PCompass({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="9" cy="9" r="7.6" fill="none" stroke="currentColor" strokeWidth="1.6"></circle>
-      <polygon points="9,4.5 11,9 9,13.5 7,9" fill="currentColor"></polygon>
-    </svg>
-  );
-}
-function PBurger() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="2" y="4" width="16" height="1.8" rx="0.9" fill="currentColor"></rect>
-      <rect x="2" y="9.1" width="16" height="1.8" rx="0.9" fill="currentColor"></rect>
-      <rect x="2" y="14.2" width="16" height="1.8" rx="0.9" fill="currentColor"></rect>
-    </svg>
-  );
-}
-function PClose() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <line x1="3" y1="3" x2="15" y2="15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"></line>
-      <line x1="15" y1="3" x2="3" y2="15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"></line>
-    </svg>
-  );
-}
-function PPlay() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">
-      <polygon points="6,3.5 17,10 6,16.5" fill="currentColor"></polygon>
-    </svg>
-  );
-}
-function PStar({ size = 30 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <polygon points="12,2.2 15,8.6 22,9.5 17,14.4 18.2,21.4 12,18 5.8,21.4 7,14.4 2,9.5 9,8.6" fill="currentColor"></polygon>
-    </svg>
-  );
-}
-function PCheck({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
-      <polyline points="2.5,8.5 6.5,12.5 13.5,4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"></polyline>
-    </svg>
-  );
-}
-function PWarn({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.6"></circle>
-      <line x1="8" y1="4.4" x2="8" y2="9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"></line>
-      <circle cx="8" cy="11.6" r="1" fill="currentColor"></circle>
-    </svg>
-  );
-}
-
 /* ---------------- Каркас экрана ---------------- */
 function PlayerFrame({ tw, children, screenLabel }) {
   return (
@@ -146,6 +90,16 @@ function MediaBlock({ image, imageLabel, video, onPlay }) {
 }
 
 /* ---------------- Рендер шага по шаблону ---------------- */
+function PlaceLine({ place, nav, onOpen }) {
+  if (!place) return null;
+  if (!nav) return <p className="p-place"><PPin></PPin>{place}</p>;
+  return (
+    <button className="p-place p-place--link" type="button" onClick={onOpen}>
+      <PPin></PPin>{place}
+    </button>
+  );
+}
+
 function StepView({ step, quest, copy, st, on }) {
   const state = st || {};
   const h = on || {};
@@ -175,12 +129,8 @@ function StepView({ step, quest, copy, st, on }) {
       <div className="p-stepbody">
         <MediaBlock video={step.video} onPlay={h.play || noop}></MediaBlock>
         <p className="p-text">{step.text}</p>
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop}></PlaceLine>
         <div className="p-actions">
-          {step.nav ? (
-            <button className="p-btn p-btn--ghost" type="button" onClick={h.navigator || noop}>
-              <PCompass></PCompass>{copy.navigator}
-            </button>
-          ) : null}
           <button className="p-btn" type="button" onClick={h.next || noop}>
             {step.template === "route_video" ? copy.onward : copy.next}
           </button>
@@ -194,7 +144,7 @@ function StepView({ step, quest, copy, st, on }) {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel}></MediaBlock>
         <p className="p-text">{step.text}</p>
-        {step.place ? <p className="p-place"><PPin></PPin>{step.place}</p> : null}
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop}></PlaceLine>
         {step.action ? <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)" }}>{step.action.desc}</p> : null}
         {step.allowNote ? (
           <textarea
@@ -205,11 +155,6 @@ function StepView({ step, quest, copy, st, on }) {
           ></textarea>
         ) : null}
         <div className="p-actions">
-          {step.nav ? (
-            <button className="p-btn p-btn--ghost" type="button" onClick={h.navigator || noop}>
-              <PCompass></PCompass>{copy.navigator}
-            </button>
-          ) : null}
           <button className="p-btn" type="button" onClick={h.confirm || noop}>
             {(step.action && step.action.confirmLabel) || "Выполнено"}
           </button>
@@ -431,7 +376,7 @@ function SyncBar({ copy }) {
 }
 
 Object.assign(window, {
-  PCoin, PPin, PClock, PCompass, PBurger, PClose, PPlay, PStar, PCheck, PWarn,
+  PCoin, PPin, PClock, PBurger, PClose, PPlay, PStar, PCheck, PWarn,
   PlayerFrame, TopBar, Flourish, MediaBlock, StepView,
   FinalA, FinalB, FinalC, RateStars, Confetti,
   CoinToast, HintPopup, MenuOverlay, FeedbackSheet, SyncBar,

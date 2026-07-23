@@ -17,8 +17,8 @@ GameStep имеет:
   - 'answer': игрок отправляет значение; клиент делает membership match против списка acceptable (простая версия; продвинутая нормализация отложена).
 - Поддерживающие / аддитивные поведения (валидируются при authoring, замороженные суммы):
   - gift?: { coins: number, narrative_text: string }
-  - hint?: { cost_coins: number, reveal_text?: string, reveal_geo?: boolean }  // контент = текст и/или изображение роли media.hint; присутствует только при наличии контента (без тумблера в конструкторе)
-  - navigator?: { lat: number, lng: number, label?: string, hint_only?: boolean, shortest_route_hint?: boolean }
+  - hint?: { cost_coins: number, reveal_text?: string, reveal_geo?: boolean }  // контент = текст и/или изображение роли media.hint; присутствует только когда тумблер подсказки включён (по умолчанию включён) И есть контент
+  - navigator?: { lat: number, lng: number, label?: string, hint_only?: boolean, shortest_route_hint?: boolean }  // точка карты из блока «Адрес и расстояние»; в плеере её открывает клик по адресной строке, в магазине — кнопка «Место старта» (отдельной кнопки «навигатор» нет)
   - bonus_animation?: { asset_ref: string, voice_ref?: string }
   - physical_action?: { description: string, confirm_label?: string }  // опционально для различия «перемещение + действие»
   - media_video?, terminal?, narrative_advance?, is_start?

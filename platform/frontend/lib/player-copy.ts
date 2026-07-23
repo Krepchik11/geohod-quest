@@ -10,7 +10,6 @@ export const PLAYER_COPY: StepCopy = {
   next: 'продолжить',
   onward: 'в путь',
   submit: 'Ответить',
-  navigator: 'Навигатор',
   wrong1: 'Неверно. Попробуйте ещё раз.',
   hintTitle: 'Нужна подсказка?',
   hintBody: (cost: number) => `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`,

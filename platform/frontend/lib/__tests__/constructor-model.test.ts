@@ -36,12 +36,12 @@ describe('templates and presets', () => {
     ]);
   });
 
-  it('prefills task_answer with an always-on hint slot and answer prompt (SPEC presets)', () => {
+  it('prefills task_answer with an enabled-by-default hint and answer prompt (SPEC presets)', () => {
     const s = newStep('task_answer');
     expect(s.prompt).toBe('Введите ответ');
     expect(s.gift).toEqual({ narrative: '' });
-    // The hint has no toggle: it exists as soon as the author adds text or an image.
-    expect(s.hint).toEqual({ cost: 5, text: '', image: null });
+    // The hint toggle defaults ON; it sells once the author adds text or an image.
+    expect(s.hint).toEqual({ on: true, cost: 5, text: '', image: null });
   });
 
   it('every new step has a single empty image slot', () => {
@@ -49,15 +49,13 @@ describe('templates and presets', () => {
     expect(newStep('continue').image).toBeNull();
   });
 
-  it('prefills task_no with navigator on', () => {
-    const s = newStep('task_no');
-    expect(s.nav.on).toBe(true);
+  it('prefills every step with the address block off (optional feature)', () => {
+    expect(newStep('task_no').address).toEqual({ on: false, name: '', distance: '', coords: '' });
+    expect(newStep('route_video').address.on).toBe(false);
   });
 
-  it('prefills route_video with navigator and a video block', () => {
-    const s = newStep('route_video');
-    expect(s.nav.on).toBe(true);
-    expect(s.video).not.toBeNull();
+  it('prefills route_video with a video block', () => {
+    expect(newStep('route_video').video).not.toBeNull();
   });
 
   it('gives every new step a unique id', () => {
@@ -129,13 +127,14 @@ describe('computeGates', () => {
     const task = newStep('task_answer');
     task.acceptable = [''];
     task.image = null;
-    task.nav = { on: true, coords: '' };
+    task.address = { on: true, name: '', distance: '', coords: '' };
     q.steps = [q.steps[0], task, q.steps[1]];
     const errs = computeGates(q).errors;
     const fieldOf = (frag: string) => errs.find((e) => e.text.includes(frag))?.field;
     expect(fieldOf('нет изображения')).toBe('image');
     expect(fieldOf('список ответов пуст')).toBe('answers');
-    expect(fieldOf('координаты не заданы')).toBe('nav');
+    expect(fieldOf('координаты не заданы')).toBe('address');
+    expect(fieldOf('название не задано')).toBe('address');
   });
 
   it('errors when there is no terminal «Поздравление»', () => {
@@ -172,13 +171,22 @@ describe('computeGates', () => {
     expect(computeGates(q).errors.some((e) => e.text.includes('список ответов пуст'))).toBe(true);
   });
 
-  it('errors on navigator without parseable coordinates', () => {
+  it('errors on an enabled address without parseable coordinates', () => {
     const q = quest();
     const s = newStep('task_no');
     s.image = '/img.jpg';
-    s.nav = { on: true, coords: 'abc, 19.84' };
+    s.address = { on: true, name: 'Церковь', distance: '', coords: 'abc, 19.84' };
     q.steps = [q.steps[0], s, q.steps[1]];
     expect(computeGates(q).errors.some((e) => e.text.includes('координаты'))).toBe(true);
+  });
+
+  it('a disabled address block gates nothing', () => {
+    const q = quest();
+    const s = newStep('task_no');
+    s.image = '/img.jpg';
+    s.address = { on: false, name: '', distance: '', coords: 'мусор' };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    expect(computeGates(q).errors).toEqual([]);
   });
 
   it('warns (not errors) on an answer task without any hint content', () => {
@@ -186,11 +194,21 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { cost: 5, text: '', image: null };
+    s.hint = { on: true, cost: 5, text: '', image: null };
     q.steps = [q.steps[0], s, q.steps[1]];
     const g = computeGates(q);
     expect(g.errors).toEqual([]);
     expect(g.warnings.some((w) => w.text.includes('подсказк'))).toBe(true);
+  });
+
+  it('a switched-off hint is the author’s choice — no missing-content warning', () => {
+    const q = quest();
+    const s = newStep('task_answer');
+    s.image = '/img.jpg';
+    s.acceptable = ['1730'];
+    s.hint = { on: false, cost: 5, text: '', image: null };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    expect(computeGates(q).warnings.some((w) => w.text.includes('подсказк'))).toBe(false);
   });
 
   it('an image-only hint satisfies the hint gate', () => {
@@ -198,7 +216,7 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
     q.steps = [q.steps[0], s, q.steps[1]];
     expect(computeGates(q).warnings.some((w) => w.text.includes('подсказк'))).toBe(false);
   });
@@ -208,10 +226,10 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
     q.steps = [q.steps[0], s, q.steps[1]];
     const withHintImage = computeGates(q).imgs;
-    s.hint = { cost: 5, text: 'текст', image: null };
+    s.hint = { on: true, cost: 5, text: 'текст', image: null };
     expect(withHintImage).toBe(computeGates(q).imgs + 1);
   });
 
@@ -248,7 +266,7 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
   it('task_answer: trims and drops blank answers; hint emitted when it has text', () => {
     const s = newStep('task_answer');
     s.acceptable = [' 1730 ', '', 'в 1730'];
-    s.hint = { cost: 7, text: 'смотрите выше', image: null };
+    s.hint = { on: true, cost: 7, text: 'смотрите выше', image: null };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.completion.acceptable).toEqual(['1730', 'в 1730']);
     expect(g.supporting?.hint).toEqual({ cost_coins: 7, reveal_text: 'смотрите выше' });
@@ -264,10 +282,19 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(g.media.hint).toBeNull();
   });
 
+  it('task_answer: a switched-off hint is not emitted even with content', () => {
+    const s = newStep('task_answer');
+    s.acceptable = ['1730'];
+    s.hint = { on: false, cost: 5, text: 'смотрите выше', image: '/hint.jpg' };
+    const g = stepToGameStep(s, newQuest({}).meta);
+    expect(g.supporting?.hint).toBeUndefined();
+    expect(g.media.hint).toBeNull();
+  });
+
   it('task_answer: the hint image rides the media.hint role (image-only hint allowed)', () => {
     const s = newStep('task_answer');
     s.acceptable = ['1730'];
-    s.hint = { cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.supporting?.hint).toEqual({ cost_coins: 5, reveal_text: '' });
     expect(g.media.hint).toBe('/hint.jpg');
@@ -302,27 +329,51 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(toDesignStep(g).image).toBe('/img.jpg');
   });
 
-  it('task_no: physical action, place and navigator survive the mapping', () => {
+  it('task_no: physical action and the address block survive the mapping', () => {
     const s = newStep('task_no');
     s.text = 'Дойдите до церкви';
-    s.place = 'ул. Николаевска порта 2';
     s.action = { desc: 'Прикоснитесь к ограде', confirmLabel: 'Я на месте, нашёл' };
-    s.nav = { on: true, coords: '45.2551, 19.8451' };
+    s.address = { on: true, name: 'ул. Николаевска порта 2', distance: '400 м отсюда', coords: '45.2551, 19.8451' };
     const g = stepToGameStep(s, newQuest({}).meta);
     // The note feature is gone: physical completion carries the mode only.
     expect(g.completion).toEqual({ mode: 'physical' });
     const d = toDesignStep(g);
-    expect(d.place).toBe('ул. Николаевска порта 2');
+    // name · distance joined into the on-page line with the pin
+    expect(d.place).toBe('ул. Николаевска порта 2 · 400 м отсюда');
     expect(d.action?.confirmLabel).toBe('Я на месте, нашёл');
-    // the content-block address doubles as the navigator point label
+    // the address NAME (not the distance) labels the map point
     expect(d.nav).toEqual({ lat: 45.2551, lng: 19.8451, label: 'ул. Николаевска порта 2' });
   });
 
-  it('task_answer: the address lives in content and flows to place_text', () => {
-    const s = newStep('task_answer');
-    s.place = 'пл. Свободы 1';
+  it('a distance-less address renders as the bare name', () => {
+    const s = newStep('task_no');
+    s.address = { on: true, name: 'пл. Свободы 1', distance: '  ', coords: '45.25, 19.84' };
     const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
     expect(d.place).toBe('пл. Свободы 1');
+  });
+
+  it('task_answer: the enabled address flows to place_text and navigator', () => {
+    const s = newStep('task_answer');
+    s.address = { on: true, name: 'пл. Свободы 1', distance: '', coords: '45.25, 19.84' };
+    const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
+    expect(d.place).toBe('пл. Свободы 1');
+    expect(d.nav).toEqual({ lat: 45.25, lng: 19.84, label: 'пл. Свободы 1' });
+  });
+
+  it('a disabled address emits neither place text nor a map point', () => {
+    const s = newStep('task_no');
+    s.address = { on: false, name: 'пл. Свободы 1', distance: '1 км', coords: '45.25, 19.84' };
+    const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
+    expect(d.place).toBeFalsy();
+    expect(d.nav).toBeUndefined();
+  });
+
+  it('video templates carry the address block too (replaces the old navigator button)', () => {
+    const s = newStep('route_video');
+    s.address = { on: true, name: 'Парк', distance: '650 м', coords: '45.2552, 19.8489' };
+    const d = toDesignStep(stepToGameStep(s, newQuest({}).meta));
+    expect(d.place).toBe('Парк · 650 м');
+    expect(d.nav).toEqual({ lat: 45.2552, lng: 19.8489, label: 'Парк' });
   });
 
   it('video: duration and caption flow into the design video block', () => {
@@ -332,9 +383,9 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(d.video).toEqual({ dur: '0:48', label: 'видео-приветствие' });
   });
 
-  it('navigator with unparsable coords is dropped from the snapshot (gates block publish anyway)', () => {
+  it('an address with unparsable coords yields no map point (gates block publish anyway)', () => {
     const s = newStep('task_no');
-    s.nav = { on: true, coords: '' };
+    s.address = { on: true, name: 'Точка', distance: '', coords: '' };
     expect(stepToGameStep(s, newQuest({}).meta).supporting?.navigator).toBeUndefined();
   });
 
@@ -473,6 +524,7 @@ describe('migrateQuest (legacy draft bodies)', () => {
       place: '',
     } as unknown as CtorQuest['steps'][number];
     delete (task as unknown as { image?: unknown }).image;
+    delete (task as unknown as { address?: unknown }).address;
     q.steps = [q.steps[0], task, q.steps[1]];
     return JSON.parse(JSON.stringify(q)) as unknown;
   };
@@ -493,34 +545,43 @@ describe('migrateQuest (legacy draft bodies)', () => {
     expect((q.steps[1] as unknown as { images?: unknown }).images).toBeUndefined();
   });
 
-  it('normalizes gift to narrative-only and nav to a single coords field', () => {
+  it('normalizes gift to narrative-only and merges nav+place into the address block', () => {
     const q = migrateQuest(legacyBody(), 'q-old')!;
     expect(q.steps[1].gift).toEqual({ narrative: 'молодец' });
-    expect(q.steps[1].nav).toEqual({ on: true, coords: '45.2551, 19.8451' });
+    // lat/lng join into the coords field; the navigator label becomes the name
+    expect(q.steps[1].address).toEqual({ on: true, name: 'Церковь', distance: '', coords: '45.2551, 19.8451' });
+    expect('nav' in (q.steps[1] as unknown as Record<string, unknown>)).toBe(false);
+    expect('place' in (q.steps[1] as unknown as Record<string, unknown>)).toBe(false);
   });
 
-  it('moves the legacy navigator label into the empty content address', () => {
-    const q = migrateQuest(legacyBody(), 'q-old')!;
-    expect(q.steps[1].place).toBe('Церковь');
-  });
-
-  it('keeps an existing address over the legacy navigator label', () => {
+  it('keeps an existing address text over the legacy navigator label', () => {
     const body = legacyBody() as { steps: Array<{ place: string }> };
     body.steps[1].place = 'пл. Свободы 1';
     const q = migrateQuest(body, 'q-old')!;
-    expect(q.steps[1].place).toBe('пл. Свободы 1');
+    expect(q.steps[1].address.name).toBe('пл. Свободы 1');
   });
 
-  it('drops the legacy hint toggle, keeping cost and text; adds the image slot', () => {
-    const q = migrateQuest(legacyBody(), 'q-old')!;
-    expect(q.steps[1].hint).toEqual({ cost: 5, text: 'ищите выше', image: null });
+  it('keeps a place-only step visible: address block turns on even with nav off', () => {
+    const body = legacyBody() as { steps: Array<{ place: string; nav: unknown }> };
+    body.steps[1].place = 'пл. Свободы 1';
+    body.steps[1].nav = { on: false, coords: '' };
+    const q = migrateQuest(body, 'q-old')!;
+    // The old address always rendered; hiding it on migrate would lose content.
+    expect(q.steps[1].address).toEqual({ on: true, name: 'пл. Свободы 1', distance: '', coords: '' });
   });
 
-  it('preserves hint text even when the legacy toggle was off (no data loss)', () => {
+  it('defaults the missing hint toggle to ON, keeping cost and text; adds the image slot', () => {
+    const body = legacyBody() as { steps: Array<{ hint: unknown }> };
+    body.steps[1].hint = { cost: 5, text: 'ищите выше' };
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.steps[1].hint).toEqual({ on: true, cost: 5, text: 'ищите выше', image: null });
+  });
+
+  it('preserves an explicit legacy hint toggle state (off stays off, no data loss)', () => {
     const body = legacyBody() as { steps: Array<{ hint: unknown }> };
     body.steps[1].hint = { on: false, cost: 3, text: 'черновик подсказки' };
     const q = migrateQuest(body, 'q-old')!;
-    expect(q.steps[1].hint).toEqual({ cost: 3, text: 'черновик подсказки', image: null });
+    expect(q.steps[1].hint).toEqual({ on: false, cost: 3, text: 'черновик подсказки', image: null });
   });
 
   it('strips the legacy allowNote flag', () => {

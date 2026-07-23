@@ -42,6 +42,7 @@ const PRODUCT = {
   description: 'Прогулка по кварталам.', author_name: 'Мария К.',
   author_published_count: 3, pages: 12, tasks: 4, paid_hints: true,
   reviews: [], reviews_total: 0,
+  start_point: null,
 };
 
 beforeEach(() => {
@@ -101,6 +102,26 @@ describe('AboutClient', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Получить' })[0]);
     await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
     expect(screen.queryByText('Подтвердите покупку')).toBeNull();
+  });
+
+  it('«Место старта» links to system maps at the quest start point', async () => {
+    getProductMock.mockResolvedValue({
+      ...PRODUCT,
+      start_point: { lat: 44.8176, lng: 20.4569, label: 'Калемегдан' },
+    });
+    render(<AboutClient questId="q1" />);
+    await waitFor(() => expect(screen.getByRole('link', { name: /Место старта/ })).toBeTruthy());
+    const link = screen.getByRole('link', { name: /Место старта — Калемегдан/ });
+    expect(link.getAttribute('href')).toBe(
+      'https://www.google.com/maps/search/?api=1&query=44.8176,20.4569',
+    );
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('no coordinates in the quest — no «Место старта» button', async () => {
+    render(<AboutClient questId="q1" />);
+    await waitFor(() => screen.getByRole('heading', { name: 'Тайны старого Белграда' }));
+    expect(screen.queryByRole('link', { name: /Место старта/ })).toBeNull();
   });
 
   it('a 404 product renders the honest gone state', async () => {
