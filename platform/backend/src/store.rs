@@ -88,6 +88,10 @@ pub struct AttemptMeta {
     pub created_at: u64,
 }
 
+/// The running best rating for a `(quest, player)` while folding attempts —
+/// `(created_at, attempt_id, rating, text)`, the max by `(created_at, attempt_id)`.
+type BestRating = (u64, String, i64, Option<String>);
+
 /// In-memory append-only fact store + attempt registry.
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryFactStore {
@@ -170,44 +174,57 @@ impl InMemoryFactStore {
         Some(accepted)
     }
 
-    /// §11 reviews v1 — the last quest_rated fact WITH text per attempt of the
-    /// quest, newest attempt first. Timestamped by the attempt (facts carry no
-    /// clock); the UI shows the month.
-    pub fn reviews_for_quest(&self, quest_id: &str, limit: usize) -> Vec<ReviewRow> {
-        let mut attempts: Vec<&AttemptMeta> = self
-            .attempts
-            .values()
-            .filter(|m| m.quest_id == quest_id)
-            .collect();
-        attempts.sort_by_key(|m| std::cmp::Reverse(m.created_at));
-        let mut out = Vec::new();
-        for meta in attempts {
-            let Some(facts) = self.fact_logs.get(&meta.attempt_id) else {
-                continue;
-            };
-            let Some(f) = facts.iter().rev().find(|f| f.kind == FactKind::QuestRated) else {
-                continue;
-            };
-            let text = f.note.as_deref().map(str::trim).unwrap_or("");
-            if text.is_empty() {
+    /// Effective per-player ratings for the given quests (or ALL quests when
+    /// `None`) — the input to the public hide-aware fold in [`crate::facts`]. One
+    /// row per `(player_id, quest_id)`: the player's latest rated attempt across
+    /// all versions (ties broken by `(created_at, attempt_id)` for determinism).
+    /// Star-only ratings are included (with `text = None`); the fold and review
+    /// list decide how each is used.
+    pub fn quest_rating_rows(
+        &self,
+        quests: Option<&[String]>,
+    ) -> Vec<crate::facts::PlayerRatingRow> {
+        let wanted: Option<std::collections::HashSet<&str>> =
+            quests.map(|qs| qs.iter().map(String::as_str).collect());
+        // (quest_id, player_id) -> (created_at, attempt_id, rating, text) — max wins.
+        let mut best: HashMap<(String, String), BestRating> = HashMap::new();
+        for meta in self.attempts.values() {
+            if let Some(w) = &wanted
+                && !w.contains(meta.quest_id.as_str())
+            {
                 continue;
             }
-            let rating = f
-                .submitted_value
-                .as_deref()
-                .and_then(|v| v.trim().parse::<i64>().ok())
-                .unwrap_or(0);
-            out.push(ReviewRow {
-                player_id: meta.player_id.clone(),
-                created_at: meta.created_at,
-                rating,
-                text: text.chars().take(500).collect(),
-            });
-            if out.len() >= limit {
-                break;
+            let Some(log) = self.fact_logs.get(&meta.attempt_id) else {
+                continue;
+            };
+            let Some((rating, text)) = crate::facts::effective_rating(log) else {
+                continue;
+            };
+            let key = (meta.quest_id.clone(), meta.player_id.clone());
+            let newer = match best.get(&key) {
+                Some((at, aid, _, _)) => (meta.created_at, meta.attempt_id.as_str()) > (*at, aid),
+                None => true,
+            };
+            if newer {
+                best.insert(
+                    key,
+                    (meta.created_at, meta.attempt_id.clone(), rating, text),
+                );
             }
         }
-        out
+        best.into_iter()
+            .map(
+                |((quest_id, player_id), (created_at, _aid, rating, text))| {
+                    crate::facts::PlayerRatingRow {
+                        player_id,
+                        quest_id,
+                        rating,
+                        text,
+                        created_at,
+                    }
+                },
+            )
+            .collect()
     }
 
     /// §7.4 delete account: drop the player's attempts and their fact logs.
@@ -268,33 +285,6 @@ impl InMemoryFactStore {
         )
     }
 
-    /// Batch store rating per snapshot for the catalog — the in-memory mirror of
-    /// [`crate::pg_store::PgFactStore::rating_stats_for_snapshots`]. Folds through
-    /// the same [`crate::facts::fold_attempt_ratings`] as `get_version_stats`, so
-    /// this returns exactly `(rating_avg, rating_count)` for each snapshot.
-    pub fn rating_stats_for_snapshots(&self, snaps: &[String]) -> HashMap<String, (f64, usize)> {
-        let amap = self.attempt_snapshot_map();
-        let wanted: std::collections::HashSet<&str> = snaps.iter().map(String::as_str).collect();
-        // snapshot -> the fact logs of its attempts
-        let mut by_snap: HashMap<&str, Vec<&Vec<Fact>>> = HashMap::new();
-        for (att, snap) in &amap {
-            if !wanted.contains(snap.as_str()) {
-                continue;
-            }
-            if let Some(log) = self.fact_logs.get(att) {
-                by_snap.entry(snap.as_str()).or_default().push(log);
-            }
-        }
-        // Every requested snapshot gets an entry, even with no attempts yet (0.0, 0).
-        snaps
-            .iter()
-            .map(|snap| {
-                let logs = by_snap.remove(snap.as_str()).unwrap_or_default();
-                (snap.clone(), crate::facts::fold_attempt_ratings(logs))
-            })
-            .collect()
-    }
-
     /// Feedback reports for a version (admin visibility), via the pure projector.
     pub fn list_feedbacks_for_version(&self, snap: &str) -> Vec<Fact> {
         crate::facts::list_feedbacks_for_snapshot(
@@ -302,6 +292,37 @@ impl InMemoryFactStore {
             &self.fact_logs,
             &self.attempt_snapshot_map(),
         )
+    }
+
+    /// Every `feedback_reported` fact across ALL attempts, carrying its attempt
+    /// context (quest, snapshot, player) and server `recorded_at` — the input to the
+    /// global feedback-inbox grouping. `recorded_at` comes from the parallel
+    /// `fact_times` vector (mirrors the Postgres `facts.recorded_at` column).
+    pub fn all_feedback_reports(&self) -> Vec<crate::facts::FeedbackReportRow> {
+        let mut out = Vec::new();
+        for meta in self.attempts.values() {
+            let Some(log) = self.fact_logs.get(&meta.attempt_id) else {
+                continue;
+            };
+            let times = self.fact_times.get(&meta.attempt_id);
+            for (i, f) in log.iter().enumerate() {
+                if f.kind != FactKind::FeedbackReported {
+                    continue;
+                }
+                let recorded_at = times
+                    .and_then(|t| t.get(i).copied())
+                    .unwrap_or(meta.created_at);
+                out.push(crate::facts::FeedbackReportRow {
+                    quest_id: meta.quest_id.clone(),
+                    snapshot_id: meta.snapshot_id.clone(),
+                    step_position: f.step_position,
+                    player_id: meta.player_id.clone(),
+                    note: f.note.clone().unwrap_or_default(),
+                    recorded_at,
+                });
+            }
+        }
+        out
     }
 
     /// One-time idempotent legacy migration: no-op (marked) on re-run for the same key.
@@ -695,6 +716,10 @@ pub struct AuthIdentity {
     pub subject: String,
     pub player_id: String,
     pub email: Option<String>,
+    /// Provider handle for contact — the Telegram `@username` (without the `@`),
+    /// captured so admins can reach a Telegram-only reporter at `t.me/<username>`.
+    /// `None` for Google/email identities and for a handleless Telegram user.
+    pub username: Option<String>,
     pub created_at: u64,
 }
 
@@ -935,6 +960,26 @@ impl InMemoryAuthStore {
         Ok(())
     }
 
+    /// Refresh a linked identity's stored `username` (e.g. a changed Telegram
+    /// handle). Only overwrites when a new value is present — an absent claim
+    /// leaves the prior value untouched. No-op when the identity is not linked.
+    pub fn set_identity_username(
+        &mut self,
+        provider: &str,
+        subject: &str,
+        username: Option<String>,
+    ) {
+        let Some(username) = username else {
+            return;
+        };
+        if let Some(id) = self
+            .identities
+            .get_mut(&(provider.to_string(), subject.to_string()))
+        {
+            id.username = Some(username);
+        }
+    }
+
     /// All social identities linked to an account (for the profile method list).
     pub fn identities_for_player(&self, player_id: &str) -> Vec<AuthIdentity> {
         let mut out: Vec<AuthIdentity> = self
@@ -944,6 +989,25 @@ impl InMemoryAuthStore {
             .cloned()
             .collect();
         out.sort_by(|a, b| a.provider.cmp(&b.provider));
+        out
+    }
+
+    /// Identities for MANY accounts in one pass — `player_id -> its identities` —
+    /// so admin identity resolution avoids an N+1 over `identities_for_player`.
+    pub fn identities_for_players(
+        &self,
+        player_ids: &[String],
+    ) -> HashMap<String, Vec<AuthIdentity>> {
+        let wanted: std::collections::HashSet<&str> =
+            player_ids.iter().map(String::as_str).collect();
+        let mut out: HashMap<String, Vec<AuthIdentity>> = HashMap::new();
+        for id in self.identities.values() {
+            if wanted.contains(id.player_id.as_str()) {
+                out.entry(id.player_id.clone())
+                    .or_default()
+                    .push(id.clone());
+            }
+        }
         out
     }
 
@@ -968,10 +1032,10 @@ impl InMemoryAuthStore {
         if self.users.contains_key(player_id) {
             return Err(AppError::Conflict("player is already registered".into()));
         }
-        if let Some(e) = &email {
-            if self.email_index.contains_key(e) {
-                return Err(AppError::Conflict("email is already taken".into()));
-            }
+        if let Some(e) = &email
+            && self.email_index.contains_key(e)
+        {
+            return Err(AppError::Conflict("email is already taken".into()));
         }
         let account = UserAccount {
             player_id: player_id.to_string(),
@@ -1005,10 +1069,10 @@ impl InMemoryAuthStore {
         email: &str,
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
-        if let Some(owner) = self.email_index.get(email) {
-            if owner != player_id {
-                return Err(AppError::Conflict("email is already taken".into()));
-            }
+        if let Some(owner) = self.email_index.get(email)
+            && owner != player_id
+        {
+            return Err(AppError::Conflict("email is already taken".into()));
         }
         let record = self
             .users
@@ -1024,15 +1088,6 @@ impl InMemoryAuthStore {
         }
         Ok(record.account.clone())
     }
-}
-
-/// §11: one player review row (text attached to the finale rating).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReviewRow {
-    pub player_id: String,
-    pub created_at: u64,
-    pub rating: i64,
-    pub text: String,
 }
 
 /// Fact/attempt storage backend, selected at startup. Both variants expose the
@@ -1055,15 +1110,14 @@ impl FactStores {
             .map_err(|e| AppError::Internal(anyhow::anyhow!("store lock poisoned: {e}")))
     }
 
-    /// See [`InMemoryFactStore::reviews_for_quest`].
-    pub async fn reviews_for_quest(
+    /// See [`InMemoryFactStore::quest_rating_rows`].
+    pub async fn quest_rating_rows(
         &self,
-        quest_id: &str,
-        limit: usize,
-    ) -> Result<Vec<ReviewRow>, AppError> {
+        quests: Option<&[String]>,
+    ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.reviews_for_quest(quest_id, limit)),
-            Self::Postgres(pg) => pg.reviews_for_quest(quest_id, limit).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.quest_rating_rows(quests)),
+            Self::Postgres(pg) => pg.quest_rating_rows(quests).await,
         }
     }
 
@@ -1136,14 +1190,13 @@ impl FactStores {
         }
     }
 
-    /// See [`InMemoryFactStore::rating_stats_for_snapshots`].
-    pub async fn rating_stats_for_snapshots(
+    /// See [`InMemoryFactStore::all_feedback_reports`].
+    pub async fn all_feedback_reports(
         &self,
-        snaps: &[String],
-    ) -> Result<std::collections::HashMap<String, (f64, usize)>, AppError> {
+    ) -> Result<Vec<crate::facts::FeedbackReportRow>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.rating_stats_for_snapshots(snaps)),
-            Self::Postgres(pg) => pg.rating_stats_for_snapshots(snaps).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.all_feedback_reports()),
+            Self::Postgres(pg) => pg.all_feedback_reports().await,
         }
     }
 
@@ -1441,6 +1494,22 @@ impl AuthStores {
         }
     }
 
+    /// See [`InMemoryAuthStore::set_identity_username`].
+    pub async fn set_identity_username(
+        &self,
+        provider: &str,
+        subject: &str,
+        username: Option<String>,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.set_identity_username(provider, subject, username);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.set_identity_username(provider, subject, username).await,
+        }
+    }
+
     /// See [`InMemoryAuthStore::identities_for_player`].
     pub async fn identities_for_player(
         &self,
@@ -1449,6 +1518,17 @@ impl AuthStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_player(player_id)),
             Self::Postgres(pg) => pg.identities_for_player(player_id).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::identities_for_players`].
+    pub async fn identities_for_players(
+        &self,
+        player_ids: &[String],
+    ) -> Result<HashMap<String, Vec<AuthIdentity>>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_players(player_ids)),
+            Self::Postgres(pg) => pg.identities_for_players(player_ids).await,
         }
     }
 
@@ -1875,6 +1955,7 @@ impl InMemoryConstructorStore {
     }
 
     /// Replace the editable body + denormalized list fields (autosave). 404 if unknown.
+    #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
     pub fn save_body(
         &mut self,
         quest_id: &str,
@@ -1997,6 +2078,7 @@ impl ConstructorStores {
     }
 
     /// See [`InMemoryConstructorStore::save_body`].
+    #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
     pub async fn save_body(
         &self,
         quest_id: &str,
@@ -2558,6 +2640,182 @@ impl FlagStores {
                 Ok(())
             }
             Self::Postgres(pg) => pg.clear(key).await,
+        }
+    }
+}
+
+/// In-memory moderation overlay — the mutable admin decisions that sit *beside* the
+/// immutable fact log (content-moderation). Nothing here ever reads or writes `facts`.
+///
+/// Two independent maps:
+/// - `hidden_reviews`: `(player_id, quest_id) -> (hidden_at, hidden_by)`. Presence is
+///   the whole signal — the pair's rating is dropped from the public page + average.
+/// - `resolved_feedback`: `(quest_id, snapshot_id, step_position) -> (acknowledged,
+///   resolved_by)`. `acknowledged` is the report count the admin marked resolved; a
+///   group reads resolved only while its current count has not grown past it, so an
+///   appended report reopens it (the fold lives in `crate::facts`).
+#[derive(Clone, Debug, Default)]
+pub struct InMemoryModerationStore {
+    hidden_reviews: HashMap<(String, String), (u64, String)>,
+    resolved_feedback: HashMap<(String, String, i32), (u64, String)>,
+}
+
+impl InMemoryModerationStore {
+    /// Create an empty overlay.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Hide `(player, quest)` — idempotent (a repeat keeps the original hide).
+    pub fn hide_review(&mut self, player: &str, quest: &str, at: u64, by: &str) {
+        self.hidden_reviews
+            .entry((player.to_string(), quest.to_string()))
+            .or_insert_with(|| (at, by.to_string()));
+    }
+
+    /// Unhide `(player, quest)` — idempotent (a no-op when not hidden).
+    pub fn unhide_review(&mut self, player: &str, quest: &str) {
+        self.hidden_reviews
+            .remove(&(player.to_string(), quest.to_string()));
+    }
+
+    /// The set of hidden `(player_id, quest_id)` pairs — the fold's drop list.
+    pub fn hidden_review_keys(&self) -> std::collections::HashSet<(String, String)> {
+        self.hidden_reviews.keys().cloned().collect()
+    }
+
+    /// Mark a feedback group resolved, recording `acknowledged` = the group's report
+    /// count at resolve time (closes the whole group). It reopens automatically once
+    /// a newer report pushes the current count past this watermark.
+    pub fn resolve_feedback(
+        &mut self,
+        quest: &str,
+        snap: &str,
+        step: i32,
+        acknowledged: u64,
+        by: &str,
+    ) {
+        self.resolved_feedback.insert(
+            (quest.to_string(), snap.to_string(), step),
+            (acknowledged, by.to_string()),
+        );
+    }
+
+    /// Reopen a feedback group — clears the watermark (idempotent when absent).
+    pub fn reopen_feedback(&mut self, quest: &str, snap: &str, step: i32) {
+        self.resolved_feedback
+            .remove(&(quest.to_string(), snap.to_string(), step));
+    }
+
+    /// The resolution watermarks `(quest, snapshot, step) -> acknowledged count`.
+    pub fn feedback_resolutions(&self) -> HashMap<(String, String, i32), u64> {
+        self.resolved_feedback
+            .iter()
+            .map(|(k, (at, _))| (k.clone(), *at))
+            .collect()
+    }
+}
+
+/// Moderation-overlay storage backend (see [`FactStores`] for the pattern). Holds the
+/// mutable admin decisions; never mixed into the immutable fact log.
+#[derive(Clone, Debug)]
+pub enum ModerationStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemoryModerationStore>>),
+    /// Durable PostgreSQL.
+    Postgres(crate::pg_store::PgModerationStore),
+}
+
+impl ModerationStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemoryModerationStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemoryModerationStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("moderation lock poisoned: {e}")))
+    }
+
+    /// See [`InMemoryModerationStore::hide_review`].
+    pub async fn hide_review(
+        &self,
+        player: &str,
+        quest: &str,
+        at: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.hide_review(player, quest, at, by);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.hide_review(player, quest, at, by).await,
+        }
+    }
+
+    /// See [`InMemoryModerationStore::unhide_review`].
+    pub async fn unhide_review(&self, player: &str, quest: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.unhide_review(player, quest);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.unhide_review(player, quest).await,
+        }
+    }
+
+    /// See [`InMemoryModerationStore::hidden_review_keys`].
+    pub async fn hidden_review_keys(
+        &self,
+    ) -> Result<std::collections::HashSet<(String, String)>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.hidden_review_keys()),
+            Self::Postgres(pg) => pg.hidden_review_keys().await,
+        }
+    }
+
+    /// See [`InMemoryModerationStore::resolve_feedback`].
+    pub async fn resolve_feedback(
+        &self,
+        quest: &str,
+        snap: &str,
+        step: i32,
+        acknowledged: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.resolve_feedback(quest, snap, step, acknowledged, by);
+                Ok(())
+            }
+            Self::Postgres(pg) => {
+                pg.resolve_feedback(quest, snap, step, acknowledged, by)
+                    .await
+            }
+        }
+    }
+
+    /// See [`InMemoryModerationStore::reopen_feedback`].
+    pub async fn reopen_feedback(
+        &self,
+        quest: &str,
+        snap: &str,
+        step: i32,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.reopen_feedback(quest, snap, step);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.reopen_feedback(quest, snap, step).await,
+        }
+    }
+
+    /// See [`InMemoryModerationStore::feedback_resolutions`].
+    pub async fn feedback_resolutions(
+        &self,
+    ) -> Result<HashMap<(String, String, i32), u64>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.feedback_resolutions()),
+            Self::Postgres(pg) => pg.feedback_resolutions().await,
         }
     }
 }
@@ -3167,5 +3425,186 @@ mod constructor_tests {
         assert_eq!(by_quest.get("quest-a").copied(), Some(2));
         assert_eq!(by_quest.get("quest-b").copied(), Some(1));
         assert_eq!(by_quest.get("quest-c").copied(), None);
+    }
+}
+
+#[cfg(test)]
+mod moderation_tests {
+    use super::*;
+
+    fn hkey(p: &str, q: &str) -> (String, String) {
+        (p.to_string(), q.to_string())
+    }
+
+    #[test]
+    fn hide_is_idempotent_and_unhide_removes() {
+        let mut m = InMemoryModerationStore::new();
+        m.hide_review("p1", "q1", 100, "admin");
+        m.hide_review("p1", "q1", 200, "admin2"); // idempotent: the first hide is kept
+        let keys = m.hidden_review_keys();
+        assert!(keys.contains(&hkey("p1", "q1")));
+        assert_eq!(keys.len(), 1);
+        m.unhide_review("p1", "q1");
+        assert!(m.hidden_review_keys().is_empty());
+        m.unhide_review("p1", "q1"); // idempotent no-op
+    }
+
+    #[test]
+    fn hide_keys_are_per_player_and_quest() {
+        let mut m = InMemoryModerationStore::new();
+        m.hide_review("p1", "q1", 1, "a");
+        m.hide_review("p1", "q2", 1, "a");
+        m.hide_review("p2", "q1", 1, "a");
+        let keys = m.hidden_review_keys();
+        assert_eq!(keys.len(), 3);
+        assert!(!keys.contains(&hkey("p2", "q2")));
+    }
+
+    #[test]
+    fn resolve_upserts_and_reopen_deletes() {
+        let mut m = InMemoryModerationStore::new();
+        let key = ("q1".to_string(), "snap1".to_string(), 4);
+        m.resolve_feedback("q1", "snap1", 4, 500, "admin");
+        assert_eq!(m.feedback_resolutions().get(&key).copied(), Some(500));
+        // Re-resolving advances the watermark (upsert, not first-write-wins).
+        m.resolve_feedback("q1", "snap1", 4, 900, "admin");
+        assert_eq!(m.feedback_resolutions().get(&key).copied(), Some(900));
+        m.reopen_feedback("q1", "snap1", 4);
+        assert!(m.feedback_resolutions().is_empty());
+        m.reopen_feedback("q1", "snap1", 4); // idempotent no-op
+    }
+
+    #[test]
+    fn resolutions_are_keyed_by_quest_snapshot_and_step() {
+        let mut m = InMemoryModerationStore::new();
+        m.resolve_feedback("q1", "snap1", 4, 1, "a");
+        m.resolve_feedback("q1", "snap1", 5, 1, "a"); // different step
+        m.resolve_feedback("q1", "snap2", 4, 1, "a"); // different snapshot
+        assert_eq!(m.feedback_resolutions().len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod rating_row_tests {
+    use super::*;
+
+    fn rated_fact(stars: &str, text: Option<&str>) -> Fact {
+        Fact {
+            kind: FactKind::QuestRated,
+            step_position: 0,
+            submitted_value: Some(stars.into()),
+            local_is_correct: true,
+            coins_delta: 0,
+            note: text.map(str::to_string),
+            device_id: "d".into(),
+        }
+    }
+
+    #[test]
+    fn quest_rating_rows_one_per_player_latest_across_versions() {
+        let mut s = InMemoryFactStore::new();
+        // p1 rated 3 on a v1 attempt, then replayed and rated 5 on v2 — 5 wins
+        // (later attempt), and the two attempts collapse to ONE effective rating.
+        let a1 = s.create_attempt("p1", "q1", "snap-v1");
+        s.append_idempotent(&a1.attempt_id, vec![rated_fact("3", Some("old"))]);
+        let a2 = s.create_attempt("p1", "q1", "snap-v2");
+        s.append_idempotent(&a2.attempt_id, vec![rated_fact("5", Some("new"))]);
+        // p2 left a star-only rating on q1.
+        let b = s.create_attempt("p2", "q1", "snap-v2");
+        s.append_idempotent(&b.attempt_id, vec![rated_fact("1", None)]);
+        // p3 rated a DIFFERENT quest — must not appear when scoping to q1.
+        let c = s.create_attempt("p3", "q2", "snap-x");
+        s.append_idempotent(&c.attempt_id, vec![rated_fact("4", Some("q2"))]);
+
+        let mut rows = s.quest_rating_rows(Some(&["q1".to_string()]));
+        rows.sort_by(|x, y| x.player_id.cmp(&y.player_id));
+        assert_eq!(rows.len(), 2, "one row per player for q1");
+        assert_eq!(rows[0].player_id, "p1");
+        assert_eq!(rows[0].rating, 5, "latest attempt's rating");
+        assert_eq!(rows[0].text.as_deref(), Some("new"));
+        assert_eq!(rows[1].player_id, "p2");
+        assert_eq!(rows[1].rating, 1);
+        assert_eq!(rows[1].text, None, "star-only carries no text");
+
+        // `None` scans every quest.
+        assert_eq!(s.quest_rating_rows(None).len(), 3);
+        // Scoping to an unrated quest yields nothing.
+        assert!(s.quest_rating_rows(Some(&["nope".to_string()])).is_empty());
+    }
+
+    #[test]
+    fn quest_rating_rows_folds_hide_aware_average() {
+        let mut s = InMemoryFactStore::new();
+        let a = s.create_attempt("p1", "q1", "snap");
+        s.append_idempotent(&a.attempt_id, vec![rated_fact("5", Some("great"))]);
+        let b = s.create_attempt("p2", "q1", "snap");
+        s.append_idempotent(&b.attempt_id, vec![rated_fact("1", Some("spam"))]);
+
+        let rows = s.quest_rating_rows(Some(&["q1".to_string()]));
+        assert_eq!(
+            crate::facts::fold_rating_rows(&rows, &std::collections::HashSet::new()),
+            (3.0, 2)
+        );
+        let hidden: std::collections::HashSet<(String, String)> =
+            [("p2".to_string(), "q1".to_string())].into_iter().collect();
+        assert_eq!(
+            crate::facts::fold_rating_rows(&rows, &hidden),
+            (5.0, 1),
+            "hidden 1★ dropped"
+        );
+    }
+}
+
+#[cfg(test)]
+mod feedback_report_tests {
+    use super::*;
+
+    fn fb(step: i32, note: &str) -> Fact {
+        Fact {
+            kind: FactKind::FeedbackReported,
+            step_position: step,
+            submitted_value: None,
+            local_is_correct: true,
+            coins_delta: 0,
+            note: Some(note.into()),
+            device_id: "d".into(),
+        }
+    }
+
+    #[test]
+    fn all_feedback_reports_gathers_context_and_excludes_non_feedback() {
+        let mut s = InMemoryFactStore::new();
+        let a = s.create_attempt("p1", "q1", "snap-v1");
+        s.append_idempotent(&a.attempt_id, vec![fb(4, "stuck at fountain")]);
+        let b = s.create_attempt("p2", "q1", "snap-v1");
+        s.append_idempotent(&b.attempt_id, vec![fb(4, "same bug")]);
+        // A non-feedback fact on another quest must not surface as feedback.
+        let c = s.create_attempt("p3", "q2", "snap-x");
+        s.append_idempotent(
+            &c.attempt_id,
+            vec![Fact {
+                kind: FactKind::PhysicalConfirmed,
+                step_position: 0,
+                submitted_value: None,
+                local_is_correct: true,
+                coins_delta: 0,
+                note: None,
+                device_id: "d".into(),
+            }],
+        );
+
+        let mut reports = s.all_feedback_reports();
+        assert_eq!(
+            reports.len(),
+            2,
+            "only feedback_reported facts, across attempts"
+        );
+        reports.sort_by(|x, y| x.player_id.cmp(&y.player_id));
+        assert_eq!(reports[0].quest_id, "q1");
+        assert_eq!(reports[0].snapshot_id, "snap-v1");
+        assert_eq!(reports[0].step_position, 4);
+        assert_eq!(reports[0].player_id, "p1");
+        assert_eq!(reports[0].note, "stuck at fountain");
+        assert!(reports[0].recorded_at > 0, "server recorded_at populated");
     }
 }

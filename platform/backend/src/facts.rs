@@ -225,9 +225,11 @@ fn parse_rating(f: &Fact) -> Option<i64> {
 
 /// Aggregate ONE rating per attempt — the last `quest_rated` fact wins, matching
 /// the client `latestRating` so re-rating never double-counts — into `(mean,
-/// count)`. The single definition of the store rating: `project_version_stats`
-/// (author dashboard) and the catalog's batch ratings both fold through here, so
-/// the marketplace card and the version-stats page can never disagree.
+/// count)`. This per-attempt, per-version fold now powers ONLY the author's
+/// per-version dashboard (`project_version_stats`). The public marketplace card and
+/// product page use the per-player, all-versions, hide-aware [`fold_rating_rows`]
+/// instead, so the two surfaces intentionally differ: a hidden review is dropped
+/// from the public average but still counted in the author's raw per-version stats.
 pub fn fold_attempt_ratings<'a, I>(logs: I) -> (f64, usize)
 where
     I: IntoIterator<Item = &'a Vec<Fact>>,
@@ -252,6 +254,203 @@ where
         0.0
     };
     (rating_avg, rating_count)
+}
+
+/// One player's effective rating for one quest — the input to the public,
+/// hide-aware rating fold (content-moderation). There is exactly one row per
+/// `(player_id, quest_id)`: the player's LATEST rated attempt, taken across every
+/// version. Grain: per player (a replaying player counts once), all versions (a
+/// rating survives a new publish), hide-aware (dropped by the fold below).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerRatingRow {
+    pub player_id: String,
+    pub quest_id: String,
+    pub rating: i64,
+    /// Trimmed review text; `None` for a star-only rating.
+    pub text: Option<String>,
+    /// The rating attempt's creation instant (drives newest-first review order).
+    pub created_at: u64,
+}
+
+/// A quest's effective rating from one attempt log: the LAST `quest_rated` fact
+/// (re-rating within an attempt lets the newer value win, matching the client
+/// `latestRating`), as `(stars, text)`. `None` when the log carries no parseable
+/// rating; a star-only rating returns `text = None`.
+pub fn effective_rating(log: &[Fact]) -> Option<(i64, Option<String>)> {
+    let f = log.iter().rev().find(|f| f.kind == FactKind::QuestRated)?;
+    let rating = parse_rating(f)?;
+    let text = f
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    Some((rating, text))
+}
+
+/// True when this row's `(player_id, quest_id)` is in the hidden overlay set.
+fn row_hidden(row: &PlayerRatingRow, hidden: &std::collections::HashSet<(String, String)>) -> bool {
+    hidden.contains(&(row.player_id.clone(), row.quest_id.clone()))
+}
+
+/// Public rating fold: mean + count over the effective per-player ratings whose
+/// `(player, quest)` is NOT hidden. Star-only ratings count toward both. Returns
+/// `(0.0, 0)` when none remain. The single backend definition behind the product
+/// page, the catalog card, and the admin reviews list; the frontend hide-preview is
+/// a same-grain TS mirror of it (`lib/admin-moderation.questAverage`), kept in step
+/// by tests rather than by sharing this code.
+pub fn fold_rating_rows(
+    rows: &[PlayerRatingRow],
+    hidden: &std::collections::HashSet<(String, String)>,
+) -> (f64, usize) {
+    let mut sum: i64 = 0;
+    let mut count = 0usize;
+    for row in rows {
+        if row_hidden(row, hidden) {
+            continue;
+        }
+        sum += row.rating;
+        count += 1;
+    }
+    if count == 0 {
+        (0.0, 0)
+    } else {
+        (sum as f64 / count as f64, count)
+    }
+}
+
+/// One public review (rating text); the author label is resolved by the caller.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerReview {
+    pub player_id: String,
+    pub created_at: u64,
+    pub rating: i64,
+    pub text: String,
+}
+
+/// The non-hidden ratings that carry text, newest first, capped at `limit`; each
+/// text is clamped to 500 chars. Star-only and hidden rows are excluded.
+pub fn quest_reviews(
+    rows: &[PlayerRatingRow],
+    hidden: &std::collections::HashSet<(String, String)>,
+    limit: usize,
+) -> Vec<PlayerReview> {
+    let mut with_text: Vec<&PlayerRatingRow> = rows
+        .iter()
+        .filter(|r| !row_hidden(r, hidden))
+        .filter(|r| r.text.as_deref().is_some_and(|t| !t.trim().is_empty()))
+        .collect();
+    with_text.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    with_text
+        .into_iter()
+        .take(limit)
+        .map(|r| PlayerReview {
+            player_id: r.player_id.clone(),
+            created_at: r.created_at,
+            rating: r.rating,
+            text: r
+                .text
+                .clone()
+                .unwrap_or_default()
+                .chars()
+                .take(500)
+                .collect(),
+        })
+        .collect()
+}
+
+/// Count of non-hidden ratings that carry text — the «{M} с отзывом» total.
+pub fn quest_reviews_total(
+    rows: &[PlayerRatingRow],
+    hidden: &std::collections::HashSet<(String, String)>,
+) -> usize {
+    rows.iter()
+        .filter(|r| !row_hidden(r, hidden))
+        .filter(|r| r.text.as_deref().is_some_and(|t| !t.trim().is_empty()))
+        .count()
+}
+
+/// One `feedback_reported` fact with its resolved attempt context — the input to
+/// the global feedback-inbox grouping (content-moderation). `recorded_at` is the
+/// SERVER receive time (never the wire fact), the basis of the resolution watermark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeedbackReportRow {
+    pub quest_id: String,
+    /// Frozen version identity the reporting attempt was bound to.
+    pub snapshot_id: String,
+    pub step_position: i32,
+    pub player_id: String,
+    pub note: String,
+    pub recorded_at: u64,
+}
+
+/// A group of reports for one `(quest, snapshot, step)`, with its resolution status.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeedbackGroupCore {
+    pub quest_id: String,
+    pub snapshot_id: String,
+    pub step_position: i32,
+    pub resolved: bool,
+    /// Reports in the group, newest first.
+    pub reports: Vec<FeedbackReportRow>,
+}
+
+/// Group reports by `(quest, snapshot, step)` and mark each group resolved via a
+/// COUNT WATERMARK: `resolutions` maps a group key to the report count the admin
+/// acknowledged. A group is resolved iff its CURRENT report count is `<=` that
+/// acknowledged count. Because reports are append-only (count only grows), a newly
+/// appended report pushes the count past the watermark and reopens the group with
+/// no write to the overlay and no dependence on clock granularity — resolution is
+/// invalidated by later evidence, never coupled to the append path. Groups are
+/// ordered open-first then most-reported-first (stable by key); reports within a
+/// group newest-first.
+pub fn group_feedback(
+    reports: Vec<FeedbackReportRow>,
+    resolutions: &std::collections::HashMap<(String, String, i32), u64>,
+) -> Vec<FeedbackGroupCore> {
+    let mut by_key: std::collections::HashMap<(String, String, i32), Vec<FeedbackReportRow>> =
+        std::collections::HashMap::new();
+    for r in reports {
+        by_key
+            .entry((r.quest_id.clone(), r.snapshot_id.clone(), r.step_position))
+            .or_default()
+            .push(r);
+    }
+    let mut groups: Vec<FeedbackGroupCore> = by_key
+        .into_iter()
+        .map(|(key, mut reps)| {
+            // Newest first; deterministic tiebreak by player then note.
+            reps.sort_by(|a, b| {
+                b.recorded_at
+                    .cmp(&a.recorded_at)
+                    .then_with(|| a.player_id.cmp(&b.player_id))
+                    .then_with(|| a.note.cmp(&b.note))
+            });
+            let resolved = resolutions
+                .get(&key)
+                .is_some_and(|&acknowledged| reps.len() as u64 <= acknowledged);
+            FeedbackGroupCore {
+                quest_id: key.0,
+                snapshot_id: key.1,
+                step_position: key.2,
+                resolved,
+                reports: reps,
+            }
+        })
+        .collect();
+    groups.sort_by(|a, b| {
+        a.resolved
+            .cmp(&b.resolved)
+            .then_with(|| b.reports.len().cmp(&a.reports.len()))
+            .then_with(|| {
+                (a.quest_id.as_str(), a.snapshot_id.as_str(), a.step_position).cmp(&(
+                    b.quest_id.as_str(),
+                    b.snapshot_id.as_str(),
+                    b.step_position,
+                ))
+            })
+    });
+    groups
 }
 
 /// Pure per-version stats fold over the logs of attempts bound to `snap`.
@@ -437,6 +636,165 @@ mod tests {
             note: None,
             device_id: "device-a".into(),
         }
+    }
+
+    /// A `quest_rated` fact with `stars` and an optional review `text`.
+    fn rated(stars: &str, text: Option<&str>) -> Fact {
+        Fact {
+            submitted_value: Some(stars.into()),
+            note: text.map(str::to_string),
+            ..fact(FactKind::QuestRated, 0, 0)
+        }
+    }
+
+    fn rrow(
+        player: &str,
+        quest: &str,
+        rating: i64,
+        text: Option<&str>,
+        at: u64,
+    ) -> PlayerRatingRow {
+        PlayerRatingRow {
+            player_id: player.into(),
+            quest_id: quest.into(),
+            rating,
+            text: text.map(str::to_string),
+            created_at: at,
+        }
+    }
+
+    fn hidden_of(pairs: &[(&str, &str)]) -> std::collections::HashSet<(String, String)> {
+        pairs
+            .iter()
+            .map(|(p, q)| ((*p).to_string(), (*q).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn effective_rating_takes_last_and_reads_text() {
+        assert_eq!(effective_rating(&[]), None, "no rating in log");
+        // Re-rated within an attempt: the newer value wins.
+        let log = vec![rated("3", Some("meh")), rated("5", Some("great"))];
+        assert_eq!(effective_rating(&log), Some((5, Some("great".to_string()))));
+        // Star-only: blank/None note trims to None.
+        assert_eq!(effective_rating(&[rated("4", Some("  "))]), Some((4, None)));
+        assert_eq!(effective_rating(&[rated("2", None)]), Some((2, None)));
+        // Unparseable stars → excluded.
+        assert_eq!(effective_rating(&[rated("", None)]), None);
+    }
+
+    #[test]
+    fn fold_rating_rows_is_mean_over_non_hidden() {
+        let rows = vec![
+            rrow("p1", "q1", 5, Some("a"), 3),
+            rrow("p2", "q1", 1, None, 2), // star-only still counts toward the average
+        ];
+        assert_eq!(fold_rating_rows(&rows, &hidden_of(&[])), (3.0, 2));
+        assert_eq!(fold_rating_rows(&[], &hidden_of(&[])), (0.0, 0));
+        // Hiding (p2, q1) leaves only the 5.
+        assert_eq!(
+            fold_rating_rows(&rows, &hidden_of(&[("p2", "q1")])),
+            (5.0, 1)
+        );
+        // Hiding the same player on ANOTHER quest does not touch q1.
+        assert_eq!(
+            fold_rating_rows(&rows, &hidden_of(&[("p2", "q2")])),
+            (3.0, 2)
+        );
+    }
+
+    #[test]
+    fn quest_reviews_excludes_star_only_and_hidden_newest_first() {
+        let rows = vec![
+            rrow("p1", "q1", 5, Some("newest"), 30),
+            rrow("p2", "q1", 4, None, 20), // star-only → not a text review
+            rrow("p3", "q1", 2, Some("oldest"), 10),
+        ];
+        let reviews = quest_reviews(&rows, &hidden_of(&[]), 10);
+        assert_eq!(reviews.len(), 2);
+        assert_eq!(reviews[0].text, "newest", "newest first");
+        assert_eq!(reviews[1].text, "oldest");
+        assert_eq!(quest_reviews_total(&rows, &hidden_of(&[])), 2);
+        assert_eq!(
+            quest_reviews(&rows, &hidden_of(&[]), 1).len(),
+            1,
+            "limit honored"
+        );
+        // Hiding a text review drops it from both the list and the total.
+        let hidden = hidden_of(&[("p1", "q1")]);
+        let reviews = quest_reviews(&rows, &hidden, 10);
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(reviews[0].text, "oldest");
+        assert_eq!(quest_reviews_total(&rows, &hidden), 1);
+    }
+
+    fn freport(
+        quest: &str,
+        snap: &str,
+        step: i32,
+        player: &str,
+        note: &str,
+        at: u64,
+    ) -> FeedbackReportRow {
+        FeedbackReportRow {
+            quest_id: quest.into(),
+            snapshot_id: snap.into(),
+            step_position: step,
+            player_id: player.into(),
+            note: note.into(),
+            recorded_at: at,
+        }
+    }
+
+    fn resolutions(
+        items: &[((&str, &str, i32), u64)],
+    ) -> std::collections::HashMap<(String, String, i32), u64> {
+        items
+            .iter()
+            .map(|((q, s, step), at)| (((*q).to_string(), (*s).to_string(), *step), *at))
+            .collect()
+    }
+
+    #[test]
+    fn group_feedback_buckets_by_quest_snapshot_step_newest_first() {
+        let reports = vec![
+            freport("q1", "s1", 4, "p1", "a", 10),
+            freport("q1", "s1", 4, "p2", "b", 20),
+            freport("q1", "s1", 5, "p3", "c", 15), // different step → own group
+            freport("q1", "s2", 4, "p4", "d", 15), // different snapshot → own group
+        ];
+        let groups = group_feedback(reports, &resolutions(&[]));
+        assert_eq!(groups.len(), 3);
+        // The 2-report group sorts first (open, most-reported).
+        let top = &groups[0];
+        assert_eq!(
+            (
+                top.quest_id.as_str(),
+                top.snapshot_id.as_str(),
+                top.step_position
+            ),
+            ("q1", "s1", 4)
+        );
+        assert_eq!(top.reports.len(), 2);
+        assert_eq!(top.reports[0].player_id, "p2", "newest first");
+        assert!(groups.iter().all(|g| !g.resolved));
+    }
+
+    #[test]
+    fn group_resolved_only_while_no_report_exceeds_the_acknowledged_count() {
+        let reports = vec![
+            freport("q1", "s1", 4, "p1", "a", 10),
+            freport("q1", "s1", 4, "p2", "b", 20),
+        ];
+        // Both reports acknowledged (count 2) → resolved.
+        let g = group_feedback(reports.clone(), &resolutions(&[(("q1", "s1", 4), 2)]));
+        assert!(g[0].resolved, "resolved when every report is acknowledged");
+        // Only 1 acknowledged but 2 exist → a later report reopened it.
+        let g = group_feedback(reports.clone(), &resolutions(&[(("q1", "s1", 4), 1)]));
+        assert!(!g[0].resolved, "an unacknowledged report reopens the group");
+        // No resolution row (never resolved, or manually reopened) → open.
+        let g = group_feedback(reports, &resolutions(&[]));
+        assert!(!g[0].resolved);
     }
 
     /// Shared parity fixtures (platform/goldens/parity/) — the SAME files the

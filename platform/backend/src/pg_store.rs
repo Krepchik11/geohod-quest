@@ -45,57 +45,66 @@ pub struct PgFactStore {
 }
 
 impl PgFactStore {
-    /// See [`crate::store::InMemoryFactStore::reviews_for_quest`] — DISTINCT ON
-    /// keeps the last quest_rated per attempt; only rows with text qualify.
-    /// The limit converts via `i64::try_from`, never `as` — `usize::MAX as i64`
-    /// is -1, which PG rejects as a negative LIMIT (a shipped 500 once).
-    pub async fn reviews_for_quest(
+    /// See [`crate::store::InMemoryFactStore::quest_rating_rows`]. Per `(quest,
+    /// player)` the latest rated attempt's last `quest_rated` fact — the input to
+    /// the public hide-aware fold. `None` scans every quest (admin list);
+    /// `Some(&[..])` scopes it (product page + catalog). Unparseable ratings are
+    /// dropped, mirroring [`crate::facts::effective_rating`].
+    pub async fn quest_rating_rows(
         &self,
-        quest_id: &str,
-        limit: usize,
-    ) -> Result<Vec<crate::store::ReviewRow>, AppError> {
-        let limit = i64::try_from(limit)
-            .map_err(|e| AppError::Internal(anyhow::anyhow!("review limit overflow: {e}")))?;
-        let rows = sqlx::query(
-            "SELECT last_rated.player_id, last_rated.created_at, last_rated.data
-             FROM (
-                 SELECT DISTINCT ON (f.attempt_id)
-                        a.player_id, a.created_at, f.data
-                 FROM facts f
-                 JOIN attempts a ON a.attempt_id = f.attempt_id
-                 WHERE a.quest_id = $1 AND f.data->>'type' = 'quest_rated'
-                 ORDER BY f.attempt_id, f.seq DESC
-             ) AS last_rated
-             WHERE COALESCE(TRIM(last_rated.data->>'note'), '') <> ''
-             ORDER BY last_rated.created_at DESC
-             LIMIT $2",
-        )
-        .bind(quest_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(internal)?;
+        quests: Option<&[String]>,
+    ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
         use sqlx::Row;
-        rows.iter()
-            .map(|r| {
-                let data: serde_json::Value = r.try_get("data").map_err(internal)?;
-                let created_at: i64 = r.try_get("created_at").map_err(internal)?;
-                Ok(crate::store::ReviewRow {
-                    player_id: r.try_get("player_id").map_err(internal)?,
-                    created_at: created_at as u64,
-                    rating: data
-                        .get("submitted_value")
-                        .and_then(|v| v.as_str())
-                        .and_then(|v| v.trim().parse::<i64>().ok())
-                        .unwrap_or(0),
-                    text: data
-                        .get("note")
-                        .and_then(|v| v.as_str())
-                        .map(|t| t.trim().chars().take(500).collect())
-                        .unwrap_or_default(),
-                })
-            })
-            .collect()
+        // Inner DISTINCT ON keeps the last quest_rated per attempt (a newer
+        // re-rating wins); outer DISTINCT ON keeps, per (quest, player), the newest
+        // rated attempt (ties by attempt_id, matching the in-memory tuple order).
+        const SELECT: &str = "SELECT DISTINCT ON (a.quest_id, a.player_id)
+                    a.quest_id, a.player_id, a.created_at, last_rated.data
+             FROM ( SELECT DISTINCT ON (f.attempt_id) f.attempt_id, f.data
+                    FROM facts f
+                    WHERE f.data->>'type' = 'quest_rated'
+                    ORDER BY f.attempt_id, f.seq DESC ) AS last_rated
+             JOIN attempts a ON a.attempt_id = last_rated.attempt_id";
+        const ORDER: &str =
+            " ORDER BY a.quest_id, a.player_id, a.created_at DESC, a.attempt_id DESC";
+        let rows = match quests {
+            Some([]) => return Ok(Vec::new()),
+            Some(qs) => sqlx::query(&format!("{SELECT} WHERE a.quest_id = ANY($1){ORDER}"))
+                .bind(qs)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?,
+            None => sqlx::query(&format!("{SELECT}{ORDER}"))
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?,
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        for r in &rows {
+            let data: serde_json::Value = r.try_get("data").map_err(internal)?;
+            let Some(rating) = data
+                .get("submitted_value")
+                .and_then(|v| v.as_str())
+                .and_then(|v| v.trim().parse::<i64>().ok())
+            else {
+                continue; // unparseable rating → excluded (mirrors effective_rating)
+            };
+            let text = data
+                .get("note")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string);
+            let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+            out.push(crate::facts::PlayerRatingRow {
+                player_id: r.try_get("player_id").map_err(internal)?,
+                quest_id: r.try_get("quest_id").map_err(internal)?,
+                rating,
+                text,
+                created_at: created_at as u64,
+            });
+        }
+        Ok(out)
     }
 
     /// See [`crate::store::InMemoryFactStore::delete_player_data`] — the
@@ -328,49 +337,37 @@ impl PgFactStore {
         ))
     }
 
-    /// See [`crate::store::InMemoryFactStore::rating_stats_for_snapshots`].
-    /// The catalog's batch rating loader: ONE round-trip for the rating facts of
-    /// EVERY listed snapshot, replacing the per-quest `get_version_stats` N+1 that
-    /// dominated `GET /api/quests`. Folds through the shared `fold_attempt_ratings`
-    /// so a card's rating is identical to the version-stats page's.
-    pub async fn rating_stats_for_snapshots(
+    /// See [`crate::store::InMemoryFactStore::all_feedback_reports`]. One scan of the
+    /// feedback facts joined to their attempt context; `recorded_at` is the server
+    /// receive time (the watermark basis). Backed by the `idx_facts_type` index.
+    pub async fn all_feedback_reports(
         &self,
-        snaps: &[String],
-    ) -> Result<std::collections::HashMap<String, (f64, usize)>, AppError> {
-        if snaps.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
+    ) -> Result<Vec<crate::facts::FeedbackReportRow>, AppError> {
+        use sqlx::Row;
         let rows = sqlx::query(
-            "SELECT a.snapshot_id, f.attempt_id, f.data FROM facts f
-             JOIN attempts a ON a.attempt_id = f.attempt_id
-             WHERE a.snapshot_id = ANY($1)
-             ORDER BY f.seq",
+            "SELECT a.quest_id, a.snapshot_id, a.player_id,
+                    (f.data->>'step_position')::int AS step_position,
+                    COALESCE(f.data->>'note', '')   AS note,
+                    f.recorded_at
+             FROM facts f JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE f.data->>'type' = 'feedback_reported'",
         )
-        .bind(snaps)
         .fetch_all(&self.pool)
         .await
         .map_err(internal)?;
-        // snapshot_id -> attempt_id -> facts (in seq order)
-        let mut by_snap: std::collections::HashMap<
-            String,
-            std::collections::HashMap<String, Vec<Fact>>,
-        > = std::collections::HashMap::new();
-        for row in rows {
-            let snap: String = row.try_get("snapshot_id").map_err(internal)?;
-            let att: String = row.try_get("attempt_id").map_err(internal)?;
-            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
-            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
-            by_snap
-                .entry(snap)
-                .or_default()
-                .entry(att)
-                .or_default()
-                .push(fact);
-        }
-        Ok(by_snap
-            .into_iter()
-            .map(|(snap, logs)| (snap, crate::facts::fold_attempt_ratings(logs.values())))
-            .collect())
+        rows.iter()
+            .map(|r| {
+                let recorded_at: Option<i64> = r.try_get("recorded_at").map_err(internal)?;
+                Ok(crate::facts::FeedbackReportRow {
+                    quest_id: r.try_get("quest_id").map_err(internal)?,
+                    snapshot_id: r.try_get("snapshot_id").map_err(internal)?,
+                    step_position: r.try_get("step_position").map_err(internal)?,
+                    player_id: r.try_get("player_id").map_err(internal)?,
+                    note: r.try_get("note").map_err(internal)?,
+                    recorded_at: recorded_at.unwrap_or(0).max(0) as u64,
+                })
+            })
+            .collect()
     }
 
     /// See [`crate::store::InMemoryFactStore::attempt_logs_for_player`].
@@ -1395,14 +1392,15 @@ impl PgAuthStore {
     /// subject)` PK absorbs a concurrent duplicate link (0 rows → 409).
     pub async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
         let inserted = sqlx::query(
-            "INSERT INTO auth_identities (provider, subject, player_id, email, created_at)
-             VALUES ($1, $2, $3, $4, $5)
+            "INSERT INTO auth_identities (provider, subject, player_id, email, username, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT DO NOTHING",
         )
         .bind(&identity.provider)
         .bind(&identity.subject)
         .bind(&identity.player_id)
         .bind(&identity.email)
+        .bind(&identity.username)
         .bind(identity.created_at as i64)
         .execute(&self.pool)
         .await
@@ -1413,13 +1411,36 @@ impl PgAuthStore {
         Ok(())
     }
 
+    /// See [`crate::store::InMemoryAuthStore::set_identity_username`]. Overwrites only
+    /// when a value is present; an absent claim leaves the stored handle untouched.
+    pub async fn set_identity_username(
+        &self,
+        provider: &str,
+        subject: &str,
+        username: Option<String>,
+    ) -> Result<(), AppError> {
+        let Some(username) = username else {
+            return Ok(());
+        };
+        sqlx::query(
+            "UPDATE auth_identities SET username = $3 WHERE provider = $1 AND subject = $2",
+        )
+        .bind(provider)
+        .bind(subject)
+        .bind(&username)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
     /// See [`crate::store::InMemoryAuthStore::identities_for_player`].
     pub async fn identities_for_player(
         &self,
         player_id: &str,
     ) -> Result<Vec<AuthIdentity>, AppError> {
         let rows = sqlx::query(
-            "SELECT provider, subject, player_id, email, created_at \
+            "SELECT provider, subject, player_id, email, username, created_at \
              FROM auth_identities WHERE player_id = $1 ORDER BY provider ASC",
         )
         .bind(player_id)
@@ -1434,10 +1455,44 @@ impl PgAuthStore {
                     subject: r.try_get("subject").map_err(internal)?,
                     player_id: r.try_get("player_id").map_err(internal)?,
                     email: r.try_get("email").map_err(internal)?,
+                    username: r.try_get("username").map_err(internal)?,
                     created_at: created_at.max(0) as u64,
                 })
             })
             .collect()
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::identities_for_players`]. One
+    /// `= ANY($1)` scan for the whole batch (admin identity resolution, no N+1).
+    pub async fn identities_for_players(
+        &self,
+        player_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<AuthIdentity>>, AppError> {
+        let rows = sqlx::query(
+            "SELECT provider, subject, player_id, email, username, created_at \
+             FROM auth_identities WHERE player_id = ANY($1) ORDER BY provider ASC",
+        )
+        .bind(player_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut out: std::collections::HashMap<String, Vec<AuthIdentity>> =
+            std::collections::HashMap::new();
+        for r in &rows {
+            let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+            let identity = AuthIdentity {
+                provider: r.try_get("provider").map_err(internal)?,
+                subject: r.try_get("subject").map_err(internal)?,
+                player_id: r.try_get("player_id").map_err(internal)?,
+                email: r.try_get("email").map_err(internal)?,
+                username: r.try_get("username").map_err(internal)?,
+                created_at: created_at.max(0) as u64,
+            };
+            out.entry(identity.player_id.clone())
+                .or_default()
+                .push(identity);
+        }
+        Ok(out)
     }
 
     /// See [`crate::store::InMemoryAuthStore::delete_identity`].
@@ -1668,6 +1723,7 @@ impl PgConstructorStore {
 
     /// See [`crate::store::InMemoryConstructorStore::save_body`]. Zero rows updated
     /// means the id is unknown → 404.
+    #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
     pub async fn save_body(
         &self,
         quest_id: &str,
@@ -2331,5 +2387,140 @@ impl PgFlagStore {
             .await
             .map_err(internal)?;
         Ok(())
+    }
+}
+
+/// PostgreSQL moderation overlay — the durable mirror of
+/// [`crate::store::InMemoryModerationStore`] (content-moderation). Two tables that are
+/// entirely separate from the immutable `facts` log.
+#[derive(Clone, Debug)]
+pub struct PgModerationStore {
+    pool: PgPool,
+}
+
+impl PgModerationStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::hide_review`] — idempotent.
+    pub async fn hide_review(
+        &self,
+        player: &str,
+        quest: &str,
+        at: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO hidden_reviews (player_id, quest_id, hidden_at, hidden_by)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (player_id, quest_id) DO NOTHING",
+        )
+        .bind(player)
+        .bind(quest)
+        .bind(at as i64)
+        .bind(by)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::unhide_review`] — idempotent.
+    pub async fn unhide_review(&self, player: &str, quest: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM hidden_reviews WHERE player_id = $1 AND quest_id = $2")
+            .bind(player)
+            .bind(quest)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::hidden_review_keys`].
+    pub async fn hidden_review_keys(
+        &self,
+    ) -> Result<std::collections::HashSet<(String, String)>, AppError> {
+        let rows = sqlx::query("SELECT player_id, quest_id FROM hidden_reviews")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok((
+                    r.try_get("player_id").map_err(internal)?,
+                    r.try_get("quest_id").map_err(internal)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::resolve_feedback`] — upsert.
+    pub async fn resolve_feedback(
+        &self,
+        quest: &str,
+        snap: &str,
+        step: i32,
+        acknowledged: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO resolved_feedback
+                 (quest_id, snapshot_id, step_position, acknowledged, resolved_by)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (quest_id, snapshot_id, step_position) DO UPDATE
+             SET acknowledged = EXCLUDED.acknowledged, resolved_by = EXCLUDED.resolved_by",
+        )
+        .bind(quest)
+        .bind(snap)
+        .bind(step)
+        .bind(acknowledged as i64)
+        .bind(by)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::reopen_feedback`] — idempotent.
+    pub async fn reopen_feedback(
+        &self,
+        quest: &str,
+        snap: &str,
+        step: i32,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "DELETE FROM resolved_feedback
+             WHERE quest_id = $1 AND snapshot_id = $2 AND step_position = $3",
+        )
+        .bind(quest)
+        .bind(snap)
+        .bind(step)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::feedback_resolutions`].
+    pub async fn feedback_resolutions(
+        &self,
+    ) -> Result<std::collections::HashMap<(String, String, i32), u64>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, snapshot_id, step_position, acknowledged FROM resolved_feedback",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let quest: String = r.try_get("quest_id").map_err(internal)?;
+                let snap: String = r.try_get("snapshot_id").map_err(internal)?;
+                let step: i32 = r.try_get("step_position").map_err(internal)?;
+                let acknowledged: i64 = r.try_get("acknowledged").map_err(internal)?;
+                Ok(((quest, snap, step), acknowledged.max(0) as u64))
+            })
+            .collect()
     }
 }
