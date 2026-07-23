@@ -141,7 +141,11 @@ mod tests {
         // Launch-era flags stay server-side: their state already reaches the
         // client through the provider capability endpoints.
         for s in Feature::SEEDED_ON {
-            assert!(!s.client_visible(), "{} must not be client visible", s.key());
+            assert!(
+                !s.client_visible(),
+                "{} must not be client visible",
+                s.key()
+            );
         }
     }
 

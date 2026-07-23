@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 /**
  * Shared admin-page primitives (`ap-*`, styles/admin-page.css) — the ONE page
@@ -108,4 +108,25 @@ export function AdminToast({ text, error = false }: { text: string; error?: bool
       {text}
     </div>
   );
+}
+
+/**
+ * Auto-dismissing toast state shared by admin pages: `showToast(msg)` shows it and
+ * clears it after ~2.8s; the timer is cleared on unmount. Pair with `<AdminToast>`.
+ */
+export function useToast(): { toast: string | null; showToast: (message: string) => void } {
+  const [toast, setToast] = useState<string | null>(null);
+  const timer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+  const showToast = (message: string) => {
+    setToast(message);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setToast(null), 2800);
+  };
+  return { toast, showToast };
 }

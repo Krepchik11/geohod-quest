@@ -14,13 +14,15 @@ import SpaceHeader from '../components/SpaceHeader';
  *
  */
 
-export type AdminTab = 'users' | 'coupons' | 'features' | 'stats';
+export type AdminTab = 'users' | 'coupons' | 'features' | 'stats' | 'reviews' | 'feedback';
 
 const TABS: Array<{ key: AdminTab; label: string; href: string }> = [
   { key: 'users', label: 'Пользователи', href: '/admin' },
   { key: 'coupons', label: 'Купоны', href: '/admin/coupons' },
   { key: 'features', label: 'Функции', href: '/admin/features' },
   { key: 'stats', label: 'Статистика', href: '/admin/stats' },
+  { key: 'reviews', label: 'Отзывы', href: '/admin/reviews' },
+  { key: 'feedback', label: 'Обратная связь', href: '/admin/feedback' },
 ];
 
 export type AdminAccess = 'checking' | 'granted' | 'denied' | 'error';
