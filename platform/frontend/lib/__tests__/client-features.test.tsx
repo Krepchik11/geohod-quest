@@ -68,6 +68,17 @@ describe('useClientFeature', () => {
   });
 });
 
+describe('legacy wire compat (flat flag map from a pre-rollout backend)', () => {
+  it('reads flags from the old flat shape; universal answer stays null', async () => {
+    apiMock.getPublicFeatures.mockResolvedValue({ player_back_button: true });
+    const { useClientFeature, useUniversalAnswer } = await loadModule();
+    const flag = renderHook(() => useClientFeature('player_back_button'));
+    const ua = renderHook(() => useUniversalAnswer());
+    await waitFor(() => expect(flag.result.current).toBe(true));
+    expect(ua.result.current).toBeNull();
+  });
+});
+
 describe('useUniversalAnswer', () => {
   it('serves the fetched value; null before it resolves', async () => {
     apiMock.getPublicFeatures.mockResolvedValue(wire({ player_universal_answer: true }, '11'));

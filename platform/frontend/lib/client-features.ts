@@ -20,9 +20,20 @@ import { api, type PublicFeatures } from './api';
  */
 let cache: Promise<PublicFeatures> | null = null;
 
+/**
+ * TRANSITIONAL (remove after the backend serving `{flags, universal_answer}`
+ * is rolled out everywhere): the pre-universal-answer backend served the flat
+ * `{key: bool}` map. During a frontend-first rolling deploy the new client
+ * must not read every flag as false against the old shape.
+ */
+function normalizeWire(wire: PublicFeatures | Record<string, boolean>): PublicFeatures {
+  if (wire && typeof wire === 'object' && 'flags' in wire) return wire as PublicFeatures;
+  return { flags: (wire as Record<string, boolean>) ?? {}, universal_answer: null };
+}
+
 function fetchFeatures(): Promise<PublicFeatures> {
   if (!cache) {
-    const promise = api.getPublicFeatures();
+    const promise = api.getPublicFeatures().then(normalizeWire);
     cache = promise;
     promise.catch(() => {
       if (cache === promise) cache = null;
