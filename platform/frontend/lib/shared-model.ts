@@ -105,6 +105,11 @@ export interface QuestSnapshot {
   city?: string;
   /** Author's store-card duration label, frozen alongside `city`. */
   duration?: string;
+  /** Author's quest-wide universal answer, frozen at publish: accepted on every
+   *  answer step of this quest by the same matcher rules as the step lists.
+   *  Optional — snapshots published without it (or before the field existed)
+   *  simply have no quest-level universal answer. */
+  universal_answer?: string | null;
 }
 
 export interface Fact {
@@ -170,6 +175,22 @@ export function isAnswerCorrect(submitted: string, acceptable: string[] | null |
   const norm = (s: string) => String(s).trim().toLowerCase();
   if (!submitted || !String(submitted).trim()) return false;
   return (acceptable || []).some((a) => norm(a) === norm(submitted));
+}
+
+/**
+ * The full player acceptance rule: the step's own acceptable list PLUS any
+ * universal answers in effect — the quest-wide one frozen in the snapshot
+ * and/or the platform-wide one served by GET /api/features. Universals go
+ * through the exact same matcher; absent/blank entries are simply not answers.
+ */
+export function isAnswerAccepted(
+  submitted: string,
+  acceptable: string[] | null | undefined,
+  universal: Array<string | null | undefined>
+): boolean {
+  // Only nullish needs filtering; the matcher itself already rejects blanks.
+  const universals = universal.filter((u): u is string => u != null);
+  return isAnswerCorrect(submitted, acceptable) || isAnswerCorrect(submitted, universals);
 }
 
 /**

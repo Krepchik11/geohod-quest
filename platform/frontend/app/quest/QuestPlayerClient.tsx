@@ -4,7 +4,7 @@ import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } 
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
 import {
-  isAnswerCorrect,
+  isAnswerAccepted,
   projectState,
   shouldOfferHint,
   latestRating,
@@ -25,7 +25,7 @@ import {
 import { flushPending } from '../../lib/sync';
 import { currentPlayerId, getDeviceId } from '../../lib/identity';
 import { mapsSearchUrl } from '../../lib/maps';
-import { useClientFeature } from '../../lib/client-features';
+import { useClientFeature, useUniversalAnswer } from '../../lib/client-features';
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
@@ -315,6 +315,9 @@ export default function QuestPlayerClient({
   // See useStepHistory for why entries-mirror-steps is the only design the
   // browsers' anti-trapping rules allow.
   const historyBackOn = useClientFeature('player_back_button');
+  // Platform-wide universal answer (null while loading / flag off / unset) —
+  // merged into every answer check next to the snapshot's quest-wide one.
+  const globalUniversalAnswer = useUniversalAnswer();
   const stepHistory = useStepHistory(historyBackOn, {
     stepIdx,
     // View follows the traversed entry, clamped: entries can outlive the
@@ -365,7 +368,12 @@ export default function QuestPlayerClient({
     (value: string) => {
       if (!value.trim()) return;
       const step = currentStep;
-      const correct = isAnswerCorrect(value, step.completion.acceptable);
+      // The step's own list plus the universal answers in effect: the quest-wide
+      // one frozen in the snapshot and the platform-wide one (admin flag+value).
+      const correct = isAnswerAccepted(value, step.completion.acceptable, [
+        snapshot.universal_answer,
+        globalUniversalAnswer,
+      ]);
       const fact = appendFact({
         type: 'answer_submitted',
         step_position: stepIdx,
@@ -387,7 +395,7 @@ export default function QuestPlayerClient({
       claimGiftIfNeeded(stepIdx);
       doAdvance();
     },
-    [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, doAdvance, setUi]
+    [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, doAdvance, setUi, snapshot.universal_answer, globalUniversalAnswer]
   );
 
   const handleBuyHint = useCallback(() => {

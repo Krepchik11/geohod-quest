@@ -64,3 +64,20 @@ describe('QuestSettings attributes', () => {
     expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['юмор'] }));
   });
 });
+
+describe('QuestSettings universal answer', () => {
+  it('shows the stored value and patches meta on change', () => {
+    const { onMeta } = setup({ universalAnswer: '11' });
+    const input = screen.getByLabelText('Универсальный ответ') as HTMLInputElement;
+    expect(input.value).toBe('11');
+    fireEvent.change(input, { target: { value: '42' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ universalAnswer: '42' }));
+  });
+
+  it('clearing the input disables the feature (empty = off)', () => {
+    const { onMeta } = setup({ universalAnswer: '11' });
+    const input = screen.getByLabelText('Универсальный ответ');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ universalAnswer: '' }));
+  });
+});

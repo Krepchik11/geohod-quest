@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
-import { isAnswerCorrect } from '../../lib/shared-model';
+import { isAnswerAccepted, type QuestSnapshot } from '../../lib/shared-model';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import {
   CoinToast,
@@ -20,7 +20,8 @@ import { coinChime, spendChime } from '../quest/sound';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и
- * тем же isAnswerCorrect. Снапшот берётся на момент запуска, прогресс
+ * тем же isAnswerAccepted (список шага + универсальный ответ квеста).
+ * Снапшот берётся на момент запуска, прогресс
  * эфемерный — dry-run будущей версии (design/ctor2/test-player.jsx).
  */
 
@@ -33,6 +34,10 @@ interface TestQuest {
   city: string;
   duration: string;
   steps: DesignStep[];
+  /** Универсальный ответ квеста из настроек. Платформенный универсальный
+   *  ответ в тесте черновика сознательно не участвует — он рантайм-настройка
+   *  админа, а не часть квеста. */
+  universalAnswer: QuestSnapshot['universal_answer'];
 }
 
 function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: number; onNav: (msg: string) => void }) {
@@ -143,7 +148,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     },
     submit: (value: string) => {
       if (!value.trim()) return;
-      if (isAnswerCorrect(value, step.acceptable || [])) {
+      if (isAnswerAccepted(value, step.acceptable || [], [quest.universalAnswer])) {
         const gifted = award(step, pos);
         if (gifted) after(950, next);
         else next();
@@ -263,6 +268,7 @@ export function TestOverlay({ quest, startPos, onClose }: {
       city: quest.meta.city || '—',
       duration: quest.meta.duration || '—',
       steps: snap.steps.map(toDesignStep),
+      universalAnswer: snap.universal_answer,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

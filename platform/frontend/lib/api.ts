@@ -8,8 +8,15 @@
  * (see `resolveApiBase` for the production-safety guard against the localhost fallback).
  */
 
-import type { AdminFeatureWire } from './admin-features';
+import type { AdminFeatureWire, AdminSettingWire } from './admin-features';
 import { authHeaders, type Session } from './identity';
+
+/** GET /api/features: client-visible flag verdicts + player runtime values. */
+export interface PublicFeatures {
+  flags: Record<string, boolean>;
+  /** Platform-wide universal answer; `null` unless its flag is on AND a value is set. */
+  universal_answer: string | null;
+}
 
 /** Which social sign-in providers this deployment has configured. Both `null`
  *  when unset, so the client hides the corresponding button (fail-closed UI that
@@ -562,6 +569,20 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
+  // Admin runtime settings (registry in backend settings.rs) — same gating.
+  // `value: null` (or blank — the backend trims) clears the setting; the
+  // mutation returns the normalized stored value.
+  adminGetSetting: (key: string) =>
+    apiFetch<AdminSettingWire>(`/api/admin/settings/${encodeURIComponent(key)}`, {
+      headers: adminHeaders(),
+    }),
+  adminSetSetting: (key: string, value: string | null) =>
+    apiFetch<AdminSettingWire>(`/api/admin/settings/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ value }),
+    }),
+
   // Admin statistics (admin-stats spec) — same dual-credential gating. Raw
   // counters over an inclusive UTC day range; omitting `from` = «Всё время»
   // (the backend anchors the range at the earliest recorded event).
@@ -730,10 +751,11 @@ export const api = {
   // Which social buttons to render + the public ids they need. Both null → hidden.
   getAuthProviders: () =>
     apiFetch<AuthProviders>('/api/auth/providers'),
-  // Public effective verdicts of the client-visible feature flags (the player
-  // runtime keys UI behavior off these; see lib/client-features.ts).
+  // Public effective verdicts of the client-visible feature flags plus the
+  // platform-wide universal answer (the player runtime keys behavior off
+  // these; see lib/client-features.ts).
   getPublicFeatures: () =>
-    apiFetch<Record<string, boolean>>('/api/features'),
+    apiFetch<PublicFeatures>('/api/features'),
   // Auth v2 (§6): the email-first step + recovery R1 + soft confirmation.
   authIdentify: (email: string) =>
     apiFetch<{ exists: boolean; confirmed: boolean }>('/api/auth/identify', {

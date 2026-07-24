@@ -5,12 +5,11 @@ import {
   AGE_TARGET_OPTIONS,
   COMPLEXITY_OPTIONS,
   CTOR_TEMPLATES,
-  DEFAULT_AGE_TARGET,
-  DEFAULT_COMPLEXITY,
   SUGGESTED_TAGS,
   TPL_BY_KEY,
   computeGates,
   fmtTime,
+  newQuest,
   newStep,
   plural,
   type CtorAgeTarget,
@@ -38,16 +37,13 @@ import { WspHeader } from './QuestList';
 /** Нейтральная мета для превью пикера — обобщённый плейсхолдер, НЕ настоящий и не
  *  выдуманный квест. Показывает форму шаблона, а не чьи-то данные. */
 const PREVIEW_META: CtorQuestMeta = {
+  // Строим от настоящих дефолтов newQuest — новое поле меты не требует
+  // параллельной правки здесь.
+  ...newQuest({}).meta,
   title: 'Название квеста',
   city: 'Город',
   duration: '1–2 часа',
   cover: '/assets/img/quest-card.png',
-  desc: '',
-  price: 0,
-  playersBonus: 0,
-  complexity: DEFAULT_COMPLEXITY,
-  ageTarget: DEFAULT_AGE_TARGET,
-  tags: [],
 };
 
 /** Краткий обобщённый текст-иллюстрация для каждого шаблона: показывает, как
@@ -246,6 +242,21 @@ export function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (me
           ) : null}
           <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
             Свободные теги для фильтрации в списке квестов: жанр, тема, настроение.
+          </p>
+        </div>
+      </WspBlock>
+      <WspBlock title="Прохождение" aside="действует на все вопросы квеста">
+        <div>
+          <label className="adm-label" htmlFor="qs-universal">Универсальный ответ</label>
+          <input
+            id="qs-universal"
+            className="input"
+            placeholder="Пусто — выключен"
+            value={m.universalAnswer}
+            onChange={(e) => set({ universalAnswer: e.target.value })}
+          />
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+            Принимается как правильный ответ на любом вопросе любого шага этого квеста — не нужно добавлять его в каждый список ответов. Оставьте пустым, чтобы выключить.
           </p>
         </div>
       </WspBlock>
