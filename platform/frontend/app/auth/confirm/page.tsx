@@ -3,7 +3,6 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import SiteHeader from '../../SiteHeader';
 import { api } from '../../../lib/api';
 
 /**
@@ -50,13 +49,8 @@ function ConfirmInner() {
 
 export default function ConfirmPage() {
   return (
-    <div className="site" style={{ background: 'var(--bg-subtle)' }}>
-      <SiteHeader />
-      <div className="auth-wrap">
-        <Suspense fallback={null}>
-          <ConfirmInner />
-        </Suspense>
-      </div>
-    </div>
+    <Suspense fallback={null}>
+      <ConfirmInner />
+    </Suspense>
   );
 }

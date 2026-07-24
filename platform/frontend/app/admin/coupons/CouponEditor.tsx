@@ -13,7 +13,6 @@ import {
   usagePercent,
   type AdminCoupon,
 } from '../../../lib/admin-coupons';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminConfirmSheet, AdminToast } from '../ui';
 
 /**
@@ -121,7 +120,6 @@ function serverMessage(err: unknown): string {
 }
 
 export default function CouponEditor({ couponId }: { couponId?: string }) {
-  const access = useAdminAccess();
   const router = useRouter();
   const isNew = !couponId;
 
@@ -141,7 +139,6 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
     setForm((f) => ({ ...f, [key]: value }));
 
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     // Paid published quests feed the applicability picker.
     void api
@@ -171,7 +168,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [access, couponId]);
+  }, [couponId]);
 
   const filteredQuests = useMemo(() => {
     const q = questQuery.trim().toLowerCase();
@@ -237,374 +234,370 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
   const usage = coupon ? usagePercent(coupon) : null;
 
   return (
-    <AdminShell active="coupons">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            <button type="button" className="ac-back" onClick={back}>
-              <span className="ac-back__arrow" aria-hidden>‹</span> Купоны
-            </button>
+    <>
+    <main className="ap-main">
+      <button type="button" className="ac-back" onClick={back}>
+        <span className="ac-back__arrow" aria-hidden>‹</span> Купоны
+      </button>
 
-            {loadState === 'loading' ? (
-              <div className="ash-state"><span className="ash-spinner" aria-label="Загрузка" /></div>
-            ) : loadState !== 'ready' ? (
-              <div className="ash-state">
-                <div className="ash-state-title">
-                  {loadState === 'missing' ? 'Купон не найден' : 'Не удалось загрузить купон'}
+      {loadState === 'loading' ? (
+        <div className="ash-state"><span className="ash-spinner" aria-label="Загрузка" /></div>
+      ) : loadState !== 'ready' ? (
+        <div className="ash-state">
+          <div className="ash-state-title">
+            {loadState === 'missing' ? 'Купон не найден' : 'Не удалось загрузить купон'}
+          </div>
+          <div className="ash-state-text">
+            {loadState === 'missing'
+              ? 'Возможно, он был удалён. Вернитесь к списку купонов.'
+              : 'Проверьте соединение и обновите страницу.'}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="ac-editor-head">
+            <h1 className="ap-title">{isNew ? 'Новый купон' : coupon?.code}</h1>
+            {coupon && (
+              <span className={`ac-badge ac-badge--${coupon.status}`}>
+                {STATUS_LABELS[coupon.status]}
+              </span>
+            )}
+          </div>
+
+          <div className="ac-editor">
+            <div className="ac-editor__form">
+              <section className="ac-card">
+                <div className="ac-card__label">ОСНОВНОЕ</div>
+                <div className="ac-field">
+                  <label htmlFor="cpn-code">Код купона</label>
+                  <div className="ac-input-row">
+                    <input
+                      id="cpn-code"
+                      className="ac-input ac-input--code"
+                      value={form.code}
+                      onChange={(e) => set('code', e.target.value.toUpperCase())}
+                      placeholder="LETO-20"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button type="button" className="ac-gen" onClick={generate}>
+                      Сгенерировать
+                    </button>
+                  </div>
+                  <div className="ac-field-hint">
+                    Любой непустой код. Игрок вводит его в окне покупки.
+                  </div>
                 </div>
-                <div className="ash-state-text">
-                  {loadState === 'missing'
-                    ? 'Возможно, он был удалён. Вернитесь к списку купонов.'
-                    : 'Проверьте соединение и обновите страницу.'}
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="ac-editor-head">
-                  <h1 className="ap-title">{isNew ? 'Новый купон' : coupon?.code}</h1>
-                  {coupon && (
-                    <span className={`ac-badge ac-badge--${coupon.status}`}>
-                      {STATUS_LABELS[coupon.status]}
+                <div className="ac-grid-2">
+                  <div className="ac-field">
+                    <label>Тип скидки</label>
+                    <div className="ac-seg" role="group" aria-label="Тип скидки">
+                      <button
+                        type="button"
+                        className={form.discountType === 'percent' ? 'is-on' : undefined}
+                        aria-pressed={form.discountType === 'percent'}
+                        onClick={() => set('discountType', 'percent')}
+                      >
+                        Процент %
+                      </button>
+                      <button
+                        type="button"
+                        className={form.discountType === 'fixed' ? 'is-on' : undefined}
+                        aria-pressed={form.discountType === 'fixed'}
+                        onClick={() => set('discountType', 'fixed')}
+                      >
+                        Сумма ₽
+                      </button>
+                    </div>
+                  </div>
+                  <div className="ac-field">
+                    <label htmlFor="cpn-value">Размер скидки</label>
+                    <span
+                      className="ac-input--unit"
+                      data-unit={form.discountType === 'percent' ? '%' : '₽'}
+                    >
+                      <input
+                        id="cpn-value"
+                        className="ac-input ac-input--num"
+                        inputMode="numeric"
+                        value={form.discountValue}
+                        onChange={(e) => set('discountValue', e.target.value.replace(/\D/g, ''))}
+                        placeholder={form.discountType === 'percent' ? '20' : '300'}
+                      />
                     </span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="ac-card">
+                <div className="ac-card__label">ОГРАНИЧЕНИЯ</div>
+                <div className="ac-grid-3">
+                  <div className="ac-field">
+                    <label htmlFor="cpn-until">Действует до</label>
+                    <input
+                      id="cpn-until"
+                      type="date"
+                      className="ac-input"
+                      value={form.validUntil}
+                      disabled={form.noExpiry}
+                      onChange={(e) => set('validUntil', e.target.value)}
+                    />
+                    <label className="ac-check">
+                      <input
+                        type="checkbox"
+                        checked={form.noExpiry}
+                        onChange={(e) => set('noExpiry', e.target.checked)}
+                      />
+                      <span className="ac-check__box" aria-hidden />
+                      Без срока
+                    </label>
+                  </div>
+                  <div className="ac-field">
+                    <label htmlFor="cpn-max">Лимит использований</label>
+                    <input
+                      id="cpn-max"
+                      className="ac-input ac-input--num"
+                      inputMode="numeric"
+                      value={form.maxRedemptions}
+                      disabled={form.noLimit}
+                      onChange={(e) => set('maxRedemptions', e.target.value.replace(/\D/g, ''))}
+                      placeholder="100"
+                    />
+                    <label className="ac-check">
+                      <input
+                        type="checkbox"
+                        checked={form.noLimit}
+                        onChange={(e) => set('noLimit', e.target.checked)}
+                      />
+                      <span className="ac-check__box" aria-hidden />
+                      Без лимита
+                    </label>
+                  </div>
+                  <div className="ac-field">
+                    <label htmlFor="cpn-per-user">На одного пользователя</label>
+                    <input
+                      id="cpn-per-user"
+                      className="ac-input ac-input--num"
+                      inputMode="numeric"
+                      value={form.perUserLimit}
+                      disabled={form.noPerUserLimit}
+                      onChange={(e) => set('perUserLimit', e.target.value.replace(/\D/g, ''))}
+                      placeholder="1"
+                    />
+                    <label className="ac-check">
+                      <input
+                        type="checkbox"
+                        checked={form.noPerUserLimit}
+                        onChange={(e) => set('noPerUserLimit', e.target.checked)}
+                      />
+                      <span className="ac-check__box" aria-hidden />
+                      Без лимита
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+              <section className="ac-card">
+                <div className="ac-card__labelrow">
+                  <div className="ac-card__label">ПРИМЕНИМОСТЬ</div>
+                  {!form.allQuests && (
+                    <span className="ac-card__chosen">Выбрано: {form.questIds.length}</span>
                   )}
                 </div>
-
-                <div className="ac-editor">
-                  <div className="ac-editor__form">
-                    <section className="ac-card">
-                      <div className="ac-card__label">ОСНОВНОЕ</div>
-                      <div className="ac-field">
-                        <label htmlFor="cpn-code">Код купона</label>
-                        <div className="ac-input-row">
-                          <input
-                            id="cpn-code"
-                            className="ac-input ac-input--code"
-                            value={form.code}
-                            onChange={(e) => set('code', e.target.value.toUpperCase())}
-                            placeholder="LETO-20"
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
-                          <button type="button" className="ac-gen" onClick={generate}>
-                            Сгенерировать
-                          </button>
-                        </div>
+                <div className="ac-seg ac-seg--capped" role="group" aria-label="Применимость">
+                  <button
+                    type="button"
+                    className={form.allQuests ? 'is-on' : undefined}
+                    aria-pressed={form.allQuests}
+                    onClick={() => set('allQuests', true)}
+                  >
+                    Все квесты
+                  </button>
+                  <button
+                    type="button"
+                    className={!form.allQuests ? 'is-on' : undefined}
+                    aria-pressed={!form.allQuests}
+                    onClick={() => set('allQuests', false)}
+                  >
+                    Выбранные
+                  </button>
+                </div>
+                {form.allQuests ? (
+                  <div className="ac-field-hint">
+                    Купон примет любой платный квест из магазина, включая будущие.
+                  </div>
+                ) : (
+                  <>
+                    <div className="ac-search">
+                      <span className="ac-search-icon" aria-hidden />
+                      <input
+                        type="text"
+                        className="ac-search-input"
+                        value={questQuery}
+                        onChange={(e) => setQuestQuery(e.target.value)}
+                        placeholder="Название квеста…"
+                        aria-label="Поиск квеста"
+                      />
+                    </div>
+                    <div className="ac-quests">
+                      {filteredQuests.length === 0 ? (
                         <div className="ac-field-hint">
-                          Любой непустой код. Игрок вводит его в окне покупки.
-                        </div>
-                      </div>
-                      <div className="ac-grid-2">
-                        <div className="ac-field">
-                          <label>Тип скидки</label>
-                          <div className="ac-seg" role="group" aria-label="Тип скидки">
-                            <button
-                              type="button"
-                              className={form.discountType === 'percent' ? 'is-on' : undefined}
-                              aria-pressed={form.discountType === 'percent'}
-                              onClick={() => set('discountType', 'percent')}
-                            >
-                              Процент %
-                            </button>
-                            <button
-                              type="button"
-                              className={form.discountType === 'fixed' ? 'is-on' : undefined}
-                              aria-pressed={form.discountType === 'fixed'}
-                              onClick={() => set('discountType', 'fixed')}
-                            >
-                              Сумма ₽
-                            </button>
-                          </div>
-                        </div>
-                        <div className="ac-field">
-                          <label htmlFor="cpn-value">Размер скидки</label>
-                          <span
-                            className="ac-input--unit"
-                            data-unit={form.discountType === 'percent' ? '%' : '₽'}
-                          >
-                            <input
-                              id="cpn-value"
-                              className="ac-input ac-input--num"
-                              inputMode="numeric"
-                              value={form.discountValue}
-                              onChange={(e) => set('discountValue', e.target.value.replace(/\D/g, ''))}
-                              placeholder={form.discountType === 'percent' ? '20' : '300'}
-                            />
-                          </span>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="ac-card">
-                      <div className="ac-card__label">ОГРАНИЧЕНИЯ</div>
-                      <div className="ac-grid-3">
-                        <div className="ac-field">
-                          <label htmlFor="cpn-until">Действует до</label>
-                          <input
-                            id="cpn-until"
-                            type="date"
-                            className="ac-input"
-                            value={form.validUntil}
-                            disabled={form.noExpiry}
-                            onChange={(e) => set('validUntil', e.target.value)}
-                          />
-                          <label className="ac-check">
-                            <input
-                              type="checkbox"
-                              checked={form.noExpiry}
-                              onChange={(e) => set('noExpiry', e.target.checked)}
-                            />
-                            <span className="ac-check__box" aria-hidden />
-                            Без срока
-                          </label>
-                        </div>
-                        <div className="ac-field">
-                          <label htmlFor="cpn-max">Лимит использований</label>
-                          <input
-                            id="cpn-max"
-                            className="ac-input ac-input--num"
-                            inputMode="numeric"
-                            value={form.maxRedemptions}
-                            disabled={form.noLimit}
-                            onChange={(e) => set('maxRedemptions', e.target.value.replace(/\D/g, ''))}
-                            placeholder="100"
-                          />
-                          <label className="ac-check">
-                            <input
-                              type="checkbox"
-                              checked={form.noLimit}
-                              onChange={(e) => set('noLimit', e.target.checked)}
-                            />
-                            <span className="ac-check__box" aria-hidden />
-                            Без лимита
-                          </label>
-                        </div>
-                        <div className="ac-field">
-                          <label htmlFor="cpn-per-user">На одного пользователя</label>
-                          <input
-                            id="cpn-per-user"
-                            className="ac-input ac-input--num"
-                            inputMode="numeric"
-                            value={form.perUserLimit}
-                            disabled={form.noPerUserLimit}
-                            onChange={(e) => set('perUserLimit', e.target.value.replace(/\D/g, ''))}
-                            placeholder="1"
-                          />
-                          <label className="ac-check">
-                            <input
-                              type="checkbox"
-                              checked={form.noPerUserLimit}
-                              onChange={(e) => set('noPerUserLimit', e.target.checked)}
-                            />
-                            <span className="ac-check__box" aria-hidden />
-                            Без лимита
-                          </label>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="ac-card">
-                      <div className="ac-card__labelrow">
-                        <div className="ac-card__label">ПРИМЕНИМОСТЬ</div>
-                        {!form.allQuests && (
-                          <span className="ac-card__chosen">Выбрано: {form.questIds.length}</span>
-                        )}
-                      </div>
-                      <div className="ac-seg ac-seg--capped" role="group" aria-label="Применимость">
-                        <button
-                          type="button"
-                          className={form.allQuests ? 'is-on' : undefined}
-                          aria-pressed={form.allQuests}
-                          onClick={() => set('allQuests', true)}
-                        >
-                          Все квесты
-                        </button>
-                        <button
-                          type="button"
-                          className={!form.allQuests ? 'is-on' : undefined}
-                          aria-pressed={!form.allQuests}
-                          onClick={() => set('allQuests', false)}
-                        >
-                          Выбранные
-                        </button>
-                      </div>
-                      {form.allQuests ? (
-                        <div className="ac-field-hint">
-                          Купон примет любой платный квест из магазина, включая будущие.
+                          {quests.length === 0
+                            ? 'Платных квестов в магазине пока нет.'
+                            : 'Ничего не нашлось.'}
                         </div>
                       ) : (
-                        <>
-                          <div className="ac-search">
-                            <span className="ac-search-icon" aria-hidden />
-                            <input
-                              type="text"
-                              className="ac-search-input"
-                              value={questQuery}
-                              onChange={(e) => setQuestQuery(e.target.value)}
-                              placeholder="Название квеста…"
-                              aria-label="Поиск квеста"
-                            />
-                          </div>
-                          <div className="ac-quests">
-                            {filteredQuests.length === 0 ? (
-                              <div className="ac-field-hint">
-                                {quests.length === 0
-                                  ? 'Платных квестов в магазине пока нет.'
-                                  : 'Ничего не нашлось.'}
-                              </div>
-                            ) : (
-                              filteredQuests.map((q) => {
-                                const on = form.questIds.includes(q.quest_id);
-                                return (
-                                  <button
-                                    type="button"
-                                    key={q.quest_id}
-                                    className={`ac-quest${on ? ' is-on' : ''}`}
-                                    aria-pressed={on}
-                                    onClick={() =>
-                                      set(
-                                        'questIds',
-                                        on
-                                          ? form.questIds.filter((id) => id !== q.quest_id)
-                                          : [...form.questIds, q.quest_id],
-                                      )
-                                    }
-                                  >
-                                    <span className="ac-quest__tick" aria-hidden />
-                                    <span
-                                      className="ac-quest__cover"
-                                      style={{ background: tileColor(q.quest_id) }}
-                                      aria-hidden
-                                    >
-                                      {(q.name.trim()[0] || '?').toUpperCase()}
-                                    </span>
-                                    <span className="ac-quest__name">{q.name}</span>
-                                    <span className="ac-quest__price">
-                                      {formatRubles(q.price ?? 0)} ₽
-                                    </span>
-                                  </button>
-                                );
-                              })
-                            )}
-                          </div>
-                        </>
+                        filteredQuests.map((q) => {
+                          const on = form.questIds.includes(q.quest_id);
+                          return (
+                            <button
+                              type="button"
+                              key={q.quest_id}
+                              className={`ac-quest${on ? ' is-on' : ''}`}
+                              aria-pressed={on}
+                              onClick={() =>
+                                set(
+                                  'questIds',
+                                  on
+                                    ? form.questIds.filter((id) => id !== q.quest_id)
+                                    : [...form.questIds, q.quest_id],
+                                )
+                              }
+                            >
+                              <span className="ac-quest__tick" aria-hidden />
+                              <span
+                                className="ac-quest__cover"
+                                style={{ background: tileColor(q.quest_id) }}
+                                aria-hidden
+                              >
+                                {(q.name.trim()[0] || '?').toUpperCase()}
+                              </span>
+                              <span className="ac-quest__name">{q.name}</span>
+                              <span className="ac-quest__price">
+                                {formatRubles(q.price ?? 0)} ₽
+                              </span>
+                            </button>
+                          );
+                        })
                       )}
-                    </section>
-
-                    {formError && <div className="ac-form-error" role="alert">{formError}</div>}
-
-                    <div className="ac-actions">
-                      <button type="button" className="ac-save" disabled={saving} onClick={() => void save()}>
-                        {saving ? 'Сохраняем…' : isNew ? 'Создать купон' : 'Сохранить купон'}
-                      </button>
-                      <button type="button" className="ac-cancel" disabled={saving} onClick={back}>
-                        Отмена
-                      </button>
                     </div>
+                  </>
+                )}
+              </section>
 
-                    {/* Mobile: the «Действия» card lives below the save button. */}
-                    {!isNew && (
-                      <section className="ac-card ac-card--actions ac-actions--mobile-extra">
-                        <div className="ac-card__label">ДЕЙСТВИЯ</div>
-                        <button type="button" className="ac-side-btn" disabled={saving} onClick={togglePause}>
-                          {form.paused ? 'Возобновить' : 'Поставить на паузу'}
-                        </button>
-                        <button
-                          type="button"
-                          className="ac-side-btn ac-side-btn--danger"
-                          disabled={saving}
-                          onClick={() => setConfirmDelete(true)}
-                        >
-                          Удалить купон
-                        </button>
-                        <div className="ac-side-note">
-                          Пауза мгновенно останавливает приём кода. Удаление необратимо; уже
-                          применённые скидки сохраняются.
-                        </div>
-                      </section>
-                    )}
+              {formError && <div className="ac-form-error" role="alert">{formError}</div>}
+
+              <div className="ac-actions">
+                <button type="button" className="ac-save" disabled={saving} onClick={() => void save()}>
+                  {saving ? 'Сохраняем…' : isNew ? 'Создать купон' : 'Сохранить купон'}
+                </button>
+                <button type="button" className="ac-cancel" disabled={saving} onClick={back}>
+                  Отмена
+                </button>
+              </div>
+
+              {/* Mobile: the «Действия» card lives below the save button. */}
+              {!isNew && (
+                <section className="ac-card ac-card--actions ac-actions--mobile-extra">
+                  <div className="ac-card__label">ДЕЙСТВИЯ</div>
+                  <button type="button" className="ac-side-btn" disabled={saving} onClick={togglePause}>
+                    {form.paused ? 'Возобновить' : 'Поставить на паузу'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ac-side-btn ac-side-btn--danger"
+                    disabled={saving}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    Удалить купон
+                  </button>
+                  <div className="ac-side-note">
+                    Пауза мгновенно останавливает приём кода. Удаление необратимо; уже
+                    применённые скидки сохраняются.
                   </div>
+                </section>
+              )}
+            </div>
 
-                  {!isNew && coupon && (
-                    <div className="ac-editor__side">
-                      <section className="ac-card">
-                        <div className="ac-card__label">ИСПОЛЬЗОВАНИЕ</div>
-                        <div>
-                          <div className="ac-usage-big">
-                            <b>{coupon.used}</b>
-                            <span>
-                              {coupon.maxRedemptions === null
-                                ? 'активаций · без лимита'
-                                : `из ${coupon.maxRedemptions} активаций`}
-                            </span>
-                          </div>
-                          <div className="ac-bar ac-bar--big">
-                            {usage === null ? (
-                              <div className="ac-bar__fill ac-bar__fill--stripes" />
-                            ) : (
-                              <div className="ac-bar__fill" style={{ width: `${usage}%` }} />
-                            )}
-                          </div>
-                          <div className="ac-usage-rows">
-                            {coupon.maxRedemptions !== null && (
-                              <div>
-                                <span>Осталось активаций</span>
-                                <b>{Math.max(0, coupon.maxRedemptions - coupon.used)}</b>
-                              </div>
-                            )}
-                            <div>
-                              <span>Последнее применение</span>
-                              <b>{lastUsedLabel(coupon.lastRedeemedAt, new Date())}</b>
-                            </div>
-                            <div>
-                              <span>Сумма скидок</span>
-                              <b>{formatRubles(coupon.totalDiscounted)} ₽</b>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="ac-card ac-card--actions">
-                        <div className="ac-card__label">ДЕЙСТВИЯ</div>
-                        <button type="button" className="ac-side-btn" disabled={saving} onClick={togglePause}>
-                          {form.paused ? 'Возобновить' : 'Поставить на паузу'}
-                        </button>
-                        <button
-                          type="button"
-                          className="ac-side-btn ac-side-btn--danger"
-                          disabled={saving}
-                          onClick={() => setConfirmDelete(true)}
-                        >
-                          Удалить купон
-                        </button>
-                        <div className="ac-side-note">
-                          Пауза мгновенно останавливает приём кода. Удаление необратимо; уже
-                          применённые скидки сохраняются.
-                        </div>
-                      </section>
+            {!isNew && coupon && (
+              <div className="ac-editor__side">
+                <section className="ac-card">
+                  <div className="ac-card__label">ИСПОЛЬЗОВАНИЕ</div>
+                  <div>
+                    <div className="ac-usage-big">
+                      <b>{coupon.used}</b>
+                      <span>
+                        {coupon.maxRedemptions === null
+                          ? 'активаций · без лимита'
+                          : `из ${coupon.maxRedemptions} активаций`}
+                      </span>
                     </div>
-                  )}
-                </div>
-              </>
+                    <div className="ac-bar ac-bar--big">
+                      {usage === null ? (
+                        <div className="ac-bar__fill ac-bar__fill--stripes" />
+                      ) : (
+                        <div className="ac-bar__fill" style={{ width: `${usage}%` }} />
+                      )}
+                    </div>
+                    <div className="ac-usage-rows">
+                      {coupon.maxRedemptions !== null && (
+                        <div>
+                          <span>Осталось активаций</span>
+                          <b>{Math.max(0, coupon.maxRedemptions - coupon.used)}</b>
+                        </div>
+                      )}
+                      <div>
+                        <span>Последнее применение</span>
+                        <b>{lastUsedLabel(coupon.lastRedeemedAt, new Date())}</b>
+                      </div>
+                      <div>
+                        <span>Сумма скидок</span>
+                        <b>{formatRubles(coupon.totalDiscounted)} ₽</b>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="ac-card ac-card--actions">
+                  <div className="ac-card__label">ДЕЙСТВИЯ</div>
+                  <button type="button" className="ac-side-btn" disabled={saving} onClick={togglePause}>
+                    {form.paused ? 'Возобновить' : 'Поставить на паузу'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ac-side-btn ac-side-btn--danger"
+                    disabled={saving}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    Удалить купон
+                  </button>
+                  <div className="ac-side-note">
+                    Пауза мгновенно останавливает приём кода. Удаление необратимо; уже
+                    применённые скидки сохраняются.
+                  </div>
+                </section>
+              </div>
             )}
-          </main>
+          </div>
+        </>
+      )}
+    </main>
 
-          {confirmDelete && coupon && (
-            <AdminConfirmSheet
-              label="Удалить купон"
-              title={`Удалить купон ${coupon.code}?`}
-              text="Удаление необратимо. Уже применённые скидки и покупки сохраняются."
-              applyLabel="Удалить"
-              busyLabel="Удаляем…"
-              busy={saving}
-              danger
-              onCancel={() => setConfirmDelete(false)}
-              onApply={() => void deleteCoupon()}
-            />
-          )}
+    {confirmDelete && coupon && (
+      <AdminConfirmSheet
+        label="Удалить купон"
+        title={`Удалить купон ${coupon.code}?`}
+        text="Удаление необратимо. Уже применённые скидки и покупки сохраняются."
+        applyLabel="Удалить"
+        busyLabel="Удаляем…"
+        busy={saving}
+        danger
+        onCancel={() => setConfirmDelete(false)}
+        onApply={() => void deleteCoupon()}
+      />
+    )}
 
-          {toast && <AdminToast text={toast} />}
-        </div>
-      </AdminGate>
-    </AdminShell>
+    {toast && <AdminToast text={toast} />}
+    </>
   );
 }

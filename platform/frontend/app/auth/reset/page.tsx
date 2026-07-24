@@ -3,7 +3,6 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import SiteHeader from '../../SiteHeader';
 import { api } from '../../../lib/api';
 import { setSession } from '../../../lib/identity';
 import { PasswordField } from '../page';
@@ -72,13 +71,8 @@ function ResetInner() {
 
 export default function ResetPage() {
   return (
-    <div className="site" style={{ background: 'var(--bg-subtle)' }}>
-      <SiteHeader />
-      <div className="auth-wrap">
-        <Suspense fallback={null}>
-          <ResetInner />
-        </Suspense>
-      </div>
-    </div>
+    <Suspense fallback={null}>
+      <ResetInner />
+    </Suspense>
   );
 }

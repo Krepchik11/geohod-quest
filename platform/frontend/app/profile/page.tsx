@@ -3,8 +3,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import SiteHeader from '../SiteHeader';
-import SiteFooter from '../components/SiteFooter';
+import SiteShell from '../components/SiteShell';
 import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
@@ -148,8 +147,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="site min-h-screen" style={{ background: '#fff', display: 'flex', flexDirection: 'column' }}>
-      <SiteHeader />
+    <SiteShell>
       <main className="co-wrap">
         <h2 className="co-title">Мой профиль</h2>
         {errorNote && <p className="pf-note" style={{ color: 'var(--amber)' }}>{errorNote}</p>}
@@ -273,7 +271,6 @@ export default function ProfilePage() {
           )}
         </div>
       </main>
-      <SiteFooter />
 
       {sheet === 'name' && (
         <NameSheet current={nameLabel} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} />
@@ -289,7 +286,7 @@ export default function ProfilePage() {
           }}
         />
       )}
-    </div>
+    </SiteShell>
   );
 }
 

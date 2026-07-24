@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import SiteHeader from '../SiteHeader';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api } from '../../lib/api';
 import {
@@ -209,129 +208,124 @@ export default function AuthPage() {
   if (session) return null; // redirecting (effect above)
 
   return (
-    <div className="site" style={{ background: 'var(--bg-subtle)' }}>
-      <SiteHeader />
-      <div className="auth-wrap">
-        <div className="af-card card">
-          {/* §6.1.5: ✕ always navigates home — never history.back(). */}
-          <Link className="af-close" href="/" aria-label="Закрыть">✕</Link>
+    <div className="af-card card">
+      {/* §6.1.5: ✕ always navigates home — never history.back(). */}
+      <Link className="af-close" href="/" aria-label="Закрыть">✕</Link>
 
-          {step.name === 'email' && (
-            <>
-              <h2 className="af-title">Вход или регистрация</h2>
-              <p className="af-sub">Аккаунт сохранит покупки, монеты и прогресс при смене устройства.</p>
-              {/* Fast path first: one tap with Google or Telegram. Each button
-                  appears only when the server has that provider configured; the
-                  "или по почте" divider follows only when a button is shown. */}
-              <SocialAuthButtons onSession={applySession} onError={setError} dividerLabel="или по почте" />
-              <label className="af-field">
-                <span className="af-field__label">Email</span>
-                <span className="af-field__wrap">
-                  <input
-                    className="af-field__input"
-                    type="email"
-                    value={email}
-                    autoComplete="email"
-                    aria-label="Email"
-                    onChange={(e) => setEmail(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void identify(); }}
-                  />
-                </span>
-              </label>
-              {error && <p className="af-error">{error}</p>}
-              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void identify()}>
-                {loading ? 'Проверяем…' : 'Продолжить'}
-              </button>
-              <p className="af-caption">Играть можно и без аккаунта — вернитесь к этому позже.</p>
-            </>
-          )}
-
-          {step.name === 'login' && (
-            <>
-              <h2 className="af-title">С возвращением!</h2>
-              <EmailChip email={step.email} onEdit={toEmailStep} />
-              <PasswordField
-                label="Пароль"
-                value={password}
-                error={fieldError}
-                autoComplete="current-password"
-                onChange={setPassword}
-                onEnter={() => void login(step)}
+      {step.name === 'email' && (
+        <>
+          <h2 className="af-title">Вход или регистрация</h2>
+          <p className="af-sub">Аккаунт сохранит покупки, монеты и прогресс при смене устройства.</p>
+          {/* Fast path first: one tap with Google or Telegram. Each button
+              appears only when the server has that provider configured; the
+              "или по почте" divider follows only when a button is shown. */}
+          <SocialAuthButtons onSession={applySession} onError={setError} dividerLabel="или по почте" />
+          <label className="af-field">
+            <span className="af-field__label">Email</span>
+            <span className="af-field__wrap">
+              <input
+                className="af-field__input"
+                type="email"
+                value={email}
+                autoComplete="email"
+                aria-label="Email"
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void identify(); }}
               />
-              <button
-                className="af-forgot"
-                type="button"
-                onClick={() => setStep({ name: 'recover', email: step.email, confirmed: step.confirmed })}
-              >
-                Забыли пароль?
-              </button>
-              {error && <p className="af-error">{error}</p>}
-              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void login(step)}>
-                {loading ? 'Входим…' : 'Войти'}
-              </button>
-            </>
-          )}
+            </span>
+          </label>
+          {error && <p className="af-error">{error}</p>}
+          <button className="btn btn--block" type="button" disabled={loading} onClick={() => void identify()}>
+            {loading ? 'Проверяем…' : 'Продолжить'}
+          </button>
+          <p className="af-caption">Играть можно и без аккаунта — вернитесь к этому позже.</p>
+        </>
+      )}
 
-          {step.name === 'register' && (
-            <>
-              <h2 className="af-title">Создадим аккаунт</h2>
-              <EmailChip email={step.email} onEdit={toEmailStep} />
-              <PasswordField
-                label="Придумайте пароль"
-                value={password}
-                hint="Минимум 8 символов"
-                error={fieldError}
-                autoComplete="new-password"
-                onChange={setPassword}
-                onEnter={() => void registerAccount(step)}
-              />
-              <label className="af-consent">
-                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-                <span>
-                  Принимаю <Link href="/terms">пользовательское соглашение</Link> и{' '}
-                  <Link href="/privacy">политику конфиденциальности</Link>
-                </span>
-              </label>
-              {error && <p className="af-error">{error}</p>}
-              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void registerAccount(step)}>
-                {loading ? 'Создаём…' : 'Зарегистрироваться'}
-              </button>
-              <div className="af-note-good">✓ Монеты и покупки этого устройства привяжутся к аккаунту.</div>
-            </>
-          )}
+      {step.name === 'login' && (
+        <>
+          <h2 className="af-title">С возвращением!</h2>
+          <EmailChip email={step.email} onEdit={toEmailStep} />
+          <PasswordField
+            label="Пароль"
+            value={password}
+            error={fieldError}
+            autoComplete="current-password"
+            onChange={setPassword}
+            onEnter={() => void login(step)}
+          />
+          <button
+            className="af-forgot"
+            type="button"
+            onClick={() => setStep({ name: 'recover', email: step.email, confirmed: step.confirmed })}
+          >
+            Забыли пароль?
+          </button>
+          {error && <p className="af-error">{error}</p>}
+          <button className="btn btn--block" type="button" disabled={loading} onClick={() => void login(step)}>
+            {loading ? 'Входим…' : 'Войти'}
+          </button>
+        </>
+      )}
 
-          {step.name === 'recover' && (
-            <>
-              <h2 className="af-title">Восстановление пароля</h2>
-              <p className="af-sub">
-                {step.confirmed
-                  ? 'Пришлём ссылку для смены пароля.'
-                  : 'Почта ещё не подтверждена — сначала отправим письмо-подтверждение, затем восстановление станет доступно.'}
-              </p>
-              <span className="af-chip">{step.email}</span>
-              {error && <p className="af-error">{error}</p>}
-              <button className="btn btn--block" type="button" disabled={loading} onClick={() => void recover(step)}>
-                {loading ? 'Отправляем…' : step.confirmed ? 'Отправить ссылку' : 'Отправить подтверждение'}
-              </button>
-              <button className="af-back" type="button" onClick={() => setStep({ name: 'login', email: step.email, confirmed: step.confirmed })}>
-                ← Назад ко входу
-              </button>
-            </>
-          )}
+      {step.name === 'register' && (
+        <>
+          <h2 className="af-title">Создадим аккаунт</h2>
+          <EmailChip email={step.email} onEdit={toEmailStep} />
+          <PasswordField
+            label="Придумайте пароль"
+            value={password}
+            hint="Минимум 8 символов"
+            error={fieldError}
+            autoComplete="new-password"
+            onChange={setPassword}
+            onEnter={() => void registerAccount(step)}
+          />
+          <label className="af-consent">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            <span>
+              Принимаю <Link href="/terms">пользовательское соглашение</Link> и{' '}
+              <Link href="/privacy">политику конфиденциальности</Link>
+            </span>
+          </label>
+          {error && <p className="af-error">{error}</p>}
+          <button className="btn btn--block" type="button" disabled={loading} onClick={() => void registerAccount(step)}>
+            {loading ? 'Создаём…' : 'Зарегистрироваться'}
+          </button>
+          <div className="af-note-good">✓ Монеты и покупки этого устройства привяжутся к аккаунту.</div>
+        </>
+      )}
 
-          {step.name === 'recover-sent' && (
-            <RecoverSent
-              masked={step.masked}
-              confirmed={step.confirmed}
-              onResend={() => api.authRecover(step.email)}
-              onCode={async (code, newPassword) => {
-                applySession(await api.authResetPassword({ email: step.email, code, password: newPassword }));
-              }}
-              onBack={toEmailStep}
-            />
-          )}
-        </div>
-      </div>
+      {step.name === 'recover' && (
+        <>
+          <h2 className="af-title">Восстановление пароля</h2>
+          <p className="af-sub">
+            {step.confirmed
+              ? 'Пришлём ссылку для смены пароля.'
+              : 'Почта ещё не подтверждена — сначала отправим письмо-подтверждение, затем восстановление станет доступно.'}
+          </p>
+          <span className="af-chip">{step.email}</span>
+          {error && <p className="af-error">{error}</p>}
+          <button className="btn btn--block" type="button" disabled={loading} onClick={() => void recover(step)}>
+            {loading ? 'Отправляем…' : step.confirmed ? 'Отправить ссылку' : 'Отправить подтверждение'}
+          </button>
+          <button className="af-back" type="button" onClick={() => setStep({ name: 'login', email: step.email, confirmed: step.confirmed })}>
+            ← Назад ко входу
+          </button>
+        </>
+      )}
+
+      {step.name === 'recover-sent' && (
+        <RecoverSent
+          masked={step.masked}
+          confirmed={step.confirmed}
+          onResend={() => api.authRecover(step.email)}
+          onCode={async (code, newPassword) => {
+            applySession(await api.authResetPassword({ email: step.email, code, password: newPassword }));
+          }}
+          onBack={toEmailStep}
+        />
+      )}
     </div>
   );
 }

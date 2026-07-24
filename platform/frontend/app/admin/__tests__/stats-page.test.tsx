@@ -12,28 +12,12 @@ import React from 'react';
  *   with the worst-drop badge; «ко всем квестам» returns to the overview;
  * - a failed load shows the reload hint.
  */
-const { overviewMock, questMock, meMock } = vi.hoisted(() => ({
+const { overviewMock, questMock } = vi.hoisted(() => ({
   overviewMock: vi.fn(),
   questMock: vi.fn(),
-  meMock: vi.fn(),
 }));
 vi.mock('../../../lib/api', () => ({
-  api: { adminStatsOverview: overviewMock, adminStatsQuest: questMock, me: meMock },
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number) {
-      super(`api ${status}`);
-      this.status = status;
-    }
-  },
-  hasAdminToken: () => true,
-}));
-vi.mock('../../../lib/identity', () => ({
-  getSession: () => null,
-  subscribeSession: () => () => {},
-}));
-vi.mock('../../../lib/session-actions', () => ({
-  logoutAndReset: () => Promise.resolve(),
+  api: { adminStatsOverview: overviewMock, adminStatsQuest: questMock },
 }));
 
 import AdminStatsPage from '../stats/page';
@@ -85,8 +69,6 @@ const DETAIL = {
 beforeEach(() => {
   overviewMock.mockReset();
   questMock.mockReset();
-  meMock.mockReset();
-  meMock.mockResolvedValue({ role: 'admin' });
   overviewMock.mockResolvedValue(OVERVIEW);
   questMock.mockResolvedValue(DETAIL);
 });
