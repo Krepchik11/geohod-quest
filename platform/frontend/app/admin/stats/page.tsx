@@ -22,7 +22,6 @@ import {
   type KpiVm,
   type StatsRangeKey,
 } from '../../../lib/admin-stats';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminPageHead } from '../ui';
 
 /**
@@ -32,7 +31,6 @@ import { AdminPageHead } from '../ui';
  * (`/api/admin/stats*`); the view-model math lives in lib/admin-stats.ts.
  */
 export default function AdminStatsPage() {
-  const access = useAdminAccess();
   const [rangeKey, setRangeKey] = useState<StatsRangeKey>('30');
   const [customFrom, setCustomFrom] = useState(() => addDaysIso(todayUtc(), -29));
   const [customTo, setCustomTo] = useState(() => todayUtc());
@@ -50,7 +48,7 @@ export default function AdminStatsPage() {
   );
 
   useEffect(() => {
-    if (access !== 'granted' || !bounds) return;
+    if (!bounds) return;
     let cancelled = false;
     void api
       .adminStatsOverview(bounds)
@@ -66,12 +64,12 @@ export default function AdminStatsPage() {
     return () => {
       cancelled = true;
     };
-  }, [access, bounds]);
+  }, [bounds]);
 
   // Selection transitions (open/back) reset detail state in the event
   // handlers below; this effect only synchronizes with the backend.
   useEffect(() => {
-    if (access !== 'granted' || !selectedId || !bounds) return;
+    if (!selectedId || !bounds) return;
     let cancelled = false;
     void api
       .adminStatsQuest(selectedId, bounds)
@@ -87,44 +85,38 @@ export default function AdminStatsPage() {
     return () => {
       cancelled = true;
     };
-  }, [access, selectedId, bounds]);
+  }, [selectedId, bounds]);
 
   return (
-    <AdminShell active="stats">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            {selectedId ? (
-              <QuestDetail
-                detail={detail}
-                error={detailError}
-                onBack={() => {
-                  setSelectedId(null);
-                  setDetail(null);
-                  setDetailError(false);
-                }}
-              />
-            ) : (
-              <Overview
-                overview={overview}
-                error={overviewError}
-                rangeKey={rangeKey}
-                onRange={setRangeKey}
-                customFrom={customFrom}
-                customTo={customTo}
-                onCustomFrom={setCustomFrom}
-                onCustomTo={setCustomTo}
-                onOpenQuest={(questId) => {
-                  setDetail(null);
-                  setDetailError(false);
-                  setSelectedId(questId);
-                }}
-              />
-            )}
-          </main>
-        </div>
-      </AdminGate>
-    </AdminShell>
+    <main className="ap-main">
+      {selectedId ? (
+        <QuestDetail
+          detail={detail}
+          error={detailError}
+          onBack={() => {
+            setSelectedId(null);
+            setDetail(null);
+            setDetailError(false);
+          }}
+        />
+      ) : (
+        <Overview
+          overview={overview}
+          error={overviewError}
+          rangeKey={rangeKey}
+          onRange={setRangeKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFrom={setCustomFrom}
+          onCustomTo={setCustomTo}
+          onOpenQuest={(questId) => {
+            setDetail(null);
+            setDetailError(false);
+            setSelectedId(questId);
+          }}
+        />
+      )}
+    </main>
   );
 }
 

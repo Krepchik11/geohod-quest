@@ -2,8 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import SiteHeader from '../SiteHeader';
-import SiteFooter from '../components/SiteFooter';
+import SiteShell from '../components/SiteShell';
 import { toast } from '../components/Toaster';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { projectState, latestRating } from '../../lib/shared-model';
@@ -207,8 +206,7 @@ export default function MyQuestsPage() {
   const rows = collection.source === 'live' ? collection.rows : [];
 
   return (
-    <div className="site min-h-screen" style={{ background: '#fff', display: 'flex', flexDirection: 'column' }}>
-      <SiteHeader />
+    <SiteShell>
       <main className="co-wrap">
         <h2 className="co-title">Мои квесты</h2>
         <p className="co-sub">Все купленные и полученные квесты. Доступ бессрочный — проходите когда удобно.</p>
@@ -287,7 +285,6 @@ export default function MyQuestsPage() {
           </div>
         )}
       </main>
-      <SiteFooter />
-    </div>
+    </SiteShell>
   );
 }

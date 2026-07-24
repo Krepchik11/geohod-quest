@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../../lib/api';
-import AdminShell, { AdminGate, useAdminAccess } from './shell';
 import { AdminConfirmSheet, AdminPageHead, AdminToast } from './ui';
 import {
   contactsOf,
@@ -26,10 +25,11 @@ import {
  * (styles/admin-users.css).
  *
  * Access is gated twice: the backend authorizes every /api/admin/* call (role==admin
- * session OR the shared ADMIN_TOKEN), and useAdminAccess checks /api/players/me up
- * front so non-admins see a clear "no access" screen instead of an empty list. The
- * operator path (NEXT_PUBLIC_ADMIN_TOKEN configured) is admitted so the very first
- * admin can be promoted before any admin account exists.
+ * session OR the shared ADMIN_TOKEN), and the route layout (app/admin/layout.tsx)
+ * checks /api/players/me up front so non-admins see a clear "no access" screen
+ * instead of an empty list — pages only mount once access is granted. The operator
+ * path (NEXT_PUBLIC_ADMIN_TOKEN configured) is admitted so the very first admin
+ * can be promoted before any admin account exists.
  *
  * Reality vs. the prototype: the backend models email + display_name + role + join
  * date only (no telegram/phone/last-active), so contact rows render present-only.
@@ -45,7 +45,6 @@ function errorKind(err: unknown): 'auth' | 'network' {
 }
 
 export default function AdminUsersPage() {
-  const access = useAdminAccess();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [listError, setListError] = useState<ListError>('none');
 
@@ -66,9 +65,9 @@ export default function AdminUsersPage() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
-  // Load the user list once the shared shell gate grants access.
+  // Load the user list on mount — the layout gate mounts pages only when
+  // access is granted.
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     void (async () => {
       try {
@@ -84,7 +83,7 @@ export default function AdminUsersPage() {
     return () => {
       cancelled = true;
     };
-  }, [access]);
+  }, []);
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -150,233 +149,227 @@ export default function AdminUsersPage() {
     setConfirmOpen(true);
   };
 
-  // ---- shell + gate + (granted) list or detail ---------------------------
+  // ---- list or detail (chrome + gate live in the route layout) -----------
   return (
-    <AdminShell active="users">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Пользователи" />
-            {/* §10.3: ≥1024px master-detail — list left (460px, selected row gets a
-                blue bar), profile right; below 1024 the panes swap like screens. */}
-            <div className={`au-split${selected ? ' has-selected' : ''}`}>
-              <div className="au-main au-pane au-pane--list">
-                <div className="au-search-row">
-                  <div className="au-search">
-                    <span className="au-search-icon" aria-hidden />
-                    <input
-                      type="text"
-                      className="au-search-input"
-                      value={query}
-                      onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-                      placeholder="Почта или имя…"
-                      aria-label="Поиск пользователей"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    {query.length > 0 && (
-                      <button
-                        type="button"
-                        className="au-clear"
-                        aria-label="Очистить"
-                        onClick={() => { setQuery(''); setPage(1); }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {hint && (
-                  <div className="au-hint">
-                    <span className="au-hint-label">РАСПОЗНАНО</span>
-                    <span className="au-hint-chip">{hint}</span>
-                  </div>
-                )}
-
-                <div className="au-roles">
-                  <span className="au-roles-label">РОЛИ</span>
-                  {ROLE_ORDER.map((role) => (
-                    <button
-                      type="button"
-                      key={role}
-                      className={`au-chip${activeRoles.includes(role) ? ' is-on' : ''}`}
-                      aria-pressed={activeRoles.includes(role)}
-                      onClick={() => toggleRole(role)}
-                    >
-                      {ROLE_LABELS[role]}
-                    </button>
-                  ))}
-                </div>
-
-                {listError === 'none' && <div className="au-count">{pluralizeUsers(filtered.length)} · новые сверху</div>}
-
-                {listError !== 'none' ? (
-                  <div className="au-empty">
-                    <div className="au-empty-mark" aria-hidden>
-                      !
-                    </div>
-                    <div className="au-empty-title">
-                      {listError === 'auth' ? 'Сессия устарела' : 'Не удалось загрузить'}
-                    </div>
-                    <div className="au-empty-text">
-                      {listError === 'auth'
-                        ? 'Войдите снова под учётной записью администратора.'
-                        : 'Проверьте соединение и обновите страницу.'}
-                    </div>
-                  </div>
-                ) : filtered.length === 0 ? (
-                  <div className="au-empty">
-                    <div className="au-empty-mark" aria-hidden>
-                      ∅
-                    </div>
-                    <div className="au-empty-title">Никого не нашлось</div>
-                    <div className="au-empty-text">Измените запрос или снимите фильтр по ролям.</div>
-                  </div>
-                ) : (
-                  pageItems.map((u) => (
-                    <div
-                      key={u.id}
-                      className={`au-card${selected?.id === u.id ? ' is-selected' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openUser(u)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          openUser(u);
-                        }
-                      }}
-                    >
-                      <div className="au-card-head">
-                        <div className="au-card-main">
-                          <div className="au-card-name">{titleOf(u)}</div>
-                          <div className="au-card-meta">вступил {formatJoined(u.createdAt)}</div>
-                        </div>
-                        <span className={`au-badge au-badge--${u.role}`}>{ROLE_LABELS[u.role]}</span>
-                        <span className="au-chev" aria-hidden>
-                          ›
-                        </span>
-                      </div>
-                      <div className="au-contacts">
-                        {contactsOf(u).map((c) => (
-                          <div className="au-contact" key={c.glyph + c.value}>
-                            <span className="au-contact-glyph" aria-hidden>
-                              {c.glyph}
-                            </span>
-                            <span className="au-contact-val">{c.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))
-                )}
-
-                {listError === 'none' && filtered.length > PER_PAGE && (
-                  <div className="au-pager">
-                    <span className="au-pager__range">{rangeLabel}</span>
-                    <div className="au-pager__pages">
-                      {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          className={`au-pager__page${n === safePage ? ' is-on' : ''}`}
-                          onClick={() => setPage(n)}
-                        >
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <aside className="au-main au-pane au-pane--detail">
-                {selected ? (
-                  <>
-                <button type="button" className="au-back" onClick={back}>
-                  <span className="au-back-arrow" aria-hidden>
-                    ‹
-                  </span>{' '}
-                  назад
-                </button>
-
-                <div className="au-identity">
-                  <div className="au-identity-title">{titleOf(selected)}</div>
-                  <span className={`au-badge au-badge--${selected.role}`}>
-                    {ROLE_LABELS[selected.role]}
-                  </span>
-                </div>
-
-                <div className="au-info">
-                  {contactsOf(selected).map((c) =>
-                    c.glyph === '✉' ? (
-                      <div className="au-info-row" key="email">
-                        <span className="au-info-label">ПОЧТА</span>
-                        <span className="au-info-val">{c.value}</span>
-                      </div>
-                    ) : null,
-                  )}
-                  <div className="au-info-row">
-                    <span className="au-info-label">ВСТУПИЛ</span>
-                    <span className="au-info-val">{formatJoined(selected.createdAt)}</span>
-                  </div>
-                </div>
-
-                <div className="au-role-editor">
-                  <div className="au-role-editor-label">РОЛЬ</div>
-                  <div className="au-role-opts">
-                    {ROLE_ORDER.map((role) => {
-                      const sel = draftRole === role;
-                      return (
-                        <button
-                          type="button"
-                          key={role}
-                          className={`au-role-opt${sel ? ' is-sel' : ''}`}
-                          aria-pressed={sel}
-                          onClick={() => setDraftRole(role)}
-                        >
-                          <span className="au-radio">
-                            <span className="au-dot" />
-                          </span>
-                          <span className="au-opt-label">{ROLE_LABELS[role]}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
+    <main className="ap-main">
+      <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Пользователи" />
+      {/* §10.3: ≥1024px master-detail — list left (460px, selected row gets a
+          blue bar), profile right; below 1024 the panes swap like screens. */}
+      <div className={`au-split${selected ? ' has-selected' : ''}`}>
+        <div className="au-main au-pane au-pane--list">
+          <div className="au-search-row">
+            <div className="au-search">
+              <span className="au-search-icon" aria-hidden />
+              <input
+                type="text"
+                className="au-search-input"
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                placeholder="Почта или имя…"
+                aria-label="Поиск пользователей"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {query.length > 0 && (
                 <button
                   type="button"
-                  className={`au-save${canSave ? ' is-on' : ''}`}
-                  disabled={!canSave}
-                  onClick={save}
+                  className="au-clear"
+                  aria-label="Очистить"
+                  onClick={() => { setQuery(''); setPage(1); }}
                 >
-                  {canSave ? 'Сохранить роль' : 'Текущая роль'}
+                  ✕
                 </button>
-              </>
-                ) : (
-                  <div className="au-detail-empty">Выберите пользователя из списка</div>
-                )}
-              </aside>
+              )}
             </div>
+          </div>
 
-            {confirmOpen && selected && draftRole && (
-              <AdminConfirmSheet
-                label="Сменить роль"
-                title="Сменить роль?"
-                text={`${titleOf(selected)} получит роль «${ROLE_LABELS[draftRole]}». Доступ изменится сразу.`}
-                applyLabel="Назначить"
-                busyLabel="Сохраняем…"
-                busy={saving}
-                onCancel={() => setConfirmOpen(false)}
-                onApply={() => void applyRole()}
-              />
-            )}
+          {hint && (
+            <div className="au-hint">
+              <span className="au-hint-label">РАСПОЗНАНО</span>
+              <span className="au-hint-chip">{hint}</span>
+            </div>
+          )}
 
-            {toast && <AdminToast text={toast.text} error={toast.error} />}
-          </main>
+          <div className="au-roles">
+            <span className="au-roles-label">РОЛИ</span>
+            {ROLE_ORDER.map((role) => (
+              <button
+                type="button"
+                key={role}
+                className={`au-chip${activeRoles.includes(role) ? ' is-on' : ''}`}
+                aria-pressed={activeRoles.includes(role)}
+                onClick={() => toggleRole(role)}
+              >
+                {ROLE_LABELS[role]}
+              </button>
+            ))}
+          </div>
+
+          {listError === 'none' && <div className="au-count">{pluralizeUsers(filtered.length)} · новые сверху</div>}
+
+          {listError !== 'none' ? (
+            <div className="au-empty">
+              <div className="au-empty-mark" aria-hidden>
+                !
+              </div>
+              <div className="au-empty-title">
+                {listError === 'auth' ? 'Сессия устарела' : 'Не удалось загрузить'}
+              </div>
+              <div className="au-empty-text">
+                {listError === 'auth'
+                  ? 'Войдите снова под учётной записью администратора.'
+                  : 'Проверьте соединение и обновите страницу.'}
+              </div>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="au-empty">
+              <div className="au-empty-mark" aria-hidden>
+                ∅
+              </div>
+              <div className="au-empty-title">Никого не нашлось</div>
+              <div className="au-empty-text">Измените запрос или снимите фильтр по ролям.</div>
+            </div>
+          ) : (
+            pageItems.map((u) => (
+              <div
+                key={u.id}
+                className={`au-card${selected?.id === u.id ? ' is-selected' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openUser(u)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openUser(u);
+                  }
+                }}
+              >
+                <div className="au-card-head">
+                  <div className="au-card-main">
+                    <div className="au-card-name">{titleOf(u)}</div>
+                    <div className="au-card-meta">вступил {formatJoined(u.createdAt)}</div>
+                  </div>
+                  <span className={`au-badge au-badge--${u.role}`}>{ROLE_LABELS[u.role]}</span>
+                  <span className="au-chev" aria-hidden>
+                    ›
+                  </span>
+                </div>
+                <div className="au-contacts">
+                  {contactsOf(u).map((c) => (
+                    <div className="au-contact" key={c.glyph + c.value}>
+                      <span className="au-contact-glyph" aria-hidden>
+                        {c.glyph}
+                      </span>
+                      <span className="au-contact-val">{c.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+
+          {listError === 'none' && filtered.length > PER_PAGE && (
+            <div className="au-pager">
+              <span className="au-pager__range">{rangeLabel}</span>
+              <div className="au-pager__pages">
+                {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={`au-pager__page${n === safePage ? ' is-on' : ''}`}
+                    onClick={() => setPage(n)}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      </AdminGate>
-    </AdminShell>
+        <aside className="au-main au-pane au-pane--detail">
+          {selected ? (
+            <>
+          <button type="button" className="au-back" onClick={back}>
+            <span className="au-back-arrow" aria-hidden>
+              ‹
+            </span>{' '}
+            назад
+          </button>
+
+          <div className="au-identity">
+            <div className="au-identity-title">{titleOf(selected)}</div>
+            <span className={`au-badge au-badge--${selected.role}`}>
+              {ROLE_LABELS[selected.role]}
+            </span>
+          </div>
+
+          <div className="au-info">
+            {contactsOf(selected).map((c) =>
+              c.glyph === '✉' ? (
+                <div className="au-info-row" key="email">
+                  <span className="au-info-label">ПОЧТА</span>
+                  <span className="au-info-val">{c.value}</span>
+                </div>
+              ) : null,
+            )}
+            <div className="au-info-row">
+              <span className="au-info-label">ВСТУПИЛ</span>
+              <span className="au-info-val">{formatJoined(selected.createdAt)}</span>
+            </div>
+          </div>
+
+          <div className="au-role-editor">
+            <div className="au-role-editor-label">РОЛЬ</div>
+            <div className="au-role-opts">
+              {ROLE_ORDER.map((role) => {
+                const sel = draftRole === role;
+                return (
+                  <button
+                    type="button"
+                    key={role}
+                    className={`au-role-opt${sel ? ' is-sel' : ''}`}
+                    aria-pressed={sel}
+                    onClick={() => setDraftRole(role)}
+                  >
+                    <span className="au-radio">
+                      <span className="au-dot" />
+                    </span>
+                    <span className="au-opt-label">{ROLE_LABELS[role]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className={`au-save${canSave ? ' is-on' : ''}`}
+            disabled={!canSave}
+            onClick={save}
+          >
+            {canSave ? 'Сохранить роль' : 'Текущая роль'}
+          </button>
+        </>
+          ) : (
+            <div className="au-detail-empty">Выберите пользователя из списка</div>
+          )}
+        </aside>
+      </div>
+
+      {confirmOpen && selected && draftRole && (
+        <AdminConfirmSheet
+          label="Сменить роль"
+          title="Сменить роль?"
+          text={`${titleOf(selected)} получит роль «${ROLE_LABELS[draftRole]}». Доступ изменится сразу.`}
+          applyLabel="Назначить"
+          busyLabel="Сохраняем…"
+          busy={saving}
+          onCancel={() => setConfirmOpen(false)}
+          onApply={() => void applyRole()}
+        />
+      )}
+
+      {toast && <AdminToast text={toast.text} error={toast.error} />}
+    </main>
   );
 }

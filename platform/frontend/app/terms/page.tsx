@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import SiteHeader from '../SiteHeader';
-import SiteFooter from '../components/SiteFooter';
+import SiteShell from '../components/SiteShell';
 import { LegalArticle } from '../components/legal';
 
 export const metadata: Metadata = { title: 'Пользовательское соглашение — GEOHOD QUEST' };
@@ -11,8 +10,7 @@ export const metadata: Metadata = { title: 'Пользовательское с�
  */
 export default function TermsPage() {
   return (
-    <div className="site">
-      <SiteHeader />
+    <SiteShell>
       <LegalArticle title="Пользовательское соглашение" updated="1 июля 2026 года">
         <h2>1. О сервисе</h2>
         <p>
@@ -60,7 +58,6 @@ export default function TermsPage() {
           сервиса означает согласие с новой редакцией.
         </p>
       </LegalArticle>
-      <SiteFooter />
-    </div>
+    </SiteShell>
   );
 }

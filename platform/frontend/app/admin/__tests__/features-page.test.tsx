@@ -14,10 +14,9 @@ import React from 'react';
  * - an unconfigured-but-on flag shows the inert-switch warning;
  * - a failed load shows the reload hint instead of rows.
  */
-const { listMock, setMock, meMock, getSettingMock, setSettingMock } = vi.hoisted(() => ({
+const { listMock, setMock, getSettingMock, setSettingMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   setMock: vi.fn(),
-  meMock: vi.fn(),
   getSettingMock: vi.fn(),
   setSettingMock: vi.fn(),
 }));
@@ -27,23 +26,7 @@ vi.mock('../../../lib/api', () => ({
     adminSetFeature: setMock,
     adminGetSetting: getSettingMock,
     adminSetSetting: setSettingMock,
-    me: meMock,
   },
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number) {
-      super(`api ${status}`);
-      this.status = status;
-    }
-  },
-  hasAdminToken: () => true,
-}));
-vi.mock('../../../lib/identity', () => ({
-  getSession: () => null,
-  subscribeSession: () => () => {},
-}));
-vi.mock('../../../lib/session-actions', () => ({
-  logoutAndReset: () => Promise.resolve(),
 }));
 
 import AdminFeaturesPage from '../features/page';
@@ -59,10 +42,8 @@ const ROW = {
 beforeEach(() => {
   listMock.mockReset();
   setMock.mockReset();
-  meMock.mockReset();
   getSettingMock.mockReset();
   setSettingMock.mockReset();
-  meMock.mockResolvedValue({ role: 'admin' });
   listMock.mockResolvedValue([ROW]);
   getSettingMock.mockResolvedValue({ key: 'universal_answer', value: null });
 });

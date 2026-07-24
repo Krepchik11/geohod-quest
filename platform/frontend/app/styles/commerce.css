@@ -1,8 +1,8 @@
 /* ============================================================
    GEOHOD QUEST — витрина/коммерция. Ported from
    design/commerce/site-theme.css. Adaptations: asset urls point
-   to /assets/icons/; the .site container sizing rules are owned
-   by the app shell (body.site), not this file.
+   to /assets/icons/; the .site wrapper sizing rules are owned by
+   globals.css (rendered by components/SiteShell), not this file.
    ============================================================ */
 
 /* Tokens live in globals.css (§0 single token layer) — no local re-definitions.

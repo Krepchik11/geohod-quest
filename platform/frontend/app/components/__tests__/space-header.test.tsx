@@ -8,17 +8,9 @@ import React from 'react';
  * user menu) shared by the admin and constructor spaces, so both wear the
  * same chrome instead of three bespoke headers.
  */
-vi.mock('../../../lib/api', () => ({
-  api: { me: vi.fn(async () => ({ role: 'admin', display_name: null })) },
-  ApiError: class extends Error { status = 0; },
-  hasAdminToken: () => false,
-}));
-vi.mock('../../../lib/identity', () => ({
-  getSession: () => null,
-  subscribeSession: () => () => {},
-  clearSession: vi.fn(),
-}));
-vi.mock('../../../lib/session-actions', () => ({ logoutAndReset: vi.fn(async () => {}) }));
+vi.mock('../../../lib/api', async () => (await import('./chrome-mocks')).apiMock);
+vi.mock('../../../lib/identity', async () => (await import('./chrome-mocks')).identityMock);
+vi.mock('../../../lib/session-actions', async () => (await import('./chrome-mocks')).sessionActionsMock);
 
 import SpaceHeader from '../SpaceHeader';
 

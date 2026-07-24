@@ -10,7 +10,6 @@ import {
   relativeTime,
   templateLabel,
 } from '../../../lib/admin-moderation';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
 
@@ -34,7 +33,6 @@ function groupKey(g: AdminFeedbackGroupWire): string {
 }
 
 export default function AdminFeedbackPage() {
-  const access = useAdminAccess();
   const [groups, setGroups] = useState<AdminFeedbackGroupWire[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [quest, setQuest] = useState('all');
@@ -44,7 +42,6 @@ export default function AdminFeedbackPage() {
   const { toast, showToast } = useToast();
 
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     void api
       .adminListFeedback()
@@ -57,7 +54,7 @@ export default function AdminFeedbackPage() {
     return () => {
       cancelled = true;
     };
-  }, [access]);
+  }, []);
 
   const setResolved = (target: AdminFeedbackGroupWire, resolved: boolean) =>
     setGroups((gs) =>
@@ -94,72 +91,101 @@ export default function AdminFeedbackPage() {
   const archive = (groups ?? []).filter((g) => !g.current && inQuest(g) && matchesStatus(g));
 
   return (
-    <AdminShell active="feedback">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            <AdminPageHead
-              eyebrow="МОДЕРАЦИЯ"
-              title="Обратная связь"
-              lede="Сообщения об ошибках от игроков, сгруппированные по шагу и версии квеста. Отметьте группу решённой — новое сообщение откроет её заново."
-            />
+    <>
+    <main className="ap-main">
+      <AdminPageHead
+        eyebrow="МОДЕРАЦИЯ"
+        title="Обратная связь"
+        lede="Сообщения об ошибках от игроков, сгруппированные по шагу и версии квеста. Отметьте группу решённой — новое сообщение откроет её заново."
+      />
 
-            {loadError ? (
-              <div className="amod-error">
-                Не удалось загрузить обращения. Обновите страницу позже.
-              </div>
-            ) : !groups ? (
-              <div className="amod-loading">
-                <span className="ash-spinner" aria-label="Загрузка" />
-              </div>
-            ) : (
-              <>
-                <div className="amod-filters">
-                  <span className="amod-filters__label">КВЕСТ</span>
-                  <select
-                    className="amod-select"
-                    aria-label="Квест"
-                    value={quest}
-                    onChange={(e) => setQuest(e.target.value)}
-                  >
-                    {questOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="amod-filters__label">СТАТУС</span>
-                  {STATUS_CHIPS.map((chip) => (
-                    <button
-                      key={chip.value}
-                      type="button"
-                      className={`amod-chip${status === chip.value ? ' is-on' : ''}`}
-                      aria-pressed={status === chip.value}
-                      onClick={() => setStatus(chip.value)}
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
-                </div>
+      {loadError ? (
+        <div className="amod-error">
+          Не удалось загрузить обращения. Обновите страницу позже.
+        </div>
+      ) : !groups ? (
+        <div className="amod-loading">
+          <span className="ash-spinner" aria-label="Загрузка" />
+        </div>
+      ) : (
+        <>
+          <div className="amod-filters">
+            <span className="amod-filters__label">КВЕСТ</span>
+            <select
+              className="amod-select"
+              aria-label="Квест"
+              value={quest}
+              onChange={(e) => setQuest(e.target.value)}
+            >
+              {questOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <span className="amod-filters__label">СТАТУС</span>
+            {STATUS_CHIPS.map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                className={`amod-chip${status === chip.value ? ' is-on' : ''}`}
+                aria-pressed={status === chip.value}
+                onClick={() => setStatus(chip.value)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
 
-                <div className="amod-count">
-                  Открытых: {openCount} · Решённых: {resolvedCount}
-                </div>
+          <div className="amod-count">
+            Открытых: {openCount} · Решённых: {resolvedCount}
+          </div>
 
-                <div className="amod-banner" role="note">
-                  <span aria-hidden>ⓘ</span>
-                  <span>
-                    Сообщения сгруппированы по шагу и версии квеста (шаг привязан к замороженному
-                    снапшоту). Отметка «решено» закрывает всю группу; новое сообщение по этому шагу
-                    открывает её заново.
-                  </span>
-                </div>
+          <div className="amod-banner" role="note">
+            <span aria-hidden>ⓘ</span>
+            <span>
+              Сообщения сгруппированы по шагу и версии квеста (шаг привязан к замороженному
+              снапшоту). Отметка «решено» закрывает всю группу; новое сообщение по этому шагу
+              открывает её заново.
+            </span>
+          </div>
 
+          <div className="amod-list">
+            {currentShown.map((g) => (
+              <FeedbackGroup
+                key={groupKey(g)}
+                group={g}
+                expanded={!!expanded[groupKey(g)]}
+                onToggle={() =>
+                  setExpanded((e) => ({ ...e, [groupKey(g)]: !e[groupKey(g)] }))
+                }
+                onResolveToggle={() => void toggleResolved(g)}
+              />
+            ))}
+            {currentShown.length === 0 && (
+              <div className="amod-empty">Нет обращений по выбранному фильтру.</div>
+            )}
+          </div>
+
+          {archive.length > 0 && (
+            <div className="amod-archive">
+              <button
+                type="button"
+                className="amod-archive__toggle"
+                aria-expanded={archiveOpen}
+                onClick={() => setArchiveOpen((v) => !v)}
+              >
+                <span aria-hidden>{archiveOpen ? '▾' : '▸'}</span>
+                Архив прошлых версий · {archive.length}
+                <span className="amod-archive__rule" />
+              </button>
+              {archiveOpen && (
                 <div className="amod-list">
-                  {currentShown.map((g) => (
+                  {archive.map((g) => (
                     <FeedbackGroup
                       key={groupKey(g)}
                       group={g}
+                      archived
                       expanded={!!expanded[groupKey(g)]}
                       onToggle={() =>
                         setExpanded((e) => ({ ...e, [groupKey(g)]: !e[groupKey(g)] }))
@@ -167,48 +193,15 @@ export default function AdminFeedbackPage() {
                       onResolveToggle={() => void toggleResolved(g)}
                     />
                   ))}
-                  {currentShown.length === 0 && (
-                    <div className="amod-empty">Нет обращений по выбранному фильтру.</div>
-                  )}
                 </div>
-
-                {archive.length > 0 && (
-                  <div className="amod-archive">
-                    <button
-                      type="button"
-                      className="amod-archive__toggle"
-                      aria-expanded={archiveOpen}
-                      onClick={() => setArchiveOpen((v) => !v)}
-                    >
-                      <span aria-hidden>{archiveOpen ? '▾' : '▸'}</span>
-                      Архив прошлых версий · {archive.length}
-                      <span className="amod-archive__rule" />
-                    </button>
-                    {archiveOpen && (
-                      <div className="amod-list">
-                        {archive.map((g) => (
-                          <FeedbackGroup
-                            key={groupKey(g)}
-                            group={g}
-                            archived
-                            expanded={!!expanded[groupKey(g)]}
-                            onToggle={() =>
-                              setExpanded((e) => ({ ...e, [groupKey(g)]: !e[groupKey(g)] }))
-                            }
-                            onResolveToggle={() => void toggleResolved(g)}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </main>
-        </div>
-        {toast && <AdminToast text={toast} />}
-      </AdminGate>
-    </AdminShell>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </main>
+    {toast && <AdminToast text={toast} />}
+    </>
   );
 }
 

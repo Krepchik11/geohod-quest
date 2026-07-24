@@ -19,7 +19,6 @@ import {
   type AdminCoupon,
   type CouponFilter,
 } from '../../../lib/admin-coupons';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminConfirmSheet, AdminPageHead, AdminToast } from '../ui';
 
 /**
@@ -31,7 +30,6 @@ import { AdminConfirmSheet, AdminPageHead, AdminToast } from '../ui';
  * leaving the list; clicking a row opens the editor.
  */
 export default function AdminCouponsPage() {
-  const access = useAdminAccess();
   const router = useRouter();
   const [coupons, setCoupons] = useState<AdminCoupon[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -43,7 +41,6 @@ export default function AdminCouponsPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     void api
       .adminListCoupons()
@@ -59,7 +56,7 @@ export default function AdminCouponsPage() {
     return () => {
       cancelled = true;
     };
-  }, [access]);
+  }, []);
 
   // Click anywhere closes an open row menu.
   useEffect(() => {
@@ -117,113 +114,109 @@ export default function AdminCouponsPage() {
   };
 
   return (
-    <AdminShell active="coupons">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Купоны">
-              <button type="button" className="ac-new" onClick={() => router.push('/admin/coupons/new')}>
-                <span className="ac-new__plus" aria-hidden>+</span>
-                <span className="ac-new__label">Новый купон</span>
-              </button>
-            </AdminPageHead>
+    <>
+    <main className="ap-main">
+      <AdminPageHead eyebrow="УПРАВЛЕНИЕ" title="Купоны">
+        <button type="button" className="ac-new" onClick={() => router.push('/admin/coupons/new')}>
+          <span className="ac-new__plus" aria-hidden>+</span>
+          <span className="ac-new__label">Новый купон</span>
+        </button>
+      </AdminPageHead>
 
-            <div className="ac-filters">
-              <div className="ac-search">
-                <span className="ac-search-icon" aria-hidden />
-                <input
-                  type="text"
-                  className="ac-search-input"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Код купона…"
-                  aria-label="Поиск по коду купона"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              <div className="ac-chips">
-                <span className="ac-chips-label">СТАТУС</span>
-                {FILTER_ORDER.map((f) => (
-                  <button
-                    type="button"
-                    key={f}
-                    className={`ac-chip${filter === f ? ' is-on' : ''}`}
-                    aria-pressed={filter === f}
-                    onClick={() => setFilter(f)}
-                  >
-                    {FILTER_LABELS[f]}
-                    {f === 'archive' && archivedCount > 0 && (
-                      <span className="ac-chip__count">{archivedCount}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {!loadError && (
-              <div className="ac-count">
-                {pluralizeCoupons(filtered.length)} · новые сверху · истёкшие и исчерпанные попадают в архив автоматически
-              </div>
-            )}
-
-            {loadError ? (
-              <div className="ac-list"><div className="ac-empty">Не удалось загрузить купоны. Проверьте соединение и обновите страницу.</div></div>
-            ) : filtered.length === 0 ? (
-              <div className="ac-list">
-                <div className="ac-empty">
-                  {coupons.length === 0
-                    ? 'Купонов пока нет — создайте первый.'
-                    : 'Ничего не нашлось. Измените запрос или фильтр.'}
-                </div>
-              </div>
-            ) : (
-              <div className="ac-list">
-                <div className="ac-cols" aria-hidden>
-                  <span>КУПОН</span>
-                  <span>СКИДКА</span>
-                  <span>ДЕЙСТВУЕТ</span>
-                  <span>ИСПОЛЬЗОВАНИЯ</span>
-                  <span>СТАТУС</span>
-                  <span />
-                </div>
-                {filtered.map((c) => (
-                  <CouponRow
-                    key={c.id}
-                    coupon={c}
-                    busy={busyId === c.id}
-                    menuOpen={menuFor === c.id}
-                    onOpen={() => router.push(`/admin/coupons/${encodeURIComponent(c.id)}`)}
-                    onMenu={() => setMenuFor((cur) => (cur === c.id ? null : c.id))}
-                    onTogglePause={() => void togglePause(c)}
-                    onDelete={() => {
-                      setMenuFor(null);
-                      setConfirmDelete(c);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </main>
-
-          {confirmDelete && (
-            <AdminConfirmSheet
-              label="Удалить купон"
-              title={`Удалить купон ${confirmDelete.code}?`}
-              text="Удаление необратимо. Уже применённые скидки и покупки сохраняются."
-              applyLabel="Удалить"
-              busyLabel="Удаляем…"
-              busy={busyId !== null}
-              danger
-              onCancel={() => setConfirmDelete(null)}
-              onApply={() => void deleteCoupon(confirmDelete)}
-            />
-          )}
-
-          {toast && <AdminToast text={toast} />}
+      <div className="ac-filters">
+        <div className="ac-search">
+          <span className="ac-search-icon" aria-hidden />
+          <input
+            type="text"
+            className="ac-search-input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Код купона…"
+            aria-label="Поиск по коду купона"
+            autoComplete="off"
+            spellCheck={false}
+          />
         </div>
-      </AdminGate>
-    </AdminShell>
+        <div className="ac-chips">
+          <span className="ac-chips-label">СТАТУС</span>
+          {FILTER_ORDER.map((f) => (
+            <button
+              type="button"
+              key={f}
+              className={`ac-chip${filter === f ? ' is-on' : ''}`}
+              aria-pressed={filter === f}
+              onClick={() => setFilter(f)}
+            >
+              {FILTER_LABELS[f]}
+              {f === 'archive' && archivedCount > 0 && (
+                <span className="ac-chip__count">{archivedCount}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!loadError && (
+        <div className="ac-count">
+          {pluralizeCoupons(filtered.length)} · новые сверху · истёкшие и исчерпанные попадают в архив автоматически
+        </div>
+      )}
+
+      {loadError ? (
+        <div className="ac-list"><div className="ac-empty">Не удалось загрузить купоны. Проверьте соединение и обновите страницу.</div></div>
+      ) : filtered.length === 0 ? (
+        <div className="ac-list">
+          <div className="ac-empty">
+            {coupons.length === 0
+              ? 'Купонов пока нет — создайте первый.'
+              : 'Ничего не нашлось. Измените запрос или фильтр.'}
+          </div>
+        </div>
+      ) : (
+        <div className="ac-list">
+          <div className="ac-cols" aria-hidden>
+            <span>КУПОН</span>
+            <span>СКИДКА</span>
+            <span>ДЕЙСТВУЕТ</span>
+            <span>ИСПОЛЬЗОВАНИЯ</span>
+            <span>СТАТУС</span>
+            <span />
+          </div>
+          {filtered.map((c) => (
+            <CouponRow
+              key={c.id}
+              coupon={c}
+              busy={busyId === c.id}
+              menuOpen={menuFor === c.id}
+              onOpen={() => router.push(`/admin/coupons/${encodeURIComponent(c.id)}`)}
+              onMenu={() => setMenuFor((cur) => (cur === c.id ? null : c.id))}
+              onTogglePause={() => void togglePause(c)}
+              onDelete={() => {
+                setMenuFor(null);
+                setConfirmDelete(c);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </main>
+
+    {confirmDelete && (
+      <AdminConfirmSheet
+        label="Удалить купон"
+        title={`Удалить купон ${confirmDelete.code}?`}
+        text="Удаление необратимо. Уже применённые скидки и покупки сохраняются."
+        applyLabel="Удалить"
+        busyLabel="Удаляем…"
+        busy={busyId !== null}
+        danger
+        onCancel={() => setConfirmDelete(null)}
+        onApply={() => void deleteCoupon(confirmDelete)}
+      />
+    )}
+
+    {toast && <AdminToast text={toast} />}
+    </>
   );
 }
 

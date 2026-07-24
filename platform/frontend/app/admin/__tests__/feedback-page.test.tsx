@@ -9,34 +9,17 @@ import React from 'react';
  * calls the resolve endpoint and removes it from the «Открытые» view; the status
  * filter and the past-versions archive work.
  */
-const { listMock, resolveMock, reopenMock, meMock } = vi.hoisted(() => ({
+const { listMock, resolveMock, reopenMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   resolveMock: vi.fn(),
   reopenMock: vi.fn(),
-  meMock: vi.fn(),
 }));
 vi.mock('../../../lib/api', () => ({
   api: {
     adminListFeedback: listMock,
     adminResolveFeedback: resolveMock,
     adminReopenFeedback: reopenMock,
-    me: meMock,
   },
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number) {
-      super(`api ${status}`);
-      this.status = status;
-    }
-  },
-  hasAdminToken: () => true,
-}));
-vi.mock('../../../lib/identity', () => ({
-  getSession: () => null,
-  subscribeSession: () => () => {},
-}));
-vi.mock('../../../lib/session-actions', () => ({
-  logoutAndReset: () => Promise.resolve(),
 }));
 
 import AdminFeedbackPage from '../feedback/page';
@@ -89,8 +72,6 @@ beforeEach(() => {
   listMock.mockReset();
   resolveMock.mockReset();
   reopenMock.mockReset();
-  meMock.mockReset();
-  meMock.mockResolvedValue({ role: 'admin' });
   listMock.mockResolvedValue(GROUPS);
   resolveMock.mockResolvedValue({});
   reopenMock.mockResolvedValue({});

@@ -7,41 +7,24 @@ import React from 'react';
  * Admin · Отзывы page. Pinned behaviors: the list renders every rating (star-only
  * included) with the resolved contact; hiding a review confirms with a before→after
  * average preview (same grain the server folds), calls the hide endpoint, and drops
- * the row from the shown list; the shared gate denies without admin access.
+ * the row from the shown list. (Access gating lives in the route layout — see
+ * layout.test.tsx; the page itself renders assuming access.)
  */
-const { listMock, hideMock, unhideMock, meMock, tokenMock } = vi.hoisted(() => ({
+const { listMock, hideMock, unhideMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   hideMock: vi.fn(),
   unhideMock: vi.fn(),
-  meMock: vi.fn(),
-  tokenMock: vi.fn(),
 }));
 vi.mock('../../../lib/api', () => ({
   api: {
     adminListReviews: listMock,
     adminHideReview: hideMock,
     adminUnhideReview: unhideMock,
-    me: meMock,
   },
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number) {
-      super(`api ${status}`);
-      this.status = status;
-    }
-  },
-  hasAdminToken: () => tokenMock(),
-}));
-vi.mock('../../../lib/identity', () => ({
-  getSession: () => null,
-  subscribeSession: () => () => {},
-}));
-vi.mock('../../../lib/session-actions', () => ({
-  logoutAndReset: () => Promise.resolve(),
 }));
 
 import AdminReviewsPage from '../reviews/page';
-import { ApiError, type AdminIdentityWire } from '../../../lib/api';
+import { type AdminIdentityWire } from '../../../lib/api';
 
 const id = (over: Partial<AdminIdentityWire>): AdminIdentityWire => ({
   player_id: 'dev:1',
@@ -91,10 +74,6 @@ beforeEach(() => {
   listMock.mockReset();
   hideMock.mockReset();
   unhideMock.mockReset();
-  meMock.mockReset();
-  tokenMock.mockReset();
-  tokenMock.mockReturnValue(true);
-  meMock.mockResolvedValue({ role: 'admin' });
   listMock.mockResolvedValue(REVIEWS);
   hideMock.mockResolvedValue({});
   unhideMock.mockResolvedValue({});
@@ -143,13 +122,5 @@ describe('AdminReviewsPage', () => {
     await waitFor(() =>
       expect(unhideMock).toHaveBeenCalledWith({ player_id: 'dev:anon', quest_id: 'q1' }),
     );
-  });
-
-  it('denies access without an admin credential', async () => {
-    tokenMock.mockReturnValue(false);
-    meMock.mockRejectedValue(new ApiError(403, '/api/players/me', 'forbidden'));
-    render(<AdminReviewsPage />);
-    expect(await screen.findByText('Нет доступа')).toBeTruthy();
-    expect(listMock).not.toHaveBeenCalled();
   });
 });
