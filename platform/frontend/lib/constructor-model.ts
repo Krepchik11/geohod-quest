@@ -107,6 +107,9 @@ export interface CtorQuestMeta {
   ageTarget: CtorAgeTarget;
   /** Собственные теги автора (свободные строки, без дублей). */
   tags: string[];
+  /** Универсальный ответ квеста: принимается на любом шаге с вопросом.
+   *  Пустая строка = выключен (в снапшот не попадает). */
+  universalAnswer: string;
 }
 
 export interface CtorVersion {
@@ -251,6 +254,7 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       complexity: meta.complexity || DEFAULT_COMPLEXITY,
       ageTarget: meta.ageTarget || DEFAULT_AGE_TARGET,
       tags: meta.tags || [],
+      universalAnswer: meta.universalAnswer || '',
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
@@ -370,6 +374,9 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     complexity: isComplexity(raw.meta.complexity) ? raw.meta.complexity : DEFAULT_COMPLEXITY,
     ageTarget: isAgeTarget(raw.meta.ageTarget) ? raw.meta.ageTarget : DEFAULT_AGE_TARGET,
     tags: sanitizeTags(raw.meta.tags),
+    // Тела до появления универсального ответа поля не имеют — нормализуем к
+    // пустой строке (= выключен), чтобы инпут в настройках был управляемым.
+    universalAnswer: typeof raw.meta.universalAnswer === 'string' ? raw.meta.universalAnswer : '',
   };
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
   return { ...raw, meta, steps, id: serverId };
@@ -547,11 +554,13 @@ export function nextVersionNumber(quest: CtorQuest): number {
 
 /** Frozen snapshot of the draft — deep-cloned, versioned, positions sealed. The
  *  store-card city/duration are frozen in too (when set), so the player renders the
- *  real place/duration instead of a hardcoded default. */
+ *  real place/duration instead of a hardcoded default. The quest-wide universal
+ *  answer freezes alongside them (trimmed; blank = the quest has none). */
 export function serializeDraft(quest: CtorQuest): QuestSnapshot {
   const steps = quest.steps.map((s, i) => ({ ...stepToGameStep(s, quest.meta), position: i }));
   const city = quest.meta.city.trim();
   const duration = quest.meta.duration.trim();
+  const universalAnswer = quest.meta.universalAnswer.trim();
   return {
     golden_id: quest.id,
     name: quest.meta.title,
@@ -559,6 +568,7 @@ export function serializeDraft(quest: CtorQuest): QuestSnapshot {
     steps: JSON.parse(JSON.stringify(steps)) as GameStep[],
     ...(city ? { city } : {}),
     ...(duration ? { duration } : {}),
+    ...(universalAnswer ? { universal_answer: universalAnswer } : {}),
   };
 }
 

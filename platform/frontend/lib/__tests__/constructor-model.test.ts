@@ -75,6 +75,7 @@ describe('newQuest', () => {
     const q = newQuest({});
     expect(q.meta.title).toBe('Без названия');
     expect(q.meta.price).toBe(0);
+    expect(q.meta.universalAnswer).toBe('');
   });
 
   it('defaults attributes to the neutral values', () => {
@@ -429,6 +430,18 @@ describe('serializeDraft', () => {
     expect(snap.city).toBe('Нови Сад');
     expect(snap.duration).toBe('1.5 часа');
   });
+
+  it('freezes the quest-wide universal answer in (trimmed; blank = omitted)', () => {
+    expect(serializeDraft(quest()).universal_answer).toBeUndefined();
+
+    const blank = quest();
+    blank.meta.universalAnswer = '   ';
+    expect(serializeDraft(blank).universal_answer).toBeUndefined();
+
+    const q = quest();
+    q.meta.universalAnswer = ' 11 ';
+    expect(serializeDraft(q).universal_answer).toBe('11');
+  });
 });
 
 describe('structural edits', () => {
@@ -537,6 +550,11 @@ describe('migrateQuest (legacy draft bodies)', () => {
   it('forces the server id onto the body', () => {
     const q = migrateQuest(legacyBody(), 'q-server');
     expect(q?.id).toBe('q-server');
+  });
+
+  it('normalizes a missing universalAnswer to the empty string (pre-feature bodies)', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.meta.universalAnswer).toBe('');
   });
 
   it('collapses the legacy role images to the single image (task first)', () => {

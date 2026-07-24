@@ -27,7 +27,7 @@ use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::pg_store::{
     PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgFlagStore, PgGrantStore,
-    PgPaymentStore,
+    PgPaymentStore, PgSettingsStore,
 };
 
 /// Unix seconds (0 on clock error; informational only).
@@ -2647,6 +2647,85 @@ impl FlagStores {
     }
 }
 
+/// Admin-set runtime setting values, keyed by `Setting::key()` (the settings
+/// registry itself is code — `crate::settings`). Absence of a key means
+/// "unset"; there are no default values to fall back to, so `clear` is the
+/// only way to return a setting to its unset state.
+#[derive(Debug, Default)]
+pub struct InMemorySettingsStore {
+    values: HashMap<String, String>,
+}
+
+impl InMemorySettingsStore {
+    /// A fresh store holds no values — every setting starts unset.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The stored value for `key`, or `None` when the setting is unset.
+    pub fn get(&self, key: &str) -> Option<String> {
+        self.values.get(key).cloned()
+    }
+
+    /// Upsert the value (last write wins — a single string has no merge).
+    pub fn set(&mut self, key: &str, value: &str) {
+        self.values.insert(key.to_string(), value.to_string());
+    }
+
+    /// Remove the value so the setting reverts to unset.
+    pub fn clear(&mut self, key: &str) {
+        self.values.remove(key);
+    }
+}
+
+/// Runtime-setting storage behind the same enum-dispatch seam as the others.
+#[derive(Clone, Debug)]
+pub enum SettingsStores {
+    /// Non-durable, zero-infra (tests + dev without DATABASE_URL).
+    InMemory(std::sync::Arc<std::sync::Mutex<InMemorySettingsStore>>),
+    /// Durable PostgreSQL.
+    Postgres(PgSettingsStore),
+}
+
+impl SettingsStores {
+    fn lock_inmem(
+        m: &std::sync::Mutex<InMemorySettingsStore>,
+    ) -> Result<std::sync::MutexGuard<'_, InMemorySettingsStore>, AppError> {
+        m.lock()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("settings lock poisoned: {e}")))
+    }
+
+    /// See [`InMemorySettingsStore::get`].
+    pub async fn value_for(&self, key: &str) -> Result<Option<String>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get(key)),
+            Self::Postgres(pg) => pg.get(key).await,
+        }
+    }
+
+    /// See [`InMemorySettingsStore::set`].
+    pub async fn set_value(&self, key: &str, value: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.set(key, value);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.set(key, value).await,
+        }
+    }
+
+    /// See [`InMemorySettingsStore::clear`].
+    pub async fn clear_value(&self, key: &str) -> Result<(), AppError> {
+        match self {
+            Self::InMemory(m) => {
+                Self::lock_inmem(m)?.clear(key);
+                Ok(())
+            }
+            Self::Postgres(pg) => pg.clear(key).await,
+        }
+    }
+}
+
 /// In-memory moderation overlay — the mutable admin decisions that sit *beside* the
 /// immutable fact log (content-moderation). Nothing here ever reads or writes `facts`.
 ///
@@ -2838,6 +2917,19 @@ mod tests {
         let mut store = store;
         store.clear(crate::features::Feature::PaymentsMock.key());
         assert_eq!(store.get("payments_mock"), None);
+    }
+
+    #[test]
+    fn settings_store_set_get_clear() {
+        let mut store = InMemorySettingsStore::new();
+        let key = crate::settings::Setting::UniversalAnswer.key();
+        assert_eq!(store.get(key), None, "fresh store: every setting unset");
+        store.set(key, "11");
+        assert_eq!(store.get(key), Some("11".to_string()));
+        store.set(key, "42");
+        assert_eq!(store.get(key), Some("42".to_string()), "last write wins");
+        store.clear(key);
+        assert_eq!(store.get(key), None);
     }
 
     fn fact(kind: FactKind, step: i32, delta: i32) -> Fact {
