@@ -2390,6 +2390,55 @@ impl PgFlagStore {
     }
 }
 
+/// Runtime setting values on PostgreSQL (`app_settings`, migration 0017).
+#[derive(Clone, Debug)]
+pub struct PgSettingsStore {
+    pool: PgPool,
+}
+
+impl PgSettingsStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// See [`crate::store::InMemorySettingsStore::get`].
+    pub async fn get(&self, key: &str) -> Result<Option<String>, AppError> {
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)
+    }
+
+    /// See [`crate::store::InMemorySettingsStore::set`].
+    pub async fn set(&self, key: &str, value: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO app_settings (key, value, updated_at)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (key) DO UPDATE
+             SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+        )
+        .bind(key)
+        .bind(value)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemorySettingsStore::clear`].
+    pub async fn clear(&self, key: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM app_settings WHERE key = $1")
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(())
+    }
+}
+
 /// PostgreSQL moderation overlay — the durable mirror of
 /// [`crate::store::InMemoryModerationStore`] (content-moderation). Two tables that are
 /// entirely separate from the immutable `facts` log.

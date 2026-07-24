@@ -27,6 +27,23 @@ describe('isAnswerCorrect (verbatim design/player/matcher.js contract)', () => {
   });
 });
 
+describe('isAnswerAccepted (step list ∪ universal answers)', () => {
+  const acceptable = ['ПУПИН'];
+
+  it('accepts a step-list member and any universal answer, same matcher rules', () => {
+    expect(model.isAnswerAccepted('пупин', acceptable, ['11', null])).toBe(true);
+    expect(model.isAnswerAccepted(' 11 ', acceptable, ['11', null])).toBe(true);
+    expect(model.isAnswerAccepted('42', acceptable, [null, ' 42 '])).toBe(true);
+  });
+
+  it('rejects everything else; absent/blank universals change nothing', () => {
+    expect(model.isAnswerAccepted('11', acceptable, [])).toBe(false);
+    expect(model.isAnswerAccepted('11', acceptable, [null, undefined, '  '])).toBe(false);
+    expect(model.isAnswerAccepted('wrong', acceptable, ['11'])).toBe(false);
+    expect(model.isAnswerAccepted('', acceptable, ['11'])).toBe(false);
+  });
+});
+
 describe('validateForPublish + serializeToSnapshot', () => {
   it('accepts the golden snapshot (errors empty)', () => {
     const snap = model.loadQuestSnapshot(getSnapshot('mystery-fortress-v1'));

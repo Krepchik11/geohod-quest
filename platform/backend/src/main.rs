@@ -41,6 +41,7 @@ mod mailer;
 mod media;
 mod payments;
 mod pg_store;
+mod settings;
 mod social;
 mod store;
 mod yookassa;
@@ -55,11 +56,13 @@ use features::Feature;
 use grants::{AccessGrant, GrantSource};
 use media::{MediaRef, MediaStores};
 use payments::{PendingPayment, PendingStatus};
+use settings::Setting;
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
     CouponStores, FactStores, FlagStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
     InMemoryCouponStore, InMemoryFactStore, InMemoryFlagStore, InMemoryGrantStore,
-    InMemoryModerationStore, InMemoryPaymentStore, ModerationStores, PaymentStores, PublishedMeta,
+    InMemoryModerationStore, InMemoryPaymentStore, InMemorySettingsStore, ModerationStores,
+    PaymentStores, PublishedMeta, SettingsStores,
 };
 use yookassa::YookassaGateway;
 
@@ -81,6 +84,9 @@ struct AppState {
     /// Admin-set feature-toggle overrides (registry in `features.rs`; evaluation
     /// in [`feature_enabled`] — code default unless overridden).
     flags: FlagStores,
+    /// Admin-set runtime string settings (registry in `settings.rs`; no row =
+    /// unset — settings have no compiled-in default values).
+    settings: SettingsStores,
     /// Mutable moderation overlay (content-moderation) — hidden reviews +
     /// feedback resolution watermarks, kept entirely separate from the immutable
     /// fact log. Admin-only reads/writes; the read-side folds consult it.
@@ -135,6 +141,7 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         media,
         payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
         flags: FlagStores::InMemory(Arc::new(Mutex::new(InMemoryFlagStore::new()))),
+        settings: SettingsStores::InMemory(Arc::new(Mutex::new(InMemorySettingsStore::new()))),
         moderation: ModerationStores::InMemory(Arc::new(
             Mutex::new(InMemoryModerationStore::new()),
         )),
@@ -334,6 +341,9 @@ fn feature_available(state: &AppState, feature: Feature) -> bool {
         Feature::PaymentsYookassa => state.yookassa.is_some(),
         // Pure client behavior — nothing to configure server-side.
         Feature::PlayerBackButton => true,
+        // Client-side matching; the answer value is a runtime setting, so
+        // there is no deployment capability to check.
+        Feature::PlayerUniversalAnswer => true,
     }
 }
 
@@ -526,6 +536,10 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/admin/features", get(list_features_handler))
         .route("/api/admin/features/{key}", post(set_feature_handler))
+        .route(
+            "/api/admin/settings/{key}",
+            get(get_setting_handler).post(set_setting_handler),
+        )
         .route("/api/features", get(public_features_handler))
         .route("/api/admin/stats", get(admin_stats_overview_handler))
         .route(
@@ -3465,24 +3479,45 @@ async fn list_features_handler(
     Ok(Json(rows))
 }
 
+/// Wire shape of GET /api/features: the client-visible flags' effective
+/// verdicts plus the values the player runtime needs alongside them. The
+/// universal answer is plaintext by design — the same trust model as the
+/// acceptable lists inside quest snapshots (the client is the matcher).
+#[derive(serde::Serialize)]
+struct PublicFeaturesResponse {
+    flags: std::collections::HashMap<&'static str, bool>,
+    /// The platform-wide universal answer; `None` unless the
+    /// `player_universal_answer` flag is on AND a value is set.
+    universal_answer: Option<String>,
+}
+
 /// GET /api/features — effective verdicts of the client-visible flags only
 /// (`Feature::client_visible`). Public by design: the player runtime keys UI
 /// behavior off these without credentials; server-enforced flags never appear.
 async fn public_features_handler(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let overrides = state.flags.all_overrides().await?;
-    let map: serde_json::Map<String, serde_json::Value> = Feature::ALL
+) -> Result<Json<PublicFeaturesResponse>, AppError> {
+    // One concurrent pass over both stores: the setting is fetched
+    // unconditionally (and discarded when its flag is off) rather than
+    // serializing a second round-trip behind the overrides read.
+    let (overrides, stored_answer) = tokio::try_join!(
+        state.flags.all_overrides(),
+        state.settings.value_for(Setting::UniversalAnswer.key())
+    )?;
+    let flags: std::collections::HashMap<&'static str, bool> = Feature::ALL
         .into_iter()
         .filter(|f| f.client_visible())
-        .map(|f| {
-            (
-                f.key().to_string(),
-                f.effective(overrides.get(f.key()).copied()).into(),
-            )
-        })
+        .map(|f| (f.key(), f.effective(overrides.get(f.key()).copied())))
         .collect();
-    Ok(Json(map.into()))
+    let universal_answer = if flags[Feature::PlayerUniversalAnswer.key()] {
+        stored_answer
+    } else {
+        None
+    };
+    Ok(Json(PublicFeaturesResponse {
+        flags,
+        universal_answer,
+    }))
 }
 
 /// Body for the feature-toggle mutation: `enabled: true|false` stores an
@@ -3508,6 +3543,61 @@ async fn set_feature_handler(
         None => state.flags.clear_override(feature.key()).await?,
     }
     Ok(Json(feature_wire(&state, feature, req.enabled)))
+}
+
+/// Wire shape of a runtime setting: its stable key and the stored value
+/// (`null` = unset — settings have no default values).
+#[derive(serde::Serialize)]
+struct SettingWire {
+    key: &'static str,
+    value: Option<String>,
+}
+
+/// GET /api/admin/settings/{key} — the stored value of one registered setting.
+/// Unknown keys are 404 (the registry lives in code; nothing to create).
+async fn get_setting_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<SettingWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let setting = Setting::parse(&key)
+        .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
+    let value = state.settings.value_for(setting.key()).await?;
+    Ok(Json(SettingWire {
+        key: setting.key(),
+        value,
+    }))
+}
+
+/// Body for the setting mutation. The write is normalized by
+/// [`Setting::normalize`]: the value is trimmed, and `null`/empty clears the
+/// row — "unset" has exactly one representation.
+#[derive(serde::Deserialize)]
+struct SetSettingRequest {
+    value: Option<String>,
+}
+
+/// POST /api/admin/settings/{key} — set or clear a setting value. Unknown
+/// keys are 404, like the feature-toggle mutation.
+async fn set_setting_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetSettingRequest>,
+) -> Result<Json<SettingWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let setting = Setting::parse(&key)
+        .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
+    let value = Setting::normalize(req.value.as_deref());
+    match &value {
+        Some(v) => state.settings.set_value(setting.key(), v).await?,
+        None => state.settings.clear_value(setting.key()).await?,
+    }
+    Ok(Json(SettingWire {
+        key: setting.key(),
+        value,
+    }))
 }
 
 /// Query for the admin statistics endpoints: an inclusive UTC day range.
@@ -3895,7 +3985,8 @@ async fn main() -> anyhow::Result<()> {
                 moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(
                     pool.clone(),
                 )),
-                flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
+                flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone())),
+                settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
                 yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -8001,7 +8092,8 @@ mod tests {
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
             moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(pool.clone())),
-            flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool)),
+            flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone())),
+            settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
             yookassa: None,
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -8743,6 +8835,7 @@ mod tests {
                 ("payments_mock", true),
                 ("payments_yookassa", false),
                 ("player_back_button", true),
+                ("player_universal_answer", true),
             ]
         );
     }
@@ -8755,7 +8848,13 @@ mod tests {
         let app = test_app();
         let (st, v) = get_json(&app, "/api/features").await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v, json!({ "player_back_button": false }));
+        assert_eq!(
+            v,
+            json!({
+                "flags": { "player_back_button": false, "player_universal_answer": false },
+                "universal_answer": null,
+            })
+        );
 
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
         let (st, _) = post_json_h(
@@ -8767,7 +8866,105 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         let (_, v) = get_json(&app, "/api/features").await;
-        assert_eq!(v, json!({ "player_back_button": true }));
+        assert_eq!(
+            v["flags"],
+            json!({ "player_back_button": true, "player_universal_answer": false })
+        );
+    }
+
+    /// The universal answer reaches GET /api/features only when BOTH halves
+    /// hold: the `player_universal_answer` flag is on AND a value is stored.
+    /// Either half alone serves `null` — flipping the flag off retracts the
+    /// answer without erasing the stored value.
+    #[tokio::test]
+    async fn universal_answer_served_only_when_flag_on_and_value_set() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Value set, flag off → null.
+        let (st, v) = post_json_h(
+            &app,
+            "/api/admin/settings/universal_answer",
+            json!({ "value": "  11 " }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            v,
+            json!({ "key": "universal_answer", "value": "11" }),
+            "trimmed on write"
+        );
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v["universal_answer"], Value::Null);
+
+        // Flag on too → served.
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/player_universal_answer",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v["universal_answer"], json!("11"));
+
+        // Clearing the value (empty string) retracts it while the flag stays on.
+        let (st, v) = post_json_h(
+            &app,
+            "/api/admin/settings/universal_answer",
+            json!({ "value": "" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["value"], Value::Null);
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v["universal_answer"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn settings_endpoints_admin_gated_and_reject_unknown_keys() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        // Both verbs require the admin credential.
+        let (st, _) = get_json(&app, "/api/admin/settings/universal_answer").await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (st, _) = post_json(
+            &app,
+            "/api/admin/settings/universal_answer",
+            json!({ "value": "11" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+
+        // The registry lives in code: unknown keys are 404 on both verbs.
+        let (st, _) = get_json_h(&app, "/api/admin/settings/smtp_url", &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/settings/smtp_url",
+            json!({ "value": "x" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+
+        // Unset reads as null; set then read round-trips.
+        let (st, v) = get_json_h(&app, "/api/admin/settings/universal_answer", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v, json!({ "key": "universal_answer", "value": null }));
+        let (_, _) = post_json_h(
+            &app,
+            "/api/admin/settings/universal_answer",
+            json!({ "value": "42" }),
+            &admin,
+        )
+        .await;
+        let (_, v) = get_json_h(&app, "/api/admin/settings/universal_answer", &admin).await;
+        assert_eq!(v["value"], json!("42"));
     }
 
     #[tokio::test]

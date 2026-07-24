@@ -68,13 +68,18 @@ function VideoBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
 
 /* ---------- Ответы + живой тест общим матчером ---------- */
 
-function AnswersBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
+function AnswersBlock({ step, universalAnswer, onPatch }: { step: CtorStep; universalAnswer: string; onPatch: Patcher }) {
   const answers = step.acceptable;
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [testValue, setTestValue] = useState('');
   const clean = answers.map((a) => a.trim()).filter(Boolean);
-  const verdict = testValue.trim() ? isAnswerCorrect(testValue, clean) : null;
+  // Вердикт плеера: список шага + универсальный ответ квеста. Платформенный
+  // универсальный ответ здесь сознательно не участвует — тест черновика не
+  // должен зависеть от рантайм-настройки админа.
+  const inList = isAnswerCorrect(testValue, clean);
+  const viaUniversal = !inList && isAnswerCorrect(testValue, [universalAnswer]);
+  const verdict = testValue.trim() ? inList || viaUniversal : null;
   const setAnswers = (arr: string[]) => onPatch({ acceptable: arr });
   const applyPaste = () => {
     const lines = pasteText.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -105,7 +110,7 @@ function AnswersBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
         {verdict === null
           ? <span className="ans-verdict" style={{ color: 'var(--muted)' }}>—</span>
           : verdict
-            ? <span className="ans-verdict ok">✓ зачтено</span>
+            ? <span className="ans-verdict ok">{viaUniversal ? '✓ зачтено (универсальный ответ)' : '✓ зачтено'}</span>
             : <span className="ans-verdict no">✗ не зачтено</span>}
       </div>
       <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Проверяет та же функция, что и в плеере, — что зачтено здесь, зачтётся игроку.</p>
@@ -378,7 +383,7 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
         </>
       ) : null}
 
-      {tpl === 'task_answer' ? <AnswersBlock step={step} onPatch={set} /> : null}
+      {tpl === 'task_answer' ? <AnswersBlock step={step} universalAnswer={quest.meta.universalAnswer} onPatch={set} /> : null}
       {tpl === 'task_no' || tpl === 'task_answer' ? <GiftBlock step={step} onPatch={set} /> : null}
       {tpl === 'task_answer' ? <HintBlock step={step} onPatch={set} /> : null}
       {tpl === 'task_no' || tpl === 'task_answer' || tpl === 'route_video' || tpl === 'video' ? <AddressBlock step={step} onPatch={set} /> : null}

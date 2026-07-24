@@ -7,6 +7,7 @@ import {
   stateLabel,
   toAdminFeature,
   type AdminFeature,
+  type FeatureSetting,
 } from '../../../lib/admin-features';
 import { WspToggle } from '../../quest-editor/controls';
 import AdminShell, { AdminGate, useAdminAccess } from '../shell';
@@ -92,13 +93,15 @@ export default function AdminFeaturesPage() {
             ) : (
               <div className="af-list">
                 {features.map((f) => (
-                  <FeatureRow
-                    key={f.key}
-                    feature={f}
-                    busy={busyKey === f.key}
-                    onToggle={() => void applyChange(f, !f.effective)}
-                    onReset={() => void applyChange(f, null)}
-                  />
+                  <React.Fragment key={f.key}>
+                    <FeatureRow
+                      feature={f}
+                      busy={busyKey === f.key}
+                      onToggle={() => void applyChange(f, !f.effective)}
+                      onReset={() => void applyChange(f, null)}
+                    />
+                    {f.setting && <SettingEditor setting={f.setting} onToast={showToast} />}
+                  </React.Fragment>
                 ))}
               </div>
             )}
@@ -108,6 +111,71 @@ export default function AdminFeaturesPage() {
         </div>
       </AdminGate>
     </AdminShell>
+  );
+}
+
+/**
+ * The value half of a flag-gated feature (the switch above is the toggle
+ * half): a runtime setting declared by the flag's META entry and rendered
+ * directly under its row. Saving posts the raw input — the backend normalizes
+ * (trims, blank clears) and the field re-renders from the returned stored
+ * value.
+ */
+function SettingEditor({ setting, onToast }: { setting: FeatureSetting; onToast: (text: string) => void }) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const inputId = `af-setting-${setting.key}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .adminGetSetting(setting.key)
+      .then((wire) => {
+        if (!cancelled) setValue(wire.value ?? '');
+      })
+      .catch(() => {
+        if (!cancelled) onToast(`${setting.label}: не удалось загрузить`);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setting.key]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const wire = await api.adminSetSetting(setting.key, value);
+      setValue(wire.value ?? '');
+      onToast(wire.value === null ? `${setting.label}: очищено` : `${setting.label}: сохранено`);
+    } catch {
+      onToast(`${setting.label}: не удалось сохранить`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="af-row af-row--setting">
+      <div className="af-row__info">
+        <label className="af-row__label" htmlFor={inputId}>
+          {setting.label}
+        </label>
+        <div className="af-row__desc">{setting.hint}</div>
+      </div>
+      <div className="af-row__controls">
+        <input
+          id={inputId}
+          className="input input--compact"
+          value={value}
+          disabled={busy}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <button type="button" className="btn btn--secondary btn--sm" disabled={busy} onClick={() => void save()}>
+          Сохранить
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -29,16 +29,21 @@ pub enum Feature {
     /// Player runtime: the browser/system back button rewinds one quest step
     /// instead of leaving the play screen.
     PlayerBackButton,
+    /// Player runtime: the platform-wide universal answer (its value is the
+    /// `universal_answer` runtime setting — `crate::settings`) is accepted on
+    /// every answer step of every quest.
+    PlayerUniversalAnswer,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
         Self::PaymentsYookassa,
         Self::PlayerBackButton,
+        Self::PlayerUniversalAnswer,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -50,6 +55,7 @@ impl Feature {
             Self::PaymentsMock => "payments_mock",
             Self::PaymentsYookassa => "payments_yookassa",
             Self::PlayerBackButton => "player_back_button",
+            Self::PlayerUniversalAnswer => "player_universal_answer",
         }
     }
 
@@ -58,7 +64,7 @@ impl Feature {
     /// behavior off belong here — server-enforced flags (auth, payments)
     /// already reach the client through their provider capability endpoints.
     pub fn client_visible(self) -> bool {
-        matches!(self, Self::PlayerBackButton)
+        matches!(self, Self::PlayerBackButton | Self::PlayerUniversalAnswer)
     }
 
     /// Flags that were live before the default-off policy. Fresh stores seed
@@ -134,10 +140,14 @@ mod tests {
     /// player runtime reads it from GET /api/features.
     #[test]
     fn player_back_button_registered_off_and_client_visible() {
-        let f = Feature::parse("player_back_button").expect("registered");
-        assert!(!f.default_enabled());
-        assert!(!Feature::SEEDED_ON.contains(&f));
-        assert!(f.client_visible());
+        // One contract for every post-policy player-runtime flag: off by
+        // default, not seeded, and served via GET /api/features.
+        for key in ["player_back_button", "player_universal_answer"] {
+            let f = Feature::parse(key).expect("registered");
+            assert!(!f.default_enabled(), "{key} must default off");
+            assert!(!Feature::SEEDED_ON.contains(&f), "{key} must not seed");
+            assert!(f.client_visible(), "{key} must be client visible");
+        }
         // Launch-era flags stay server-side: their state already reaches the
         // client through the provider capability endpoints.
         for s in Feature::SEEDED_ON {

@@ -55,10 +55,24 @@ All amounts and lists freeze verbatim in the snapshot at publish.
 isAnswerCorrect(submitted, acceptable):
   norm = s => String(s).trim().toLowerCase()
   return submitted non-blank AND acceptable.some(a => norm(a) === norm(submitted))
+
+isAnswerAccepted(submitted, acceptable, universal[]):   // the player's full acceptance rule
+  return isAnswerCorrect(submitted, acceptable)
+      OR isAnswerCorrect(submitted, universal.filter(non-blank))
 ```
 Exact membership equality after trim+lowercase — no contains, no normalization beyond this (v1).
 The SAME module is used by: player submit, constructor «Тест ответа» box, bundle validator,
 goldens. Reference: `player/matcher.js`.
+
+Universal answers (both optional, both matched by the same rules as the step lists):
+- **quest-wide** — a single per-quest answer set in constructor settings and frozen into the
+  snapshot as `universal_answer`; blank in settings = the quest has none;
+- **platform-wide** — an admin runtime setting (`universal_answer`) gated by the
+  `player_universal_answer` feature flag; served via GET /api/features only while the flag is
+  on AND a value is set (fail-closed: offline/unset ⇒ absent). It exists so operators can walk
+  any quest without editing per-quest answer lists.
+A universally-answered submit records an ordinary correct `answer_submitted` fact — folds,
+hints, and stats are unaffected by *why* the answer was accepted.
 
 ## Wrong-Answer / Hint Flow
 1. Wrong submit #1 → inline error «Неверно. Попробуйте ещё раз.» + input shake.
