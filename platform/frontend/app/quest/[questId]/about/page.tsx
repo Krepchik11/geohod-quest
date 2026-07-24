@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import SiteHeader from '../../../SiteHeader';
-import SiteFooter from '../../../components/SiteFooter';
+import SiteShell from '../../../components/SiteShell';
 import AboutClient from './AboutClient';
 
 /** §5: the product page links the per-quest manifest — the owned-state install
@@ -31,10 +30,8 @@ export default async function QuestAboutPage({
 }) {
   const { questId } = await params;
   return (
-    <div className="site">
-      <SiteHeader />
+    <SiteShell>
       <AboutClient questId={questId} />
-      <SiteFooter />
-    </div>
+    </SiteShell>
   );
 }

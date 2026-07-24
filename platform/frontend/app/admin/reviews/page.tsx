@@ -11,7 +11,6 @@ import {
   questFilterOptions,
   relativeTime,
 } from '../../../lib/admin-moderation';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminConfirmSheet, AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
 
@@ -38,7 +37,6 @@ function reviewKey(r: AdminReviewWire): string {
 }
 
 export default function AdminReviewsPage() {
-  const access = useAdminAccess();
   const [reviews, setReviews] = useState<AdminReviewWire[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [quest, setQuest] = useState('all');
@@ -49,7 +47,6 @@ export default function AdminReviewsPage() {
   const { toast, showToast } = useToast();
 
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     void api
       .adminListReviews()
@@ -62,7 +59,7 @@ export default function AdminReviewsPage() {
     return () => {
       cancelled = true;
     };
-  }, [access]);
+  }, []);
 
   const setHidden = (target: AdminReviewWire, hidden: boolean) =>
     setReviews((rs) =>
@@ -115,128 +112,124 @@ export default function AdminReviewsPage() {
     : null;
 
   return (
-    <AdminShell active="reviews">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main">
-            <AdminPageHead
-              eyebrow="МОДЕРАЦИЯ"
-              title="Отзывы"
-              lede="Все оценки квестов, включая оценки без текста. Скройте недостоверные — они исчезнут со страницы квеста и из средней оценки."
-            />
+    <>
+    <main className="ap-main">
+      <AdminPageHead
+        eyebrow="МОДЕРАЦИЯ"
+        title="Отзывы"
+        lede="Все оценки квестов, включая оценки без текста. Скройте недостоверные — они исчезнут со страницы квеста и из средней оценки."
+      />
 
-            {loadError ? (
-              <div className="amod-error">
-                Не удалось загрузить отзывы. Обновите страницу позже.
-              </div>
-            ) : !reviews ? (
-              <div className="amod-loading">
-                <span className="ash-spinner" aria-label="Загрузка" />
-              </div>
-            ) : (
-              <>
-                <div className="amod-filters">
-                  <span className="amod-filters__label">КВЕСТ</span>
-                  <select
-                    className="amod-select"
-                    aria-label="Квест"
-                    value={quest}
-                    onChange={(e) => setQuest(e.target.value)}
-                  >
-                    {questOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="amod-filters__label">ОЦЕНКА</span>
-                  {RATING_CHIPS.map((chip) => (
-                    <button
-                      key={chip.value}
-                      type="button"
-                      className={`amod-chip${rating === chip.value ? ' is-on' : ''}`}
-                      aria-pressed={rating === chip.value}
-                      onClick={() => setRating(chip.value)}
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className={`amod-chip amod-chip--right${showHidden ? ' is-on' : ''}`}
-                    aria-pressed={showHidden}
-                    onClick={() => setShowHidden((v) => !v)}
-                  >
-                    Показать скрытые · {hiddenCount}
-                  </button>
-                </div>
-
-                <div className="amod-count">
-                  {shownCount} {plural(shownCount, 'запись', 'записи', 'записей')} ·{' '}
-                  {hiddenCount} скрыто · сначала худшие
-                </div>
-
-                <div className="amod-banner" role="note">
-                  <span aria-hidden>ⓘ</span>
-                  <span>
-                    Скрытый отзыв исчезает со страницы квеста и не учитывается в средней оценке.
-                    Скрытие привязано к игроку и квесту — повторная оценка того же игрока его не
-                    вернёт.
-                  </span>
-                </div>
-
-                <div className="amod-list">
-                  {visible.map((r) => (
-                    <ReviewCard
-                      key={reviewKey(r)}
-                      review={r}
-                      onHide={() => setConfirm(r)}
-                      onUnhide={() => void unhide(r)}
-                      onJump={() =>
-                        showToast(`${r.identity.player_id} — в разделе «Пользователи» (вне прототипа)`)
-                      }
-                    />
-                  ))}
-                  {visible.length === 0 && (
-                    <div className="amod-empty">Нет отзывов по выбранному фильтру.</div>
-                  )}
-                </div>
-              </>
-            )}
-          </main>
+      {loadError ? (
+        <div className="amod-error">
+          Не удалось загрузить отзывы. Обновите страницу позже.
         </div>
+      ) : !reviews ? (
+        <div className="amod-loading">
+          <span className="ash-spinner" aria-label="Загрузка" />
+        </div>
+      ) : (
+        <>
+          <div className="amod-filters">
+            <span className="amod-filters__label">КВЕСТ</span>
+            <select
+              className="amod-select"
+              aria-label="Квест"
+              value={quest}
+              onChange={(e) => setQuest(e.target.value)}
+            >
+              {questOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <span className="amod-filters__label">ОЦЕНКА</span>
+            {RATING_CHIPS.map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                className={`amod-chip${rating === chip.value ? ' is-on' : ''}`}
+                aria-pressed={rating === chip.value}
+                onClick={() => setRating(chip.value)}
+              >
+                {chip.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`amod-chip amod-chip--right${showHidden ? ' is-on' : ''}`}
+              aria-pressed={showHidden}
+              onClick={() => setShowHidden((v) => !v)}
+            >
+              Показать скрытые · {hiddenCount}
+            </button>
+          </div>
 
-        {confirm && (
-          <AdminConfirmSheet
-            label="Скрыть отзыв"
-            title="Скрыть отзыв?"
-            danger
-            busy={busy}
-            applyLabel="Скрыть отзыв"
-            busyLabel="Скрываю…"
-            onCancel={() => !busy && setConfirm(null)}
-            onApply={() => void applyHide()}
-            text={
-              <>
-                Отзыв <b>{identityName(confirm.identity)}</b> к квесту «{confirm.quest_name}»
-                перестанет показываться на странице квеста и не будет учитываться в средней оценке.
-                <span className="amod-preview">
-                  <span className="amod-preview__label">СРЕДНЯЯ КВЕСТА</span>
-                  <span className="amod-preview__before">
-                    {before?.avg == null ? '—' : formatAverage(before.avg)}
-                  </span>
-                  <span aria-hidden>→</span>
-                  <span className="amod-preview__after">
-                    {after?.avg == null ? 'нет оценок' : formatAverage(after.avg)}
-                  </span>
-                </span>
-              </>
-            }
-          />
-        )}
-        {toast && <AdminToast text={toast} />}
-      </AdminGate>
-    </AdminShell>
+          <div className="amod-count">
+            {shownCount} {plural(shownCount, 'запись', 'записи', 'записей')} ·{' '}
+            {hiddenCount} скрыто · сначала худшие
+          </div>
+
+          <div className="amod-banner" role="note">
+            <span aria-hidden>ⓘ</span>
+            <span>
+              Скрытый отзыв исчезает со страницы квеста и не учитывается в средней оценке.
+              Скрытие привязано к игроку и квесту — повторная оценка того же игрока его не
+              вернёт.
+            </span>
+          </div>
+
+          <div className="amod-list">
+            {visible.map((r) => (
+              <ReviewCard
+                key={reviewKey(r)}
+                review={r}
+                onHide={() => setConfirm(r)}
+                onUnhide={() => void unhide(r)}
+                onJump={() =>
+                  showToast(`${r.identity.player_id} — в разделе «Пользователи» (вне прототипа)`)
+                }
+              />
+            ))}
+            {visible.length === 0 && (
+              <div className="amod-empty">Нет отзывов по выбранному фильтру.</div>
+            )}
+          </div>
+        </>
+      )}
+    </main>
+
+    {confirm && (
+      <AdminConfirmSheet
+        label="Скрыть отзыв"
+        title="Скрыть отзыв?"
+        danger
+        busy={busy}
+        applyLabel="Скрыть отзыв"
+        busyLabel="Скрываю…"
+        onCancel={() => !busy && setConfirm(null)}
+        onApply={() => void applyHide()}
+        text={
+          <>
+            Отзыв <b>{identityName(confirm.identity)}</b> к квесту «{confirm.quest_name}»
+            перестанет показываться на странице квеста и не будет учитываться в средней оценке.
+            <span className="amod-preview">
+              <span className="amod-preview__label">СРЕДНЯЯ КВЕСТА</span>
+              <span className="amod-preview__before">
+                {before?.avg == null ? '—' : formatAverage(before.avg)}
+              </span>
+              <span aria-hidden>→</span>
+              <span className="amod-preview__after">
+                {after?.avg == null ? 'нет оценок' : formatAverage(after.avg)}
+              </span>
+            </span>
+          </>
+        }
+      />
+    )}
+    {toast && <AdminToast text={toast} />}
+    </>
   );
 }
 

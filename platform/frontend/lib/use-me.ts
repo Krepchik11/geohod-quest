@@ -20,14 +20,19 @@ import { getSession, subscribeSession, type Session } from './identity';
  * belongs to, so it is ignored after a logout / account switch.
  */
 
-interface MeInfo {
+export interface MeInfo {
   role: string | null;
   displayName: string | null;
 }
 
 let cache: { token: string; promise: Promise<MeInfo> } | null = null;
 
-function fetchMe(token: string): Promise<MeInfo> {
+/**
+ * The token-keyed /me cache itself — ONE network round-trip per session token,
+ * shared by every consumer (useMe below, and the admin access gate, which needs
+ * the raw rejection to tell 401/403 from a network failure).
+ */
+export function fetchMe(token: string): Promise<MeInfo> {
   if (cache?.token !== token) {
     const promise = api.me().then((me) => ({ role: me.role, displayName: me.display_name }));
     cache = { token, promise };

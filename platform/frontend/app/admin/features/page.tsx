@@ -10,7 +10,6 @@ import {
   type FeatureSetting,
 } from '../../../lib/admin-features';
 import { WspToggle } from '../../quest-editor/controls';
-import AdminShell, { AdminGate, useAdminAccess } from '../shell';
 import { AdminPageHead, AdminToast } from '../ui';
 
 /**
@@ -22,7 +21,6 @@ import { AdminPageHead, AdminToast } from '../ui';
  * the row re-renders from the wire object the POST returns.
  */
 export default function AdminFeaturesPage() {
-  const access = useAdminAccess();
   const [features, setFeatures] = useState<AdminFeature[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -30,7 +28,6 @@ export default function AdminFeaturesPage() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (access !== 'granted') return;
     let cancelled = false;
     void api
       .adminListFeatures()
@@ -46,7 +43,7 @@ export default function AdminFeaturesPage() {
     return () => {
       cancelled = true;
     };
-  }, [access]);
+  }, []);
 
   const showToast = (text: string) => {
     setToast(text);
@@ -74,43 +71,39 @@ export default function AdminFeaturesPage() {
   };
 
   return (
-    <AdminShell active="features">
-      <AdminGate access={access}>
-        <div className="ap-root">
-          <main className="ap-main ap-main--narrow">
-            <AdminPageHead
-              eyebrow="УПРАВЛЕНИЕ"
-              title="Функции"
-              lede="Включение и выключение возможностей платформы на лету. Список функций задаётся кодом; здесь хранится только переопределение — сброшенная функция возвращается к значению по умолчанию."
-            />
+    <>
+    <main className="ap-main ap-main--narrow">
+      <AdminPageHead
+        eyebrow="УПРАВЛЕНИЕ"
+        title="Функции"
+        lede="Включение и выключение возможностей платформы на лету. Список функций задаётся кодом; здесь хранится только переопределение — сброшенная функция возвращается к значению по умолчанию."
+      />
 
-            {loadError ? (
-              <div className="af-list">
-                <div className="af-empty">
-                  Не удалось загрузить список функций. Проверьте соединение и обновите страницу.
-                </div>
-              </div>
-            ) : (
-              <div className="af-list">
-                {features.map((f) => (
-                  <React.Fragment key={f.key}>
-                    <FeatureRow
-                      feature={f}
-                      busy={busyKey === f.key}
-                      onToggle={() => void applyChange(f, !f.effective)}
-                      onReset={() => void applyChange(f, null)}
-                    />
-                    {f.setting && <SettingEditor setting={f.setting} onToast={showToast} />}
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
-          </main>
-
-          {toast && <AdminToast text={toast} />}
+      {loadError ? (
+        <div className="af-list">
+          <div className="af-empty">
+            Не удалось загрузить список функций. Проверьте соединение и обновите страницу.
+          </div>
         </div>
-      </AdminGate>
-    </AdminShell>
+      ) : (
+        <div className="af-list">
+          {features.map((f) => (
+            <React.Fragment key={f.key}>
+              <FeatureRow
+                feature={f}
+                busy={busyKey === f.key}
+                onToggle={() => void applyChange(f, !f.effective)}
+                onReset={() => void applyChange(f, null)}
+              />
+              {f.setting && <SettingEditor setting={f.setting} onToast={showToast} />}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </main>
+
+    {toast && <AdminToast text={toast} />}
+    </>
   );
 }
 

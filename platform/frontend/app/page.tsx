@@ -1,8 +1,7 @@
 'use client'; // narrow island ONLY for the live catalog + owned set (§2)
 
 import React, { useEffect, useMemo, useState } from 'react';
-import SiteHeader from './SiteHeader';
-import SiteFooter from './components/SiteFooter';
+import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import QuestFilters, { matchesAttrs, type QuestFiltersValue } from './components/QuestFilters';
 import { api, type PublishedQuestWire } from '../lib/api';
@@ -83,8 +82,7 @@ export default function GeoQuestHome() {
   const facts = market && market.length > 0 ? factsLine(catalogFacts(market)) : null;
 
   return (
-    <div className="site">
-      <SiteHeader />
+    <SiteShell>
 
       {/* HERO — §2.3: headline + CTA stay; the facts row is live catalog data. */}
       <section className="hero" style={{ backgroundImage: "url('/assets/img/hero-main.png')" }} data-screen-label="Главная — хиро">
@@ -169,7 +167,6 @@ export default function GeoQuestHome() {
         )}
       </section>
 
-      <SiteFooter />
-    </div>
+    </SiteShell>
   );
 }

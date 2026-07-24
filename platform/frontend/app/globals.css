@@ -74,13 +74,20 @@ body {
 
 /* BASE */
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* stable gutter: the scrollbar appearing/disappearing between short and long
+   pages must not shift centered layout during navigation */
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 body { margin:0; font-family:var(--font-body); font-size:14px; line-height:20px; color:var(--text); background:var(--white); }
 img { display:block; max-width:100%; }
 a { color:inherit; text-decoration:none; }
 button { font:inherit; border:0; background:none; cursor:pointer; padding:0; color:inherit; }
 input,select,textarea { font:inherit; color:inherit; }
 h1,h2,h3,p { margin:0; }
+
+/* The public-page wrapper (components/SiteShell): full-viewport flex column so
+   a flex:1 content region (e.g. .co-wrap) pins the footer to the bottom. */
+.site { min-height:100vh; display:flex; flex-direction:column; background:var(--white); }
+.site--subtle { background:var(--bg-subtle); }
 
 .display { font-family:var(--font-display); font-weight:400; text-transform:uppercase; letter-spacing:.14em; color:var(--navy); }
 

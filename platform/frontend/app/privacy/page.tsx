@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import SiteHeader from '../SiteHeader';
-import SiteFooter from '../components/SiteFooter';
+import SiteShell from '../components/SiteShell';
 import { LegalArticle } from '../components/legal';
 
 export const metadata: Metadata = { title: 'Политика конфиденциальности — GEOHOD QUEST' };
@@ -12,8 +11,7 @@ export const metadata: Metadata = { title: 'Политика конфиденц�
  */
 export default function PrivacyPage() {
   return (
-    <div className="site">
-      <SiteHeader />
+    <SiteShell>
       <LegalArticle title="Политика конфиденциальности" updated="1 июля 2026 года">
         <h2>1. Какие данные мы собираем</h2>
         <p>
@@ -60,7 +58,6 @@ export default function PrivacyPage() {
           сервисом после изменений, вы соглашаетесь с новой редакцией.
         </p>
       </LegalArticle>
-      <SiteFooter />
-    </div>
+    </SiteShell>
   );
 }
