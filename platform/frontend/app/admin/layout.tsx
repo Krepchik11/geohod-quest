@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useSelectedLayoutSegment } from 'next/navigation';
-import { api, ApiError, hasAdminToken } from '../../lib/api';
-import { getSession } from '../../lib/identity';
+import { ApiError, hasAdminToken } from '../../lib/api';
+import { getSession, subscribeSession } from '../../lib/identity';
 import { isAdmin } from '../../lib/roles';
 import { fetchMe } from '../../lib/use-me';
 import SpaceHeader from '../components/SpaceHeader';
@@ -39,33 +39,40 @@ type AdminAccess = 'checking' | 'granted' | 'denied' | 'error';
  * admins, so without a session the verdict needs no request at all.
  */
 function useAdminAccess(): AdminAccess {
-  const [access, setAccess] = useState<AdminAccess>('checking');
+  // Live session, like lib/use-me: SSR snapshot is null (anonymous),
+  // reconciled on the client without a hydration mismatch.
+  const session = useSyncExternalStore(subscribeSession, getSession, () => null);
+  // The /me verdict, keyed by the token it was computed for so it is ignored
+  // after a logout / account switch. Only the async fetch needs state — the
+  // no-session verdicts derive at render, below.
+  const [checked, setChecked] = useState<{ token: string; verdict: AdminAccess } | null>(null);
   useEffect(() => {
+    if (!session) return;
     let cancelled = false;
+    const token = session.token;
     const tokenAdmin = hasAdminToken();
-    const session = getSession();
-    if (!session) {
-      setAccess(tokenAdmin ? 'granted' : 'denied');
-      return;
-    }
-    fetchMe(session.token)
+    fetchMe(token)
       .then((me) => {
-        if (!cancelled) setAccess(tokenAdmin || isAdmin(me.role) ? 'granted' : 'denied');
+        if (!cancelled) {
+          setChecked({ token, verdict: tokenAdmin || isAdmin(me.role) ? 'granted' : 'denied' });
+        }
       })
       .catch((err) => {
         if (cancelled) return;
         if (tokenAdmin) {
-          setAccess('granted');
+          setChecked({ token, verdict: 'granted' });
           return;
         }
         const status = err instanceof ApiError ? err.status : null;
-        setAccess(status === 401 || status === 403 ? 'denied' : 'error');
+        setChecked({ token, verdict: status === 401 || status === 403 ? 'denied' : 'error' });
       });
     return () => {
       cancelled = true;
     };
-  }, []);
-  return access;
+  }, [session]);
+  // Anonymous visitors can never be admins — verdict without any request.
+  if (!session) return hasAdminToken() ? 'granted' : 'denied';
+  return checked?.token === session.token ? checked.verdict : 'checking';
 }
 
 /**
