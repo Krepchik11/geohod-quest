@@ -25,11 +25,18 @@ vi.mock('../../../lib/identity', () => ({ anonymousPlayerId: () => 'dev:anon-1' 
 import SocialAuthButtons from '../SocialAuthButtons';
 
 /** Resolve the `telegram-login.js` <script> loadScript injects by firing its load
- *  event, after installing the `Telegram.Login` global the popup flow needs. */
-function readyTelegram(auth: (opts: unknown, cb: (r: { id_token?: string }) => void) => void) {
+ *  event, after installing the `Telegram.Login` global the popup flow needs.
+ *  The component injects the tag asynchronously after the providers fetch, so
+ *  WAIT for it — dispatching against a not-yet-injected script is a silent
+ *  no-op and the button never enables (the CI flake this replaces). */
+async function readyTelegram(auth: (opts: unknown, cb: (r: { id_token?: string }) => void) => void) {
   (window as unknown as { Telegram?: unknown }).Telegram = { Login: { auth } };
-  const script = document.querySelector<HTMLScriptElement>('script[src*="telegram-login.js"]');
-  script?.dispatchEvent(new Event('load'));
+  const script = await waitFor(() => {
+    const s = document.querySelector<HTMLScriptElement>('script[src*="telegram-login.js"]');
+    if (!s) throw new Error('telegram script not injected yet');
+    return s;
+  });
+  script.dispatchEvent(new Event('load'));
 }
 
 beforeEach(() => {
@@ -65,7 +72,7 @@ describe('SocialAuthButtons', () => {
 
     // Library loads → button enables. The popup callback yields the OIDC id_token.
     const auth = vi.fn((_opts, cb: (r: { id_token?: string }) => void) => cb({ id_token: 'JWT' }));
-    readyTelegram(auth);
+    await readyTelegram(auth);
     await waitFor(() => expect(button.disabled).toBe(false));
 
     fireEvent.click(button);
@@ -98,7 +105,7 @@ describe('SocialAuthButtons', () => {
       if (!b) throw new Error('telegram button not mounted');
       return b;
     });
-    readyTelegram((_opts, cb) => cb({ id_token: 'JWT' }));
+    await readyTelegram((_opts, cb) => cb({ id_token: 'JWT' }));
     await waitFor(() => expect(button.disabled).toBe(false));
 
     fireEvent.click(button);
