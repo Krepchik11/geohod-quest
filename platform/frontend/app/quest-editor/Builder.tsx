@@ -26,6 +26,7 @@ import {
   type Gates,
   type GateField,
 } from '../../lib/constructor-model';
+import { COVER_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
@@ -188,6 +189,15 @@ export function QuestSettings({ quest, onMeta, highlight }: {
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
       </WspBlock>
+      <WspBlock title="Обложка" gateField="cover" aside="первый экран и карточка магазина">
+        <ImageZone
+          value={{ url: m.cover, origin: m.coverOrigin }}
+          label="обложка"
+          width={240}
+          maxBytes={COVER_IMAGE_MAX_BYTES}
+          onChange={(v) => set({ cover: v.url, coverOrigin: v.origin })}
+        />
+      </WspBlock>
       <WspBlock title="Атрибуты" aside="фильтры списка квестов">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
@@ -281,9 +291,6 @@ export function QuestSettings({ quest, onMeta, highlight }: {
             Принимается как правильный ответ на любом вопросе любого шага этого квеста — не нужно добавлять его в каждый список ответов. Оставьте пустым, чтобы выключить.
           </p>
         </div>
-      </WspBlock>
-      <WspBlock title="Обложка" gateField="cover" aside="первый экран и карточка магазина">
-        <ImageZone src={m.cover} label="обложка" hint="PNG/JPG — будет ужата до 1280px" width={240} onChange={(cover) => set({ cover })} />
       </WspBlock>
     </div>
   );
