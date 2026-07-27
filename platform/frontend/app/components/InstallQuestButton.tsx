@@ -29,9 +29,9 @@ export default function InstallQuestButton({ cover }: { cover: string | null }) 
       <p className="qp-install-note">Появится на экране «Домой» с названием и обложкой квеста и откроется сразу в игру.</p>
 
       {sheetOpen && (
-        <div className="psheet__ovl" onClick={() => setSheetOpen(false)}>
-          <div className="psheet qp-ios-sheet" role="dialog" aria-label="Установка квеста" onClick={(e) => e.stopPropagation()}>
-            <span className="psheet__grabber" aria-hidden />
+        <div className="sheet__ovl" onClick={() => setSheetOpen(false)}>
+          <div className="sheet qp-ios-sheet" role="dialog" aria-label="Установка квеста" onClick={(e) => e.stopPropagation()}>
+            <span className="sheet__grip" aria-hidden />
             <div className="qp-ios-sheet__head">
               {cover && <span className="qp-ios-sheet__thumb" style={{ backgroundImage: `url(${cover})` }} />}
               <b>Квест — на экран «Домой»</b>

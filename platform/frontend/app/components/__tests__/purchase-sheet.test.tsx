@@ -74,8 +74,8 @@ describe('PurchaseSheet', () => {
     const { container } = render(
       <PurchaseSheet quest={QUEST} onClose={() => {}} onPurchased={() => {}} />,
     );
-    expect(container.querySelector('.psheet__ovl')).toBeNull();
-    const overlay = document.body.querySelector('.psheet__ovl');
+    expect(container.querySelector('.sheet__ovl')).toBeNull();
+    const overlay = document.body.querySelector('.sheet__ovl');
     expect(overlay).toBeTruthy();
     expect(overlay!.parentElement).toBe(document.body);
   });

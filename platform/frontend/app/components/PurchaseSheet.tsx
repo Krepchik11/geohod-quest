@@ -176,9 +176,9 @@ export default function PurchaseSheet({
   // transform would otherwise become the containing block for this fixed
   // overlay (clipping the sheet into the card and flickering with hover).
   return createPortal(
-    <div className="psheet__ovl" onClick={busy ? undefined : onClose}>
-      <div className="psheet" role="dialog" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
-        <span className="psheet__grabber" aria-hidden />
+    <div className="sheet__ovl" onClick={busy ? undefined : onClose}>
+      <div className="sheet" role="dialog" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
+        <span className="sheet__grip" aria-hidden />
         <h3 className="psheet__title">Подтвердите покупку</h3>
 
         <div className="psheet__quest">

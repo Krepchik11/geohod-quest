@@ -4,35 +4,22 @@ import React from 'react';
 import { AGE_TARGET_OPTIONS, COMPLEXITY_OPTIONS } from '../../lib/constructor-model';
 
 /**
- * ONE quest filter bar for every quest list (constructor dashboard and the
- * store page): Поиск + optional Статус + Сложность + Возраст + Тег. The
- * options for the closed sets come from lib/constructor-model (single source
- * of truth); the tag list is whatever exists in the caller's quests. Purely
- * presentational — the caller owns the state and the filtering predicate
- * (each list filters different extra fields), while `matchesAttrs` keeps the
- * shared attribute predicate in one place.
+ * The CONSTRUCTOR dashboard filter bar: Поиск + Статус + Сложность + Возраст +
+ * Тег, all expanded and single-select — a workspace list where the fields are
+ * always visible. The store has its own toolbar (components/StoreToolbar): the
+ * two lists share their data rules (lib/quest-filters), never their chrome.
+ *
+ * The options for the closed sets come from lib/constructor-model (single
+ * source of truth); the tag list is whatever exists in the caller's quests.
+ * Purely presentational — the caller owns the state and the predicate.
  */
 
 export interface QuestFiltersValue {
   search: string;
-  /** Present only where a lifecycle exists (constructor). */
-  status?: string;
+  status: string;
   complexity: string;
   age: string;
   tag: string;
-}
-
-/** The attribute part of the predicate, shared by every quest list. `null`
- *  attributes (legacy/direct publishes) match only the «any» filter. */
-export function matchesAttrs(
-  f: Pick<QuestFiltersValue, 'complexity' | 'age' | 'tag'>,
-  a: { complexity: string | null; age_target: string | null; tags: string[] },
-): boolean {
-  return (
-    (f.complexity === '' || a.complexity === f.complexity) &&
-    (f.age === '' || a.age_target === f.age) &&
-    (f.tag === '' || a.tags.includes(f.tag))
-  );
 }
 
 const ChevronDown = () => (
@@ -44,15 +31,13 @@ export default function QuestFilters({
   onChange,
   tags,
   statusOptions,
-  searchPlaceholder = 'Название…',
 }: {
   value: QuestFiltersValue;
   onChange: (next: QuestFiltersValue) => void;
   /** Tags that actually exist across the caller's quests (sorted). */
   tags: string[];
-  /** When set, renders the Статус select with these options (first = «all»). */
-  statusOptions?: string[];
-  searchPlaceholder?: string;
+  /** Статус options; the first one is «all». */
+  statusOptions: string[];
 }) {
   const set = <K extends keyof QuestFiltersValue>(key: K, v: QuestFiltersValue[K]) =>
     onChange({ ...value, [key]: v });
@@ -68,28 +53,26 @@ export default function QuestFilters({
             className="qcd-input"
             value={value.search}
             onChange={(e) => set('search', e.target.value)}
-            placeholder={searchPlaceholder}
+            placeholder="Название или автор…"
           />
         </div>
       </div>
-      {statusOptions && (
-        <div className="qcd-field">
-          <label htmlFor="qf-status">Статус</label>
-          <div className="qcd-field__wrap">
-            <select
-              id="qf-status"
-              className="qcd-select"
-              value={value.status ?? statusOptions[0]}
-              onChange={(e) => set('status', e.target.value)}
-            >
-              {statusOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
-            <span className="qcd-chevron"><ChevronDown /></span>
-          </div>
+      <div className="qcd-field">
+        <label htmlFor="qf-status">Статус</label>
+        <div className="qcd-field__wrap">
+          <select
+            id="qf-status"
+            className="qcd-select"
+            value={value.status}
+            onChange={(e) => set('status', e.target.value)}
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          <span className="qcd-chevron"><ChevronDown /></span>
         </div>
-      )}
+      </div>
       <div className="qcd-field">
         <label htmlFor="qf-complexity">Сложность</label>
         <div className="qcd-field__wrap">
