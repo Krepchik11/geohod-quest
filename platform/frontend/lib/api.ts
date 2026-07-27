@@ -238,11 +238,11 @@ export interface ProductPageWire extends PublishedQuestWire {
   start_point: StartPointWire | null;
 }
 
-/** The quest start point (first navigator point of the published snapshot). */
+/** The quest start point frozen at publish. Coordinates only — the button
+ *  always reads «Место старта», never an address. */
 export interface StartPointWire {
   lat: number;
   lng: number;
-  label: string | null;
 }
 
 /** §11: one public review (author first name only, month-precision date). */

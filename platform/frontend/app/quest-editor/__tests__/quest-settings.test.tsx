@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QuestSettings } from '../Builder';
-import { newQuest } from '../../../lib/constructor-model';
+import { BAD_START_COORDS_TEXT, newQuest } from '../../../lib/constructor-model';
 
 /**
  * Настройки квеста — attribute editing. Rules under test:
@@ -62,6 +62,26 @@ describe('QuestSettings attributes', () => {
     const { onMeta } = setup({ tags: ['хоррор', 'юмор'] });
     fireEvent.click(screen.getByRole('button', { name: 'Убрать тег «хоррор»' }));
     expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['юмор'] }));
+  });
+});
+
+describe('QuestSettings start point', () => {
+  it('shows the stored coordinates and patches meta on change', () => {
+    const { onMeta } = setup({ startCoords: '45.2651, 19.8656' });
+    const input = screen.getByLabelText('Координаты места старта') as HTMLInputElement;
+    expect(input.value).toBe('45.2651, 19.8656');
+    fireEvent.change(input, { target: { value: '44.8176, 20.4569' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ startCoords: '44.8176, 20.4569' }));
+  });
+
+  it('flags unparseable coordinates inline with the publish gate’s own wording', () => {
+    setup({ startCoords: '45.2651 19.8656' });
+    expect(screen.getByText(BAD_START_COORDS_TEXT, { exact: false })).toBeTruthy();
+  });
+
+  it('says nothing when the field is blank or valid', () => {
+    setup({ startCoords: '' });
+    expect(screen.queryByText(BAD_START_COORDS_TEXT, { exact: false })).toBeNull();
   });
 });
 

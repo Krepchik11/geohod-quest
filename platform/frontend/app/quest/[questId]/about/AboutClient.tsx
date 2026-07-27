@@ -247,8 +247,9 @@ export default function AboutClient({ questId }: { questId: string }) {
             {productChips(p).map((c) => <span key={c}>{c}</span>)}
           </div>
 
-          {/* «Место старта» — first map point of the published quest; opens
-              system maps in a new tab. Hidden when the quest has no coordinates. */}
+          {/* «Место старта» — the quest's start point set by the author in the
+              constructor; opens system maps in a new tab. Hidden when the quest
+              has no coordinates. The label is fixed: never an address. */}
           {p.start_point && (
             <a
               className="btn btn--secondary btn--md qp-startpoint"
@@ -257,7 +258,7 @@ export default function AboutClient({ questId }: { questId: string }) {
               rel="noopener noreferrer"
             >
               <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} />
-              Место старта{p.start_point.label ? ` — ${p.start_point.label}` : ''}
+              Место старта
             </a>
           )}
 

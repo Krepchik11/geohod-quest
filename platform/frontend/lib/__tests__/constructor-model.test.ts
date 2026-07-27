@@ -190,6 +190,29 @@ describe('computeGates', () => {
     expect(computeGates(q).errors).toEqual([]);
   });
 
+  it('warns when the quest has no start point (the store button disappears)', () => {
+    const g = computeGates(quest());
+    expect(g.errors).toEqual([]);
+    expect(g.warnings.some((w) => w.field === 'start')).toBe(true);
+  });
+
+  it('errors on unparseable start coordinates — never silently drops what the author typed', () => {
+    const q = quest();
+    q.meta.startCoords = '45.2651 19.8656';
+    const g = computeGates(q);
+    expect(g.errors.some((e) => e.field === 'start' && e.pageId === null)).toBe(true);
+    // The blank-field warning is gone — the author DID set something.
+    expect(g.warnings.some((w) => w.field === 'start')).toBe(false);
+  });
+
+  it('valid start coordinates gate nothing', () => {
+    const q = quest();
+    q.meta.startCoords = '45.2651, 19.8656';
+    const g = computeGates(q);
+    expect(g.errors.some((e) => e.field === 'start')).toBe(false);
+    expect(g.warnings.some((w) => w.field === 'start')).toBe(false);
+  });
+
   it('warns (not errors) on an answer task without any hint content', () => {
     const q = quest();
     const s = newStep('task_answer');
@@ -431,6 +454,20 @@ describe('serializeDraft', () => {
     expect(snap.duration).toBe('1.5 часа');
   });
 
+  it('freezes the start point in — always present, null when the author set none', () => {
+    // The key is ALWAYS written so the store can tell «author set none» (null)
+    // from «snapshot predates the field» (key absent → legacy navigator fallback).
+    expect(serializeDraft(quest()).start_point).toBeNull();
+
+    const bad = quest();
+    bad.meta.startCoords = 'мусор';
+    expect(serializeDraft(bad).start_point).toBeNull();
+
+    const q = quest();
+    q.meta.startCoords = ' 45.2651, 19.8656 ';
+    expect(serializeDraft(q).start_point).toEqual({ lat: 45.2651, lng: 19.8656 });
+  });
+
   it('freezes the quest-wide universal answer in (trimmed; blank = omitted)', () => {
     expect(serializeDraft(quest()).universal_answer).toBeUndefined();
 
@@ -555,6 +592,39 @@ describe('migrateQuest (legacy draft bodies)', () => {
   it('normalizes a missing universalAnswer to the empty string (pre-feature bodies)', () => {
     const q = migrateQuest(legacyBody(), 'q-old')!;
     expect(q.meta.universalAnswer).toBe('');
+  });
+
+  it('adopts the first step point as the start point (pre-feature bodies keep their store button)', () => {
+    // Before the quest-level field the store derived «Место старта» from the first
+    // navigator. Carrying that value into the new field is what keeps a republish
+    // from silently dropping the button.
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    delete body.meta.startCoords;
+    expect(migrateQuest(body, 'q-old')!.meta.startCoords).toBe('45.2551, 19.8451');
+  });
+
+  it('leaves startCoords empty when the legacy quest had no point at all', () => {
+    const body = legacyBody() as { meta: Record<string, unknown>; steps: Array<{ nav: unknown }> };
+    delete body.meta.startCoords;
+    body.steps[1].nav = { on: false, coords: '' };
+    expect(migrateQuest(body, 'q-old')!.meta.startCoords).toBe('');
+  });
+
+  it('backfills the point the STORE showed, skipping addresses that never became navigators', () => {
+    // A «Продолжить» page keeps its address in the editor but publishes no
+    // navigator (see stepToGameStep), so the store's button pointed at the NEXT
+    // page. Backfilling off the authoring shape would silently move it.
+    const body = legacyBody() as { meta: Record<string, unknown>; steps: CtorQuest['steps'] };
+    delete body.meta.startCoords;
+    const cont = { ...newStep('continue'), address: { on: true, name: 'Мост', distance: '', coords: '10.5, 20.5' } };
+    body.steps = [body.steps[0], cont, ...body.steps.slice(1)];
+    expect(migrateQuest(body, 'q-old')!.meta.startCoords).toBe('45.2551, 19.8451');
+  });
+
+  it('never re-derives the start point once the body carries the field (blank = author cleared it)', () => {
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    body.meta.startCoords = '';
+    expect(migrateQuest(body, 'q-old')!.meta.startCoords).toBe('');
   });
 
   it('collapses the legacy role images to the single image (task first)', () => {

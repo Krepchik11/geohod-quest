@@ -32,7 +32,7 @@ GameStep {
   supporting: {
     gift?: { coins: number, narrative_text: string },
     hint?: { cost_coins: number, reveal_text?: string },  // content = reveal_text and/or media.images.hint; present only when enabled and it has content
-    navigator?: { lat, lng, label? },                     // system-maps handoff only (the player's address line and the store's «Место старта» open it)
+    navigator?: { lat, lng, label? },                     // system-maps handoff only (the player's address line opens it)
     terminal?: boolean, is_start?: boolean
   }
 }
@@ -165,6 +165,12 @@ Frame: 360×740 design canvas; media block uses `flex: 0 1 auto` so CTAs never c
   completed list with own ratings.
 
 ## Constructor
+- **Quest settings** (the store card block): name, city, duration, price, store description,
+  players bonus, cover — plus a single Google-Maps-format **start-point coords field**. It is
+  the sole source of the store page's «Место старта» button, freezes into the snapshot as
+  `start_point` (always written; `null` = the author set none), and carries no title: the
+  button always reads exactly «Место старта». Step navigators never feed it — a snapshot
+  without the key at all is pre-field and falls back to the first navigator for compatibility.
 - **Picker**: default — grid of 7 cards, each preview rendered by REAL player components
   (scaled live frames, never screenshots); alternative list variant with preset descriptions.
 - **Pages screen**: sortable rows (grip, №, name, template chip, per-page gate status ✓/✗),
@@ -182,14 +188,16 @@ Frame: 360×740 design canvas; media block uses `flex: 0 1 auto` so CTAs never c
   changes reach players only via next published version.
 - **Publish gates** (errors block, warnings don't): structure (start first, terminal exists);
   task image present on all task templates; non-empty acceptable lists; address enabled ⇒
-  name and coordinates set; bundle size estimate vs 5 MB target (warning); dry-run serialize passes.
+  name and coordinates set; start-point coords parse when filled in (error) and are set at all
+  (warning — a blank field just hides the store button); bundle size estimate vs 5 MB target
+  (warning); dry-run serialize passes.
 - **Publish modal**: creates immutable version N; freezes texts/images/answers/amounts; new
   attempts start on N, active attempts keep theirs; no rollback — fix forward.
 
 ## Bundle Contents
 Ordered GameSteps with all content + comic role images + plain acceptable lists + frozen
-supporting values (gift coins, hint costs, navigator lat/lng/label) + inline video/audio refs +
-version/snapshot id + integrity info. No routing data (system maps handoff). Target ~5 MB.
+supporting values (gift coins, hint costs, navigator lat/lng/label) + the quest-level
+`start_point` + inline video/audio refs + version/snapshot id + integrity info. No routing data (system maps handoff). Target ~5 MB.
 
 ## Asset Hygiene (learned, enforced)
 - Figma-extracted SVGs may carry geometry outside the declared viewBox (stroke→fill ±overshoot).
