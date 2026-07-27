@@ -120,7 +120,10 @@ export function PublishPanel({ quest, gates, justPublished, publishError, publis
                 </div>
               );
             }
-            const no = pageNo(g.pageId) ?? (g.field === 'cover' ? 'Настройки' : 'Структура');
+            // Один источник маршрутизации, тот же, что у onFix: есть страница —
+            // ведём на неё, нет — в настройки (кнопка рендерится только когда
+            // есть куда вести: pageId или field).
+            const no = pageNo(g.pageId) ?? 'Настройки';
             return (
               <button
                 type="button"

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { cropToStepImage, decodeImageFile, fileToImageBlob, type DecodedImage } from '../../lib/image-file';
 import { clampCropRect, largestAspectRect, matchesAspect, type CropRect } from '../../lib/image-crop';
 import { api } from '../../lib/api';
+import type { GateField } from '../../lib/constructor-model';
 
 /** Shared workspace controls (design/ctor2/page-editor.jsx primitives). */
 
@@ -24,12 +25,39 @@ export function WspToggle({ on, onClick, label, ariaLabel, disabled }: { on: boo
   );
 }
 
-export function WspBlock({ title, aside, gateField, children }: { title: string; aside?: string; gateField?: string; children: React.ReactNode }) {
+export function WspBlock({ title, aside, gateField, children }: { title: string; aside?: string; gateField?: GateField; children: React.ReactNode }) {
   return (
     <div className="ed-block" data-gate-field={gateField}>
       <h4>{title}{aside ? <span className="opt">{aside}</span> : null}</h4>
       {children}
     </div>
+  );
+}
+
+/**
+ * §9.2 «Исправить →»: доскроллить до элемента с этим gateField и мигнуть им.
+ * Якорь — любой `data-gate-field` (блок {@link WspBlock} или отдельный контрол),
+ * запрос по DOM, а не по рефам: объявление якоря остаётся при самой разметке.
+ * Хук общий, иначе панель, где его забыли, молча не подсвечивает ничего.
+ */
+export function useGateHighlight(highlight: { field?: GateField } | null | undefined): void {
+  useEffect(() => {
+    if (!highlight?.field) return undefined;
+    const el = document.querySelector(`[data-gate-field="${highlight.field}"]`);
+    if (!(el instanceof HTMLElement)) return undefined;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('gate-flash');
+    const t = setTimeout(() => el.classList.remove('gate-flash'), 2400);
+    return () => clearTimeout(t);
+  }, [highlight]);
+}
+
+/** Красная строка «публикация будет заблокирована» под проблемным контролом. */
+export function GateNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>
+      ✗ {children} — публикация будет заблокирована.
+    </p>
   );
 }
 
