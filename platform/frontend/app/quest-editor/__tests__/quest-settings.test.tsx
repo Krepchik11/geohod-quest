@@ -20,6 +20,17 @@ function setup(metaPatch: Parameters<typeof newQuest>[0] = {}) {
   return { quest, onMeta };
 }
 
+describe('QuestSettings block order', () => {
+  it('puts the cover right after the quest card — the two describe the same store listing', () => {
+    setup();
+    const titles = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent ?? '');
+    const card = titles.findIndex((t) => t.startsWith('Карточка квеста'));
+    const cover = titles.findIndex((t) => t.startsWith('Обложка'));
+    expect(card).toBeGreaterThanOrEqual(0);
+    expect(cover).toBe(card + 1);
+  });
+});
+
 describe('QuestSettings attributes', () => {
   it('shows stored complexity/age and patches meta on change', () => {
     const { onMeta } = setup({ complexity: 'high', ageTarget: '18plus' });

@@ -1,26 +1,27 @@
 /**
- * Image file → downscaled JPEG Blob for upload to the media store (Cloudflare R2).
- * Downscales through a canvas (≤1280px, JPEG-82) so uploads stay small; the
- * constructor stores the returned R2 URL, not the bytes. Replaces the design's
- * «клик ставит демо-файл» mock.
+ * The browser half of the 4:3 quest-image pipeline (the geometry lives in
+ * image-crop.ts). Every constructor image is authored the same way:
  *
- * Step images have a stricter contract (4:3, ≤100 KB): decodeImageFile exposes
- * the decoded bitmap so the editor can run the crop UI, and cropToStepImage
- * crops + compresses until the byte budget from lib/image-crop is met.
+ *   file → fileToOriginImage (downscaled, UNCROPPED source, uploaded once)
+ *        → crop rect chosen in the source's own pixel space
+ *        → cropToQuestImage (4:3, ≤ the role's byte budget, uploaded)
+ *
+ * Keeping the source lets the author reopen the crop later — decodeImageUrl
+ * brings it back — instead of re-uploading the file to move the frame.
  */
-import { STEP_IMAGE_ASPECT, STEP_IMAGE_MAX_BYTES, type CropRect } from './image-crop';
+import { QUEST_IMAGE_ASPECT, byteBudgetLabel, type CropRect } from './image-crop';
 
 const MAX_DIMENSION = 1280;
 const JPEG_QUALITY = 0.82;
 /** Hard cap when canvas downscale is unavailable (keeps localStorage usable). */
 const RAW_LIMIT_BYTES = 2.5 * 1024 * 1024;
 
-function readAsDataUrl(file: File): Promise<string> {
+function readAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -37,83 +38,99 @@ export interface DecodedImage {
   img: HTMLImageElement;
   width: number;
   height: number;
-  dataUrl: string;
+  /** What an `<img>` in the crop editor can render (a data URL). */
+  src: string;
 }
 
-/** Decode an image file to a bitmap the crop editor can display and measure. */
-export async function decodeImageFile(file: File): Promise<DecodedImage> {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('Нужно изображение PNG или JPG');
-  }
-  const dataUrl = await readAsDataUrl(file);
-  const img = await loadImage(dataUrl);
+async function decodeBlob(blob: Blob): Promise<DecodedImage> {
+  const src = await readAsDataUrl(blob);
+  const img = await loadImage(src);
   if (!img.naturalWidth || !img.naturalHeight) {
     throw new Error('Файл не похож на изображение');
   }
-  return { img, width: img.naturalWidth, height: img.naturalHeight, dataUrl };
+  return { img, width: img.naturalWidth, height: img.naturalHeight, src };
 }
 
-/** Longest edge of the encoded 4:3 step image — plenty for a phone screen. */
-const STEP_IMAGE_MAX_WIDTH = 1200;
-const STEP_IMAGE_MIN_WIDTH = 320;
+/**
+ * Bring a stored source back for re-cropping. Fetched (not assigned to
+ * `img.src`) on purpose: a data URL is same-origin, so the canvas never gets
+ * tainted by a cross-origin media host — and no crossOrigin/cache interplay can
+ * make the crop fail after the same URL was displayed as a plain preview.
+ */
+export async function decodeImageUrl(url: string): Promise<DecodedImage> {
+  const res = await fetch(url, { mode: 'cors' });
+  if (!res.ok) throw new Error('Не удалось загрузить исходник изображения');
+  return decodeBlob(await res.blob());
+}
 
 /**
- * Crop the source to `rect` (a 4:3 region) and compress to ≤100 KB: first walk
- * the JPEG quality down, then shrink dimensions. Terminates: dimensions fall
- * geometrically and a 320px-wide JPEG at q0.5 is far under the budget.
+ * The uncropped source kept next to a cropped image: downscaled for upload and
+ * decoded, so every crop rect lives in the SAME pixel space that a later
+ * re-crop will see. A file already within bounds is uploaded as-is and reuses
+ * the decode we just did — the common case costs exactly one decode.
  */
-export async function cropToStepImage(img: HTMLImageElement, rect: CropRect): Promise<Blob> {
-  let width = Math.min(Math.round(rect.width), STEP_IMAGE_MAX_WIDTH);
+export async function fileToOriginImage(file: File): Promise<{ blob: Blob; decoded: DecodedImage }> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Нужно изображение PNG или JPG');
+  }
+  const decoded = await decodeBlob(file);
+  const scale = Math.min(1, MAX_DIMENSION / Math.max(decoded.width, decoded.height));
+  if (scale === 1 && file.size <= RAW_LIMIT_BYTES) return { blob: file, decoded };
+  const blob = await downscale(decoded, scale);
+  return { blob, decoded: await decodeBlob(blob) };
+}
+
+/** Re-encode at `scale` (≤1) as JPEG — the source upload, no crop applied. */
+async function downscale(decoded: DecodedImage, scale: number): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(decoded.width * scale));
+  canvas.height = Math.max(1, Math.round(decoded.height * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Обрезка недоступна в этом браузере (нет canvas)');
+  ctx.drawImage(decoded.img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY),
+  );
+  if (!blob) throw new Error('Не удалось сжать изображение');
+  return blob;
+}
+
+/** Longest edge of the encoded 4:3 image — plenty for a phone screen. */
+const QUEST_IMAGE_MAX_WIDTH = 1200;
+const QUEST_IMAGE_MIN_WIDTH = 320;
+
+/**
+ * Crop the source to `rect` (a 4:3 region) and compress to ≤`maxBytes`: first
+ * walk the JPEG quality down, then shrink dimensions. Terminates: dimensions
+ * fall geometrically and a 320px-wide JPEG at q0.5 is far under any budget.
+ */
+export async function cropToQuestImage(
+  img: HTMLImageElement,
+  rect: CropRect,
+  maxBytes: number,
+): Promise<Blob> {
+  let width = Math.min(Math.round(rect.width), QUEST_IMAGE_MAX_WIDTH);
+  // One canvas for every shrink step — resizing it is a resize, not a new surface.
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Обрезка недоступна в этом браузере (нет canvas)');
   for (;;) {
-    const canvas = document.createElement('canvas');
     canvas.width = width;
-    canvas.height = Math.round(width / STEP_IMAGE_ASPECT);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Обрезка недоступна в этом браузере (нет canvas)');
+    canvas.height = Math.round(width / QUEST_IMAGE_ASPECT);
     // JPEG has no alpha — flatten transparent PNGs onto white, not black.
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+    for (const quality of [JPEG_QUALITY, 0.72, 0.62, 0.52]) {
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, 'image/jpeg', quality),
       );
       if (!blob) throw new Error('Не удалось сжать изображение');
-      if (blob.size <= STEP_IMAGE_MAX_BYTES) return blob;
+      if (blob.size <= maxBytes) return blob;
     }
-    if (width <= STEP_IMAGE_MIN_WIDTH) {
-      throw new Error('Не удалось сжать изображение до 100 КБ');
+    if (width <= QUEST_IMAGE_MIN_WIDTH) {
+      throw new Error(`Не удалось сжать изображение до ${byteBudgetLabel(maxBytes)}`);
     }
-    width = Math.max(STEP_IMAGE_MIN_WIDTH, Math.round(width * 0.75));
-  }
-}
-
-export async function fileToImageBlob(file: File): Promise<Blob> {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('Нужно изображение PNG или JPG');
-  }
-  const raw = await readAsDataUrl(file);
-  try {
-    const img = await loadImage(raw);
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight));
-    // Already within bounds: upload the original file (a Blob) untouched.
-    if (scale === 1 && file.size <= RAW_LIMIT_BYTES) return file;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('canvas unavailable');
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY),
-    );
-    if (!blob) throw new Error('canvas toBlob failed');
-    return blob;
-  } catch {
-    // Canvas unavailable / decode failed: fall back to the original file if small enough.
-    if (file.size > RAW_LIMIT_BYTES) {
-      throw new Error('Изображение больше 2,5 МБ — сожмите его перед загрузкой');
-    }
-    return file;
+    width = Math.max(QUEST_IMAGE_MIN_WIDTH, Math.round(width * 0.75));
   }
 }

@@ -5,17 +5,23 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  STEP_IMAGE_ASPECT,
+  COVER_IMAGE_MAX_BYTES,
+  QUEST_IMAGE_ASPECT,
   STEP_IMAGE_MAX_BYTES,
   clampCropRect,
   largestAspectRect,
   matchesAspect,
+  startCropRect,
 } from '../image-crop';
 
 describe('constants', () => {
-  it('locks the contract: 4:3 and 100 KB', () => {
-    expect(STEP_IMAGE_ASPECT).toBeCloseTo(4 / 3);
+  it('locks the contract: one 4:3 aspect for every quest image, 100 KB per page image', () => {
+    expect(QUEST_IMAGE_ASPECT).toBeCloseTo(4 / 3);
     expect(STEP_IMAGE_MAX_BYTES).toBe(100 * 1024);
+  });
+
+  it('gives the cover its own (larger) byte budget — it is rendered full-bleed', () => {
+    expect(COVER_IMAGE_MAX_BYTES).toBeGreaterThan(STEP_IMAGE_MAX_BYTES);
   });
 });
 
@@ -64,6 +70,32 @@ describe('largestAspectRect', () => {
       expect(r.y + r.height).toBeLessThanOrEqual(h);
       expect(r.width / r.height).toBeCloseTo(4 / 3, 1);
     }
+  });
+});
+
+describe('startCropRect', () => {
+  it('no saved rect: the largest centered 4:3 rect', () => {
+    expect(startCropRect(1000, 600, null)).toEqual(largestAspectRect(1000, 600));
+  });
+
+  it('reopens on the saved rect — the author sees the crop they chose', () => {
+    const saved = { x: 200, y: 0, width: 800, height: 600 };
+    expect(startCropRect(1000, 600, saved)).toEqual(saved);
+  });
+
+  it('clamps a saved rect that hangs outside the source', () => {
+    expect(startCropRect(1000, 600, { x: 900, y: 0, width: 800, height: 600 }))
+      .toEqual({ x: 200, y: 0, width: 800, height: 600 });
+  });
+
+  it('discards a saved rect that cannot belong to this source', () => {
+    // Bigger than the source, wrong aspect, or degenerate — fall back, never crash.
+    expect(startCropRect(1000, 600, { x: 0, y: 0, width: 4000, height: 3000 }))
+      .toEqual(largestAspectRect(1000, 600));
+    expect(startCropRect(1000, 600, { x: 0, y: 0, width: 1000, height: 600 }))
+      .toEqual(largestAspectRect(1000, 600));
+    expect(startCropRect(1000, 600, { x: 0, y: 0, width: 0, height: 0 }))
+      .toEqual(largestAspectRect(1000, 600));
   });
 });
 

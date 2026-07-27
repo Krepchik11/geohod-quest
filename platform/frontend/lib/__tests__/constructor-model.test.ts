@@ -41,7 +41,7 @@ describe('templates and presets', () => {
     expect(s.prompt).toBe('Введите ответ');
     expect(s.gift).toEqual({ narrative: '' });
     // The hint toggle defaults ON; it sells once the author adds text or an image.
-    expect(s.hint).toEqual({ on: true, cost: 5, text: '', image: null });
+    expect(s.hint).toEqual({ on: true, cost: 5, text: '', image: null, imageOrigin: null });
   });
 
   it('every new step has a single empty image slot', () => {
@@ -218,7 +218,7 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { on: true, cost: 5, text: '', image: null };
+    s.hint = { ...s.hint, on: true, cost: 5, text: '', image: null };
     q.steps = [q.steps[0], s, q.steps[1]];
     const g = computeGates(q);
     expect(g.errors).toEqual([]);
@@ -230,7 +230,7 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { on: false, cost: 5, text: '', image: null };
+    s.hint = { ...s.hint, on: false, cost: 5, text: '', image: null };
     q.steps = [q.steps[0], s, q.steps[1]];
     expect(computeGates(q).warnings.some((w) => w.text.includes('подсказк'))).toBe(false);
   });
@@ -240,7 +240,7 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { ...s.hint, on: true, cost: 5, text: '', image: '/hint.jpg' };
     q.steps = [q.steps[0], s, q.steps[1]];
     expect(computeGates(q).warnings.some((w) => w.text.includes('подсказк'))).toBe(false);
   });
@@ -250,10 +250,10 @@ describe('computeGates', () => {
     const s = newStep('task_answer');
     s.image = '/img.jpg';
     s.acceptable = ['1730'];
-    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { ...s.hint, on: true, cost: 5, text: '', image: '/hint.jpg' };
     q.steps = [q.steps[0], s, q.steps[1]];
     const withHintImage = computeGates(q).imgs;
-    s.hint = { on: true, cost: 5, text: 'текст', image: null };
+    s.hint = { ...s.hint, on: true, cost: 5, text: 'текст', image: null };
     expect(withHintImage).toBe(computeGates(q).imgs + 1);
   });
 
@@ -290,7 +290,7 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
   it('task_answer: trims and drops blank answers; hint emitted when it has text', () => {
     const s = newStep('task_answer');
     s.acceptable = [' 1730 ', '', 'в 1730'];
-    s.hint = { on: true, cost: 7, text: 'смотрите выше', image: null };
+    s.hint = { ...s.hint, on: true, cost: 7, text: 'смотрите выше', image: null };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.completion.acceptable).toEqual(['1730', 'в 1730']);
     expect(g.supporting?.hint).toEqual({ cost_coins: 7, reveal_text: 'смотрите выше' });
@@ -309,7 +309,7 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
   it('task_answer: a switched-off hint is not emitted even with content', () => {
     const s = newStep('task_answer');
     s.acceptable = ['1730'];
-    s.hint = { on: false, cost: 5, text: 'смотрите выше', image: '/hint.jpg' };
+    s.hint = { ...s.hint, on: false, cost: 5, text: 'смотрите выше', image: '/hint.jpg' };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.supporting?.hint).toBeUndefined();
     expect(g.media.hint).toBeNull();
@@ -318,7 +318,7 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
   it('task_answer: the hint image rides the media.hint role (image-only hint allowed)', () => {
     const s = newStep('task_answer');
     s.acceptable = ['1730'];
-    s.hint = { on: true, cost: 5, text: '', image: '/hint.jpg' };
+    s.hint = { ...s.hint, on: true, cost: 5, text: '', image: '/hint.jpg' };
     const g = stepToGameStep(s, newQuest({}).meta);
     expect(g.supporting?.hint).toEqual({ cost_coins: 5, reveal_text: '' });
     expect(g.media.hint).toBe('/hint.jpg');
@@ -662,14 +662,31 @@ describe('migrateQuest (legacy draft bodies)', () => {
     const body = legacyBody() as { steps: Array<{ hint: unknown }> };
     body.steps[1].hint = { cost: 5, text: 'ищите выше' };
     const q = migrateQuest(body, 'q-old')!;
-    expect(q.steps[1].hint).toEqual({ on: true, cost: 5, text: 'ищите выше', image: null });
+    expect(q.steps[1].hint).toEqual({ on: true, cost: 5, text: 'ищите выше', image: null, imageOrigin: null });
   });
 
   it('preserves an explicit legacy hint toggle state (off stays off, no data loss)', () => {
     const body = legacyBody() as { steps: Array<{ hint: unknown }> };
     body.steps[1].hint = { on: false, cost: 3, text: 'черновик подсказки' };
     const q = migrateQuest(body, 'q-old')!;
-    expect(q.steps[1].hint).toEqual({ on: false, cost: 3, text: 'черновик подсказки', image: null });
+    expect(q.steps[1].hint).toEqual({ on: false, cost: 3, text: 'черновик подсказки', image: null, imageOrigin: null });
+  });
+
+  it('normalizes missing crop origins to null (bodies authored before re-cropping)', () => {
+    const q = migrateQuest(legacyBody(), 'q-old')!;
+    expect(q.meta.coverOrigin).toBeNull();
+    expect(q.steps[1].imageOrigin).toBeNull();
+    expect(q.steps[1].hint.imageOrigin).toBeNull();
+  });
+
+  it('keeps a stored crop origin and rejects a malformed one', () => {
+    const origin = { url: '/o.jpg', width: 1000, height: 600, rect: { x: 100, y: 0, width: 800, height: 600 } };
+    const body = legacyBody() as { meta: Record<string, unknown>; steps: Array<Record<string, unknown>> };
+    body.meta.coverOrigin = origin;
+    body.steps[1].imageOrigin = { url: '/o.jpg', width: 'wide', height: 600, rect: null };
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.meta.coverOrigin).toEqual(origin);
+    expect(q.steps[1].imageOrigin).toBeNull();
   });
 
   it('strips the legacy allowNote flag', () => {
