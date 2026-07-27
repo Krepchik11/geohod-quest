@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   GIFT_COINS,
   IMAGE_TEMPLATES,
@@ -13,7 +13,7 @@ import {
 } from '../../lib/constructor-model';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';
-import { ImageZone, WspBlock, WspDanger, WspToggle } from './controls';
+import { GateNote, ImageZone, WspBlock, WspDanger, WspToggle, useGateHighlight } from './controls';
 
 type StepPatch = Partial<CtorStep>;
 type Patcher = (patch: StepPatch) => void;
@@ -174,15 +174,6 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   );
 }
 
-/** Красная строка незакрытого гейта под контролом («✗ … — публикация будет заблокирована»). */
-function GateNote({ children }: { children: React.ReactNode }) {
-  return (
-    <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>
-      ✗ {children} — публикация будет заблокирована.
-    </p>
-  );
-}
-
 function AddressBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const a = step.address;
   const set = (patch: Partial<typeof a>) => onPatch({ address: { ...a, ...patch } });
@@ -283,17 +274,7 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
   onDuplicate: () => void;
   onSettings: () => void;
 }) {
-  // Scroll to and flash the offending block. DOM query (not refs) keeps the
-  // anchor declaration next to each block via WspBlock's gateField prop.
-  useEffect(() => {
-    if (!highlight?.field) return;
-    const el = document.querySelector(`[data-gate-field="${highlight.field}"]`);
-    if (!(el instanceof HTMLElement)) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.add('gate-flash');
-    const t = setTimeout(() => el.classList.remove('gate-flash'), 2400);
-    return () => clearTimeout(t);
-  }, [highlight]);
+  useGateHighlight(highlight);
 
   const tplMeta = TPL_BY_KEY[step.template];
   const set = onPatch;

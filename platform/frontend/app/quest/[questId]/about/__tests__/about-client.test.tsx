@@ -107,11 +107,11 @@ describe('AboutClient', () => {
   it('«Место старта» links to system maps at the quest start point', async () => {
     getProductMock.mockResolvedValue({
       ...PRODUCT,
-      start_point: { lat: 44.8176, lng: 20.4569, label: 'Калемегдан' },
+      start_point: { lat: 44.8176, lng: 20.4569 },
     });
     render(<AboutClient questId="q1" />);
-    await waitFor(() => expect(screen.getByRole('link', { name: /Место старта/ })).toBeTruthy());
-    const link = screen.getByRole('link', { name: /Место старта — Калемегдан/ });
+    // The label is always exactly «Место старта» — no address, no point name.
+    const link = await screen.findByRole('link', { name: 'Место старта' });
     expect(link.getAttribute('href')).toBe(
       'https://www.google.com/maps/search/?api=1&query=44.8176,20.4569',
     );

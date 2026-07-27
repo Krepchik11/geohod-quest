@@ -3,10 +3,12 @@
 import React, { useMemo, useState } from 'react';
 import {
   AGE_TARGET_OPTIONS,
+  BAD_START_COORDS_TEXT,
   COMPLEXITY_OPTIONS,
   CTOR_TEMPLATES,
   SUGGESTED_TAGS,
   TPL_BY_KEY,
+  badStartCoords,
   computeGates,
   fmtTime,
   newQuest,
@@ -27,7 +29,7 @@ import {
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
-import { ImageZone, WspBlock, WspToggle } from './controls';
+import { GateNote, ImageZone, WspBlock, WspToggle, useGateHighlight } from './controls';
 import { PageEditor } from './PageEditor';
 import { PublishPanel } from './PublishPanel';
 import { WspHeader } from './QuestList';
@@ -112,10 +114,16 @@ function TemplatePickerModal({ onClose, onPick }: { onClose: () => void; onPick:
 
 /* ---------- Настройки квеста ---------- */
 
-export function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (meta: CtorQuestMeta) => void }) {
+export function QuestSettings({ quest, onMeta, highlight }: {
+  quest: CtorQuest;
+  onMeta: (meta: CtorQuestMeta) => void;
+  /** §9.2: control to scroll to + flash after an «Исправить →» click. */
+  highlight?: { field?: GateField; nonce: number } | null;
+}) {
   const m = quest.meta;
   const set = (patch: Partial<CtorQuestMeta>) => onMeta({ ...m, ...patch });
   const [tagDraft, setTagDraft] = useState('');
+  useGateHighlight(highlight);
   const addTag = (raw: string) => {
     const tag = raw.trim();
     if (!tag || m.tags.includes(tag)) return;
@@ -146,6 +154,20 @@ export function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (me
             <label className="adm-label">Цена, ₽</label>
             <input className="input" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
           </div>
+        </div>
+        <div data-gate-field="start">
+          <label className="adm-label" htmlFor="qs-start">Координаты места старта</label>
+          <input
+            id="qs-start"
+            className="input"
+            placeholder="45.2651377918879, 19.865664144668212"
+            value={m.startCoords}
+            onChange={(e) => set({ startCoords: e.target.value })}
+          />
+          {badStartCoords(m) ? <GateNote>{BAD_START_COORDS_TEXT}</GateNote> : null}
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+            Кнопка «Место старта» на странице квеста в магазине: передаёт эти координаты в системные карты. Вставьте из Google Maps: правый клик по точке → первая строка. Пусто — кнопки не будет.
+          </p>
         </div>
         <div>
           <label className="adm-label">Описание для магазина</label>
@@ -260,7 +282,7 @@ export function QuestSettings({ quest, onMeta }: { quest: CtorQuest; onMeta: (me
           </p>
         </div>
       </WspBlock>
-      <WspBlock title="Обложка" aside="первый экран и карточка магазина">
+      <WspBlock title="Обложка" gateField="cover" aside="первый экран и карточка магазина">
         <ImageZone src={m.cover} label="обложка" hint="PNG/JPG — будет ужата до 1280px" width={240} onChange={(cover) => set({ cover })} />
       </WspBlock>
     </div>
@@ -509,7 +531,11 @@ export function BuilderScreen({
               onPublish={actions.publish}
             />
           ) : view === 'settings' ? (
-            <QuestSettings quest={quest} onMeta={(meta) => actions.onPatchQuest((q) => ({ ...q, meta }))} />
+            <QuestSettings
+              quest={quest}
+              onMeta={(meta) => actions.onPatchQuest((q) => ({ ...q, meta }))}
+              highlight={highlight && highlight.pageId === null ? highlight : null}
+            />
           ) : (
             <PageEditor
               quest={quest}

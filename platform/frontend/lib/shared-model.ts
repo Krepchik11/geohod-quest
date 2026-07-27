@@ -110,6 +110,13 @@ export interface QuestSnapshot {
    *  Optional — snapshots published without it (or before the field existed)
    *  simply have no quest-level universal answer. */
   universal_answer?: string | null;
+  /** Точка старта квеста — координаты кнопки «Место старта» в магазине,
+   *  замороженные при публикации. Конструктор пишет ключ ВСЕГДА, поэтому решает
+   *  его наличие, а не значение: null = автор точку не задал (кнопки нет),
+   *  отсутствие ключа = снапшот старее поля, и магазин берёт первый навигатор
+   *  шага. Тип общий для чтения и записи, поэтому поле опционально: старые
+   *  снапшоты его действительно не содержат. */
+  start_point?: { lat: number; lng: number } | null;
 }
 
 export interface Fact {

@@ -1232,30 +1232,35 @@ fn snapshot_chips(
 }
 
 /// The quest's start point for the product page's «Место старта» button: the
-/// first step (snapshot order) that carries a navigator point. None when the
-/// quest has no coordinates at all — the UI then hides the button.
+/// author's quest-level `start_point`, frozen at publish. PRESENCE of the key —
+/// not its value — decides who answers, since the constructor always writes it:
+/// present ⇒ the author's word is final; absent ⇒ pre-field snapshot, and the
+/// first step navigator stands in so old publishes keep their button.
 fn snapshot_start_point(snapshot: Option<&serde_json::Value>) -> Option<StartPointWire> {
-    let steps = snapshot?.get("steps")?.as_array()?;
-    steps.iter().find_map(|st| {
-        let nav = st.get("supporting")?.get("navigator")?;
-        Some(StartPointWire {
-            lat: nav.get("lat")?.as_f64()?,
-            lng: nav.get("lng")?.as_f64()?,
-            label: nav
-                .get("label")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string),
-        })
+    let snapshot = snapshot?;
+    if let Some(explicit) = snapshot.get("start_point") {
+        return point_of(explicit);
+    }
+    let steps = snapshot.get("steps")?.as_array()?;
+    steps
+        .iter()
+        .find_map(|st| point_of(st.get("supporting")?.get("navigator")?))
+}
+
+/// `{ lat, lng }` out of an untrusted JSON value; None for any other shape.
+fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
+    Some(StartPointWire {
+        lat: v.get("lat")?.as_f64()?,
+        lng: v.get("lng")?.as_f64()?,
     })
 }
 
-/// Wire shape of the quest start point (see [`snapshot_start_point`]).
+/// Wire shape of the quest start point (see [`snapshot_start_point`]). Bare
+/// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, Debug, PartialEq)]
 struct StartPointWire {
     lat: f64,
     lng: f64,
-    label: Option<String>,
 }
 
 async fn publish_quest_handler(
@@ -1863,8 +1868,7 @@ struct ProductPageWire {
     reviews: Vec<ReviewWire>,
     /// Total ratings that carry text («{M} с отзывом»).
     reviews_total: usize,
-    /// «Место старта» — the first navigator point of the published snapshot;
-    /// None (button hidden) when the quest carries no coordinates.
+    /// «Место старта» — see [`snapshot_start_point`]; None hides the button.
     start_point: Option<StartPointWire>,
 }
 
@@ -4148,7 +4152,43 @@ mod tests {
     // ---- start point («Место старта») ---------------------------------------
 
     #[test]
-    fn start_point_is_first_navigator_in_snapshot_order() {
+    fn start_point_is_the_authors_quest_level_field() {
+        let snap = json!({
+            "start_point": { "lat": 44.8176, "lng": 20.4569 },
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(
+            snapshot_start_point(Some(&snap)),
+            Some(StartPointWire {
+                lat: 44.8176,
+                lng: 20.4569,
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_null_start_point_hides_the_button_despite_navigators() {
+        let snap = json!({
+            "start_point": null,
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(snapshot_start_point(Some(&snap)), None);
+        // Same for a present-but-malformed value: honour the intent, guess nothing.
+        let broken = json!({
+            "start_point": { "lat": "45" },
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(snapshot_start_point(Some(&broken)), None);
+    }
+
+    #[test]
+    fn legacy_snapshot_without_the_field_falls_back_to_the_first_navigator() {
         let snap = json!({ "steps": [
             { "template": "start", "supporting": { "is_start": true } },
             { "template": "task_no", "supporting": { "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Церковь" } } },
@@ -4159,7 +4199,6 @@ mod tests {
             Some(StartPointWire {
                 lat: 45.2551,
                 lng: 19.8451,
-                label: Some("Церковь".to_string()),
             })
         );
     }
@@ -4181,11 +4220,7 @@ mod tests {
         ] });
         assert_eq!(
             snapshot_start_point(Some(&mixed)),
-            Some(StartPointWire {
-                lat: 1.5,
-                lng: 2.5,
-                label: None
-            })
+            Some(StartPointWire { lat: 1.5, lng: 2.5 })
         );
     }
 
@@ -6709,8 +6744,8 @@ mod tests {
         assert_eq!(v["paid_hints"], true);
         assert_eq!(
             v["start_point"],
-            json!({ "lat": 44.8176, "lng": 20.4569, "label": "Калемегдан" }),
-            "«Место старта» derives from the snapshot's first navigator"
+            json!({ "lat": 44.8176, "lng": 20.4569 }),
+            "«Место старта» falls back to the first navigator on legacy snapshots"
         );
         assert_eq!(v["rating_count"], 0);
         assert!(

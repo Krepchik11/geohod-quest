@@ -110,6 +110,9 @@ export interface CtorQuestMeta {
   /** Универсальный ответ квеста: принимается на любом шаге с вопросом.
    *  Пустая строка = выключен (в снапшот не попадает). */
   universalAnswer: string;
+  /** Точка старта квеста одной строкой (формат Google Maps, как у адреса шага):
+   *  координаты кнопки «Место старта» в магазине. Пустая строка = точки нет. */
+  startCoords: string;
 }
 
 export interface CtorVersion {
@@ -142,7 +145,7 @@ export interface GateMessage {
 }
 
 /** Controls a gate failure can point at inside the page editor / settings. */
-export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover';
+export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover' | 'start';
 
 export interface Gates {
   errors: GateMessage[];
@@ -189,6 +192,15 @@ export function parseCoords(input: string): { lat: number; lng: number } | null 
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   return { lat, lng };
 }
+
+/** Автор что-то ввёл в поле точки старта, но это не координаты. Один источник
+ *  правила и текста для гейта публикации и для подписи под самим инпутом —
+ *  иначе чек-лист и настройки разойдутся в пороге или в формулировке. */
+export function badStartCoords(meta: CtorQuestMeta): boolean {
+  return !!meta.startCoords.trim() && !parseCoords(meta.startCoords);
+}
+
+export const BAD_START_COORDS_TEXT = 'Точка старта: координаты не распознаны (формат «45.2651, 19.8656»)';
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -255,6 +267,7 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       ageTarget: meta.ageTarget || DEFAULT_AGE_TARGET,
       tags: meta.tags || [],
       universalAnswer: meta.universalAnswer || '',
+      startCoords: meta.startCoords || '',
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
@@ -313,6 +326,21 @@ interface LegacyStepFields {
   nav?: { on?: boolean; coords?: string; lat?: string; lng?: string; label?: string };
   hint?: { on?: boolean; cost?: number; text?: string; image?: string | null };
   allowNote?: boolean;
+}
+
+/**
+ * Прежний (выводной) источник «Места старта» — первый навигатор СНАПШОТА, ровно
+ * то, что магазин читает у тел без поля в настройках. Считаем через
+ * stepToGameStep, а не по s.address: адрес включён не на всех шаблонах попадает
+ * в навигатор (см. switch там), и правило «первая точка» обязано совпадать с
+ * тем, что реально опубликовано, иначе перенос сдвинет кнопку на другую точку.
+ */
+function firstSnapshotPoint(steps: CtorStep[], meta: CtorQuestMeta): string {
+  for (const s of steps) {
+    const nav = stepToGameStep(s, meta).supporting?.navigator;
+    if (nav) return `${nav.lat}, ${nav.lng}`;
+  }
+  return '';
 }
 
 /**
@@ -377,6 +405,14 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     // Тела до появления универсального ответа поля не имеют — нормализуем к
     // пустой строке (= выключен), чтобы инпут в настройках был управляемым.
     universalAnswer: typeof raw.meta.universalAnswer === 'string' ? raw.meta.universalAnswer : '',
+    // До появления квестового поля магазин выводил «Место старта» из первой точки
+    // шага — переносим её в поле, иначе первая же перепубликация старого черновика
+    // молча убрала бы кнопку. Только при ОТСУТСТВИИ ключа: пустая строка в теле —
+    // осознанный выбор автора, его не перетираем.
+    startCoords:
+      typeof raw.meta.startCoords === 'string'
+        ? raw.meta.startCoords
+        : firstSnapshotPoint(steps, raw.meta),
   };
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
   return { ...raw, meta, steps, id: serverId };
@@ -434,6 +470,14 @@ export function computeGates(quest: CtorQuest): Gates {
 
   if (!quest.meta.cover) {
     add(null, 'warn', 'Нет обложки — карточка в магазине и «Первый экран» будут пустыми', 'cover');
+  }
+
+  // Точка старта: пусто — кнопки в магазине просто не будет (предупреждение);
+  // введено, но не разобрано — ошибка, иначе набранное автором молча пропадёт.
+  if (!quest.meta.startCoords.trim()) {
+    add(null, 'warn', 'Не задана точка старта — на странице квеста не будет кнопки «Место старта»', 'start');
+  } else if (badStartCoords(quest.meta)) {
+    add(null, 'err', BAD_START_COORDS_TEXT, 'start');
   }
 
   let imgs = 0;
@@ -555,7 +599,10 @@ export function nextVersionNumber(quest: CtorQuest): number {
 /** Frozen snapshot of the draft — deep-cloned, versioned, positions sealed. The
  *  store-card city/duration are frozen in too (when set), so the player renders the
  *  real place/duration instead of a hardcoded default. The quest-wide universal
- *  answer freezes alongside them (trimmed; blank = the quest has none). */
+ *  answer freezes alongside them (trimmed; blank = the quest has none).
+ *
+ *  `start_point` is written on EVERY snapshot (null = the author set none) —
+ *  see its declaration on QuestSnapshot for why presence is load-bearing. */
 export function serializeDraft(quest: CtorQuest): QuestSnapshot {
   const steps = quest.steps.map((s, i) => ({ ...stepToGameStep(s, quest.meta), position: i }));
   const city = quest.meta.city.trim();
@@ -566,6 +613,7 @@ export function serializeDraft(quest: CtorQuest): QuestSnapshot {
     name: quest.meta.title,
     snapshot_version: nextVersionNumber(quest),
     steps: JSON.parse(JSON.stringify(steps)) as GameStep[],
+    start_point: parseCoords(quest.meta.startCoords),
     ...(city ? { city } : {}),
     ...(duration ? { duration } : {}),
     ...(universalAnswer ? { universal_answer: universalAnswer } : {}),
