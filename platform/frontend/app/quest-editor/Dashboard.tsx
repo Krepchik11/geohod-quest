@@ -8,7 +8,8 @@ import {
   type CtorAgeTarget,
   type CtorComplexity,
 } from '../../lib/constructor-model';
-import QuestFilters, { matchesAttrs, type QuestFiltersValue } from '../components/QuestFilters';
+import QuestFilters, { type QuestFiltersValue } from './QuestFilters';
+import { matchesAttrs, singleValueFacets } from '../../lib/quest-filters';
 import SpaceHeader from '../components/SpaceHeader';
 import StatusControl from './StatusControl';
 
@@ -98,10 +99,13 @@ export default function Dashboard({
   // "yourself"). Search + status + attributes are the meaningful filters.
   const filtered = useMemo(() => {
     const q0 = filters.search.trim().toLowerCase();
+    // Single-select here, sets in the store — ONE predicate either way: the
+    // dashboard just passes one-element facets (lib/quest-filters).
+    const facets = singleValueFacets(filters);
     return quests.filter(
       (q) =>
         (filters.status === 'Все' || STATUS_LABEL[q.status] === filters.status) &&
-        matchesAttrs(filters, q) &&
+        matchesAttrs(facets, q) &&
         (q0 === '' || q.name.toLowerCase().includes(q0) || q.author.toLowerCase().includes(q0)),
     );
   }, [quests, filters]);
@@ -142,7 +146,6 @@ export default function Dashboard({
           onChange={setFilters}
           tags={allTags}
           statusOptions={['Все', 'Опубликован', 'Тест', 'Проект']}
-          searchPlaceholder="Название или автор…"
         />
 
         {/* ===== Заголовок секции ===== */}

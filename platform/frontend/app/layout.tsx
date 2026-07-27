@@ -10,6 +10,7 @@ import "./globals.css"; // canonical design system (primitives live here)
 // are deleted; `npm run lint:ds` fails if any of them reappears.
 import "./styles/player-paper.css";
 import "./styles/commerce.css";
+import "./styles/store-toolbar.css";
 import "./styles/myquests.css";
 import "./styles/admin-ctor.css";
 import "./styles/ctor-workspace.css";

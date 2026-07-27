@@ -1,0 +1,202 @@
+/* Тулбар магазина (§2.1) — фильтры и сортировка в кнопках.
+   Тулбар живёт ПЕРВОЙ СТРОКОЙ сетки карточек (grid-column:1/-1): отдельный
+   контейнер расходится с сеткой на половину жёлоба. Кнопки и нижний лист —
+   примитивы из globals.css (.btn, .sheet); здесь только их дельта. */
+
+.stb {
+  grid-column: 1 / -1;
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.stb-anchor { position: relative; }
+
+/* ——— Кнопки: .btn.btn--quiet + счётчик, значение и шеврон ——— */
+.stb-btn { gap: 10px; }
+/* Активное состояние видно, не открывая панель. */
+.stb-btn.is-active {
+  background: var(--blue-tint);
+  box-shadow: inset 0 0 0 1.5px var(--blue);
+  color: var(--blue);
+}
+.stb-btn.is-active:hover { background: var(--blue-tint); box-shadow: inset 0 0 0 1.5px var(--blue); }
+.stb-btn__value { font-weight: 500; color: var(--muted-2); }
+.stb-caret {
+  width: 14px;
+  height: 7px;
+  flex: none;
+  background: url("/assets/icons/c/ic-select-chevron--dark.svg") no-repeat center/contain;
+  opacity: .75;
+}
+.stb-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--blue);
+  color: var(--white);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+/* ——— Поповеры (десктоп) ——— */
+.stb-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 10px);
+  width: 392px;
+  max-width: calc(100vw - 32px);
+  z-index: 40;
+  background: var(--white);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-ui);
+  box-shadow: var(--shadow-pop);
+  animation: stb-pop-in .14s ease-out;
+}
+.stb-pop--sort { width: 288px; padding: 8px; }
+.stb-pop__body {
+  max-height: 428px;
+  overflow-y: auto;
+  padding: 18px 20px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.stb-pop__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-2);
+}
+@keyframes stb-pop-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* ——— Фасеты и чипы ——— */
+.stb-facet { display: flex; flex-direction: column; gap: 9px; }
+.stb-facet__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stb-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.stb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 17px;
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: box-shadow .15s ease, background .15s ease, color .15s ease;
+}
+.stb-chip:hover { box-shadow: inset 0 0 0 1px var(--muted); }
+.stb-chip.is-on {
+  background: var(--blue-tint);
+  box-shadow: inset 0 0 0 1.5px var(--blue);
+  color: var(--blue);
+}
+.stb-chip__tick { flex: none; font-size: 11px; font-weight: 700; }
+
+/* ——— Переключатель «Только не купленные» ——— */
+.stb-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+}
+.stb-switch__track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--track);
+  transition: background .15s ease;
+}
+.stb-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 1px 3px rgba(18,41,71,.3);
+  transition: left .15s ease;
+}
+.stb-switch__track.is-on { background: var(--blue); }
+.stb-switch__track.is-on::after { left: 19px; }
+
+/* ——— Сортировка ——— */
+.stb-sorts { display: flex; flex-direction: column; gap: 2px; }
+.stb-sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-ui);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+}
+.stb-sort:hover { background: var(--bg-subtle); }
+.stb-sort.is-on { background: var(--blue-tint); color: var(--blue); font-weight: 600; }
+.stb-sort__tick { flex: none; font-weight: 700; }
+
+/* ——— Действия панели ——— */
+.stb-apply { flex: 1; }
+.stb-reset {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  color: var(--blue);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+/* Сбрасывать нечего — кнопка гаснет. */
+.stb-reset:disabled { color: var(--disabled); cursor: default; }
+
+/* ——— Нижний лист: общая оболочка .sheet + прокручиваемое тело ——— */
+.stb-sheet { max-height: 92dvh; animation: stb-sheet-in .22s cubic-bezier(.22,.61,.36,1); }
+.stb-overlay { animation: stb-overlay-in .18s ease-out; }
+.stb-sheet__head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stb-sheet__head h3 { font-size: 18px; font-weight: 600; }
+.stb-sheet__body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-bottom: 4px; }
+.stb-sheet__rule { flex: none; height: 1px; border: 0; background: var(--border-2); }
+/* Пальцевые цели: не меньше 44 px в листе. */
+.stb-sheet .stb-chip { min-height: 44px; padding: 0 16px; border-radius: 22px; font-size: 14px; gap: 8px; }
+.stb-sheet .stb-chip__tick { font-size: 12px; }
+.stb-sheet .stb-sort { min-height: 48px; height: auto; padding: 10px 14px; border-radius: 12px; box-shadow: inset 0 0 0 1.5px var(--line, #E3E8F0); }
+.stb-sheet .stb-sort.is-on { box-shadow: inset 0 0 0 1.5px var(--blue); }
+.stb-sheet .stb-switch { min-height: 56px; padding: 12px 16px; font-size: 14px; }
+.stb-sheet .stb-switch__track { width: 44px; height: 26px; border-radius: 13px; }
+.stb-sheet .stb-switch__track::after { width: 20px; height: 20px; }
+.stb-sheet .stb-switch__track.is-on::after { left: 21px; }
+@keyframes stb-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes stb-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .stb-pop, .stb-overlay, .stb-sheet { animation: none; }
+}

@@ -392,9 +392,9 @@ function NameSheet({ current, onClose, onSaved }: { current: string | null; onCl
     }
   };
   return (
-    <div className="psheet__ovl" onClick={onClose}>
-      <div className="psheet" role="dialog" aria-label="Изменить имя" onClick={(e) => e.stopPropagation()}>
-        <span className="psheet__grabber" aria-hidden />
+    <div className="sheet__ovl" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-label="Изменить имя" onClick={(e) => e.stopPropagation()}>
+        <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Изменить имя</b>
         <input className="input" aria-label="Имя" placeholder="Как вас называть?" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn btn--block btn--md" type="button" disabled={busy} onClick={() => void save()}>Сохранить</button>
@@ -429,9 +429,9 @@ function PasswordSheet({ email, onClose }: { email: string | null; onClose: () =
     }
   };
   return (
-    <div className="psheet__ovl" onClick={onClose}>
-      <div className="psheet" role="dialog" aria-label="Сменить пароль" onClick={(e) => e.stopPropagation()}>
-        <span className="psheet__grabber" aria-hidden />
+    <div className="sheet__ovl" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-label="Сменить пароль" onClick={(e) => e.stopPropagation()}>
+        <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Сменить пароль</b>
         <span className="af-field__wrap">
           <input className="af-field__input" type={showCur ? 'text' : 'password'} aria-label="Текущий пароль" placeholder="текущий пароль" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
@@ -486,9 +486,9 @@ function DeleteSheet({ purchases, balance, onClose, onDeleted }: {
     }
   };
   return (
-    <div className="psheet__ovl" onClick={onClose}>
-      <div className="psheet" role="alertdialog" aria-label="Удаление аккаунта" onClick={(e) => e.stopPropagation()}>
-        <span className="psheet__grabber" aria-hidden />
+    <div className="sheet__ovl" onClick={onClose}>
+      <div className="sheet" role="alertdialog" aria-label="Удаление аккаунта" onClick={(e) => e.stopPropagation()}>
+        <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Удалить аккаунт навсегда?</b>
         <div className="pf-delete__list">
           <span><i>✕</i>{purchases} {plural(purchases, 'купленный квест станет недоступен', 'купленных квеста станут недоступны', 'купленных квестов станут недоступны')}</span>
