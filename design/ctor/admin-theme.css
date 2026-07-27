@@ -100,7 +100,7 @@
 /* Зоны комикса */
 .comic-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .comic-zone {
-  position: relative; height: 132px; border-radius: 10px;
+  position: relative; aspect-ratio: 4 / 3; border-radius: 10px;
   border: 2px dashed var(--border); background: var(--bg);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   font-size: 11px; color: var(--gray); text-align: center; padding: 8px; cursor: pointer;

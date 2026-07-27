@@ -11,6 +11,7 @@ import {
   type CtorStep,
   type GateField,
 } from '../../lib/constructor-model';
+import { byteBudgetLabel, STEP_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';
 import { GateNote, ImageZone, WspBlock, WspDanger, WspToggle, useGateHighlight } from './controls';
@@ -24,17 +25,17 @@ function StepImageBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher })
   const slot = IMAGE_TEMPLATES[step.template];
   if (!slot) return null;
   return (
-    <WspBlock title="Изображение страницы" gateField="image" aside="4:3, до 100 КБ">
+    <WspBlock title="Изображение страницы" gateField="image" aside={`4:3, до ${byteBudgetLabel(STEP_IMAGE_MAX_BYTES)}`}>
       <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
         <ImageZone
-          src={step.image}
+          value={{ url: step.image, origin: step.imageOrigin }}
           label={slot.label}
           required={slot.req}
-          aspect43
-          onChange={(image) => onPatch({ image })}
+          maxBytes={STEP_IMAGE_MAX_BYTES}
+          onChange={(v) => onPatch({ image: v.url, imageOrigin: v.origin })}
         />
       </div>
-      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Не 4:3 — откроется кадрирование; больше 100 КБ — сожмём автоматически.</p>
+      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Кадр 4:3 выбирается при загрузке — клик по изображению открывает его снова; больше {byteBudgetLabel(STEP_IMAGE_MAX_BYTES)} сожмём автоматически.</p>
     </WspBlock>
   );
 }
@@ -158,10 +159,10 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
           </div>
           <div className="comic-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
             <ImageZone
-              src={h.image}
+              value={{ url: h.image, origin: h.imageOrigin }}
               label="изображение подсказки"
-              aspect43
-              onChange={(image) => set({ image })}
+              maxBytes={STEP_IMAGE_MAX_BYTES}
+              onChange={(v) => set({ image: v.url, imageOrigin: v.origin })}
             />
           </div>
           <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>Подсказка может быть текстом, изображением или обоими сразу; игрок увидит её попапом и под вопросом. Без текста и изображения подсказка не продаётся.</p>

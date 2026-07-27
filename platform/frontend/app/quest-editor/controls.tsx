@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { cropToStepImage, decodeImageFile, fileToImageBlob, type DecodedImage } from '../../lib/image-file';
-import { clampCropRect, largestAspectRect, matchesAspect, type CropRect } from '../../lib/image-crop';
-import { api } from '../../lib/api';
-import type { GateField } from '../../lib/constructor-model';
+import { beginCropFromFile, beginCropFromValue, commitCrop, sessionRect, type CropSession } from '../../lib/image-authoring';
+import type { DecodedImage } from '../../lib/image-file';
+import { byteBudgetLabel, clampCropRect, type CropRect } from '../../lib/image-crop';
+import type { CtorImageValue, GateField } from '../../lib/constructor-model';
 
 /** Shared workspace controls (design/ctor2/page-editor.jsx primitives). */
 
@@ -90,14 +90,17 @@ export function WspDanger({ label, confirmLabel, onConfirm }: { label: string; c
 /**
  * Кадрирование под 4:3: рамка фиксирована, автор перетаскивает изображение
  * вдоль свободной оси. Работает в исходных координатах картинки (CropRect),
- * поэтому геометрия из lib/image-crop покрыта node-тестами.
+ * поэтому геометрия из lib/image-crop покрыта node-тестами. Открывается и на
+ * уже загруженном изображении — тогда стартовая рамка возвращает автора ровно
+ * в тот кадр, который он выбрал раньше.
  */
-function CropModal({ dec, onConfirm, onCancel }: {
+function CropModal({ dec, initialRect, onConfirm, onCancel }: {
   dec: DecodedImage;
+  initialRect: CropRect;
   onConfirm: (rect: CropRect) => void;
   onCancel: () => void;
 }) {
-  const [rect, setRect] = useState<CropRect>(() => largestAspectRect(dec.width, dec.height));
+  const [rect, setRect] = useState<CropRect>(initialRect);
   const viewRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; rect: CropRect } | null>(null);
   // Measured frame width — the ref is null on first render and the frame is
@@ -135,7 +138,7 @@ function CropModal({ dec, onConfirm, onCancel }: {
     <div className="crop-overlay" role="dialog" aria-modal="true" aria-label="Кадрирование изображения 4:3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="crop-card">
         <h4>Кадрирование 4:3</h4>
-        <p className="crop-note">Изображение не 4:3 — потяните его внутри рамки, лишнее будет обрезано.</p>
+        <p className="crop-note">Рамка 4:3 — ровно так изображение увидят в квесте и в магазине. Потяните его внутри рамки, лишнее будет обрезано.</p>
         <div
           ref={viewRef}
           className="crop-view"
@@ -146,7 +149,7 @@ function CropModal({ dec, onConfirm, onCancel }: {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={dec.dataUrl}
+            src={dec.src}
             alt=""
             draggable={false}
             style={{
@@ -166,57 +169,56 @@ function CropModal({ dec, onConfirm, onCancel }: {
 }
 
 /**
- * Зона изображения с настоящей загрузкой файла (downscale → upload в R2 → URL).
- * Пустая зона открывает выбор файла; заполненная показывает картинку и ✕.
- * С `aspect43` действует контракт страницы: строго 4:3 (иначе — кадрирование)
- * и сжатие до 100 КБ перед загрузкой.
+ * Зона изображения. Контракт один для всех изображений конструктора: автор
+ * выбирает рамку 4:3, зона показывает результат в тех же 4:3 — так же, как его
+ * увидят в квесте и в магазине. Исходник (несрезанный) лежит рядом с кадром,
+ * поэтому клик по готовому изображению ОТКРЫВАЕТ КАДР ЗАНОВО, а не требует
+ * новый файл. Сама последовательность загрузок — в lib/image-authoring.
  */
-export function ImageZone({ src, label, hint, required, width, aspect43, onChange }: {
-  src: string | null | undefined;
+export function ImageZone({ value, label, required, width, maxBytes, onChange }: {
+  value: CtorImageValue;
   label: string;
-  hint?: string;
   required?: boolean;
   width?: number;
-  aspect43?: boolean;
-  onChange: (src: string | null) => void;
+  /** Бюджет кадра в байтах: роль изображения задаёт его явно (см. lib/image-crop). */
+  maxBytes: number;
+  onChange: (value: CtorImageValue) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [pendingCrop, setPendingCrop] = useState<DecodedImage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [session, setSession] = useState<CropSession | null>(null);
+  const src = value.url;
 
-  const upload = async (work: () => Promise<Blob>) => {
+  const run = async (work: () => Promise<void>) => {
+    if (busy) return;
     setError(null);
-    setUploading(true);
+    setBusy(true);
     try {
-      const blob = await work();
-      const { url } = await api.uploadMedia(blob);
-      onChange(url);
+      await work();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setUploading(false);
+      setBusy(false);
     }
   };
 
-  const pickFile = async (file: File | undefined) => {
+  const pickFile = (file: File | undefined) => {
     if (!file) return;
-    if (!aspect43) {
-      // Обложка и прочие свободные зоны: старый путь (downscale → upload).
-      await upload(() => fileToImageBlob(file));
+    void run(async () => setSession(await beginCropFromFile(file)));
+  };
+
+  const activate = () => {
+    if (!src) {
+      inputRef.current?.click();
       return;
     }
-    setError(null);
-    try {
-      const dec = await decodeImageFile(file);
-      if (matchesAspect(dec.width, dec.height)) {
-        await upload(() => cropToStepImage(dec.img, { x: 0, y: 0, width: dec.width, height: dec.height }));
-      } else {
-        setPendingCrop(dec); // не 4:3 — сначала кадрирование
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    void run(async () => setSession(await beginCropFromValue(value)));
+  };
+
+  const confirmCrop = (open: CropSession, rect: CropRect) => {
+    setSession(null);
+    void run(async () => onChange(await commitCrop(open, rect, maxBytes)));
   };
 
   return (
@@ -225,18 +227,18 @@ export function ImageZone({ src, label, hint, required, width, aspect43, onChang
       style={width ? { width } : undefined}
       role="button"
       tabIndex={0}
-      aria-label={`Загрузить изображение: ${label}`}
-      onClick={() => { if (!src && !uploading) inputRef.current?.click(); }}
-      onKeyDown={(e) => { if (!src && !uploading && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); inputRef.current?.click(); } }}
+      aria-label={`${src ? 'Изменить кадрирование' : 'Загрузить изображение'}: ${label}`}
+      onClick={activate}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
       onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => { e.preventDefault(); if (!uploading) void pickFile(e.dataTransfer.files?.[0]); }}
+      onDrop={(e) => { e.preventDefault(); pickFile(e.dataTransfer.files?.[0]); }}
     >
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
         style={{ display: 'none' }}
-        onChange={(e) => { void pickFile(e.target.files?.[0]); e.target.value = ''; }}
+        onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }}
       />
       {src ? (
         <>
@@ -247,30 +249,25 @@ export function ImageZone({ src, label, hint, required, width, aspect43, onChang
             className="rm"
             type="button"
             aria-label="Убрать изображение"
-            onClick={(e) => { e.stopPropagation(); onChange(null); }}
+            onClick={(e) => { e.stopPropagation(); onChange({ url: null, origin: null }); }}
           >✕</button>
         </>
       ) : (
         <>
           <b>{label}</b>
-          {uploading ? (
-            <span style={{ color: 'var(--text)', fontWeight: 600 }}>Загрузка…</span>
-          ) : error ? (
-            <span style={{ color: 'var(--red)', fontWeight: 600 }}>{error}</span>
-          ) : (
-            hint || (aspect43 ? 'PNG/JPG, 4:3, до 100 КБ' : 'PNG/JPG до 1 МБ')
-          )}
+          {`PNG/JPG, кадр 4:3, до ${byteBudgetLabel(maxBytes)}`}
         </>
       )}
-      {pendingCrop ? (
+      {/* Одно место для обоих состояний зоны — пустой и заполненной. */}
+      {busy || error ? (
+        <span className={'zone-msg' + (error ? ' zone-msg--error' : '')}>{error || 'Загрузка…'}</span>
+      ) : null}
+      {session ? (
         <CropModal
-          dec={pendingCrop}
-          onCancel={() => setPendingCrop(null)}
-          onConfirm={(rect) => {
-            const dec = pendingCrop;
-            setPendingCrop(null);
-            void upload(() => cropToStepImage(dec.img, rect));
-          }}
+          dec={session.decoded}
+          initialRect={sessionRect(session)}
+          onCancel={() => setSession(null)}
+          onConfirm={(rect) => confirmCrop(session, rect)}
         />
       ) : null}
     </div>

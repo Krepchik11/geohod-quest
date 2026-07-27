@@ -145,11 +145,18 @@ if (await fixBtn.count()) {
   await page.waitForTimeout(300);
   (await page.locator('.wsp-pageerrs').count()) ? ok('«Исправить» jumps to the broken page') : fail('fix jump failed');
 } else fail('no fix button on checklist');
-// загрузка изображения: реальный файл в зону «задание»
+// загрузка изображения: реальный файл в зону «задание» → выбор кадра 4:3
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGNk+M9Qz4AFMGETHFwSAEOZAhU8mJ9HAAAAAElFTkSuQmCC', 'base64');
 await page.locator('.comic-zone input[type=file]').first().setInputFiles({ name: 'task.png', mimeType: 'image/png', buffer: png });
+const cropConfirm = page.locator('.crop-actions button', { hasText: 'Обрезать и загрузить' });
+await cropConfirm.waitFor({ timeout: 5000 }).then(() => ok('crop dialog opens on upload')).catch(() => fail('crop dialog did not open'));
+await cropConfirm.click();
 await page.waitForTimeout(600);
 (await page.locator('.comic-zone.filled').count()) ? ok('real image upload fills comic zone') : fail('image upload failed');
+// повторный клик по готовому изображению открывает кадрирование заново
+await page.locator('.comic-zone.filled').first().click();
+await cropConfirm.waitFor({ timeout: 5000 }).then(() => ok('click on a filled zone reopens the crop')).catch(() => fail('re-crop did not open'));
+await page.locator('.crop-actions button', { hasText: 'Отмена' }).click();
 // гейты позеленели → публикуем
 await page.locator('.wsp-navitem', { hasText: 'Публикация и версии' }).click();
 await page.waitForTimeout(300);

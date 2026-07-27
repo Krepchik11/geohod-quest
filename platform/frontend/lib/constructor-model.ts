@@ -10,7 +10,43 @@
  * Pure functions only — persistence takes an injectable storage so the model
  * stays testable in node.
  */
+import type { CropRect } from './image-crop';
 import type { GameStep, QuestSnapshot, Supporting } from './shared-model';
+
+/**
+ * Исходник кадрированного изображения: URL несрезанной картинки плюс выбранная
+ * автором рамка 4:3 (в пикселях этого исходника). Живёт только в теле
+ * черновика — в снапшот уходит сам кадр (`image` / `cover`). Благодаря нему
+ * «поменять кадр» не требует повторной загрузки файла.
+ */
+export interface CtorImageOrigin {
+  url: string;
+  width: number;
+  height: number;
+  rect: CropRect;
+}
+
+/** Значение зоны изображения: опубликованный кадр и его исходник — всегда вместе. */
+export interface CtorImageValue {
+  url: string | null;
+  origin: CtorImageOrigin | null;
+}
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Исходник из недоверенного тела: либо полностью валидный, либо его нет. */
+function sanitizeImageOrigin(v: unknown): CtorImageOrigin | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Partial<CtorImageOrigin>;
+  const r = o.rect;
+  if (typeof o.url !== 'string' || !o.url) return null;
+  if (!isFiniteNumber(o.width) || !isFiniteNumber(o.height)) return null;
+  if (!r || typeof r !== 'object') return null;
+  if (!isFiniteNumber(r.x) || !isFiniteNumber(r.y) || !isFiniteNumber(r.width) || !isFiniteNumber(r.height)) {
+    return null;
+  }
+  return { url: o.url, width: o.width, height: o.height, rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
+}
 
 export type CtorTemplate =
   | 'start' | 'video' | 'task_no' | 'task_answer' | 'continue' | 'route_video' | 'congrats';
@@ -33,12 +69,14 @@ export interface CtorStep {
   action: { desc: string; confirmLabel: string };
   /** Единственное изображение страницы (4:3, ≤100 КБ — контракт пайплайна загрузки). */
   image: string | null;
+  /** Исходник {@link image} для повторного кадрирования (null — загружено до появления кадрирования). */
+  imageOrigin: CtorImageOrigin | null;
   video: { dur: string; label: string } | null;
   acceptable: string[];
   gift: { narrative: string };
   /** Подсказка с тумблером (по умолчанию включена); продаётся, когда включена
    *  и есть текст и/или изображение. */
-  hint: { on: boolean; cost: number; text: string; image: string | null };
+  hint: { on: boolean; cost: number; text: string; image: string | null; imageOrigin: CtorImageOrigin | null };
   /**
    * «Адрес и расстояние» — необязательный блок точки. Название и расстояние
    * складываются в строку с булавкой на странице; координаты (формат Google
@@ -98,6 +136,8 @@ export interface CtorQuestMeta {
   city: string;
   duration: string;
   cover: string | null;
+  /** Исходник {@link cover} для повторного кадрирования (см. {@link CtorImageOrigin}). */
+  coverOrigin: CtorImageOrigin | null;
   desc: string;
   price: number;
   /** Marketing padding added to the real completions for the public players
@@ -234,10 +274,11 @@ export function newStep(template: CtorTemplate): CtorStep {
     prompt: '',
     action: { desc: '', confirmLabel: 'Я на месте' },
     image: null,
+    imageOrigin: null,
     video: null,
     acceptable: [],
     gift: { narrative: '' },
-    hint: { on: true, cost: 5, text: '', image: null },
+    hint: { on: true, cost: 5, text: '', image: null, imageOrigin: null },
     address: { on: false, name: '', distance: '', coords: '' },
   };
   if (template === 'start') s.kicker = 'Городской квест';
@@ -260,6 +301,7 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       city: meta.city || '',
       duration: meta.duration || '',
       cover: meta.cover || null,
+      coverOrigin: sanitizeImageOrigin(meta.coverOrigin),
       desc: meta.desc || '',
       price: meta.price || 0,
       playersBonus: meta.playersBonus || 0,
@@ -364,11 +406,16 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     s.gift = { narrative: legacy.gift?.narrative ?? '' };
     // Тумблер подсказки: отсутствие в старом теле = включена (текст/изображение
     // сохраняем всегда — данные не теряются, продажу решает тумблер + контент).
+    // Исходники кадрирования появились позже самих изображений: тела без них
+    // (и с испорченным значением) нормализуем к null — зона предложит выбрать
+    // файл заново вместо того, чтобы кадрировать несуществующий исходник.
+    s.imageOrigin = sanitizeImageOrigin(step.imageOrigin);
     s.hint = {
       on: legacy.hint?.on ?? true,
       cost: legacy.hint?.cost ?? 5,
       text: legacy.hint?.text ?? '',
       image: legacy.hint?.image ?? null,
+      imageOrigin: sanitizeImageOrigin(step.hint?.imageOrigin),
     };
     delete (s as LegacyStepFields).allowNote;
     // Раздельные «Адрес» (place) и «Навигатор» (nav: coords или lat/lng+label)
@@ -398,6 +445,7 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
   // невалидные значения приводим к нейтральным, не доверяя хранимому телу.
   const meta = {
     ...raw.meta,
+    coverOrigin: sanitizeImageOrigin(raw.meta.coverOrigin),
     playersBonus: raw.meta.playersBonus ?? 0,
     complexity: isComplexity(raw.meta.complexity) ? raw.meta.complexity : DEFAULT_COMPLEXITY,
     ageTarget: isAgeTarget(raw.meta.ageTarget) ? raw.meta.ageTarget : DEFAULT_AGE_TARGET,
