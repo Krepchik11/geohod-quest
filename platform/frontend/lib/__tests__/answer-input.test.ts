@@ -10,14 +10,14 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { StepView, type DesignStep, type StepState } from '../../app/player/PlayerComponents';
+import { PREVIEW_HANDLERS, StepView, type DesignStep, type StepState } from '../../app/player/PlayerComponents';
 import { PLAYER_COPY } from '../player-copy';
 
 const step: DesignStep = { template: 'task_answer', text: 'Вопрос?', prompt: 'Введите ответ' };
 
 function render(st: StepState): string {
   return renderToStaticMarkup(
-    createElement(StepView, { step, copy: PLAYER_COPY, st, on: {} })
+    createElement(StepView, { step, copy: PLAYER_COPY, st, on: PREVIEW_HANDLERS })
   );
 }
 
@@ -68,7 +68,7 @@ describe('task_answer inline-submit', () => {
 describe('task_answer question placement', () => {
   function renderStep(s: DesignStep): string {
     return renderToStaticMarkup(
-      createElement(StepView, { step: s, copy: PLAYER_COPY, st: { answer: '' }, on: {} })
+      createElement(StepView, { step: s, copy: PLAYER_COPY, st: { answer: '' }, on: PREVIEW_HANDLERS })
     );
   }
 

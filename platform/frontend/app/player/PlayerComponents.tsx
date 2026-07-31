@@ -206,9 +206,18 @@ export interface StepState {
   time?: string;
   steps?: string;
   rating?: number;
-  reviewSent?: boolean;
 }
 
+/**
+ * Every control StepView can render, keyed by the handler that drives it.
+ *
+ * The contract: **a missing handler HIDES its control.** A control that renders
+ * with a `noop` fallback is a button that lies — it looks tappable and does
+ * nothing, with no type error and no runtime signal (exactly how the constructor
+ * test-player shipped a dead «подсказка» chip). A surface that wants the controls
+ * without the behavior — the editor previews — opts in explicitly with
+ * `PREVIEW_HANDLERS`, never by omission.
+ */
 export interface StepHandlers {
   next?: () => void;
   confirm?: () => void;
@@ -224,9 +233,87 @@ export interface StepHandlers {
   onward?: () => void;
   /** Final screen «пройти заново» — replay this quest from step 0 (real player only). */
   replay?: () => void;
-  review?: () => void;
   /** Step back through history to reread earlier content (real player only). */
   back?: () => void;
+}
+
+const noop = () => {};
+
+/**
+ * The one sanctioned inert handler set (see `StepHandlers`): the constructor's
+ * static previews render every control and do nothing *by explicit choice*.
+ *
+ * `Required<Omit<…>>` is load-bearing — adding a handler to `StepHandlers` without
+ * listing it here is a compile error, so previews can never silently lose a control.
+ * `back` and `replay` are omitted: they are real-player-only affordances whose
+ * absence is itself the intended rendering.
+ */
+export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back' | 'replay'>> = {
+  next: noop,
+  confirm: noop,
+  submit: noop,
+  answer: noop,
+  buyHint: noop,
+  play: noop,
+  navigator: noop,
+  rate: noop,
+  reviewText: noop,
+  onward: noop,
+};
+
+/** The answer row: field + inline submit share ONE row, so the browser's native
+ *  "scroll focused field into view" lifts BOTH above the on-screen keyboard (iOS,
+ *  which ignores interactiveWidget, included). The <form> + enterKeyHint makes the
+ *  keyboard's own action key («Отпр.») submit, and native form submission (unlike a
+ *  manual Enter handler) respects IME composition — it never submits a half-composed
+ *  value. The row floats to the step bottom via .p-actions' margin-top:auto (see
+ *  player-paper.css). No handler → no form (see `StepHandlers`). */
+function AnswerForm({ value, wrong, fieldLabel, submitLabel, onChange, onSubmit }: {
+  value: string;
+  wrong?: boolean;
+  fieldLabel: string;
+  submitLabel: string;
+  onChange?: (v: string) => void;
+  onSubmit?: (v: string) => void;
+}) {
+  if (!onSubmit) return null;
+  const canSubmit = value.trim().length > 0;
+  return (
+    <form
+      className="p-actions p-actions--field"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (canSubmit) onSubmit(value);
+      }}
+    >
+      <input
+        className={"p-input" + (wrong ? " p-input--wrong" : "")}
+        name="answer"
+        placeholder="Введите ответ"
+        value={value}
+        onChange={(e) => onChange && onChange(e.target.value)}
+        enterKeyHint="send"
+        autoCapitalize="off"
+        autoCorrect="off"
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={fieldLabel}
+      />
+      <button className="p-submit" type="submit" disabled={!canSubmit} aria-label={submitLabel}>
+        <PArrow />
+      </button>
+    </form>
+  );
+}
+
+/** The step's primary call to action. No handler → no button (see `StepHandlers`). */
+function PrimaryAction({ on, label }: { on?: () => void; label: string }) {
+  if (!on) return null;
+  return (
+    <div className="p-actions">
+      <button className="p-btn p-btn--solid" onClick={on}>{label}</button>
+    </div>
+  );
 }
 
 /* Frame */
@@ -290,9 +377,11 @@ export function MediaBlock({ image, imageLabel, video, onPlay }: {
     return (
       <div className="p-media">
         {video.poster ? <img src={video.poster} alt="" /> : <div className="p-media--ph" style={{ position: "absolute", inset: 0 }}><span>{video.label || "видео"}</span></div>}
-        <button className="p-media__play" type="button" aria-label="Смотреть видео" onClick={onPlay}>
-          <span className="ic-ring"><PPlay /></span>
-        </button>
+        {onPlay && (
+          <button className="p-media__play" type="button" aria-label="Смотреть видео" onClick={onPlay}>
+            <span className="ic-ring"><PPlay /></span>
+          </button>
+        )}
         <span className="p-media__dur">{video.dur}</span>
       </div>
     );
@@ -312,7 +401,8 @@ export function PlaceLine({ place, nav, onOpen }: {
   onOpen?: () => void;
 }) {
   if (!place) return null;
-  if (!nav) return <p className="p-place"><PPin />{place}</p>;
+  // No coordinates, or nothing wired to open them → a plain line, never a dead link.
+  if (!nav || !onOpen) return <p className="p-place"><PPin />{place}</p>;
   return (
     <button className="p-place p-place--link" type="button" onClick={onOpen} aria-label={`Открыть в картах: ${place}`}>
       <PPin />{place}
@@ -330,7 +420,6 @@ export function StepView({ step, quest, copy, st, on }: {
 }) {
   const stateIn: StepState = st || {};
   const h: StepHandlers = on || {};
-  const noop = () => {};
 
   if (step.template === "start") {
     return (
@@ -346,9 +435,7 @@ export function StepView({ step, quest, copy, st, on }: {
             {quest?.duration && <span><PClock />{quest.duration}</span>}
           </div>
         )}
-        <div className="p-actions">
-          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{copy?.start || "начать квест"}</button>
-        </div>
+        <PrimaryAction on={h.next} label={copy?.start || "начать квест"} />
       </div>
     );
   }
@@ -356,12 +443,13 @@ export function StepView({ step, quest, copy, st, on }: {
   if (step.template === "video" || step.template === "route_video") {
     return (
       <div className="p-stepbody">
-        <MediaBlock video={step.video} onPlay={h.play || noop} />
+        <MediaBlock video={step.video} onPlay={h.play} />
         <p className="p-text">{step.text}</p>
-        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
-        <div className="p-actions">
-          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}</button>
-        </div>
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
+        <PrimaryAction
+          on={h.next}
+          label={step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}
+        />
       </div>
     );
   }
@@ -371,18 +459,15 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
         {step.action && <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)" }}>{step.action.desc}</p>}
-        <div className="p-actions">
-          <button className="p-btn p-btn--solid" onClick={() => (h.confirm ? h.confirm() : (h.next || noop)())}>{step.action?.confirmLabel || "Я на месте"}</button>
-        </div>
+        <PrimaryAction on={h.confirm} label={step.action?.confirmLabel || "Я на месте"} />
       </div>
     );
   }
 
   if (step.template === "task_answer") {
     const val = stateIn.answer || "";
-    const canSubmit = val.trim().length > 0;
     // The question lives ON THE PAGE: a placeholder disappears the moment the
     // player types, so a question stored there is unreadable mid-answer. The
     // legacy model default («Введите ответ», baked into old snapshots) is a
@@ -393,7 +478,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator || noop} />
+        <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
         {question && <p className="p-prompt">{question}</p>}
         {stateIn.hintRevealed ? (
           <div className="p-hintbox">
@@ -413,50 +498,22 @@ export function StepView({ step, quest, copy, st, on }: {
             a paper chip above the answer form (the post-2nd-wrong popup stays as
             the proactive offer). Cost comes from the step data, never hardcoded.
             Disappears after purchase — the hint then renders inline above. */}
-        {step.hint && typeof step.hint !== 'string' && step.hint.cost != null && !stateIn.hintRevealed ? (
+        {h.buyHint && step.hint && typeof step.hint !== 'string' && step.hint.cost != null && !stateIn.hintRevealed ? (
           <div className="p-hintchip-row">
-            <button className="p-hintchip" type="button" onClick={h.buyHint || noop}>
+            <button className="p-hintchip" type="button" onClick={h.buyHint}>
               <PCoin size={15} />
               подсказка · {step.hint.cost} {plural(step.hint.cost, 'монета', 'монеты', 'монет')}
             </button>
           </div>
         ) : null}
-        {/* Inline submit: the field and its submit share ONE row, so the browser's
-            native "scroll focused field into view" lifts BOTH above the on-screen
-            keyboard (iOS, which ignores interactiveWidget, included). The <form> +
-            enterKeyHint makes the keyboard's own action key («Отпр.») submit, and
-            native form submission (unlike a manual Enter handler) respects IME
-            composition — it never submits a half-composed value. The row floats to
-            the step bottom via .p-actions' margin-top:auto (see player-paper.css). */}
-        <form
-          className="p-actions p-actions--field"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSubmit && h.submit) h.submit(val);
-          }}
-        >
-          <input
-            className={"p-input" + (stateIn.wrong ? " p-input--wrong" : "")}
-            name="answer"
-            placeholder="Введите ответ"
-            value={val}
-            onChange={(e) => h.answer && h.answer(e.target.value)}
-            enterKeyHint="send"
-            autoCapitalize="off"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label={question || "Введите ответ"}
-          />
-          <button
-            className="p-submit"
-            type="submit"
-            disabled={!canSubmit}
-            aria-label={copy?.submit || "Ответить"}
-          >
-            <PArrow />
-          </button>
-        </form>
+        <AnswerForm
+          value={val}
+          wrong={stateIn.wrong}
+          fieldLabel={question || "Введите ответ"}
+          submitLabel={copy?.submit || "Ответить"}
+          onChange={h.answer}
+          onSubmit={h.submit}
+        />
       </div>
     );
   }
@@ -466,9 +523,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <div className="p-actions">
-          <button className="p-btn p-btn--solid" onClick={h.next || noop}>{copy?.next || "продолжить"}</button>
-        </div>
+        <PrimaryAction on={h.next} label={copy?.next || "продолжить"} />
       </div>
     );
   }
@@ -480,14 +535,20 @@ export function StepView({ step, quest, copy, st, on }: {
     return <FinalScreen quest={quest} copy={copy} st={stateIn} on={h} />;
   }
 
-  return <div className="p-stepbody"><p>Шаг: {step.template}</p><button className="p-btn" onClick={h.next || noop}>Далее</button></div>;
+  return (
+    <div className="p-stepbody">
+      <p>Шаг: {step.template}</p>
+      {h.next && <button className="p-btn" onClick={h.next}>Далее</button>}
+    </div>
+  );
 }
 
 export function RateStars({ value, onRate }: { value?: number; onRate?: (n: number) => void }) {
+  if (!onRate) return null;
   return (
     <div className="p-rate">
       {[1, 2, 3, 4, 5].map((n) => (
-        <button key={n} type="button" className={n <= (value || 0) ? "on" : ""} onClick={() => onRate && onRate(n)} aria-label={n + " звёзд"}>
+        <button key={n} type="button" className={n <= (value || 0) ? "on" : ""} onClick={() => onRate(n)} aria-label={n + " звёзд"}>
           <PStar size={26} />
         </button>
       ))}
@@ -516,7 +577,7 @@ export function FinalScreen({ quest, copy, st, on }: {
   const rated = (s.rating || 0) > 0;
   // The forward action is always available (rating never blocks); «Пропустить
   // оценку» is just a quieter label for the same action while still unrated.
-  const onward = h.onward || h.next || (() => {});
+  const onward = h.onward;
   // «пройти заново» is a real-player affordance (restart this quest from step 0).
   // It is gated on a wired handler so the constructor test-player and editor
   // previews — which pass none — never render a dead button.
@@ -562,13 +623,15 @@ export function FinalScreen({ quest, copy, st, on }: {
       </div>
 
       <div className="p-actions">
-        <button className="p-btn p-btn--solid" type="button" onClick={onward}>
-          {copy?.whatNext || "что дальше"} <PArrow />
-        </button>
+        {onward && (
+          <button className="p-btn p-btn--solid" type="button" onClick={onward}>
+            {copy?.whatNext || "что дальше"} <PArrow />
+          </button>
+        )}
         {replay && (
           <button className="p-btn p-btn--ghost" type="button" onClick={replay}>{copy?.playAgain || "пройти заново"}</button>
         )}
-        {!rated && (
+        {onward && !rated && (
           <button className="p-skip" type="button" onClick={onward}>{copy?.skipRating || "Пропустить оценку"}</button>
         )}
       </div>

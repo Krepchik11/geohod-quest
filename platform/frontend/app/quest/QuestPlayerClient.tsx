@@ -71,6 +71,13 @@ function formatElapsed(createdAt: string | null): string {
 
 interface PlayerState {
   facts: Fact[];
+  /** The step the player is on, as an ARRAY INDEX — the single step identity in
+   *  this component. Every fact is written with `step_position: stepIdx`, and the
+   *  backend reads `step_position` back as an index (`steps.get(i)` in admin stats
+   *  / moderation). The snapshot's own `position` field is descriptive metadata a
+   *  hand-authored or legacy snapshot may number any way it likes; deriving display
+   *  state from it would silently decouple the rendered step from its own facts (a
+   *  purchased hint stops showing, progress mis-counts). */
   stepIdx: number;
   /** Furthest step ever reached this attempt. The resume position persists THIS
    *  (not stepIdx), so a back-navigation reread never regresses where the
@@ -678,7 +685,6 @@ export default function QuestPlayerClient({
     );
   }
 
-  const pos = currentStep.position ?? stepIdx;
   // City/duration are the author's real values frozen into the snapshot at publish
   // (undefined for snapshots published before the field existed — the player then
   // simply omits them rather than showing a hardcoded place). completionBonus is the
@@ -700,7 +706,7 @@ export default function QuestPlayerClient({
       quest={questMeta}
       copy={COPY}
       st={{
-        hintRevealed: proj.revealedHints.includes(pos),
+        hintRevealed: proj.revealedHints.includes(stepIdx),
         wrong: ui.wrong,
         answer: ui.answer,
         rating: ui.rating || latestRating(facts),
@@ -756,12 +762,12 @@ export default function QuestPlayerClient({
   return (
     <PlayerFrame
       tw={{ art: 'paper', layout: 'image', anims: true }}
-      screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${pos}`}
+      screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${stepIdx}`}
     >
       {showTop && (
         <>
           <TopBar
-            pos={pos + 1}
+            pos={stepIdx + 1}
             total={displaySteps.length}
             coins={walletBalance}
             onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}

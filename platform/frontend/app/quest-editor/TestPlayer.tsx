@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
-import { isAnswerAccepted, type QuestSnapshot } from '../../lib/shared-model';
+import { isAnswerAccepted, offersHintAfterWrongs, type QuestSnapshot } from '../../lib/shared-model';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import {
   CoinToast,
@@ -41,6 +41,26 @@ interface TestQuest {
   universalAnswer: QuestSnapshot['universal_answer'];
 }
 
+/** Меты теста («на паузе», «окончен») — состояния самого прогона, а не квеста,
+ *  поэтому живут здесь, а не в PlayerComponents. Одна разметка на оба. */
+function TestPopup({ title, text, primary, ghost }: {
+  title: string;
+  text: string;
+  primary: { label: string; on: () => void };
+  ghost: { label: string; on: () => void };
+}) {
+  return (
+    <div className="p-overlay">
+      <div className="p-popup">
+        <p className="p-popup__title">{title}</p>
+        <p className="p-popup__text">{text}</p>
+        <button className="p-btn" type="button" onClick={primary.on}>{primary.label}</button>
+        <button className="p-btn p-btn--ghost" type="button" onClick={ghost.on}>{ghost.label}</button>
+      </div>
+    </div>
+  );
+}
+
 function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: number; onNav: (msg: string) => void }) {
   const total = quest.steps.length;
   const clamp = (n: number) => Math.max(0, Math.min(n, total - 1));
@@ -53,14 +73,14 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const [wrongs, setWrongs] = useState<Record<number, number>>({});
   const [sound, setSound] = useState(true);
   const [rating, setRating] = useState(0);
-  const [reviewSent, setReviewSent] = useState(false);
+  const [reviewText, setReviewText] = useState('');
   const [startTs, setStartTs] = useState(() => Date.now());
   const [finalTime, setFinalTime] = useState('0:01');
   const [answer, setAnswer] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
   const [wrongFlash, setWrongFlash] = useState(false);
   const [toast, setToast] = useState<{ amount: number; narrative?: string } | null>(null);
-  const [overlay, setOverlay] = useState<'hint' | 'hintReveal' | 'menu' | 'feedback' | 'paused' | null>(null);
+  const [overlay, setOverlay] = useState<'hint' | 'hintReveal' | 'menu' | 'feedback' | 'paused' | 'over' | null>(null);
   const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   useEffect(() => {
     const pending = timers.current;
@@ -127,12 +147,27 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     setHints([]);
     setWrongs({});
     setRating(0);
-    setReviewSent(false);
+    setReviewText('');
     setOverlay(null);
     setAnswer('');
     setWrongFlash(false);
     setStartTs(Date.now());
     setFinalTime('0:01');
+  };
+
+  const hintCost = typeof step.hint === 'object' && step.hint ? step.hint.cost || 0 : 0;
+  const hintContent = typeof step.hint === 'object' && step.hint
+    ? { text: step.hint.text, image: step.hint.image }
+    : { text: typeof step.hint === 'string' ? step.hint : undefined, image: null };
+
+  /** Единственный путь покупки — и для чипа на странице, и для попапа после
+   *  2-й ошибки (в плеере это тоже один handleBuyHint). */
+  const buyHint = () => {
+    if (hints.includes(pos)) return;
+    setCoins((c) => c - hintCost);
+    setHints((h) => [...h, pos]);
+    setOverlay('hintReveal');
+    showToast(-hintCost, 'подсказка');
   };
 
   const handlers = {
@@ -142,6 +177,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
       if (step.nav) onNav(`→ Системные карты: ${step.nav.label || 'точка'} · ${step.nav.lat}, ${step.nav.lng}`);
     },
     answer: (value: string) => { setAnswer(value); setWrongFlash(false); },
+    buyHint,
     confirm: () => {
       const gifted = award(step, pos);
       if (gifted) after(950, next);
@@ -156,18 +192,21 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
       } else {
         const n = (wrongs[pos] || 0) + 1;
         setWrongs((w) => ({ ...w, [pos]: n }));
-        if (n >= 2 && step.hint && !hints.includes(pos)) setOverlay('hint');
-        else setWrongFlash(true);
+        // Инлайн-ошибка показывается ВСЕГДА (как в плеере); попап — сверху неё,
+        // по общему правилу порога.
+        setWrongFlash(true);
+        if (offersHintAfterWrongs({ wrongs: n, hasHint: !!step.hint, purchased: hints.includes(pos) })) {
+          setOverlay('hint');
+        }
       }
     },
     rate: (n: number) => setRating(n),
-    review: () => setReviewSent(true),
+    reviewText: setReviewText,
+    // «что дальше» в настоящем плеере открывает каталог других квестов; черновик
+    // каталога не имеет — тест на этом заканчивается.
+    onward: () => setOverlay('over'),
   };
 
-  const hintCost = typeof step.hint === 'object' && step.hint ? step.hint.cost || 0 : 0;
-  const hintContent = typeof step.hint === 'object' && step.hint
-    ? { text: step.hint.text, image: step.hint.image }
-    : { text: typeof step.hint === 'string' ? step.hint : undefined, image: null };
   const stepState = {
     answer,
     wrong: wrongFlash,
@@ -176,7 +215,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     time: finalTime,
     steps: `${total} / ${total}`,
     rating,
-    reviewSent,
+    reviewText,
   };
 
   return (
@@ -199,15 +238,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
         <HintPopup
           step={{ hint: { cost: hintCost } }}
           copy={PLAYER_COPY}
-          on={{
-            dismiss: () => { setOverlay(null); setWrongFlash(true); },
-            buy: () => {
-              setCoins((c) => c - hintCost);
-              setHints((h) => [...h, pos]);
-              setOverlay('hintReveal');
-              showToast(-hintCost, 'подсказка');
-            },
-          }}
+          on={{ dismiss: () => setOverlay(null), buy: buyHint }}
         />
       ) : null}
 
@@ -243,14 +274,21 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
       ) : null}
 
       {overlay === 'paused' ? (
-        <div className="p-overlay">
-          <div className="p-popup">
-            <p className="p-popup__title">Тест на паузе</p>
-            <p className="p-popup__text">Это тестовая попытка по черновику — шаг {pos + 1} из {total}. Прогресс не сохраняется.</p>
-            <button className="p-btn" type="button" onClick={() => setOverlay(null)}>Продолжить</button>
-            <button className="p-btn p-btn--ghost" type="button" onClick={reset}>Заново</button>
-          </div>
-        </div>
+        <TestPopup
+          title="Тест на паузе"
+          text={`Это тестовая попытка по черновику — шаг ${pos + 1} из ${total}. Прогресс не сохраняется.`}
+          primary={{ label: 'Продолжить', on: () => setOverlay(null) }}
+          ghost={{ label: 'Заново', on: reset }}
+        />
+      ) : null}
+
+      {overlay === 'over' ? (
+        <TestPopup
+          title="Тест окончен"
+          text="В опубликованном квесте здесь откроется каталог других квестов. Оценка и отзыв в тесте никуда не отправляются."
+          primary={{ label: 'Заново', on: reset }}
+          ghost={{ label: 'Вернуться к финалу', on: () => setOverlay(null) }}
+        />
       ) : null}
     </PlayerFrame>
   );
