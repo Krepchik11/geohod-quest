@@ -16,18 +16,36 @@ import { BAD_START_COORDS_TEXT, newQuest } from '../../../lib/constructor-model'
 function setup(metaPatch: Parameters<typeof newQuest>[0] = {}) {
   const quest = newQuest({ title: 'X', ...metaPatch });
   const onMeta = vi.fn();
-  render(<QuestSettings quest={quest} onMeta={onMeta} />);
-  return { quest, onMeta };
+  const { container } = render(<QuestSettings quest={quest} onMeta={onMeta} />);
+  return { quest, onMeta, container };
 }
 
-describe('QuestSettings block order', () => {
-  it('puts the cover right after the quest card — the two describe the same store listing', () => {
+/** True when `a` precedes `b` in document order. */
+function precedes(a: Element, b: Element): boolean {
+  return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+describe('QuestSettings cover placement', () => {
+  it('edits the cover inside the quest card, between the title and city — the first screen’s own order', () => {
+    setup();
+    const title = screen.getByLabelText('Название');
+    const cover = screen.getByRole('button', { name: 'Загрузить изображение: обложка' });
+    const city = screen.getByLabelText('Город');
+    expect(precedes(title, cover)).toBe(true);
+    expect(precedes(cover, city)).toBe(true);
+  });
+
+  it('keeps no separate cover block — one card block describes the whole store listing', () => {
     setup();
     const titles = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent ?? '');
-    const card = titles.findIndex((t) => t.startsWith('Карточка квеста'));
-    const cover = titles.findIndex((t) => t.startsWith('Обложка'));
-    expect(card).toBeGreaterThanOrEqual(0);
-    expect(cover).toBe(card + 1);
+    expect(titles.some((t) => t.startsWith('Обложка'))).toBe(false);
+  });
+
+  it('anchors the «Исправить →» cover gate on the zone that now lives in the card', () => {
+    const { container } = setup();
+    const anchor = container.querySelector('[data-gate-field="cover"]');
+    expect(anchor).not.toBeNull();
+    expect(anchor!.contains(screen.getByRole('button', { name: 'Загрузить изображение: обложка' }))).toBe(true);
   });
 });
 

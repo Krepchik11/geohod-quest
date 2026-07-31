@@ -57,6 +57,10 @@
 .comic-zone .zone-msg--error { background: var(--red); }
 .comic-zone.filled .tag { position: absolute; left: 6px; top: 6px; font: 600 10px/1 'Inter', sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 4px 7px; border-radius: 6px; }
 .comic-zone.req::after { content: "обязательно"; position: absolute; right: 6px; top: 6px; font: 600 9px/1 'Inter', sans-serif; color: var(--red); background: rgba(231,90,124,.12); padding: 3px 6px; border-radius: 6px; }
+/* Узкий вариант для тесной строки: свой размер, не сжимается флексом, и без
+   подсказки о формате — в таком кадре она не помещается. */
+.comic-zone--compact { width: 140px; flex: none; }
+.comic-zone--compact .zone-hint { display: none; }
 
 /* Кадрирование 4:3 (изображение страницы) */
 .crop-overlay { position: fixed; inset: 0; z-index: 120; background: rgba(2,8,135,.45); display: flex; align-items: center; justify-content: center; padding: 20px; cursor: default; }

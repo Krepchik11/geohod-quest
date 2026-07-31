@@ -8,13 +8,14 @@ import {
   parseCoords,
   plural,
   type CtorQuest,
+  type CtorQuestMeta,
   type CtorStep,
   type GateField,
 } from '../../lib/constructor-model';
 import { byteBudgetLabel, STEP_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';
-import { GateNote, ImageZone, WspBlock, WspDanger, WspToggle, useGateHighlight } from './controls';
+import { GateNote, ImageZone, QuestCoverZone, WspBlock, WspDanger, WspToggle, useGateHighlight } from './controls';
 
 type StepPatch = Partial<CtorStep>;
 type Patcher = (patch: StepPatch) => void;
@@ -210,7 +211,13 @@ function AddressBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
 
 /* ---------- Контент-блоки по шаблонам ---------- */
 
-function StartContent({ quest, step, set, onSettings }: { quest: CtorQuest; step: CtorStep; set: Patcher; onSettings: () => void }) {
+function StartContent({ quest, step, set, onMeta, onSettings }: {
+  quest: CtorQuest;
+  step: CtorStep;
+  set: Patcher;
+  onMeta: (meta: CtorQuestMeta) => void;
+  onSettings: () => void;
+}) {
   const m = quest.meta;
   return (
     <>
@@ -226,17 +233,16 @@ function StartContent({ quest, step, set, onSettings }: { quest: CtorQuest; step
       </WspBlock>
       <WspBlock title="Из настроек квеста" aside="название, город, длительность, обложка">
         <div className="wsp-metacard">
-          {m.cover
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={m.cover} alt="" />
-            : <span className="mc-ph">нет обложки</span>}
+          {/* Обложка — содержимое этой страницы, поэтому она здесь не картинка-
+              напоминание, а тот же контрол, что и в настройках: клик кадрирует. */}
+          <QuestCoverZone meta={m} onMeta={onMeta} compact />
           <span className="mc-body">
             <b>{m.title}</b><br />
             <span>{[m.city, m.duration].filter(Boolean).join(' · ') || 'город и длительность не заданы'}</span>
           </span>
           <button className="btn btn--secondary btn--sm" type="button" onClick={onSettings}>Открыть настройки</button>
         </div>
-        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>«Первый экран» собирается из общих настроек квеста — они меняются в одном месте и для магазина, и для плеера.</p>
+        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>«Первый экран» собирается из общих настроек квеста — они меняются в одном месте и для магазина, и для плеера. Обложка правится и отсюда: это то же поле, что в настройках.</p>
       </WspBlock>
     </>
   );
@@ -264,12 +270,14 @@ function TaskNoContent({ step, set }: { step: CtorStep; set: Patcher }) {
 
 /* ---------- Редактор страницы ---------- */
 
-export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, onDuplicate, onSettings }: {
+export function PageEditor({ quest, step, msgs, highlight, onMeta, onPatch, onDelete, onDuplicate, onSettings }: {
   quest: CtorQuest;
   step: CtorStep;
   msgs: Array<{ kind: 'err' | 'warn'; text: string }> | undefined;
   /** §9.2: control to scroll to + flash after an «Исправить →» click. */
   highlight?: { field?: GateField; nonce: number } | null;
+  /** «Первый экран» правит обложку — общее поле квеста, не поле шага. */
+  onMeta: (meta: CtorQuestMeta) => void;
   onPatch: Patcher;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -308,7 +316,7 @@ export function PageEditor({ quest, step, msgs, highlight, onPatch, onDelete, on
 
       <StepImageBlock step={step} onPatch={set} />
 
-      {tpl === 'start' ? <StartContent quest={quest} step={step} set={set} onSettings={onSettings} /> : null}
+      {tpl === 'start' ? <StartContent quest={quest} step={step} set={set} onMeta={onMeta} onSettings={onSettings} /> : null}
 
       {tpl === 'video' || tpl === 'route_video' ? (
         <>

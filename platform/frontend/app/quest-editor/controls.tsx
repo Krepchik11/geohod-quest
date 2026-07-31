@@ -1,12 +1,35 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { beginCropFromFile, beginCropFromValue, commitCrop, sessionRect, type CropSession } from '../../lib/image-authoring';
 import type { DecodedImage } from '../../lib/image-file';
-import { byteBudgetLabel, clampCropRect, type CropRect } from '../../lib/image-crop';
-import type { CtorImageValue, GateField } from '../../lib/constructor-model';
+import { COVER_IMAGE_MAX_BYTES, byteBudgetLabel, clampCropRect, type CropRect } from '../../lib/image-crop';
+import type { CtorImageValue, CtorQuestMeta, GateField } from '../../lib/constructor-model';
 
-/** Shared workspace controls (design/ctor2/page-editor.jsx primitives). */
+/**
+ * Shared workspace controls: сначала оформительские примитивы
+ * (design/ctor2/page-editor.jsx), ниже — контролы, знающие про модель квеста
+ * (см. «Контролы, привязанные к модели»).
+ */
+
+/**
+ * Escape закрывает наложение. Хук общий, потому что иначе каждое новое
+ * наложение заново выбирает цель слушателя, зависимости и условие — а расходятся
+ * они молча. `enabled` для наложений, живущих в DOM и в закрытом виде.
+ */
+export function useEscape(onClose: () => void, enabled = true): void {
+  // Слушатель не должен переподписываться из-за новой идентичности onClose:
+  // она меняется на каждом рендере родителя (§8.3 agents/react.md).
+  const close = useEffectEvent(onClose);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [enabled]);
+}
 
 export function WspToggle({ on, onClick, label, ariaLabel, disabled }: { on: boolean; onClick: () => void; label?: string; ariaLabel?: string; disabled?: boolean }) {
   return (
@@ -25,9 +48,18 @@ export function WspToggle({ on, onClick, label, ariaLabel, disabled }: { on: boo
   );
 }
 
+/**
+ * Атрибут-якорь для §9.2 «Исправить →». Единственный способ объявить якорь:
+ * поле проходит через {@link GateField}, поэтому переименование в union ломает
+ * сборку, а не тихо отключает подсветку.
+ */
+export function gateAnchor(field: GateField | undefined): { 'data-gate-field'?: GateField } {
+  return { 'data-gate-field': field };
+}
+
 export function WspBlock({ title, aside, gateField, children }: { title: string; aside?: string; gateField?: GateField; children: React.ReactNode }) {
   return (
-    <div className="ed-block" data-gate-field={gateField}>
+    <div className="ed-block" {...gateAnchor(gateField)}>
       <h4>{title}{aside ? <span className="opt">{aside}</span> : null}</h4>
       {children}
     </div>
@@ -115,6 +147,10 @@ function CropModal({ dec, initialRect, onConfirm, onCancel }: {
     return () => ro.disconnect();
   }, []);
 
+  // Кадрирование открывается кликом по ЛЮБОМУ изображению — выход должен быть
+  // один и всегда доступный, модалка при этом ничего не фокусирует.
+  useEscape(onCancel);
+
   // view px → source px: the frame always shows the full crop rect width.
   const scale = (viewW || 400) / rect.width;
 
@@ -175,11 +211,13 @@ function CropModal({ dec, initialRect, onConfirm, onCancel }: {
  * поэтому клик по готовому изображению ОТКРЫВАЕТ КАДР ЗАНОВО, а не требует
  * новый файл. Сама последовательность загрузок — в lib/image-authoring.
  */
-export function ImageZone({ value, label, required, width, maxBytes, onChange }: {
+export function ImageZone({ value, label, required, width, compact, maxBytes, onChange }: {
   value: CtorImageValue;
   label: string;
   required?: boolean;
   width?: number;
+  /** Узкий вариант зоны для тесных строк: свой размер и без подсказки формата. */
+  compact?: boolean;
   /** Бюджет кадра в байтах: роль изображения задаёт его явно (см. lib/image-crop). */
   maxBytes: number;
   onChange: (value: CtorImageValue) => void;
@@ -221,13 +259,18 @@ export function ImageZone({ value, label, required, width, maxBytes, onChange }:
     void run(async () => onChange(await commitCrop(open, rect, maxBytes)));
   };
 
+  // Что сделает клик — говорит сама зона, и глазами (title), и озвучкой
+  // (aria-label). Иначе про повторное кадрирование знает только тот блок,
+  // который не забыл написать это прозой рядом.
+  const action = `${src ? 'Изменить кадрирование' : 'Загрузить изображение'}: ${label}`;
   return (
     <div
-      className={'comic-zone' + (src ? ' filled' : '') + (required ? ' req' : '')}
+      className={'comic-zone' + (src ? ' filled' : '') + (required ? ' req' : '') + (compact ? ' comic-zone--compact' : '')}
       style={width ? { width } : undefined}
       role="button"
       tabIndex={0}
-      aria-label={`${src ? 'Изменить кадрирование' : 'Загрузить изображение'}: ${label}`}
+      aria-label={action}
+      title={action}
       onClick={activate}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
       onDragOver={(e) => e.preventDefault()}
@@ -255,7 +298,7 @@ export function ImageZone({ value, label, required, width, maxBytes, onChange }:
       ) : (
         <>
           <b>{label}</b>
-          {`PNG/JPG, кадр 4:3, до ${byteBudgetLabel(maxBytes)}`}
+          <span className="zone-hint">{`PNG/JPG, кадр 4:3, до ${byteBudgetLabel(maxBytes)}`}</span>
         </>
       )}
       {/* Одно место для обоих состояний зоны — пустой и заполненной. */}
@@ -271,5 +314,31 @@ export function ImageZone({ value, label, required, width, maxBytes, onChange }:
         />
       ) : null}
     </div>
+  );
+}
+
+/* ---------- Контролы, привязанные к модели квеста ---------- */
+
+/**
+ * Обложка квеста как контрол: она живёт в мете (`cover` + `coverOrigin`), а
+ * правится из двух мест — из настроек квеста и с «Первого экрана», где она и
+ * есть содержимое страницы. Роль объявлена здесь один раз, поэтому оба места
+ * правят одно поле одинаково.
+ */
+export function QuestCoverZone({ meta, onMeta, width, compact }: {
+  meta: CtorQuestMeta;
+  onMeta: (meta: CtorQuestMeta) => void;
+  width?: number;
+  compact?: boolean;
+}) {
+  return (
+    <ImageZone
+      value={{ url: meta.cover, origin: meta.coverOrigin }}
+      label="обложка"
+      width={width}
+      compact={compact}
+      maxBytes={COVER_IMAGE_MAX_BYTES}
+      onChange={(v) => onMeta({ ...meta, cover: v.url, coverOrigin: v.origin })}
+    />
   );
 }
