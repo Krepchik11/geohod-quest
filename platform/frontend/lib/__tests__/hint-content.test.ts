@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CoinToast,
   HintRevealPopup,
+  PREVIEW_HANDLERS,
   StepView,
   type DesignStep,
 } from '../../app/player/PlayerComponents';
@@ -47,7 +48,7 @@ describe('HintRevealPopup', () => {
 describe('inline hint box (persistent reveal)', () => {
   const render = (step: DesignStep, hintRevealed: boolean): string =>
     renderToStaticMarkup(
-      createElement(StepView, { step, copy: PLAYER_COPY, st: { answer: '', hintRevealed }, on: {} })
+      createElement(StepView, { step, copy: PLAYER_COPY, st: { answer: '', hintRevealed }, on: PREVIEW_HANDLERS })
     );
 
   it('shows the hint image inside the revealed box', () => {
@@ -83,7 +84,7 @@ describe('retired note feature', () => {
       action: { desc: '', confirmLabel: 'Я на месте' },
     };
     const html = renderToStaticMarkup(
-      createElement(StepView, { step, copy: PLAYER_COPY, st: {}, on: {} })
+      createElement(StepView, { step, copy: PLAYER_COPY, st: {}, on: PREVIEW_HANDLERS })
     );
     expect(html).not.toContain('p-note');
     expect(html).not.toContain('<textarea');

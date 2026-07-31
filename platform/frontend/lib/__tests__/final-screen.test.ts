@@ -10,10 +10,16 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { FinalScreen, type StepHandlers, type StepState } from '../../app/player/PlayerComponents';
+import {
+  FinalScreen,
+  PREVIEW_HANDLERS,
+  type StepHandlers,
+  type StepState,
+} from '../../app/player/PlayerComponents';
 import { PLAYER_COPY } from '../player-copy';
 
-function render(st: StepState, on: StepHandlers = {}): string {
+/** A fully-wired finale; individual tests override to probe a missing handler. */
+function render(st: StepState, on: StepHandlers = PREVIEW_HANDLERS): string {
   return renderToStaticMarkup(createElement(FinalScreen, { copy: PLAYER_COPY, st, on }));
 }
 
@@ -28,9 +34,9 @@ describe('FinalScreen', () => {
   });
 
   it('renders «пройти заново» only when a replay handler is wired', () => {
-    expect(render({ coinsEarned: 5 }, { replay: () => {} })).toContain('пройти заново');
+    expect(render({ coinsEarned: 5 }, { ...PREVIEW_HANDLERS, replay: () => {} })).toContain('пройти заново');
     // Editor previews / constructor test-player pass no replay handler — no dead button.
-    expect(render({ coinsEarned: 5 }, {})).not.toContain('пройти заново');
+    expect(render({ coinsEarned: 5 })).not.toContain('пройти заново');
   });
 
   it('offers «Пропустить оценку» only while unrated', () => {

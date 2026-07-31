@@ -304,15 +304,40 @@ export function latestRating(facts: Fact[]): number {
   return rating;
 }
 
+/** The state a step is in as far as the hint offer is concerned. Named fields, not
+ *  positional args: `hasHint` and `purchased` are adjacent booleans and a
+ *  transposition would silently invert the rule. */
+export interface HintOfferState {
+  wrongs: number;
+  hasHint: boolean;
+  purchased: boolean;
+}
+
 /**
  * SPEC §Wrong-Answer / Hint Flow: the hint popup is offered only from the SECOND
  * wrong answer on a step, only while the step carries a hint that has not been
- * purchased yet. Derived from the fact log alone — no parallel counter state.
+ * purchased yet.
+ *
+ * This is the ONE place the threshold lives. The production player derives its
+ * inputs from the fact log (`shouldOfferHint`) and the constructor's test player
+ * from its ephemeral draft-run state; both must agree, so neither restates «>= 2».
  */
+export function offersHintAfterWrongs({ wrongs, hasHint, purchased }: HintOfferState): boolean {
+  return hasHint && !purchased && wrongs >= 2;
+}
+
+/** `offersHintAfterWrongs` fed from the fact log alone — no parallel counter state. */
 export function shouldOfferHint(facts: Fact[], pos: number, step: GameStep): boolean {
-  if (!step.supporting?.hint) return false;
-  if (projectState(facts).revealedHints.includes(pos)) return false;
-  return wrongAnswersAt(facts, pos) >= 2;
+  const hasHint = !!step.supporting?.hint;
+  // Cheap gate first: both inputs below are O(n) walks of the log, and a step that
+  // sells no hint can never offer one.
+  if (!hasHint) return false;
+  return offersHintAfterWrongs({
+    wrongs: wrongAnswersAt(facts, pos),
+    hasHint,
+    // The one membership question projectState would answer, asked directly.
+    purchased: facts.some((f) => f.type === 'hint_purchased' && f.step_position === pos),
+  });
 }
 
 /** Balance re-projection notice: show «Баланс обновлён» old → new (SPEC correction 1). */

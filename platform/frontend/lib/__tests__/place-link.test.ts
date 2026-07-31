@@ -9,14 +9,14 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { StepView, type DesignStep } from '../../app/player/PlayerComponents';
+import { PREVIEW_HANDLERS, StepView, type DesignStep } from '../../app/player/PlayerComponents';
 import { PLAYER_COPY } from '../player-copy';
 import { mapsSearchUrl } from '../maps';
 
 const nav = { lat: 45.2551, lng: 19.8451, label: 'Церковь' };
 
 function render(step: DesignStep): string {
-  return renderToStaticMarkup(createElement(StepView, { step, copy: PLAYER_COPY, st: {}, on: {} }));
+  return renderToStaticMarkup(createElement(StepView, { step, copy: PLAYER_COPY, st: {}, on: PREVIEW_HANDLERS }));
 }
 
 describe('clickable address line (replaces the navigator button)', () => {

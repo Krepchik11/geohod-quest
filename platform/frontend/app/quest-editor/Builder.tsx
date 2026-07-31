@@ -28,7 +28,7 @@ import {
 } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
-import { PlayerFrame, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
+import { PlayerFrame, PREVIEW_HANDLERS, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
 import { GateNote, QuestCoverZone, WspBlock, WspToggle, gateAnchor, useGateHighlight } from './controls';
 import { PageEditor } from './PageEditor';
 import { PublishPanel } from './PublishPanel';
@@ -85,7 +85,7 @@ function MiniTemplatePreview({ template }: { template: CtorTemplate }) {
     <div className="mini">
       <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }}>
         {template !== 'start' ? <TopBar pos={pos} total={total} coins={0} /> : null}
-        <StepView step={step} quest={{ city: PREVIEW_META.city, duration: PREVIEW_META.duration }} copy={PLAYER_COPY} st={{}} on={{}} />
+        <StepView step={step} quest={{ city: PREVIEW_META.city, duration: PREVIEW_META.duration }} copy={PLAYER_COPY} st={{}} on={PREVIEW_HANDLERS} />
       </PlayerFrame>
     </div>
   );
@@ -317,7 +317,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
             quest={{ title: quest.meta.title, city: quest.meta.city || '—', duration: quest.meta.duration || '—' }}
             copy={PLAYER_COPY}
             st={{ hintRevealed: hintOn, wrong: wrongOn }}
-            on={{}}
+            on={PREVIEW_HANDLERS}
           />
         </PlayerFrame>
       </div>
