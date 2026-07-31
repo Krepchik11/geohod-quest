@@ -32,9 +32,9 @@ import { AdminConfirmSheet, AdminToast } from '../ui';
 export interface QuestPickerRow {
   questId: string;
   name: string;
-  /** `null` for an off-catalog quest — its price is genuinely unknown here. */
+  /** `null` for an off-catalog quest — its price is a published-version fact. */
   price: number | null;
-  /** Selected earlier, but the catalog no longer offers it — no name to show. */
+  /** Not currently on sale: selected earlier, since delisted or never published. */
   offCatalog: boolean;
 }
 
@@ -44,18 +44,24 @@ export interface QuestPickerRow {
  *
  * The union is the point. Rendering the catalog alone left an id that is in the
  * payload and counted by «Выбрано: N» with no row to untick — a selection the
- * admin could neither see nor remove. An off-catalog quest has no name here (the
- * catalog is the only source the editor loads), so its id is the honest label and
- * also what the search matches on.
+ * admin could neither see nor remove.
+ *
+ * The two inputs answer two different questions, which is why both are needed:
+ * `authored` (the constructor registry) names a quest whatever its lifecycle,
+ * and `catalog` says what is on sale and for how much. Naming an off-catalog
+ * quest by its raw id would be the very defect the label seam removed on the
+ * backend, so the id appears only for a quest neither source knows.
  */
 export function questPickerRows(
-  quests: ReadonlyArray<{ quest_id: string; name: string; price?: number | null }>,
+  catalog: ReadonlyArray<{ quest_id: string; name: string; price?: number | null }>,
+  authored: ReadonlyArray<{ quest_id: string; name: string }>,
   selectedIds: readonly string[],
   query: string,
 ): QuestPickerRow[] {
-  const inCatalog = new Set(quests.map((q) => q.quest_id));
+  const inCatalog = new Set(catalog.map((q) => q.quest_id));
+  const nameOf = new Map(authored.map((q) => [q.quest_id, q.name]));
   const rows: QuestPickerRow[] = [
-    ...quests.map((q) => ({
+    ...catalog.map((q) => ({
       questId: q.quest_id,
       name: q.name,
       price: q.price ?? 0,
@@ -63,7 +69,12 @@ export function questPickerRows(
     })),
     ...selectedIds
       .filter((id) => !inCatalog.has(id))
-      .map((id) => ({ questId: id, name: id, price: null, offCatalog: true })),
+      .map((id) => ({
+        questId: id,
+        name: nameOf.get(id) ?? id,
+        price: null,
+        offCatalog: true,
+      })),
   ];
   const needle = query.trim().toLowerCase();
   return needle ? rows.filter((r) => r.name.toLowerCase().includes(needle)) : rows;
@@ -170,6 +181,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
     isNew ? 'ready' : 'loading',
   );
   const [quests, setQuests] = useState<PublishedQuestWire[]>([]);
+  const [authored, setAuthored] = useState<Array<{ quest_id: string; name: string }>>([]);
   const [questQuery, setQuestQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -181,7 +193,8 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Paid published quests feed the applicability picker.
+    // Paid published quests feed the applicability picker: what is on sale, and
+    // for how much.
     void api
       .listQuests()
       .then((all) => {
@@ -189,6 +202,16 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
       })
       .catch(() => {
         /* picker degrades to an empty list; «Все квесты» still works */
+      });
+    // The authoring registry names a quest whatever its lifecycle — so a coupon
+    // already scoped to a quest that has left the store still shows a real name.
+    void api
+      .listConstructorQuests()
+      .then((all) => {
+        if (!cancelled) setAuthored(all.map((q) => ({ quest_id: q.quest_id, name: q.name })));
+      })
+      .catch(() => {
+        /* names degrade to ids; the rows stay visible and removable */
       });
     if (couponId) {
       void api
@@ -212,8 +235,8 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
   }, [couponId]);
 
   const filteredQuests = useMemo(
-    () => questPickerRows(quests, form.questIds, questQuery),
-    [quests, form.questIds, questQuery],
+    () => questPickerRows(quests, authored, form.questIds, questQuery),
+    [quests, authored, form.questIds, questQuery],
   );
 
   const showToast = (text: string) => {
@@ -519,7 +542,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                                 {q.offCatalog && ' · нет в каталоге'}
                               </span>
                               <span className="ac-quest__price">
-                                {q.price === null ? '—' : `${formatRubles(q.price)} ₽`}
+                                {q.offCatalog ? '—' : `${formatRubles(q.price ?? 0)} ₽`}
                               </span>
                             </button>
                           );

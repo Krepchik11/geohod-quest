@@ -9,6 +9,7 @@ import {
   periodLabel,
   plural,
   questMetaLine,
+  stepsLabel,
   questRowVm,
   questsCountLabel,
 } from '../admin-stats';
@@ -167,8 +168,8 @@ describe('quest rows', () => {
 
   it('handles zero starts and missing meta', () => {
     expect(questRowVm({ ...row, started: 0, finished: 0 }).pct).toBe(0);
-    expect(questMetaLine({ city: null, pages: null, template_summary: '7 steps' })).toBe('7 steps');
-    expect(questMetaLine({ city: 'Казань', pages: 1, template_summary: '' })).toBe('Казань · 1 шаг');
+    expect(questMetaLine(null, stepsLabel({ pages: null, template_summary: '7 steps' }))).toBe('7 steps');
+    expect(questMetaLine('Казань', stepsLabel({ pages: 1, template_summary: '' }))).toBe('Казань · 1 шаг');
   });
 });
 

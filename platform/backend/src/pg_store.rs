@@ -1849,13 +1849,15 @@ impl PgConstructorStore {
     /// the targeted read — same projection, only the `WHERE` differs (the
     /// [`Self::fetch_summaries`] pattern).
     ///
-    /// `city` is projected out of the body IN THE DATABASE: a jsonb path
-    /// extraction transfers one short string per row instead of the whole
-    /// authoring body (megabytes for a media-heavy quest). The `jsonb_typeof`
-    /// guard mirrors `store::ctor_body_city` exactly — only a JSON *string* is a
-    /// city, so a numeric `meta.city` reads as absent here just as it does
-    /// in-memory. Trimming is NOT done in SQL; `QuestLabel::from_authored` owns
-    /// it, so the two backends cannot disagree about padding.
+    /// `city` is extracted from the body IN THE DATABASE, so one short value per
+    /// row crosses the wire instead of the whole authoring body (megabytes for a
+    /// media-heavy quest).
+    ///
+    /// SQL navigates to `meta.city` and stops; it deliberately does NOT decide
+    /// what counts as a city. The raw jsonb comes back and the same Rust rules
+    /// that serve the in-memory store apply — `as_str()` (only a JSON *string* is
+    /// a city) then [`QuestLabel::from_authored`] (trim, blank becomes absent).
+    /// Mirroring those rules in SQL would be a second definition free to drift.
     async fn fetch_labels(
         &self,
         quest_id: Option<&str>,
@@ -1866,9 +1868,7 @@ impl PgConstructorStore {
             ""
         };
         let sql = format!(
-            "SELECT quest_id, name, \
-                    CASE WHEN jsonb_typeof(body -> 'meta' -> 'city') = 'string' \
-                         THEN body -> 'meta' ->> 'city' END AS city \
+            "SELECT quest_id, name, body -> 'meta' -> 'city' AS city \
              FROM constructor_quests {where_clause}"
         );
         let mut query = sqlx::query(&sql);
@@ -1880,8 +1880,9 @@ impl PgConstructorStore {
             .map(|row| {
                 let quest_id: String = row.try_get("quest_id").map_err(internal)?;
                 let name: String = row.try_get("name").map_err(internal)?;
-                let city: Option<String> = row.try_get("city").map_err(internal)?;
-                Ok((quest_id, QuestLabel::from_authored(name, city.as_deref())))
+                let city: Option<serde_json::Value> = row.try_get("city").map_err(internal)?;
+                let city = city.as_ref().and_then(serde_json::Value::as_str);
+                Ok((quest_id, QuestLabel::from_authored(name, city)))
             })
             .collect()
     }

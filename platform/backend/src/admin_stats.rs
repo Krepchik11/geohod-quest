@@ -15,7 +15,7 @@
 use serde::Serialize;
 
 use crate::facts::{Fact, project_state};
-use crate::store::{PublishedMeta, QuestLabelRef, QuestLabels};
+use crate::store::{PublishedMeta, QuestLabel, QuestLabels};
 
 // ── calendar helpers ─────────────────────────────────────────────────────────
 
@@ -309,8 +309,8 @@ pub fn quest_rows(
             let label = labels.get(&m.quest_id);
             QuestStatsRow {
                 quest_id: m.quest_id.clone(),
-                name: label.name.to_string(),
-                city: label.city.map(str::to_string),
+                name: label.name,
+                city: label.city,
                 template_summary: m.template_summary.clone(),
                 pages: m.pages,
                 published: true,
@@ -326,8 +326,8 @@ pub fn quest_rows(
     rows.extend(by_quest.into_iter().map(|(quest_id, t)| {
         let label = labels.get(quest_id);
         QuestStatsRow {
-            name: label.name.to_string(),
-            city: label.city.map(str::to_string),
+            name: label.name,
+            city: label.city,
             quest_id: quest_id.to_string(),
             template_summary: String::new(),
             pages: None,
@@ -421,7 +421,7 @@ pub fn funnel_counts(steps_len: usize, logs: &[Vec<Fact>]) -> Vec<u64> {
 #[allow(clippy::too_many_arguments)]
 pub fn project_quest_detail(
     meta: &PublishedMeta,
-    label: QuestLabelRef<'_>,
+    label: QuestLabel,
     snapshot: Option<&serde_json::Value>,
     ev: &StatsEvents,
     range: &DayRange,
@@ -432,8 +432,8 @@ pub fn project_quest_detail(
     let reached = funnel_counts(steps.len(), funnel_logs);
     QuestStatsResponse {
         quest_id: meta.quest_id.clone(),
-        name: label.name.to_string(),
-        city: label.city.map(str::to_string),
+        name: label.name,
+        city: label.city,
         template_summary: meta.template_summary.clone(),
         pages: meta.pages,
         from: range.from.clone(),

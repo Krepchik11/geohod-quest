@@ -1906,6 +1906,15 @@ pub struct QuestLabel {
 }
 
 impl QuestLabel {
+    /// Copy of a marketplace listing's label — the stand-in for a quest that has
+    /// no authoring row (a legacy/direct publish).
+    pub fn from_listing(meta: &PublishedMeta) -> Self {
+        Self {
+            name: meta.name.clone(),
+            city: meta.city.clone(),
+        }
+    }
+
     /// Build from an authoring row's raw fields.
     ///
     /// A blank or whitespace-only city normalizes to `None` — the same rule
@@ -1921,15 +1930,6 @@ impl QuestLabel {
                 .map(str::to_string),
         }
     }
-}
-
-/// Borrowed view of a resolved label. [`QuestLabels::get`] is total, so the
-/// unknown-quest case borrows the quest id itself instead of allocating a
-/// throwaway `String` per row.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QuestLabelRef<'a> {
-    pub name: &'a str,
-    pub city: Option<&'a str>,
 }
 
 /// Every known quest's label, resolved once per request from both registries.
@@ -1949,52 +1949,23 @@ impl QuestLabels {
     pub fn resolve(authored: HashMap<String, QuestLabel>, published: &[PublishedMeta]) -> Self {
         let mut by_quest = authored;
         for meta in published {
-            // The listing only FILLS GAPS, so a quest with an authoring row never
-            // clones the frozen strings it would immediately discard.
-            by_quest
-                .entry(meta.quest_id.clone())
-                .or_insert_with(|| QuestLabel {
-                    name: meta.name.clone(),
-                    city: meta.city.clone(),
-                });
+            // The listing only FILLS GAPS. Guarding with `contains_key` rather than
+            // `entry` keeps the common case (the quest HAS an authoring row) free of
+            // the key clone `entry` would take unconditionally.
+            if !by_quest.contains_key(meta.quest_id.as_str()) {
+                by_quest.insert(meta.quest_id.clone(), QuestLabel::from_listing(meta));
+            }
         }
         Self(by_quest)
     }
 
-    /// One quest's label, by the SAME precedence as the full map — the per-quest
-    /// surfaces read a single authoring row instead of scanning the registry, and
-    /// still cannot end up with a different rule than the list views.
-    pub fn resolve_one(
-        quest_id: &str,
-        authored: Option<QuestLabel>,
-        published: Option<&PublishedMeta>,
-    ) -> Self {
-        Self::resolve(
-            // `Option` iterates over zero or one item — a one-entry map here.
-            authored
-                .into_iter()
-                .map(|label| (quest_id.to_string(), label))
-                .collect(),
-            published.map(std::slice::from_ref).unwrap_or_default(),
-        )
-    }
-
-    /// The label of `quest_id` — total: an unknown quest reads as its own id.
-    ///
-    /// The returned view borrows from `self` OR from `quest_id`, so both inputs
-    /// share the output lifetime `'a` (Rust nuance: this is what lets the fallback
-    /// hand back a slice of the caller's id with no allocation).
-    pub fn get<'a>(&'a self, quest_id: &'a str) -> QuestLabelRef<'a> {
-        match self.0.get(quest_id) {
-            Some(label) => QuestLabelRef {
-                name: &label.name,
-                city: label.city.as_deref(),
-            },
-            None => QuestLabelRef {
-                name: quest_id,
-                city: None,
-            },
-        }
+    /// The label of `quest_id` — total: an unknown quest reads as its own id, so
+    /// no call site has to remember the fallback.
+    pub fn get(&self, quest_id: &str) -> QuestLabel {
+        self.0.get(quest_id).cloned().unwrap_or_else(|| QuestLabel {
+            name: quest_id.to_string(),
+            city: None,
+        })
     }
 }
 
@@ -2005,7 +1976,7 @@ impl QuestLabels {
 /// null, a number, a non-object `meta`) reads as "no city" rather than an error.
 /// The value is returned verbatim; [`QuestLabel::from_authored`] owns the cleanup,
 /// and the Postgres projection applies the same JSON-string-only rule in SQL.
-pub fn ctor_body_city(body: &serde_json::Value) -> Option<&str> {
+pub(crate) fn ctor_body_city(body: &serde_json::Value) -> Option<&str> {
     body.get("meta")?.get("city")?.as_str()
 }
 
@@ -3732,13 +3703,13 @@ mod constructor_tests {
         // The authoring registry is the quest's live identity — it wins whole,
         // never field-by-field, so name and city can never come from two epochs.
         assert_eq!(labels.get("renamed").name, "Новое имя");
-        assert_eq!(labels.get("renamed").city, Some("Нови Сад"));
+        assert_eq!(labels.get("renamed").city.as_deref(), Some("Нови Сад"));
         // Never published: the draft still has a name.
         assert_eq!(labels.get("draft-only").name, "Черновик");
         assert_eq!(labels.get("draft-only").city, None);
         // A legacy/direct publish has no constructor row — the listing stands in.
         assert_eq!(labels.get("legacy").name, "Легаси");
-        assert_eq!(labels.get("legacy").city, Some("Москва"));
+        assert_eq!(labels.get("legacy").city.as_deref(), Some("Москва"));
         // Known only to the fact log: the id is the honest label, and no caller
         // has to remember to write that fallback itself.
         assert_eq!(labels.get("bubble-1755").name, "bubble-1755");
