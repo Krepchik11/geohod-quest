@@ -15,7 +15,7 @@
 use serde::Serialize;
 
 use crate::facts::{Fact, project_state};
-use crate::store::PublishedMeta;
+use crate::store::{PublishedMeta, QuestLabel, QuestLabels};
 
 // ── calendar helpers ─────────────────────────────────────────────────────────
 
@@ -278,12 +278,16 @@ pub fn daily_series(ev: &StatsEvents, range: &DayRange) -> Vec<DailyPoint> {
 }
 
 /// Per-quest table rows: every published quest (zero-activity ones included)
-/// PLUS every quest with range activity that is no longer published — the rows
-/// must always sum to the KPI totals, and delisting a quest must not erase its
-/// history. Sorted by starts desc, then purchases desc, then name. One pass
-/// per stream (not one scan per quest).
+/// PLUS every quest with range activity that has no catalog entry — the rows
+/// must always sum to the KPI totals, and losing a listing must not erase a
+/// quest's history. Sorted by starts desc, then purchases desc, then name. One
+/// pass per stream (not one scan per quest).
+///
+/// Every row is named through `labels`, listed or not, so this table agrees with
+/// the moderation views and with the drill-down opened from it.
 pub fn quest_rows(
     metas: &[PublishedMeta],
+    labels: &QuestLabels,
     ev: &StatsEvents,
     range: &DayRange,
 ) -> Vec<QuestStatsRow> {
@@ -302,10 +306,11 @@ pub fn quest_rows(
         .iter()
         .map(|m| {
             let t = by_quest.remove(m.quest_id.as_str()).unwrap_or_default();
+            let label = labels.get(&m.quest_id);
             QuestStatsRow {
                 quest_id: m.quest_id.clone(),
-                name: m.name.clone(),
-                city: m.city.clone(),
+                name: label.name,
+                city: label.city,
                 template_summary: m.template_summary.clone(),
                 pages: m.pages,
                 published: true,
@@ -315,18 +320,22 @@ pub fn quest_rows(
             }
         })
         .collect();
-    // Whatever is left has activity but no catalog entry: a delisted quest.
-    // The stored name is gone with the listing, so the id is the honest label.
-    rows.extend(by_quest.into_iter().map(|(quest_id, t)| QuestStatsRow {
-        quest_id: quest_id.to_string(),
-        name: quest_id.to_string(),
-        city: None,
-        template_summary: String::new(),
-        pages: None,
-        published: false,
-        purchased: t.purchased,
-        started: t.started,
-        finished: t.finished,
+    // Whatever is left has activity but no catalog entry. The chips are
+    // snapshot-derived and genuinely absent, but the quest still has a name: the
+    // authoring registry keeps it whether or not the quest ever reached the store.
+    rows.extend(by_quest.into_iter().map(|(quest_id, t)| {
+        let label = labels.get(quest_id);
+        QuestStatsRow {
+            name: label.name,
+            city: label.city,
+            quest_id: quest_id.to_string(),
+            template_summary: String::new(),
+            pages: None,
+            published: false,
+            purchased: t.purchased,
+            started: t.started,
+            finished: t.finished,
+        }
     }));
     rows.sort_by(|a, b| {
         b.started
@@ -341,6 +350,7 @@ pub fn quest_rows(
 /// backends share.
 pub fn project_overview(
     metas: &[PublishedMeta],
+    labels: &QuestLabels,
     ev: &StatsEvents,
     range: &DayRange,
     with_prev: bool,
@@ -351,7 +361,7 @@ pub fn project_overview(
         totals: totals_in(ev, range, None),
         prev: with_prev.then(|| totals_in(ev, &range.prev(), None)),
         daily: daily_series(ev, range),
-        quests: quest_rows(metas, ev, range),
+        quests: quest_rows(metas, labels, ev, range),
     }
 }
 
@@ -405,10 +415,13 @@ pub fn funnel_counts(steps_len: usize, logs: &[Vec<Fact>]) -> Vec<u64> {
     reached
 }
 
-/// The whole quest-detail body (KPIs + funnel over the current snapshot).
+/// The whole quest-detail body (KPIs + funnel over the current snapshot). The
+/// label comes from the same seam as the overview row this page opens from, so
+/// the two can never name the quest differently.
 #[allow(clippy::too_many_arguments)]
 pub fn project_quest_detail(
     meta: &PublishedMeta,
+    label: QuestLabel,
     snapshot: Option<&serde_json::Value>,
     ev: &StatsEvents,
     range: &DayRange,
@@ -419,8 +432,8 @@ pub fn project_quest_detail(
     let reached = funnel_counts(steps.len(), funnel_logs);
     QuestStatsResponse {
         quest_id: meta.quest_id.clone(),
-        name: meta.name.clone(),
-        city: meta.city.clone(),
+        name: label.name,
+        city: label.city,
         template_summary: meta.template_summary.clone(),
         pages: meta.pages,
         from: range.from.clone(),
@@ -477,6 +490,21 @@ mod tests {
             note: None,
             device_id: "d1".into(),
         }
+    }
+
+    /// Labels as the authoring registry would supply them (`(quest_id, name, city)`).
+    fn labels(rows: &[(&str, &str, Option<&str>)]) -> QuestLabels {
+        QuestLabels::resolve(
+            rows.iter()
+                .map(|(quest_id, name, city)| {
+                    (
+                        (*quest_id).to_string(),
+                        crate::store::QuestLabel::from_authored((*name).to_string(), *city),
+                    )
+                })
+                .collect(),
+            &[],
+        )
     }
 
     fn meta(quest_id: &str, name: &str) -> PublishedMeta {
@@ -608,7 +636,7 @@ mod tests {
             meta("q1", "Тайны"),
             meta("q2", "Дозор"),
         ];
-        let rows = quest_rows(&metas, &ev, &r);
+        let rows = quest_rows(&metas, &QuestLabels::default(), &ev, &r);
         assert_eq!(
             rows.iter().map(|r| r.quest_id.as_str()).collect::<Vec<_>>(),
             vec!["q1", "q2", "q0"]
@@ -619,12 +647,35 @@ mod tests {
     }
 
     #[test]
-    fn quest_rows_keep_delisted_quests_so_totals_reconcile() {
-        // q2 has activity but no published meta (delisted): it must still get
-        // a row, else the table stops summing to the KPI totals.
+    fn quest_rows_take_every_name_from_the_label_seam() {
+        // Listed or not, a row is named by the authoring registry — so the table
+        // agrees with the moderation views and with its own drill-down.
         let ev = sample_events();
         let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
-        let rows = quest_rows(&[meta("q1", "Тайны")], &ev, &r);
+        let labels = labels(&[
+            ("q1", "Тайны. Ремастер", Some("Москва")),
+            ("q2", "Дозор", Some("Нови Сад")),
+        ]);
+        let rows = quest_rows(&[meta("q1", "Тайны")], &labels, &ev, &r);
+        let row = |id: &str| {
+            rows.iter()
+                .find(|row| row.quest_id == id)
+                .unwrap_or_else(|| panic!("{id} row"))
+        };
+        assert_eq!(row("q1").name, "Тайны. Ремастер", "renamed after publish");
+        assert_eq!(row("q1").city.as_deref(), Some("Москва"));
+        assert_eq!(row("q2").name, "Дозор", "never published, still named");
+        assert_eq!(row("q2").city.as_deref(), Some("Нови Сад"));
+    }
+
+    #[test]
+    fn quest_rows_keep_unlisted_quests_so_totals_reconcile() {
+        // q2 has activity but no published meta: it must still get a row, else
+        // the table stops summing to the KPI totals. With no registry entry
+        // either, the id is the honest label.
+        let ev = sample_events();
+        let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
+        let rows = quest_rows(&[meta("q1", "Тайны")], &QuestLabels::default(), &ev, &r);
         assert_eq!(rows.len(), 2);
         let ghost = rows
             .iter()
@@ -642,9 +693,9 @@ mod tests {
     fn overview_prev_is_optional() {
         let ev = sample_events();
         let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
-        let with = project_overview(&[], &ev, &r, true);
+        let with = project_overview(&[], &QuestLabels::default(), &ev, &r, true);
         assert!(with.prev.is_some());
-        let without = project_overview(&[], &ev, &r, false);
+        let without = project_overview(&[], &QuestLabels::default(), &ev, &r, false);
         assert!(without.prev.is_none());
     }
 
@@ -657,7 +708,7 @@ mod tests {
             finishes: vec![],
         };
         let r = DayRange::new("2026-07-10", "2026-07-12").unwrap();
-        let o = project_overview(&[], &ev, &r, true);
+        let o = project_overview(&[], &QuestLabels::default(), &ev, &r, true);
         assert_eq!(o.totals.started, 1);
         let prev = o.prev.expect("prev");
         assert_eq!(prev.started, 1);
@@ -727,7 +778,10 @@ mod tests {
         let m = meta("q1", "Тайны");
         let snap = snapshot_json();
         let logs = vec![vec![], vec![fact(FactKind::PhysicalConfirmed, 0, false)]];
-        let d = project_quest_detail(&m, Some(&snap), &ev, &r, true, &logs);
+        let renamed = labels(&[("q1", "Тайны. Ремастер", Some("Москва"))]);
+        let d = project_quest_detail(&m, renamed.get("q1"), Some(&snap), &ev, &r, true, &logs);
+        assert_eq!(d.name, "Тайны. Ремастер", "the seam names the detail too");
+        assert_eq!(d.city.as_deref(), Some("Москва"));
         assert_eq!(d.totals.started, 2);
         assert_eq!(d.funnel_started, 2);
         assert_eq!(d.funnel.len(), 4);
@@ -736,7 +790,7 @@ mod tests {
         assert_eq!(d.funnel[0].title, "Старт: у башни");
         assert!(d.prev.is_some());
         // No snapshot data (legacy publish): empty funnel, honest zero.
-        let d2 = project_quest_detail(&m, None, &ev, &r, false, &[]);
+        let d2 = project_quest_detail(&m, renamed.get("q1"), None, &ev, &r, false, &[]);
         assert!(d2.funnel.is_empty());
         assert_eq!(d2.funnel_started, 0);
     }

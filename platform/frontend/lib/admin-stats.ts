@@ -217,14 +217,22 @@ export interface QuestRowVm {
   pct: number;
   pctNote: string;
   low: boolean;
-  /** Delisted quests keep their numbers but have no drill-down to open. */
+  /**
+   * The quest has a catalog entry. `false` means a publish never happened (a
+   * quest moved back to draft/test KEEPS its published row, so it stays `true`):
+   * the numbers are real, but there is no frozen snapshot and so no funnel to open.
+   */
   published: boolean;
 }
 
-/** «Казань · 7 шагов» (city optional, steps fall back to the template summary). */
-export function questMetaLine(row: { city: string | null; pages: number | null; template_summary: string }): string {
-  const steps = row.pages !== null ? `${row.pages} ${plural(row.pages, 'шаг', 'шага', 'шагов')}` : row.template_summary;
-  return row.city ? `${row.city} · ${steps}` : steps;
+/** «Казань · 7 шагов» — the one place the city prefix is joined. */
+export function questMetaLine(city: string | null, tail: string): string {
+  return city ? `${city} · ${tail}` : tail;
+}
+
+/** «7 шагов», falling back to the template summary when the chip is unknown. */
+export function stepsLabel(row: { pages: number | null; template_summary: string }): string {
+  return row.pages !== null ? `${row.pages} ${plural(row.pages, 'шаг', 'шага', 'шагов')}` : row.template_summary;
 }
 
 export function questRowVm(row: AdminStatsQuestRowWire): QuestRowVm {
@@ -232,7 +240,10 @@ export function questRowVm(row: AdminStatsQuestRowWire): QuestRowVm {
   return {
     questId: row.quest_id,
     name: row.name,
-    meta: row.published ? questMetaLine(row) : 'снят с публикации',
+    // Without a catalog entry the step chips genuinely do not exist, but the
+    // quest is still named and placed by the authoring registry — keep what is
+    // known instead of replacing the whole line.
+    meta: questMetaLine(row.city, row.published ? stepsLabel(row) : 'нет в каталоге'),
     purchased: fmtInt(row.purchased),
     started: fmtInt(row.started),
     finished: fmtInt(row.finished),

@@ -1433,7 +1433,7 @@ async fn acting_author(
     Ok((id, name))
 }
 
-/// Fetch a constructor quest the caller is allowed to act on, or 404.
+/// Authorize the caller for `quest_id` and return its LIST row (no body, no cover).
 ///
 /// Authoring is editor-gated (capability), then ownership-gated: a quest stays the
 /// author's, but an ADMIN is the superuser and may act on any author's quest in any
@@ -1441,22 +1441,42 @@ async fn acting_author(
 /// edited by admin"). For a non-admin, a quest they did not author is
 /// indistinguishable from one that does not exist — the same opaque 404, never a
 /// signal that another author's quest exists. `author_id` is immutable (there is
-/// no quest-transfer), so the fetched quest can be reused for the follow-up
+/// no quest-transfer), so the fetched row can be reused for the follow-up
 /// mutation with no TOCTOU ownership gap. This is the single chokepoint every
-/// per-quest constructor handler routes through, so the owner-or-admin rule is
-/// structural rather than re-derived (and forgettable) at each call site.
+/// per-quest constructor handler routes through — including
+/// [`require_owned_constructor_quest`] — so the owner-or-admin rule exists in
+/// exactly one place and cannot be re-derived (and forgotten) per call site.
+///
+/// Authorizing on the SUMMARY is what keeps the heavy read opt-in: save, status
+/// and delete only need to know who owns the quest, and the authoring body they
+/// used to load along the way runs to megabytes for a media-rich import.
+async fn require_owned_constructor_summary(
+    state: &AppState,
+    headers: &HeaderMap,
+    quest_id: &str,
+) -> Result<ConstructorQuestSummary, AppError> {
+    require_editor(state, headers).await?;
+    let (author_id, _, admin) = acting_author_role(state, headers).await?;
+    state
+        .constructor
+        .summary_for_quest(quest_id)
+        .await?
+        .filter(|q| admin || q.author_id == author_id)
+        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
+}
+
+/// The same gate, then the FULL entity — for the two callers that genuinely read
+/// the authoring body (GET-one and export). Everything else takes the summary.
 async fn require_owned_constructor_quest(
     state: &AppState,
     headers: &HeaderMap,
     quest_id: &str,
 ) -> Result<ConstructorQuest, AppError> {
-    require_editor(state, headers).await?;
-    let (author_id, _, admin) = acting_author_role(state, headers).await?;
+    require_owned_constructor_summary(state, headers, quest_id).await?;
     state
         .constructor
         .get(quest_id)
         .await?
-        .filter(|q| admin || q.author_id == author_id)
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
 }
 
@@ -1621,7 +1641,7 @@ async fn save_constructor_quest_handler(
     headers: HeaderMap,
     Json(req): Json<SaveConstructorQuestRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
+    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
     let now = store::now_secs();
     let s = state
@@ -1653,7 +1673,7 @@ async fn set_constructor_status_handler(
     headers: HeaderMap,
     Json(req): Json<SetConstructorStatusRequest>,
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
-    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
+    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     store::validate_ctor_status(&req.status)?;
     // Coherence invariant: a quest can be `test` or `published` ONLY once a frozen
     // snapshot exists (created by the gated Publish in the editor). Without this, a
@@ -1694,7 +1714,7 @@ async fn delete_constructor_quest_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_owned_constructor_quest(&state, &headers, &quest_id).await?;
+    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     if !state.constructor.delete(&quest_id).await? {
         return Err(AppError::NotFound(format!(
             "constructor quest '{quest_id}' not found"
@@ -1906,7 +1926,12 @@ async fn get_quest_product_handler(
     // Same visibility rule as the catalog: the authoritative lifecycle status
     // hides test/draft quests; a missing constructor row means a legacy/direct
     // publish and stays visible.
-    let ctor = state.constructor.get(&quest_id).await?;
+    //
+    // The SUMMARY, never the full row: this is the public product page, and all
+    // it wants from the authoring registry is a status and an author. Loading the
+    // whole entity shipped the authoring body AND the base64 cover — megabytes
+    // for an imported quest — over the hottest read path in the product.
+    let ctor = state.constructor.summary_for_quest(&quest_id).await?;
     if ctor
         .as_ref()
         .is_some_and(|q| q.status != store::CTOR_STATUS_PUBLISHED)
@@ -2127,12 +2152,27 @@ fn resolve_admin_identity(
     }
 }
 
-/// Index published metas by quest id — the marketplace label lookup shared by the
-/// two admin moderation list handlers.
-fn published_by_quest(
-    metas: Vec<PublishedMeta>,
-) -> std::collections::HashMap<String, PublishedMeta> {
-    metas.into_iter().map(|m| (m.quest_id.clone(), m)).collect()
+/// Resolve every quest's label, and hand back the listings the caller may also
+/// need. THE entry point for naming a quest on an internal surface.
+///
+/// Which registries feed a label is decided here, once. A surface that reached
+/// for `labels_by_quest()` alone would compile and read fine while silently
+/// dropping the listing fallback — reintroducing, for legacy/direct publishes,
+/// exactly the raw-id defect this seam exists to remove. The two reads are
+/// independent, so they run concurrently; callers may nest this inside a wider
+/// `tokio::join!` and keep their own concurrency.
+async fn resolve_quest_labels(
+    state: &AppState,
+) -> Result<(store::QuestLabels, Vec<PublishedMeta>), AppError> {
+    let (authored, published) = tokio::join!(
+        state.constructor.labels_by_quest(),
+        state.grants.list_published(),
+    );
+    let published = published?;
+    Ok((
+        store::QuestLabels::resolve(authored?, &published),
+        published,
+    ))
 }
 
 /// Batch-resolve identities for many players in exactly two store reads (accounts +
@@ -2187,31 +2227,30 @@ async fn admin_list_reviews_handler(
     headers: HeaderMap,
 ) -> Result<Json<AdminReviewsResponse>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    // Independent reads — the fold rows, the hidden set, and quest labels — concurrently.
-    let (rows, hidden, published) = tokio::join!(
+    // Independent reads — the fold rows, the hidden set, and the quest labels —
+    // run concurrently.
+    let (rows, hidden, labels) = tokio::join!(
         state.store.quest_rating_rows(None),
         state.moderation.hidden_review_keys(),
-        state.grants.list_published(),
+        resolve_quest_labels(&state),
     );
     let rows = rows?;
     let hidden = hidden?;
-    let published = published_by_quest(published?);
+    let (labels, _) = labels?;
     let player_ids: Vec<String> = rows.iter().map(|r| r.player_id.clone()).collect();
     let identities = resolve_admin_identities(&state, &player_ids).await?;
     let mut reviews: Vec<AdminReviewWire> = rows
         .into_iter()
         .map(|r| {
             let is_hidden = hidden.contains(&(r.player_id.clone(), r.quest_id.clone()));
-            let meta = published.get(&r.quest_id);
+            let label = labels.get(&r.quest_id);
             let identity = identities
                 .get(&r.player_id)
                 .cloned()
                 .unwrap_or_else(|| resolve_admin_identity(&r.player_id, None, &[]));
             AdminReviewWire {
-                quest_name: meta
-                    .map(|m| m.name.clone())
-                    .unwrap_or_else(|| r.quest_id.clone()),
-                quest_city: meta.and_then(|m| m.city.clone()),
+                quest_name: label.name,
+                quest_city: label.city,
                 quest_id: r.quest_id,
                 rating: r.rating,
                 text: r.text,
@@ -2300,14 +2339,22 @@ async fn admin_list_feedback_handler(
     headers: HeaderMap,
 ) -> Result<Json<AdminFeedbackResponse>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    // Independent reads — reports, resolutions, and quest labels — run concurrently.
-    let (reports, resolutions, published) = tokio::join!(
+    // Independent reads — reports, resolutions, and the quest labels — run
+    // concurrently.
+    let (reports, resolutions, labels) = tokio::join!(
         state.store.all_feedback_reports(),
         state.moderation.feedback_resolutions(),
-        state.grants.list_published(),
+        resolve_quest_labels(&state),
     );
     let core = facts::group_feedback(reports?, &resolutions?);
-    let published = published_by_quest(published?);
+    let (labels, published) = labels?;
+    // Which snapshot each quest is serving RIGHT NOW — the only thing this view
+    // legitimately asks the marketplace listing, since `current` is a statement
+    // about the published version, not about the quest.
+    let current_snapshot: std::collections::HashMap<&str, &str> = published
+        .iter()
+        .map(|m| (m.quest_id.as_str(), m.snapshot_id.as_str()))
+        .collect();
     // Identities in one batch across every report.
     let player_ids: Vec<String> = core
         .iter()
@@ -2327,8 +2374,9 @@ async fn admin_list_feedback_handler(
     let groups = core
         .into_iter()
         .map(|g| {
-            let meta = published.get(&g.quest_id);
-            let current = meta.map(|m| m.snapshot_id.as_str()) == Some(g.snapshot_id.as_str());
+            let label = labels.get(&g.quest_id);
+            let current =
+                current_snapshot.get(g.quest_id.as_str()) == Some(&g.snapshot_id.as_str());
             let snap = snapshots.get(&g.snapshot_id).and_then(|o| o.as_ref());
             let version = snap
                 .and_then(|s| s.get("snapshot_version"))
@@ -2353,10 +2401,8 @@ async fn admin_list_feedback_handler(
                 })
                 .collect();
             AdminFeedbackGroupWire {
-                quest_name: meta
-                    .map(|m| m.name.clone())
-                    .unwrap_or_else(|| g.quest_id.clone()),
-                quest_city: meta.and_then(|m| m.city.clone()),
+                quest_name: label.name,
+                quest_city: label.city,
                 quest_id: g.quest_id,
                 snapshot_id: g.snapshot_id,
                 version,
@@ -3690,9 +3736,9 @@ async fn admin_stats_overview_handler(
 ) -> Result<Json<admin_stats::OverviewResponse>, AppError> {
     require_admin_actor(&state, &headers).await?;
     let (range, with_prev, ev) = load_stats_window(&state, &q, None).await?;
-    let metas = state.grants.list_published().await?;
+    let (labels, metas) = resolve_quest_labels(&state).await?;
     Ok(Json(admin_stats::project_overview(
-        &metas, &ev, &range, with_prev,
+        &metas, &labels, &ev, &range, with_prev,
     )))
 }
 
@@ -3711,17 +3757,23 @@ async fn admin_stats_quest_handler(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("quest '{quest_id}' is not published")))?;
     let (range, with_prev, ev) = load_stats_window(&state, &q, Some(&quest_id)).await?;
-    let funnel_logs = state
-        .store
-        .funnel_logs(&meta.snapshot_id, range.start_secs(), range.end_secs_excl())
-        .await?;
+    let (funnel_logs, authored) = tokio::join!(
+        state
+            .store
+            .funnel_logs(&meta.snapshot_id, range.start_secs(), range.end_secs_excl()),
+        state.constructor.label_for_quest(&quest_id),
+    );
+    // Same precedence as the overview table this page opens from, for one quest:
+    // the authoring row, else the listing (which exists — `get_bundle` 404s above).
+    let label = authored?.unwrap_or_else(|| store::QuestLabel::from_listing(&meta));
     Ok(Json(admin_stats::project_quest_detail(
         &meta,
+        label,
         snapshot.as_ref(),
         &ev,
         &range,
         with_prev,
-        &funnel_logs,
+        &funnel_logs?,
     )))
 }
 
@@ -5587,6 +5639,145 @@ mod tests {
                 .iter()
                 .any(|f| f["type"] == "feedback_reported" && f["note"] == "test feedback")
         );
+
+        // This quest was published WITHOUT snapshot content, so its snapshot row
+        // carries no data. The inbox must degrade to "labels unknown", not fail:
+        // a stored NULL and a missing row are the same absence, and both storage
+        // backends have to answer it the same way.
+        let (st, v) = get_json_h(app, "/api/admin/feedback", &admin).await;
+        assert_eq!(st, StatusCode::OK, "content-less snapshot: {v}");
+        let group = v["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .find(|g| g["quest_id"] == ids.quest.as_str())
+            .expect("the reported quest is grouped");
+        assert_eq!(group["version"], Value::Null);
+        assert_eq!(group["step_title"], Value::Null);
+        assert_eq!(group["current"], json!(true), "v1 is the live version");
+    }
+
+    /// The back office names a quest from the AUTHORING registry, so the label
+    /// survives a rename and does not depend on the catalog at all. Runs on both
+    /// backends because the city is projected out of the authoring body — in Rust
+    /// in-memory, in SQL on Postgres — and the two must not drift.
+    async fn scenario_admin_quest_labels(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        let h = [("authorization", bearer.as_str())];
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let quest = ids.quest.as_str();
+
+        // Authored under one name, published under another (the frozen store card),
+        // then renamed in the constructor — the state a rename-after-publish leaves.
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": quest,
+                "name": "Рабочее имя",
+                "steps_count": 1,
+                "body": { "id": quest, "meta": { "title": "Рабочее имя", "city": "  Нови Сад  " } }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = publish(
+            app,
+            ids,
+            json!({
+                "quest_id": quest, "name": "Витринное имя", "template_summary": "1 step",
+                "snapshot_version": 1, "snapshot_id": ids.snap1, "city": "Казань",
+                "snapshot": { "steps": [{ "template": "start" }] }
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Buy, play, rate and report — the fact log the admin surfaces fold.
+        let (st, _) = post_json(
+            app,
+            "/api/checkout",
+            json!({"player_id": ids.player, "quest_id": quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, meta) = post_json(
+            app,
+            "/api/attempts",
+            json!({"player_id": ids.player, "quest_id": quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let attempt = meta["attempt_id"].as_str().expect("attempt id");
+        let (st, _) = post_json(
+            app,
+            &format!("/api/attempts/{attempt}/facts"),
+            json!({"facts": [
+                {"type": "quest_rated", "step_position": 0, "submitted_value": "2",
+                 "local_is_correct": true, "coins_delta": 0, "note": "спорно", "device_id": "d"},
+                {"type": "feedback_reported", "step_position": 0, "submitted_value": null,
+                 "local_is_correct": true, "coins_delta": 0, "note": "шаг сломан", "device_id": "d"}
+            ]}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{quest}/save"),
+            json!({
+                "name": "Финальное имя",
+                "steps_count": 1,
+                "body": { "id": quest, "meta": { "title": "Финальное имя", "city": " Белград " } }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Every admin surface reports the live authored label, trimmed.
+        let (_, v) = get_json_h(app, "/api/admin/reviews", &admin).await;
+        let review = v["reviews"]
+            .as_array()
+            .expect("reviews")
+            .iter()
+            .find(|r| r["quest_id"] == quest)
+            .expect("the rated quest is listed");
+        assert_eq!(review["quest_name"], json!("Финальное имя"));
+        assert_eq!(review["quest_city"], json!("Белград"));
+
+        let (st, v) = get_json_h(app, "/api/admin/feedback", &admin).await;
+        assert_eq!(st, StatusCode::OK, "feedback list: {v}");
+        let group = v["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .find(|g| g["quest_id"] == quest)
+            .expect("the reported quest is listed");
+        assert_eq!(group["quest_name"], json!("Финальное имя"));
+        assert_eq!(group["quest_city"], json!("Белград"));
+
+        let (_, v) = get_json_h(app, "/api/admin/stats", &admin).await;
+        let row = v["quests"]
+            .as_array()
+            .expect("quests")
+            .iter()
+            .find(|r| r["quest_id"] == quest)
+            .expect("the played quest has a row");
+        assert_eq!(row["name"], json!("Финальное имя"));
+        assert_eq!(row["city"], json!("Белград"));
+
+        let (st, v) = get_json_h(app, &format!("/api/admin/stats/{quest}"), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["name"], json!("Финальное имя"), "drill-down agrees");
+        assert_eq!(v["city"], json!("Белград"));
+
+        // The public store card is untouched: it is the frozen published version.
+        let (st, product) = get_json(app, &format!("/api/quests/{quest}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(product["name"], json!("Витринное имя"));
+        assert_eq!(product["city"], json!("Казань"));
     }
 
     async fn scenario_bad_payload(app: &Router, ids: &Ids) {
@@ -6247,6 +6438,11 @@ mod tests {
     #[tokio::test]
     async fn admin_user_management_list_and_roles() {
         scenario_admin_users(&test_app(), &Ids::new("users")).await;
+    }
+
+    #[tokio::test]
+    async fn admin_surfaces_name_quests_from_the_authoring_registry() {
+        scenario_admin_quest_labels(&test_app(), &Ids::new("labels")).await;
     }
 
     /// Admin coupon CRUD: create → list → get → save → delete, with the
@@ -8406,6 +8602,7 @@ mod tests {
         scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
         scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
         scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
+        scenario_admin_quest_labels(&app, &Ids::new(&format!("labels-{run}"))).await;
         scenario_admin_coupons(&app, &Ids::new(&format!("cpncrud-{run}"))).await;
         scenario_coupon_validate(&app, &Ids::new(&format!("cpnprev-{run}"))).await;
         scenario_coupon_redeem(&app, &Ids::new(&format!("cpnrdm-{run}"))).await;
@@ -9512,34 +9709,14 @@ mod tests {
             ("acct-tg", rate_fact("5", Some("Супер"))),
             ("dev-anon", rate_fact("2", None)), // star-only, anonymous
         ] {
-            let a = state
-                .store
-                .create_attempt(pid, "q1", "q1-v1")
-                .await
-                .expect("attempt");
-            state
-                .store
-                .append_idempotent(&a.attempt_id, vec![fact])
-                .await
-                .expect("append")
-                .expect("known attempt");
+            seed_fact(state, pid, "q1", "q1-v1", fact).await;
         }
         for (pid, note) in [
             ("acct-email", "Ответ не принят"),
             ("acct-tg", "not accepted"),
             ("dev-anon", "баг"),
         ] {
-            let a = state
-                .store
-                .create_attempt(pid, "q1", "q1-v1")
-                .await
-                .expect("attempt");
-            state
-                .store
-                .append_idempotent(&a.attempt_id, vec![report_fact(note)])
-                .await
-                .expect("append")
-                .expect("known attempt");
+            seed_fact(state, pid, "q1", "q1-v1", report_fact(note)).await;
         }
     }
 
@@ -9655,17 +9832,14 @@ mod tests {
         assert_eq!(v["groups"][0]["resolved"], json!(true));
 
         // A NEW report pushes the count past the acknowledged watermark → reopens.
-        let a = state
-            .store
-            .create_attempt("acct-email", "q1", "q1-v1")
-            .await
-            .expect("attempt");
-        state
-            .store
-            .append_idempotent(&a.attempt_id, vec![report_fact("ещё раз не работает")])
-            .await
-            .expect("append")
-            .expect("known attempt");
+        seed_fact(
+            &state,
+            "acct-email",
+            "q1",
+            "q1-v1",
+            report_fact("ещё раз не работает"),
+        )
+        .await;
         let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
         assert_eq!(
             v["groups"][0]["resolved"],
@@ -9682,6 +9856,120 @@ mod tests {
         assert_eq!(st, StatusCode::NO_CONTENT);
         let (_, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
         assert_eq!(v["groups"][0]["resolved"], json!(false));
+    }
+
+    /// Register a constructor row (the authoring registry) with an authored city
+    /// in its body. Registers NOTHING in the catalog — publishing is a separate
+    /// act, which is the whole point of the callers below.
+    async fn seed_authoring_row(
+        state: &AppState,
+        quest_id: &str,
+        name: &str,
+        city: &str,
+        status: &str,
+    ) {
+        state
+            .constructor
+            .create(ConstructorQuest {
+                quest_id: quest_id.to_string(),
+                author_id: "bubble:import".into(),
+                author_name: "Импорт".into(),
+                name: name.to_string(),
+                status: status.to_string(),
+                cover: None,
+                steps_count: 3,
+                attrs: store::QuestAttributes::default(),
+                created_at: 1,
+                updated_at: 1,
+                body: json!({ "id": quest_id, "meta": { "city": city } }),
+            })
+            .await
+            .expect("constructor row");
+    }
+
+    /// Append one fact on a fresh attempt, straight through the store. Attempt
+    /// creation via the API needs a published snapshot; the store does not, which
+    /// is what lets these tests reach states a live deployment arrives at by
+    /// import or restore.
+    async fn seed_fact(
+        state: &AppState,
+        player: &str,
+        quest_id: &str,
+        snapshot_id: &str,
+        fact: Fact,
+    ) {
+        let a = state
+            .store
+            .create_attempt(player, quest_id, snapshot_id)
+            .await
+            .expect("attempt");
+        state
+            .store
+            .append_idempotent(&a.attempt_id, vec![fact])
+            .await
+            .expect("append")
+            .expect("known attempt");
+    }
+
+    /// Rate and report on `quest_id` as `player` — the fact log outlives any
+    /// catalog row, which is exactly the state an imported deployment is in.
+    async fn seed_play(state: &AppState, player: &str, quest_id: &str, snapshot_id: &str) {
+        for fact in [rate_fact("1", Some("не понравилось")), report_fact("баг")] {
+            seed_fact(state, player, quest_id, snapshot_id, fact).await;
+        }
+    }
+
+    /// A quest that was NEVER published — an imported draft — still has to be
+    /// nameable everywhere the back office lists it. Before the label seam these
+    /// surfaces read `published_quests` and printed the raw quest id.
+    #[tokio::test]
+    async fn admin_surfaces_name_a_quest_that_was_never_published() {
+        let state = test_state(test_config());
+        seed_authoring_row(
+            &state,
+            "bubble-1755",
+            "Пузырь",
+            " Нови Сад ",
+            store::CTOR_STATUS_DRAFT,
+        )
+        .await;
+        seed_play(&state, "dev-anon", "bubble-1755", "bubble-1755-v1").await;
+        let app = build_router(state);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+
+        let (st, v) = get_json_h(&app, "/api/admin/reviews", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let review = &v["reviews"][0];
+        assert_eq!(review["quest_id"], json!("bubble-1755"));
+        assert_eq!(review["quest_name"], json!("Пузырь"), "not the raw id");
+        assert_eq!(
+            review["quest_city"],
+            json!("Нови Сад"),
+            "authored city, trimmed"
+        );
+
+        let (st, v) = get_json_h(&app, "/api/admin/feedback", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let group = &v["groups"][0];
+        assert_eq!(group["quest_name"], json!("Пузырь"));
+        assert_eq!(group["quest_city"], json!("Нови Сад"));
+        assert_eq!(
+            group["current"],
+            json!(false),
+            "no published version, so no group is the current one"
+        );
+
+        let (st, v) = get_json_h(&app, "/api/admin/stats", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let row = v["quests"]
+            .as_array()
+            .expect("quests")
+            .iter()
+            .find(|r| r["quest_id"] == json!("bubble-1755"))
+            .expect("the played quest has a row");
+        assert_eq!(row["name"], json!("Пузырь"));
+        assert_eq!(row["city"], json!("Нови Сад"));
+        assert_eq!(row["published"], json!(false));
     }
 
     #[tokio::test]

@@ -17,6 +17,7 @@ import {
   overviewVm,
   periodLabel,
   questMetaLine,
+  stepsLabel,
   todayUtc,
   type ChartVm,
   type KpiVm,
@@ -258,7 +259,7 @@ function Overview({
                   type="button"
                   className="ast-table__row"
                   disabled={!row.published}
-                  title={row.published ? undefined : 'Квест снят с публикации — воронка недоступна'}
+                  title={row.published ? undefined : 'Квест не публиковался — воронка недоступна'}
                   onClick={() => onOpenQuest(row.questId)}
                 >
                   <span className="ast-quest">
@@ -398,11 +399,7 @@ function DetailBody({ detail }: { detail: AdminStatsQuestWire }) {
         className="ast-head--detail"
         eyebrow="КОНВЕРСИЯ ПО ШАГАМ"
         title={detail.name}
-        lede={`${questMetaLine({
-          city: detail.city,
-          pages: detail.pages,
-          template_summary: detail.template_summary,
-        })} · ${periodLabel(detail.from, detail.to)}`}
+        lede={`${questMetaLine(detail.city, stepsLabel(detail))} · ${periodLabel(detail.from, detail.to)}`}
       />
 
       <KpiCards kpis={kpisFor(detail.totals, detail.prev)} />

@@ -24,7 +24,7 @@ use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
     AttemptMeta, AuthIdentity, CatalogListing, ConstructorQuest, ConstructorQuestSummary,
-    PublishedMeta, QuestAttributes, now_rfc3339, now_secs,
+    PublishedMeta, QuestAttributes, QuestLabel, now_rfc3339, now_secs,
 };
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
@@ -987,7 +987,17 @@ impl PgGrantStore {
             .fetch_optional(&self.pool)
             .await
             .map_err(internal)?;
-        row.map(|r| r.try_get("data").map_err(internal)).transpose()
+        // TWO independent absences collapse into one `None`: no snapshot row at
+        // all, and a row whose `data` is NULL (a publish that registered a version
+        // without content — `snapshots.data` is nullable). The in-memory store
+        // answers `None` for both, so the decode target must be `Option` here;
+        // letting it infer the bare value made the second case a 500.
+        match row {
+            None => Ok(None),
+            Some(row) => row
+                .try_get::<Option<serde_json::Value>, _>("data")
+                .map_err(internal),
+        }
     }
 }
 
@@ -1687,6 +1697,22 @@ impl PgConstructorStore {
         self.fetch_summaries(Some(author_id)).await
     }
 
+    /// See [`crate::store::InMemoryConstructorStore::summary_for_quest`]. Selects
+    /// the SAME columns as the list — no `body`, no `cover` — so authorizing or
+    /// identifying one quest never drags a TOASTed authoring body over the wire.
+    pub async fn summary_for_quest(
+        &self,
+        quest_id: &str,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        let sql = format!("SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests WHERE quest_id = $1");
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
     /// See [`crate::store::InMemoryConstructorStore::get`].
     pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
         let sql = format!(
@@ -1817,6 +1843,65 @@ impl PgConstructorStore {
             );
         }
         Ok(out)
+    }
+
+    /// Label rows, optionally narrowed to one quest. Shared by the full scan and
+    /// the targeted read — same projection, only the `WHERE` differs (the
+    /// [`Self::fetch_summaries`] pattern).
+    ///
+    /// `city` is extracted from the body IN THE DATABASE, so one short value per
+    /// row crosses the wire instead of the whole authoring body (megabytes for a
+    /// media-heavy quest).
+    ///
+    /// SQL navigates to `meta.city` and stops; it deliberately does NOT decide
+    /// what counts as a city. The raw jsonb comes back and the same Rust rules
+    /// that serve the in-memory store apply — `as_str()` (only a JSON *string* is
+    /// a city) then [`QuestLabel::from_authored`] (trim, blank becomes absent).
+    /// Mirroring those rules in SQL would be a second definition free to drift.
+    async fn fetch_labels(
+        &self,
+        quest_id: Option<&str>,
+    ) -> Result<Vec<(String, QuestLabel)>, AppError> {
+        let where_clause = if quest_id.is_some() {
+            "WHERE quest_id = $1 "
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT quest_id, name, body -> 'meta' -> 'city' AS city \
+             FROM constructor_quests {where_clause}"
+        );
+        let mut query = sqlx::query(&sql);
+        if let Some(quest_id) = quest_id {
+            query = query.bind(quest_id);
+        }
+        let rows = query.fetch_all(&self.pool).await.map_err(internal)?;
+        rows.iter()
+            .map(|row| {
+                let quest_id: String = row.try_get("quest_id").map_err(internal)?;
+                let name: String = row.try_get("name").map_err(internal)?;
+                let city: Option<serde_json::Value> = row.try_get("city").map_err(internal)?;
+                let city = city.as_ref().and_then(serde_json::Value::as_str);
+                Ok((quest_id, QuestLabel::from_authored(name, city)))
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::labels_by_quest`].
+    pub async fn labels_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, QuestLabel>, AppError> {
+        Ok(self.fetch_labels(None).await?.into_iter().collect())
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::label_for_quest`]. Served by
+    /// the primary key — never a scan to name one quest.
+    pub async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
+        Ok(self
+            .fetch_labels(Some(quest_id))
+            .await?
+            .pop()
+            .map(|(_, label)| label))
     }
 
     /// See [`crate::store::InMemoryConstructorStore::delete`].
