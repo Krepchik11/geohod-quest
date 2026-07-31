@@ -1890,7 +1890,133 @@ pub struct ConstructorQuestSummary {
     pub updated_at: u64,
 }
 
+/// A quest's human label for internal surfaces (moderation lists, statistics):
+/// what to call the quest, and the city that tells two same-named quests apart.
+///
+/// This is deliberately NOT [`PublishedMeta`]. A quest exists in the authoring
+/// registry from the moment it is created and keeps existing after it leaves the
+/// catalog; a published listing is a frozen copy of ONE version of it. Back-office
+/// surfaces identify the quest, so they resolve labels through [`QuestLabels`] and
+/// never read the listing directly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuestLabel {
+    pub name: String,
+    /// Authored city; `None` when the author left it blank.
+    pub city: Option<String>,
+}
+
+impl QuestLabel {
+    /// Build from an authoring row's raw fields.
+    ///
+    /// A blank or whitespace-only city normalizes to `None` — the same rule
+    /// publishing applies to the store card. Both storage backends construct
+    /// labels through here, so neither can drift on padding: the SQL projection
+    /// only decides WHICH string to hand over, never how to clean it.
+    pub fn from_authored(name: String, city: Option<&str>) -> Self {
+        Self {
+            name,
+            city: city
+                .map(str::trim)
+                .filter(|city| !city.is_empty())
+                .map(str::to_string),
+        }
+    }
+}
+
+/// Borrowed view of a resolved label. [`QuestLabels::get`] is total, so the
+/// unknown-quest case borrows the quest id itself instead of allocating a
+/// throwaway `String` per row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QuestLabelRef<'a> {
+    pub name: &'a str,
+    pub city: Option<&'a str>,
+}
+
+/// Every known quest's label, resolved once per request from both registries.
+///
+/// Precedence is fixed here, in one place, so no call site can invent its own:
+/// the authoring row wins (it is the quest's live identity), a published listing
+/// stands in for legacy/direct publishes that have no constructor row, and a
+/// quest known only to the fact log keeps its raw id. Resolution is whole-label,
+/// never field-by-field — a name and a city from two different epochs would
+/// describe a quest that never existed.
+#[derive(Clone, Debug, Default)]
+pub struct QuestLabels(HashMap<String, QuestLabel>);
+
+impl QuestLabels {
+    /// Build from the authoring registry (see
+    /// [`InMemoryConstructorStore::labels_by_quest`]) and the marketplace listings.
+    pub fn resolve(authored: HashMap<String, QuestLabel>, published: &[PublishedMeta]) -> Self {
+        let mut by_quest = authored;
+        for meta in published {
+            // The listing only FILLS GAPS, so a quest with an authoring row never
+            // clones the frozen strings it would immediately discard.
+            by_quest
+                .entry(meta.quest_id.clone())
+                .or_insert_with(|| QuestLabel {
+                    name: meta.name.clone(),
+                    city: meta.city.clone(),
+                });
+        }
+        Self(by_quest)
+    }
+
+    /// One quest's label, by the SAME precedence as the full map — the per-quest
+    /// surfaces read a single authoring row instead of scanning the registry, and
+    /// still cannot end up with a different rule than the list views.
+    pub fn resolve_one(
+        quest_id: &str,
+        authored: Option<QuestLabel>,
+        published: Option<&PublishedMeta>,
+    ) -> Self {
+        Self::resolve(
+            // `Option` iterates over zero or one item — a one-entry map here.
+            authored
+                .into_iter()
+                .map(|label| (quest_id.to_string(), label))
+                .collect(),
+            published.map(std::slice::from_ref).unwrap_or_default(),
+        )
+    }
+
+    /// The label of `quest_id` — total: an unknown quest reads as its own id.
+    ///
+    /// The returned view borrows from `self` OR from `quest_id`, so both inputs
+    /// share the output lifetime `'a` (Rust nuance: this is what lets the fallback
+    /// hand back a slice of the caller's id with no allocation).
+    pub fn get<'a>(&'a self, quest_id: &'a str) -> QuestLabelRef<'a> {
+        match self.0.get(quest_id) {
+            Some(label) => QuestLabelRef {
+                name: &label.name,
+                city: label.city.as_deref(),
+            },
+            None => QuestLabelRef {
+                name: quest_id,
+                city: None,
+            },
+        }
+    }
+}
+
+/// The raw authored city inside a constructor body — `meta.city` of the CtorQuest
+/// JSON, the same field publishing freezes into the store card.
+///
+/// The body is opaque JSON from the client, so every foreign shape (missing key,
+/// null, a number, a non-object `meta`) reads as "no city" rather than an error.
+/// The value is returned verbatim; [`QuestLabel::from_authored`] owns the cleanup,
+/// and the Postgres projection applies the same JSON-string-only rule in SQL.
+pub fn ctor_body_city(body: &serde_json::Value) -> Option<&str> {
+    body.get("meta")?.get("city")?.as_str()
+}
+
 impl ConstructorQuest {
+    /// This row's label: the denormalized `name` column plus the authored city
+    /// projected out of the body. One definition, so the in-memory store and the
+    /// SQL projection in [`crate::pg_store`] cannot drift apart.
+    pub fn label(&self) -> QuestLabel {
+        QuestLabel::from_authored(self.name.clone(), ctor_body_city(&self.body))
+    }
+
     /// Strip the body for the list view.
     pub fn summary(&self) -> ConstructorQuestSummary {
         ConstructorQuestSummary {
@@ -1949,9 +2075,20 @@ impl InMemoryConstructorStore {
         v
     }
 
-    /// Full quest (with body) by id.
+    /// Full quest (with body) by id. Only for callers that READ the authoring
+    /// body — it is the heaviest row in the system (a media-rich import runs to
+    /// megabytes). Anything that just needs to identify or authorize a quest
+    /// wants [`Self::summary_for_quest`].
     pub fn get(&self, quest_id: &str) -> Option<ConstructorQuest> {
         self.quests.get(quest_id).cloned()
+    }
+
+    /// One quest's list row — the same body-free, cover-free projection the
+    /// dashboard list uses. The per-quest counterpart of
+    /// [`Self::list_all_summaries`], so a caller that only needs the status or
+    /// the author never pays for the body.
+    pub fn summary_for_quest(&self, quest_id: &str) -> Option<ConstructorQuestSummary> {
+        self.quests.get(quest_id).map(ConstructorQuest::summary)
     }
 
     /// Replace the editable body + denormalized list fields (autosave). 404 if unknown.
@@ -2022,6 +2159,23 @@ impl InMemoryConstructorStore {
                 )
             })
             .collect()
+    }
+
+    /// `quest_id` → label for every authored quest. The back-office counterpart
+    /// of [`Self::listings_by_quest`]: one lightweight scan (no bodies, no covers)
+    /// that lets moderation and statistics name a quest whatever its lifecycle
+    /// status and whether or not it was ever published.
+    pub fn labels_by_quest(&self) -> HashMap<String, QuestLabel> {
+        self.quests
+            .iter()
+            .map(|(id, q)| (id.clone(), q.label()))
+            .collect()
+    }
+
+    /// One quest's label — the targeted read behind the per-quest surfaces, so
+    /// they never scan the whole registry to name a single quest.
+    pub fn label_for_quest(&self, quest_id: &str) -> Option<QuestLabel> {
+        self.quests.get(quest_id).map(ConstructorQuest::label)
     }
 
     /// Delete a quest; `true` if a row was removed.
@@ -2132,6 +2286,33 @@ impl ConstructorStores {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?.listings_by_quest()),
             Self::Postgres(pg) => pg.listings_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::summary_for_quest`].
+    pub async fn summary_for_quest(
+        &self,
+        quest_id: &str,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.summary_for_quest(quest_id)),
+            Self::Postgres(pg) => pg.summary_for_quest(quest_id).await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::labels_by_quest`].
+    pub async fn labels_by_quest(&self) -> Result<HashMap<String, QuestLabel>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.labels_by_quest()),
+            Self::Postgres(pg) => pg.labels_by_quest().await,
+        }
+    }
+
+    /// See [`InMemoryConstructorStore::label_for_quest`].
+    pub async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.label_for_quest(quest_id)),
+            Self::Postgres(pg) => pg.label_for_quest(quest_id).await,
         }
     }
 
@@ -3437,6 +3618,131 @@ mod constructor_tests {
         assert!(validate_ctor_status("published").is_ok());
         assert!(validate_ctor_status("live").is_err());
         assert!(validate_ctor_status("").is_err());
+    }
+
+    #[test]
+    fn body_city_is_read_only_from_a_json_string() {
+        let city = |v: serde_json::Value| ctor_body_city(&v).map(str::to_string);
+        assert_eq!(
+            city(serde_json::json!({ "meta": { "city": "  Нови Сад " } })),
+            Some("  Нови Сад ".to_string()),
+            "verbatim — normalization belongs to QuestLabel::from_authored"
+        );
+        // The body is opaque JSON — every foreign shape reads as "no city".
+        assert_eq!(city(serde_json::json!({ "meta": { "city": 42 } })), None);
+        assert_eq!(city(serde_json::json!({ "meta": { "city": null } })), None);
+        assert_eq!(city(serde_json::json!({ "meta": "Нови Сад" })), None);
+        assert_eq!(city(serde_json::json!({ "meta": {} })), None);
+        assert_eq!(city(serde_json::json!({})), None);
+        assert_eq!(city(serde_json::json!(7)), None);
+    }
+
+    #[test]
+    fn authored_label_trims_the_city_and_drops_a_blank_one() {
+        let city = |raw: Option<&str>| QuestLabel::from_authored("Q".into(), raw).city;
+        assert_eq!(city(Some("  Нови Сад ")), Some("Нови Сад".to_string()));
+        assert_eq!(city(Some("   ")), None);
+        assert_eq!(city(Some("\t\n")), None);
+        assert_eq!(city(Some("")), None);
+        assert_eq!(city(None), None);
+    }
+
+    #[test]
+    fn summary_for_quest_answers_without_the_heavy_columns() {
+        let mut s = InMemoryConstructorStore::new();
+        let mut q = quest("q1", "Имя", 1);
+        q.cover = Some("data:image/png;base64,AAAA".into());
+        q.body = serde_json::json!({ "id": "q1", "steps": [1, 2, 3] });
+        s.create(q).expect("create");
+
+        let summary = s.summary_for_quest("q1").expect("present");
+        // Same row the list view returns — a type that CANNOT carry the body or
+        // the cover, so an authorize-only caller cannot accidentally load them.
+        assert_eq!(summary, s.get("q1").expect("present").summary());
+        assert_eq!(summary.name, "Имя");
+        assert_eq!(summary.author_id, "seed:a");
+        assert_eq!(summary.status, CTOR_STATUS_DRAFT);
+        assert_eq!(s.summary_for_quest("ghost"), None);
+    }
+
+    #[test]
+    fn labels_read_the_name_column_and_the_authored_city() {
+        let mut s = InMemoryConstructorStore::new();
+        let mut q = quest("q1", "Ирония судьбы", 1);
+        q.body = serde_json::json!({ "id": "q1", "meta": { "city": "Казань" } });
+        s.create(q).expect("create");
+        s.create(quest("q2", "Без города", 2)).expect("create");
+
+        let labels = s.labels_by_quest();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(
+            labels["q1"],
+            QuestLabel {
+                name: "Ирония судьбы".into(),
+                city: Some("Казань".into())
+            }
+        );
+        assert_eq!(labels["q2"].city, None, "no meta.city in the body");
+
+        // The targeted read answers exactly what the full scan does.
+        assert_eq!(s.label_for_quest("q1"), Some(labels["q1"].clone()));
+        assert_eq!(s.label_for_quest("ghost"), None);
+    }
+
+    #[test]
+    fn labels_prefer_the_authoring_row_then_the_listing_then_the_id() {
+        let listing = |quest_id: &str, name: &str, city: Option<&str>| PublishedMeta {
+            quest_id: quest_id.into(),
+            name: name.into(),
+            primary_comic: None,
+            template_summary: String::new(),
+            snapshot_version: 1,
+            snapshot_id: format!("{quest_id}-v1"),
+            city: city.map(str::to_string),
+            duration: None,
+            price: None,
+            description: None,
+            pages: None,
+            tasks: None,
+            paid_hints: None,
+            players_bonus: 0,
+        };
+        let authored = HashMap::from([
+            (
+                "renamed".to_string(),
+                QuestLabel {
+                    name: "Новое имя".into(),
+                    city: Some("Нови Сад".into()),
+                },
+            ),
+            (
+                "draft-only".to_string(),
+                QuestLabel {
+                    name: "Черновик".into(),
+                    city: None,
+                },
+            ),
+        ]);
+        let published = vec![
+            listing("renamed", "Старое имя", Some("Казань")),
+            listing("legacy", "Легаси", Some("Москва")),
+        ];
+        let labels = QuestLabels::resolve(authored, &published);
+
+        // The authoring registry is the quest's live identity — it wins whole,
+        // never field-by-field, so name and city can never come from two epochs.
+        assert_eq!(labels.get("renamed").name, "Новое имя");
+        assert_eq!(labels.get("renamed").city, Some("Нови Сад"));
+        // Never published: the draft still has a name.
+        assert_eq!(labels.get("draft-only").name, "Черновик");
+        assert_eq!(labels.get("draft-only").city, None);
+        // A legacy/direct publish has no constructor row — the listing stands in.
+        assert_eq!(labels.get("legacy").name, "Легаси");
+        assert_eq!(labels.get("legacy").city, Some("Москва"));
+        // Known only to the fact log: the id is the honest label, and no caller
+        // has to remember to write that fallback itself.
+        assert_eq!(labels.get("bubble-1755").name, "bubble-1755");
+        assert_eq!(labels.get("bubble-1755").city, None);
     }
 
     #[test]

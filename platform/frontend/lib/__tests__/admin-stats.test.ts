@@ -149,10 +149,20 @@ describe('quest rows', () => {
     expect(vm.published).toBe(true);
   });
 
-  it('labels a delisted quest instead of fabricating meta', () => {
-    const vm = questRowVm({ ...row, published: false });
+  // `published: false` means the quest has no catalog entry at all — a publish
+  // never happened. Moving a quest to draft/test keeps its published row, so it
+  // still reports `published: true`; calling this row "снят с публикации" claimed
+  // a delisting that never took place.
+  it('says a quest is absent from the catalog, keeping the city it does know', () => {
+    const vm = questRowVm({ ...row, published: false, pages: null, template_summary: '' });
     expect(vm.published).toBe(false);
-    expect(vm.meta).toBe('снят с публикации');
+    expect(vm.name).toBe('Тайны');
+    expect(vm.meta).toBe('Казань · нет в каталоге');
+  });
+
+  it('omits the city separator when the quest has no city either', () => {
+    const vm = questRowVm({ ...row, published: false, city: null, pages: null, template_summary: '' });
+    expect(vm.meta).toBe('нет в каталоге');
   });
 
   it('handles zero starts and missing meta', () => {

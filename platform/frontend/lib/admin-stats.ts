@@ -217,7 +217,11 @@ export interface QuestRowVm {
   pct: number;
   pctNote: string;
   low: boolean;
-  /** Delisted quests keep their numbers but have no drill-down to open. */
+  /**
+   * The quest has a catalog entry. `false` means a publish never happened (a
+   * quest moved back to draft/test KEEPS its published row, so it stays `true`):
+   * the numbers are real, but there is no frozen snapshot and so no funnel to open.
+   */
   published: boolean;
 }
 
@@ -232,7 +236,12 @@ export function questRowVm(row: AdminStatsQuestRowWire): QuestRowVm {
   return {
     questId: row.quest_id,
     name: row.name,
-    meta: row.published ? questMetaLine(row) : 'снят с публикации',
+    // Without a catalog entry the step chips genuinely do not exist, but the
+    // quest is still named and placed by the authoring registry — keep what is
+    // known instead of replacing the whole line.
+    meta: row.published
+      ? questMetaLine(row)
+      : [row.city, 'нет в каталоге'].filter(Boolean).join(' · '),
     purchased: fmtInt(row.purchased),
     started: fmtInt(row.started),
     finished: fmtInt(row.finished),

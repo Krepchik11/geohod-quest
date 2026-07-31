@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayload } from '../CouponEditor';
+import { buildPayload, questPickerRows } from '../CouponEditor';
 
 const base = {
   code: 'LETO-20',
@@ -46,5 +46,39 @@ describe('buildPayload', () => {
       const built = buildPayload({ ...base, noPerUserLimit: false, perUserLimit });
       expect('error' in built).toBe(true);
     }
+  });
+});
+
+describe('questPickerRows', () => {
+  const catalog = [
+    { quest_id: 'q1', name: 'Тайны', price: 500 },
+    { quest_id: 'q2', name: 'Дозор', price: null },
+  ];
+
+  it('offers every catalog quest when nothing is selected', () => {
+    expect(questPickerRows(catalog, [], '')).toEqual([
+      { questId: 'q1', name: 'Тайны', price: 500, offCatalog: false },
+      { questId: 'q2', name: 'Дозор', price: 0, offCatalog: false },
+    ]);
+  });
+
+  // A coupon scoped to a quest that has since left the catalog kept that id in
+  // the payload and in «Выбрано: N», but the picker rendered no row for it — a
+  // selection the admin could neither see nor remove.
+  it('keeps a selected quest the catalog no longer offers, flagged and removable', () => {
+    const rows = questPickerRows(catalog, ['q1', 'gone-7'], '');
+    expect(rows.map((r) => r.questId)).toEqual(['q1', 'q2', 'gone-7']);
+    // price stays null rather than rendering a fabricated «0 ₽».
+    expect(rows[2]).toEqual({ questId: 'gone-7', name: 'gone-7', price: null, offCatalog: true });
+  });
+
+  it('never duplicates a selected quest that is still in the catalog', () => {
+    expect(questPickerRows(catalog, ['q1', 'q2'], '').map((r) => r.questId)).toEqual(['q1', 'q2']);
+  });
+
+  it('searches names, and the id for an off-catalog quest (its only visible text)', () => {
+    expect(questPickerRows(catalog, ['gone-7'], 'дозор').map((r) => r.questId)).toEqual(['q2']);
+    expect(questPickerRows(catalog, ['gone-7'], 'GONE').map((r) => r.questId)).toEqual(['gone-7']);
+    expect(questPickerRows(catalog, ['gone-7'], 'нет такого')).toEqual([]);
   });
 });

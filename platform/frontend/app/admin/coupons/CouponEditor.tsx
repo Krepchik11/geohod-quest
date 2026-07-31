@@ -28,6 +28,47 @@ import { AdminConfirmSheet, AdminToast } from '../ui';
  * Russian error messages verbatim.
  */
 
+/** One row of the applicability picker. */
+export interface QuestPickerRow {
+  questId: string;
+  name: string;
+  /** `null` for an off-catalog quest — its price is genuinely unknown here. */
+  price: number | null;
+  /** Selected earlier, but the catalog no longer offers it — no name to show. */
+  offCatalog: boolean;
+}
+
+/**
+ * Rows for the applicability picker: every paid catalog quest, PLUS any already
+ * selected quest the catalog no longer offers.
+ *
+ * The union is the point. Rendering the catalog alone left an id that is in the
+ * payload and counted by «Выбрано: N» with no row to untick — a selection the
+ * admin could neither see nor remove. An off-catalog quest has no name here (the
+ * catalog is the only source the editor loads), so its id is the honest label and
+ * also what the search matches on.
+ */
+export function questPickerRows(
+  quests: ReadonlyArray<{ quest_id: string; name: string; price?: number | null }>,
+  selectedIds: readonly string[],
+  query: string,
+): QuestPickerRow[] {
+  const inCatalog = new Set(quests.map((q) => q.quest_id));
+  const rows: QuestPickerRow[] = [
+    ...quests.map((q) => ({
+      questId: q.quest_id,
+      name: q.name,
+      price: q.price ?? 0,
+      offCatalog: false,
+    })),
+    ...selectedIds
+      .filter((id) => !inCatalog.has(id))
+      .map((id) => ({ questId: id, name: id, price: null, offCatalog: true })),
+  ];
+  const needle = query.trim().toLowerCase();
+  return needle ? rows.filter((r) => r.name.toLowerCase().includes(needle)) : rows;
+}
+
 interface FormState {
   code: string;
   discountType: 'percent' | 'fixed';
@@ -170,10 +211,10 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
     };
   }, [couponId]);
 
-  const filteredQuests = useMemo(() => {
-    const q = questQuery.trim().toLowerCase();
-    return q ? quests.filter((x) => x.name.toLowerCase().includes(q)) : quests;
-  }, [quests, questQuery]);
+  const filteredQuests = useMemo(
+    () => questPickerRows(quests, form.questIds, questQuery),
+    [quests, form.questIds, questQuery],
+  );
 
   const showToast = (text: string) => {
     setToast(text);
@@ -448,33 +489,37 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                         </div>
                       ) : (
                         filteredQuests.map((q) => {
-                          const on = form.questIds.includes(q.quest_id);
+                          const on = form.questIds.includes(q.questId);
                           return (
                             <button
                               type="button"
-                              key={q.quest_id}
+                              key={q.questId}
                               className={`ac-quest${on ? ' is-on' : ''}`}
                               aria-pressed={on}
+                              title={q.offCatalog ? 'Квеста нет в магазине' : undefined}
                               onClick={() =>
                                 set(
                                   'questIds',
                                   on
-                                    ? form.questIds.filter((id) => id !== q.quest_id)
-                                    : [...form.questIds, q.quest_id],
+                                    ? form.questIds.filter((id) => id !== q.questId)
+                                    : [...form.questIds, q.questId],
                                 )
                               }
                             >
                               <span className="ac-quest__tick" aria-hidden />
                               <span
                                 className="ac-quest__cover"
-                                style={{ background: tileColor(q.quest_id) }}
+                                style={{ background: tileColor(q.questId) }}
                                 aria-hidden
                               >
                                 {(q.name.trim()[0] || '?').toUpperCase()}
                               </span>
-                              <span className="ac-quest__name">{q.name}</span>
+                              <span className="ac-quest__name">
+                                {q.name}
+                                {q.offCatalog && ' · нет в каталоге'}
+                              </span>
                               <span className="ac-quest__price">
-                                {formatRubles(q.price ?? 0)} ₽
+                                {q.price === null ? '—' : `${formatRubles(q.price)} ₽`}
                               </span>
                             </button>
                           );

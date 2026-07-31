@@ -258,7 +258,7 @@ function Overview({
                   type="button"
                   className="ast-table__row"
                   disabled={!row.published}
-                  title={row.published ? undefined : 'Квест снят с публикации — воронка недоступна'}
+                  title={row.published ? undefined : 'Квест не публиковался — воронка недоступна'}
                   onClick={() => onOpenQuest(row.questId)}
                 >
                   <span className="ast-quest">
