@@ -4,7 +4,7 @@
 //! compiled-in default — adding a flag is a code change, so the set of flags
 //! is always reviewable and exhaustively matched. What an admin controls at
 //! runtime is only the *override* (a persisted bool per key; see
-//! `store::FlagStores` and `migrations/0012_feature_flags.sql`).
+//! `store::FlagStores` and the `feature_overrides` table).
 //!
 //! Evaluation is two independent gates, both fail-closed:
 //! - **capability** — the deployment is configured for the feature
@@ -69,7 +69,8 @@ impl Feature {
 
     /// Compiled-in default, used when no override is stored. Every flag ships
     /// OFF — enabling a feature is always an explicit admin decision (a stored
-    /// override). Nothing seeds overrides, so a fresh deployment starts fully off.
+    /// override). Nothing seeds overrides, so a fresh deployment of either
+    /// backing store starts with every feature off.
     pub fn default_enabled(self) -> bool {
         false
     }
@@ -124,18 +125,24 @@ mod tests {
         assert!(!f.effective(Some(false)));
     }
 
-    /// The player back-button flag: registered, off by default, not seeded on
-    /// (it postdates the default-off policy), and exposed to the client — the
-    /// player runtime reads it from GET /api/features.
+    /// Player-runtime flags key client behavior, so the player reads their
+    /// verdict from GET /api/features. Server-enforced flags (auth, payments)
+    /// must NOT be listed there — their state already reaches the client
+    /// through the provider capability endpoints.
     #[test]
-    fn player_back_button_registered_off_and_client_visible() {
-        // One contract for every post-policy player-runtime flag: off by
-        // default, not seeded, and served via GET /api/features.
+    fn only_player_runtime_flags_are_client_visible() {
         for key in ["player_back_button", "player_universal_answer"] {
             let f = Feature::parse(key).expect("registered");
-            assert!(!f.default_enabled(), "{key} must default off");
             assert!(f.client_visible(), "{key} must be client visible");
         }
+        for key in [
+            "auth_google",
+            "auth_telegram",
+            "payments_mock",
+            "payments_yookassa",
+        ] {
+            let f = Feature::parse(key).expect("registered");
+            assert!(!f.client_visible(), "{key} must not be client visible");
+        }
     }
-
 }

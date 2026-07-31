@@ -6,8 +6,7 @@
  *
  * Storing and precaching are split so both entry points reuse them: the explicit
  * «Скачать для офлайна» button (full, awaited, with progress) and the on-open
- * BundleGate (store now, warm media in the background) — see Decision in
- * openspec pwa-offline.
+ * BundleGate (store now, warm media in the background).
  *
  * Progress is staged (fetch → store → cache) — one JSON fetch has no meaningful
  * byte progress; real sizes arrive with the media phase (P6 measurement item).

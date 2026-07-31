@@ -2400,8 +2400,8 @@ impl CouponStores {
     }
 }
 
-/// In-flight redirect payments (YooKassa), keyed by our id. See
-/// `migrations/0011_pending_payments.sql` for the model rationale.
+/// In-flight redirect payments (YooKassa), keyed by our id. See the
+/// `pending_payments` table in `migrations/0001_init.sql` for the model rationale.
 #[derive(Debug, Default)]
 pub struct InMemoryPaymentStore {
     payments: HashMap<String, PendingPayment>,
@@ -2904,11 +2904,16 @@ mod tests {
     use super::*;
 
     /// A fresh store holds NO overrides: every flag is off until an admin turns
-    /// it on — the in-memory twin of an empty `feature_overrides` table.
+    /// it on. The same truth as an empty `feature_overrides` table, so in-memory
+    /// and Postgres deployments start identically.
     #[test]
     fn fresh_flag_store_has_no_overrides() {
         let mut store = InMemoryFlagStore::new();
         assert!(store.all().is_empty(), "a fresh store stores nothing");
+        for f in crate::features::Feature::ALL {
+            assert_eq!(store.get(f.key()), None, "{} must be unset", f.key());
+        }
+        // An override round-trips, and clearing it returns to the code default.
         store.set(crate::features::Feature::PaymentsMock.key(), true);
         assert_eq!(store.get("payments_mock"), Some(true));
         store.clear(crate::features::Feature::PaymentsMock.key());

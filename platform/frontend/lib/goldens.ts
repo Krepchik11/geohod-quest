@@ -1,7 +1,7 @@
 /**
  * Goldens loader (shared fixtures live at platform/goldens/ — single source for both
  * the Rust and TypeScript suites; see goldens/README.md).
- * Traceability: original from old-knowledgebase/discovery/exported-quests + clean mapping.
+ * Traceability: mapped from the original Bubble quest exports.
  * Use load* from shared-model + these for tests.
  */
 import mysterySnapshot from '../../goldens/golden-mystery-fortress-v1.json';

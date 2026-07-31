@@ -1,5 +1,5 @@
 /**
- * Technology-agnostic shared model for GeoQuest, mirroring blueprint/SPEC.md.
+ * Technology-agnostic shared model for GeoQuest.
  *
  * Home of the wire types (QuestSnapshot, GameStep, Fact, AccessGrant) and the pure
  * deterministic projectors (projectState/projectBalance/latestRating). The

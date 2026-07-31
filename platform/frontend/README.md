@@ -65,5 +65,5 @@ lib/
   suite (`lib/__tests__/parity.test.ts`) and the backend's — one-sided drift fails a
   suite.
 
-See [`../README.md`](../README.md) for the monorepo and [`../../blueprint/`](../../blueprint/)
-for the canonical product spec (CONCEPT / SPEC / TECH / PLAN).
+See [`../README.md`](../README.md) for the monorepo and
+[`../DEPLOYMENT.md`](../DEPLOYMENT.md) for how it ships.

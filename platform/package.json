@@ -2,7 +2,7 @@
   "name": "geohod-quests-platform",
   "version": "0.1.0",
   "private": true,
-  "description": "GeoQuest monorepo — Rust (Axum) backend + Next.js (React 19) frontend. Only project source files. Primary concepts and development guidance: ../blueprint/ (see PLAN.md). Historical/legacy material archived in ../old-knowledgebase/.",
+  "description": "GeoQuest monorepo — Rust (Axum) backend + Next.js (React 19) frontend.",
   "workspaces": [
     "frontend"
   ],

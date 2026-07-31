@@ -48,11 +48,43 @@ consistency rules thread through it:
 4. **Vercel** — set `NEXT_PUBLIC_API_URL`; redeploy. No media env is needed (R2 URLs
    are self-contained in the quest JSON).
 5. **Import the legacy quests** — `npm run upload` (the SAME `R2_PUBLIC_BASE_URL`) →
-   `npm run build` → psql `load.sql` into Supabase
-   (`platform/tools/bubble-import/README.md`).
-6. **Verify** — `curl https://api.quest.geohod.ru/health`; in the constructor upload an
+   `npm run build` → psql `load.sql` into Supabase. The importer lives at
+   `platform/tools/bubble-import/` **on disk only** — it is gitignored, because its
+   raw dumps carry real user PII and it is run by hand against a live source, never
+   built or deployed with the platform. See its own README there.
+6. **Enable the features you need** — a fresh database stores no overrides, and every
+   flag ships OFF (see **First boot: feature flags** below). Until you do this, the
+   sign-in buttons do not render and checkout answers 501.
+7. **Verify** — `curl https://api.quest.geohod.ru/health`; in the constructor upload an
    image (it lands in R2) and publish; play the quest; then DevTools → Network →
    Offline and confirm media still renders (served from the SW's quest-bundle cache).
+
+---
+
+## First boot: feature flags
+
+The flag registry lives in code (`backend/src/features.rs`); the database holds only
+admin-set overrides. **Nothing is seeded**, so a brand-new deployment comes up with
+every feature off — that is deliberate (fail-closed), and it means a fresh deploy is
+not usable until you turn things on.
+
+What is off until you enable it, in `/admin` → features:
+
+| Flag | Off means |
+|---|---|
+| `auth_google` | no "Sign in with Google" button |
+| `auth_telegram` | no Telegram login |
+| `payments_yookassa` | real checkout answers 501 — **nobody can buy** |
+| `payments_mock` | the always-approving test provider is unavailable |
+| `player_back_button` | system back leaves the play screen instead of rewinding a step |
+| `player_universal_answer` | the platform-wide universal answer is not accepted |
+
+Enabling a flag is a runtime decision and needs no redeploy. Note the second gate:
+a flag can never switch on what the deployment cannot do — `auth_google` without
+`GOOGLE_CLIENT_ID`, or `payments_yookassa` without the YooKassa secret, stays
+unavailable no matter the override. Configure the credentials first, then flip the flag.
+
+Leave `payments_mock` OFF in production: it grants access without charging.
 
 ---
 
@@ -82,8 +114,8 @@ consistency rules thread through it:
   so this is the only thing stopping a broken-but-compiling app from deploying.
   Add it as a **required status check** in GitHub branch protection for `main`.
 - **Ignored builds**: `vercel.json` `ignoreCommand` skips Vercel builds when the
-  commit didn't touch `platform/frontend` (so `blueprint/`, `design/`, `backend/`
-  edits don't trigger pointless frontend redeploys).
+  commit didn't touch `platform/frontend` (so `backend/` or docs edits don't trigger
+  pointless frontend redeploys).
 
 ## Frontend ↔ backend contract
 
@@ -196,9 +228,10 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    - **Disable the Data API for `public`**: Project Settings → API → remove
      `public` from the exposed schemas. The backend's pooler connection is
      unaffected; only the public PostgREST surface is.
-   - The initial migration (`0001_init.sql`) additionally enables RLS
-     (deny-by-default) on every app table as defense in depth. It is a no-op for
-     the app, which connects as the table-owner role (RLS-exempt).
+   - The schema (`0001_init.sql`) additionally enables RLS (deny-by-default) on
+     **every** app table — including `auth_tokens` and `auth_identities`, which hold
+     reset-token hashes and provider subjects — as defense in depth. It is a no-op
+     for the app, which connects as the table-owner role (RLS-exempt).
 
 ## Verify
 
@@ -377,6 +410,11 @@ pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
      the `geohod-quest-r2-*` podman secrets and restart.
   3. Delete the local `platform/tools/bubble-import/.env` (the import is one-shot;
      it carries both plaintext secrets and is gitignored but not encrypted).
+  4. **Bubble API token** — `BUBBLE_API_TOKEN` was committed to git history in
+     `old-knowledgebase/discovery/config/app.env` and was readable in every clone
+     and on GitHub. The history rewrite removed the blob, but anything already
+     cloned or indexed still has it: **treat the token as compromised and roll it
+     in the Bubble dashboard.**
 - **Secret rotation (ongoing)**: rotate the Supabase DB password (then refresh the
   `geohod-quest-database-url` secret) and the `ADMIN_TOKEN` periodically.
 - **Connection budget**: `DB_MAX_CONNECTIONS` (default 5, set in the API unit)

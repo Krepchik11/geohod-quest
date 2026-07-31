@@ -4,7 +4,7 @@
 //! an enum variant with a stable wire key, so the set of settings is always
 //! reviewable and exhaustively matched. What an admin controls at runtime is
 //! only the stored *value* (a persisted string per key; see
-//! `store::SettingsStores` and `migrations/0017_app_settings.sql`). Absence of
+//! `store::SettingsStores` and the `app_settings` table). Absence of
 //! a row means "unset" — there are no compiled-in default values.
 //!
 //! Values are normalized on write: surrounding whitespace is trimmed and an

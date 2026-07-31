@@ -6,8 +6,8 @@ Single source of truth for projection goldens, consumed by **both** test suites:
   `project_balance` / `project_state`, asserts `expected`.
 - TypeScript: `frontend` vitest does the same with `projectBalance` / `projectState`.
 
-Neither side may keep its own copy of expected values for these scenarios
-(spec: `parity-goldens`). Editing a fixture must flip both suites together.
+Neither side may keep its own copy of expected values for these scenarios.
+Editing a fixture must flip both suites together.
 
 ## Parity fixture format (`parity/*.json`)
 

@@ -1,7 +1,7 @@
 /**
  * GeoQuest service worker — app shell + offline quest media.
  *
- * Policy (see openspec change pwa-offline, design Decision 8):
+ * Policy:
  *  - Navigations + same-origin static assets: stale-while-revalidate into a
  *    versioned shell cache; offline navigation falls back to the cached page
  *    (/quest is cached ignoring its search params so ?golden=/?quest= variants

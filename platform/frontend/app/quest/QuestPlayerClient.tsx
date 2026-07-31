@@ -184,7 +184,7 @@ export default function QuestPlayerClient({
     queueStatus, showStartGate, hintOfferPos, hintRevealPos, toast,
   } = state;
 
-  // SPEC (blueprint/SPEC.md §Coins): there is exactly ONE balance — the player's
+  // Coins: there is exactly ONE balance — the player's
   // global, cross-quest coin wallet (the fold of every CoinFact on this device).
   // It is shown identically in the top bar, the quest menu and the profile, so the
   // number never disagrees with itself. `priorLogs` holds every OTHER attempt; the

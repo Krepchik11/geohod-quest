@@ -4076,9 +4076,38 @@ mod tests {
         }
     }
 
+    /// The features a flow test needs switched on. Every flag ships OFF
+    /// (`features::Feature::default_enabled`) and nothing seeds overrides, so a
+    /// test that exercises a gated flow must enable its feature — exactly as a
+    /// real deployment's admin does after first boot. Declaring that here, once,
+    /// is why no test depends on seeded data.
+    const TEST_ENABLED_FLAGS: [features::Feature; 4] = [
+        features::Feature::AuthGoogle,
+        features::Feature::AuthTelegram,
+        features::Feature::PaymentsMock,
+        features::Feature::PaymentsYookassa,
+    ];
+
     /// Build an in-memory `AppState` for tests — the media store comes from the
-    /// config, mirroring how `main()` builds it once and injects it.
+    /// config, mirroring how `main()` builds it once and injects it. The state
+    /// comes up with [`TEST_ENABLED_FLAGS`] on; use [`pristine_state`] to observe
+    /// a deployment that has never been configured.
     fn test_state(config: AppConfig) -> AppState {
+        let state = pristine_state(config);
+        let FlagStores::InMemory(flags) = &state.flags else {
+            panic!("in-memory tests build an in-memory flag store");
+        };
+        {
+            let mut flags = flags.lock().expect("flags lock");
+            for f in TEST_ENABLED_FLAGS {
+                flags.set(f.key(), true);
+            }
+        }
+        state
+    }
+
+    /// A state with no overrides stored at all — a deployment as it comes up.
+    fn pristine_state(config: AppConfig) -> AppState {
         let media = MediaStores::from_config(&config.media).expect("test media store");
         in_memory_state(config, media)
     }
@@ -4102,6 +4131,12 @@ mod tests {
 
     fn test_app() -> Router {
         build_router(test_state(test_config()))
+    }
+
+    /// A router whose deployment has never been configured: no stored overrides,
+    /// so every flag reads its code default.
+    fn test_app_pristine() -> Router {
+        build_router(pristine_state(test_config()))
     }
 
     /// Router + captured outbox — flows that need the mailed token (§6).
@@ -8100,9 +8135,21 @@ mod tests {
     // === DATABASE_URL (zero-infra dev/CI stays green); run `docker compose up -d`
     // === and set DATABASE_URL (see backend/.env.example) to execute.
 
-    fn pg_app(pool: sqlx::PgPool) -> (Router, std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>) {
+    async fn pg_app(
+        pool: sqlx::PgPool,
+    ) -> (Router, std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>) {
         let media_cfg = test_media_cfg();
         let (m, outbox) = mailer::Mailer::recorder();
+        // Same baseline as the in-memory harness: nothing seeds overrides any
+        // more, so a harness must switch on the features it exercises. Idempotent
+        // upserts — the pg suites share one database and run concurrently.
+        let flag_store = FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone()));
+        for f in TEST_ENABLED_FLAGS {
+            flag_store
+                .set_override(f.key(), true)
+                .await
+                .expect("enable baseline flag");
+        }
         let router = build_router(AppState {
             config: AppConfig {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
@@ -8127,7 +8174,7 @@ mod tests {
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
             moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(pool.clone())),
-            flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone())),
+            flags: flag_store,
             settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
             yookassa: None,
             mailer: m,
@@ -8158,7 +8205,7 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let (app, _mails) = pg_app(pool);
+        let (app, _mails) = pg_app(pool).await;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
         let qid = format!("q-citest-{run}");
@@ -8339,7 +8386,7 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let (app, pg_mails) = pg_app(pool.clone());
+        let (app, pg_mails) = pg_app(pool.clone()).await;
 
         // Run-unique tag: scenarios tolerate a shared, pre-populated database.
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
@@ -8382,7 +8429,7 @@ mod tests {
             .connect(&url)
             .await
             .expect("reconnect");
-        let (app2, _mails2) = pg_app(pool2);
+        let (app2, _mails2) = pg_app(pool2).await;
         let (st, gv) = get_json(&app2, &format!("/api/attempts/{happy_attempt}/state")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(gv["projected"]["balance"], 5, "projection survives restart");
@@ -8826,7 +8873,7 @@ mod tests {
 
     #[tokio::test]
     async fn features_admin_gated_and_lists_registry_defaults() {
-        let app = test_app();
+        let app = test_app_pristine();
         // No credential and a fail-closed (no ADMIN_TOKEN) deployment both 403.
         let (st, _) = get_json(&app, "/api/admin/features").await;
         assert_eq!(st, StatusCode::FORBIDDEN);
@@ -8839,8 +8886,8 @@ mod tests {
         let rows = v.as_array().expect("feature list");
         assert_eq!(rows.len(), features::Feature::ALL.len());
         for row in rows {
-            // A fresh deployment stores no overrides, so every flag reads
-            // its code default — off.
+            // A fresh deployment stores no overrides at all, so every flag reads
+            // its code default — off. Enabling one is always an admin decision.
             let key = row["key"].as_str().expect("key");
             assert_eq!(row["default_enabled"], json!(false), "{key} defaults off");
             assert_eq!(row["override"], Value::Null, "{key} has no override");
@@ -9138,7 +9185,7 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let (app, _mails) = pg_app(pool);
+        let (app, _mails) = pg_app(pool).await;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
 
         // The pg suites share ONE database and run concurrently, so this test

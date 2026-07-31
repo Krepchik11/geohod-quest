@@ -1,20 +1,24 @@
-# Python venv
+# Dependencies and build output
+node_modules/
 .venv/
 
 # Secrets
-discovery/config/app.env
 .env
 .env.*
 # …but `.env.example` is a committed template (no real secrets), not a secret.
 !.env.example
 
-# Raw data (may contain PII)
-discovery/raw/data-api/**/list_page_*.json
-discovery/raw/exports/
-
 # Logs
-discovery/logs/
 *.log
 
-# Checkpoints with potentially sensitive metadata
-discovery/checkpoints/
+# Per-machine agent permissions — local state, not project configuration.
+.claude/settings.local.json
+
+# Bubble migration tooling and its working data. Local only: the raw dumps carry
+# real user PII, and the importer is run by hand against a live source, not built
+# or deployed with the platform.
+platform/tools/bubble-import/
+
+# Bubble migration working dump: plaintext passwords, magiclinks, 1451 emails, media
+# bytes. Local only — never commit. Delete once the prod migration is verified.
+fwd/
