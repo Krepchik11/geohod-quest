@@ -17,6 +17,7 @@ import {
   type DesignStep,
 } from '../player/PlayerComponents';
 import { coinChime, spendChime } from '../quest/sound';
+import { useEscape } from './controls';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и
@@ -282,15 +283,11 @@ export function TestOverlay({ quest, startPos, onClose }: {
       : Math.min(0.95, (window.innerHeight - 132) / 740, (window.innerWidth - 80) / 360);
   const [scale, setScale] = useState(calcScale);
 
+  useEscape(onClose);
   useEffect(() => {
     const onResize = () => setScale(calcScale());
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('resize', onResize);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('keydown', onKey);
-    };
+    return () => window.removeEventListener('resize', onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

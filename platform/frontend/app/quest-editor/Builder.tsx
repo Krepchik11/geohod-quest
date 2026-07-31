@@ -26,11 +26,10 @@ import {
   type Gates,
   type GateField,
 } from '../../lib/constructor-model';
-import { COVER_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
-import { GateNote, ImageZone, WspBlock, WspToggle, useGateHighlight } from './controls';
+import { GateNote, QuestCoverZone, WspBlock, WspToggle, gateAnchor, useGateHighlight } from './controls';
 import { PageEditor } from './PageEditor';
 import { PublishPanel } from './PublishPanel';
 import { WspHeader } from './QuestList';
@@ -139,24 +138,32 @@ export function QuestSettings({ quest, onMeta, highlight }: {
       </div>
       <WspBlock title="Карточка квеста" aside="используется «Первым экраном» и магазином">
         <div>
-          <label className="adm-label">Название</label>
-          <input className="input" value={m.title} onChange={(e) => set({ title: e.target.value })} />
+          <label className="adm-label" htmlFor="qs-title">Название</label>
+          <input id="qs-title" className="input" value={m.title} onChange={(e) => set({ title: e.target.value })} />
+        </div>
+        {/* Обложка стоит там же, где её видит игрок: сразу под названием, перед
+            городом и длительностью — порядок «Первого экрана» и карточки магазина. */}
+        <div {...gateAnchor('cover')}>
+          {/* Не <label>: зона — это кнопка, своё имя она объявляет сама (aria-label).
+              Подпись здесь оформительская, метить ею нечего. */}
+          <span className="adm-label">Обложка<small>первый экран и карточка магазина</small></span>
+          <QuestCoverZone meta={m} onMeta={onMeta} width={240} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <div>
-            <label className="adm-label">Город</label>
-            <input className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
+            <label className="adm-label" htmlFor="qs-city">Город</label>
+            <input id="qs-city" className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
           </div>
           <div>
-            <label className="adm-label">Длительность</label>
-            <input className="input" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
+            <label className="adm-label" htmlFor="qs-duration">Длительность</label>
+            <input id="qs-duration" className="input" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
           </div>
           <div>
-            <label className="adm-label">Цена, ₽</label>
-            <input className="input" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
+            <label className="adm-label" htmlFor="qs-price">Цена, ₽</label>
+            <input id="qs-price" className="input" type="number" min={0} value={m.price} onChange={(e) => set({ price: Math.max(0, +e.target.value || 0) })} />
           </div>
         </div>
-        <div data-gate-field="start">
+        <div {...gateAnchor('start')}>
           <label className="adm-label" htmlFor="qs-start">Координаты места старта</label>
           <input
             id="qs-start"
@@ -171,12 +178,13 @@ export function QuestSettings({ quest, onMeta, highlight }: {
           </p>
         </div>
         <div>
-          <label className="adm-label">Описание для магазина</label>
-          <textarea className="textarea" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
+          <label className="adm-label" htmlFor="qs-desc">Описание для магазина</label>
+          <textarea id="qs-desc" className="textarea" value={m.desc} onChange={(e) => set({ desc: e.target.value })} />
         </div>
         <div>
-          <label className="adm-label">Бонус к счётчику игроков</label>
+          <label className="adm-label" htmlFor="qs-bonus">Бонус к счётчику игроков</label>
           <input
+            id="qs-bonus"
             className="input"
             type="number"
             min={0}
@@ -188,15 +196,6 @@ export function QuestSettings({ quest, onMeta, highlight }: {
           </p>
         </div>
         <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>0 ₽ — бесплатный квест. Оплата, купоны и выдача доступов — на стороне магазина, не конструктора.</p>
-      </WspBlock>
-      <WspBlock title="Обложка" gateField="cover" aside="первый экран и карточка магазина">
-        <ImageZone
-          value={{ url: m.cover, origin: m.coverOrigin }}
-          label="обложка"
-          width={240}
-          maxBytes={COVER_IMAGE_MAX_BYTES}
-          onChange={(v) => set({ cover: v.url, coverOrigin: v.origin })}
-        />
       </WspBlock>
       <WspBlock title="Атрибуты" aside="фильтры списка квестов">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -444,6 +443,8 @@ export function BuilderScreen({
       ...q,
       steps: q.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)),
     }));
+  // Мета правится из двух панелей (настройки и «Первый экран») — один патчер.
+  const setMeta = (meta: CtorQuestMeta) => actions.onPatchQuest((q) => ({ ...q, meta }));
 
   return (
     <>
@@ -540,7 +541,7 @@ export function BuilderScreen({
           ) : view === 'settings' ? (
             <QuestSettings
               quest={quest}
-              onMeta={(meta) => actions.onPatchQuest((q) => ({ ...q, meta }))}
+              onMeta={setMeta}
               highlight={highlight && highlight.pageId === null ? highlight : null}
             />
           ) : (
@@ -549,6 +550,7 @@ export function BuilderScreen({
               step={selStep!}
               msgs={gates.perPage[selStep!.id]}
               highlight={highlight && highlight.pageId === selStep!.id ? highlight : null}
+              onMeta={setMeta}
               onPatch={(patch) => patchStep(selStep!.id, patch)}
               onDelete={() => actions.removeStep(selStep!.id)}
               onDuplicate={() => actions.duplicateStep(selStep!.id)}

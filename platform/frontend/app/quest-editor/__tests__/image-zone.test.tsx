@@ -14,43 +14,26 @@ import { COVER_IMAGE_MAX_BYTES, STEP_IMAGE_MAX_BYTES } from '../../../lib/image-
  * - clicking a filled zone re-crops the stored value, byte budget included;
  * - clearing drops the crop and its source together.
  */
-vi.mock('../../../lib/image-authoring', async (orig) => ({
-  ...(await orig<typeof import('../../../lib/image-authoring')>()),
-  beginCropFromFile: vi.fn(),
-  beginCropFromValue: vi.fn(),
-  commitCrop: vi.fn(),
-}));
+vi.mock('../../../lib/image-authoring', async (orig) =>
+  (await import('./crop-mocks')).cropAuthoringMock(
+    await orig<typeof import('../../../lib/image-authoring')>(),
+  ));
 
 import { beginCropFromFile, beginCropFromValue, commitCrop } from '../../../lib/image-authoring';
+import { cropSession, filledImage, installResizeObserver } from './crop-mocks';
 
-const SOURCE = { img: {} as HTMLImageElement, width: 1000, height: 600, src: 'blob:src' };
-const session = (saved: { x: number; y: number; width: number; height: number } | null = null) =>
-  ({ decoded: SOURCE, origin: { url: '/media/source.jpg' }, saved });
 const COMMITTED = { url: '/media/crop.jpg', origin: null };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(beginCropFromFile).mockResolvedValue(session());
-  vi.mocked(beginCropFromValue).mockResolvedValue(session());
+  vi.mocked(beginCropFromFile).mockResolvedValue(cropSession());
+  vi.mocked(beginCropFromValue).mockResolvedValue(cropSession());
   vi.mocked(commitCrop).mockResolvedValue(COMMITTED);
 });
 
-// jsdom ships no ResizeObserver; the crop frame measures itself with one.
-class ResizeObserverStub {
-  observe() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+installResizeObserver();
 
-const FILLED = {
-  url: '/media/crop.jpg',
-  origin: {
-    url: '/media/source.jpg',
-    width: 1000,
-    height: 600,
-    rect: { x: 200, y: 0, width: 800, height: 600 },
-  },
-};
+const FILLED = filledImage('crop');
 
 function setup(props: Partial<React.ComponentProps<typeof ImageZone>> = {}) {
   const onChange = vi.fn();
@@ -92,10 +75,15 @@ describe('ImageZone — upload', () => {
     expect(vi.mocked(commitCrop).mock.calls[0][2]).toBe(COVER_IMAGE_MAX_BYTES);
   });
 
-  it('commits nothing when the author cancels the crop', async () => {
+  // Both ways out of the crop owe the same thing: nothing uploaded, nothing
+  // committed. One body, so the contract has one place to change.
+  it.each([
+    ['кнопка «Отмена»', async () => fireEvent.click(await screen.findByRole('button', { name: 'Отмена' }))],
+    ['Escape', async () => { await screen.findByRole('dialog'); fireEvent.keyDown(document, { key: 'Escape' }); }],
+  ])('commits nothing when the author dismisses the crop with %s', async (_name, dismiss) => {
     const { onChange, pickFile } = setup();
     pickFile();
-    fireEvent.click(await screen.findByRole('button', { name: 'Отмена' }));
+    await dismiss();
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(commitCrop).not.toHaveBeenCalled();
@@ -105,7 +93,7 @@ describe('ImageZone — upload', () => {
 
 describe('ImageZone — re-crop', () => {
   it('clicking the image reopens the crop on the saved rect', async () => {
-    vi.mocked(beginCropFromValue).mockResolvedValue(session(FILLED.origin.rect));
+    vi.mocked(beginCropFromValue).mockResolvedValue(cropSession(FILLED.origin.rect));
     const { onChange, confirmCrop } = setup({ value: FILLED });
     fireEvent.click(screen.getByRole('button', { name: 'Изменить кадрирование: изображение' }));
 
@@ -129,5 +117,13 @@ describe('ImageZone — re-crop', () => {
     const { onChange } = setup({ value: FILLED });
     fireEvent.click(screen.getByRole('button', { name: 'Убрать изображение' }));
     expect(onChange).toHaveBeenLastCalledWith({ url: null, origin: null });
+  });
+
+  // The zone itself announces what a click does — a block that forgets to say so
+  // in prose still cannot hide the affordance.
+  it('announces the click affordance as a tooltip, not only to screen readers', () => {
+    setup({ value: FILLED });
+    const zone = screen.getByRole('button', { name: 'Изменить кадрирование: изображение' });
+    expect(zone.getAttribute('title')).toBe('Изменить кадрирование: изображение');
   });
 });
