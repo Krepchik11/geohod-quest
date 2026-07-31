@@ -1,0 +1,199 @@
+name: release
+
+# THE release pipeline for `main`. One ordered chain, because the frontend and the
+# backend are two halves of one product and must never ship out of order:
+#
+#   quality gates ──> backend image ──> backend LIVE on the VPS ──> frontend promoted
+#
+# The link that matters is "backend LIVE": it polls the production `/health` until
+# it reports the build id of THIS commit's backend sources, and only then is the
+# frontend promoted. Before this pipeline existed the two halves ran on independent
+# clocks — Vercel promoted a push in ~2 minutes, while the VPS only noticed a new
+# image when `podman-auto-update`'s DAILY timer next fired — so a new frontend
+# routinely called a backend up to a day behind that could not serve it.
+#
+# Properties worth knowing:
+#
+#  - A commit that does not touch the backend does not change its build id, so the
+#    gate is already satisfied and passes on the first poll. No waiting, and no
+#    needless container restart for a frontend-only or docs-only change.
+#  - If the VPS never picks the image up, this run FAILS and the frontend is NOT
+#    promoted. Production stays on the previous, self-consistent pair — the failure
+#    mode is a stale-but-working site, never a broken one.
+#  - The skew window is only ever closed in ONE direction. Between the backend
+#    restart and the frontend promotion — and for as long as a PWA client holds a
+#    cached bundle, which can be days — an OLD frontend talks to the NEW backend.
+#    Ordering cannot fix that; API backward compatibility must. See "The invariant
+#    this pipeline does not enforce" in platform/DEPLOYMENT.md.
+#
+# Operator prerequisites (one-time, see platform/DEPLOYMENT.md → "Releases"):
+#   VPS      podman-auto-update.timer drop-in installed (reconcile every minute,
+#            not daily) — otherwise every release stalls until the gate times out.
+#   Secrets  VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+#   Variable API_BASE_URL (optional; defaults to https://api.quest.geohod.ru)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: >-
+          Rebuild the backend image even though its sources are unchanged. The
+          only way to pick up a base-image security update, since the pipeline
+          otherwise never rebuilds identical sources. Note the gate cannot observe
+          such a rebuild landing — the build id is unchanged by definition — so it
+          passes immediately and the frontend may be promoted while the API
+          restarts.
+        type: boolean
+        default: false
+
+# A newer release supersedes an older one, so cancel rather than queue: queueing
+# would let an in-flight older run promote its older frontend AFTER the newer run
+# already promoted its own.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The release identity: a hash of the sources the backend image is built from.
+  #
+  # Deliberately NOT the commit sha. The gate compares this value against what the
+  # live backend reports, so it must change exactly when the backend changes — a
+  # commit sha would change on every push and leave the gate waiting forever for a
+  # redeploy that a frontend-only commit never triggers.
+  identity:
+    runs-on: ubuntu-latest
+    outputs:
+      build_id: ${{ steps.compute.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute the backend build id
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exactly the image's inputs: the crate and the goldens it embeds (minus
+          # goldens/parity, which platform/.dockerignore keeps out of the context),
+          # the .dockerignore that decides what the context contains, and the
+          # recipe that turns them into an image. Hashing MORE than the image
+          # contains only costs a needless restart; hashing LESS is a silent
+          # correctness bug — a changed backend would satisfy the gate against the
+          # old one and never deploy. When in doubt, hash it.
+          manifest="$(
+            {
+              git ls-tree -r HEAD -- platform/backend platform/goldens platform/.dockerignore \
+                | grep -v $'\tplatform/goldens/parity/' || true
+              git ls-tree -r HEAD -- .github/workflows/backend-image.yml
+            }
+          )"
+          files="$(printf '%s\n' "$manifest" | grep -c . || true)"
+          # A typo in the paths above would silently hash an empty manifest into a
+          # constant id that every release then "matches". Fail loudly instead.
+          if [ "${files:-0}" -lt 10 ]; then
+            echo "::error::Refusing to release: the backend source manifest has ${files} entries. The paths hashed into build_id are wrong."
+            exit 1
+          fi
+          build_id="$(printf '%s\n' "$manifest" | sha256sum | cut -c1-12)"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "Backend build id \`$build_id\` over $files source files." >> "$GITHUB_STEP_SUMMARY"
+
+  # Gates, not afterthoughts: they run BEFORE anything is published. `cargo build
+  # --release` (the image build) compiles without #[cfg(test)], so only these jobs
+  # can stop a regression from reaching production.
+  backend-tests:
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend-tests:
+    uses: ./.github/workflows/frontend-ci.yml
+
+  backend-image:
+    needs: [identity, backend-tests]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/backend-image.yml
+    with:
+      build_id: ${{ needs.identity.outputs.build_id }}
+      # `inputs` is empty on a push, so this is false for every ordinary release.
+      force_rebuild: ${{ inputs.force_rebuild == true }}
+
+  # The gate. Everything above this line is preparation; this is what makes the
+  # release ordered.
+  backend-live:
+    needs: [identity, backend-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait until the VPS serves this backend
+        shell: bash
+        env:
+          API_BASE: ${{ vars.API_BASE_URL || 'https://api.quest.geohod.ru' }}
+          EXPECTED: ${{ needs.identity.outputs.build_id }}
+          # ~1 min for the reconcile timer + image pull + start + health probe,
+          # with generous headroom for a slow pull on a small VPS.
+          TIMEOUT_SECONDS: "900"
+        run: |
+          set -uo pipefail
+          deadline=$(( $(date +%s) + $TIMEOUT_SECONDS ))
+          while :; do
+            # Quiet in the loop — the API being briefly unreachable across its own
+            # restart is expected, not an error. The three outcomes are told apart
+            # by `observed`: a build id, `<no build_id>` (reachable, but running a
+            # backend from before this field existed), or empty (unreachable).
+            observed="$(curl -fsS --max-time 10 "$API_BASE/health" 2>/dev/null | jq -r '.build_id // "<no build_id>"' 2>/dev/null || true)"
+            if [ "$observed" = "$EXPECTED" ]; then
+              echo "Backend live on build $EXPECTED."
+              echo "Backend live on build \`$EXPECTED\`." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::$API_BASE/health reports build_id='${observed:-<unreachable>}' after ${TIMEOUT_SECONDS}s, expected '$EXPECTED'. The frontend was NOT promoted, so production stays on the previous frontend/backend pair."
+              echo "Last response:"
+              curl -sS --max-time 10 -i "$API_BASE/health" || true
+              echo "The VPS did not pick the new image up. On the host, check:"
+              echo "  systemctl --user list-timers | grep auto-update   # is the 1-minute drop-in installed?"
+              echo "  journalctl --user -u podman-auto-update.service -n 50"
+              echo "  podman auto-update                               # force it now, then re-run this workflow"
+              exit 1
+            fi
+            echo "waiting — observed='${observed:-<unreachable>}' expected='$EXPECTED'"
+            sleep 10
+          done
+
+  frontend:
+    needs: [backend-live, frontend-tests]
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the Vercel CLI
+        run: npm install --global vercel@latest
+
+      # Every `vercel` command below runs from the REPO ROOT, not from
+      # platform/frontend: the Vercel project's Root Directory is platform/frontend
+      # and the CLI applies that setting itself — the same way the Git integration
+      # did. Running from inside the directory makes the CLI resolve
+      # platform/frontend/platform/frontend and fail to find the app.
+      - name: Pull the production environment
+        # Fetches the project's production env vars, incl. NEXT_PUBLIC_API_URL —
+        # which is inlined into the bundle, so Vercel stays its single source of
+        # truth rather than it being duplicated into repository secrets.
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Promote to production
+        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"

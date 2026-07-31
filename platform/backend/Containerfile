@@ -36,6 +36,18 @@ USER appuser
 ENV PORT=8082
 EXPOSE 8082
 
+# Content identity of this image — a hash of the sources it is built from,
+# computed by .github/workflows/release.yml. `GET /health` reports it as
+# `build_id`, and the release gate polls that until it matches the commit being
+# released; only then is the frontend promoted, so the frontend can never reach
+# users ahead of the backend it needs.
+#
+# Declared LAST so changing it rebuilds only this metadata layer, never the Rust
+# compile. The `dev` default means a hand-built image is never mistaken for a
+# released one (the gate would keep waiting rather than promote).
+ARG BUILD_ID=dev
+ENV BUILD_ID=${BUILD_ID}
+
 # Liveness via the app's own /health endpoint. start-period covers DB cold start.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1

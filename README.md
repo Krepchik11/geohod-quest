@@ -43,6 +43,14 @@ an invariant fails those tests.
 
 ## Deploying
 
+A push to `main` runs one ordered pipeline
+([`.github/workflows/release.yml`](./.github/workflows/release.yml)): quality gates →
+backend image → **the backend is live on the VPS** → the frontend is promoted. That
+middle step polls `/health` until it reports the build id of this commit's backend
+sources, so a new frontend can never reach users ahead of the backend it needs. The
+window is only closed in one direction, so the API must stay backward compatible
+with the previous frontend — cached PWA clients outlive any deploy.
+
 The database schema is a single file — [`platform/backend/migrations/0001_init.sql`](./platform/backend/migrations/0001_init.sql) —
 applied by sqlx at startup. Every feature flag ships **off**; a fresh deployment
 enables what it needs from the admin panel. See

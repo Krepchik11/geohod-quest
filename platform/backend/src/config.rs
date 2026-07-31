@@ -5,6 +5,22 @@ fn env_opt(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// Reported when the process runs outside a released image (local `cargo run`,
+/// tests, a hand-built container). A released image always carries a hex content
+/// id, so this value can never be mistaken for one by the release gate.
+pub const UNRELEASED_BUILD_ID: &str = "dev";
+
+/// Resolves [`AppConfig::build_id`] from the raw `BUILD_ID` env value.
+///
+/// Split out so the fallback is unit-testable without mutating process env
+/// (which races across parallel tests).
+pub fn build_id_from(raw: Option<&str>) -> String {
+    raw.map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(UNRELEASED_BUILD_ID)
+        .to_string()
+}
+
 /// Application configuration loaded from environment.
 ///
 /// All values have safe defaults suitable for local development.
@@ -13,8 +29,24 @@ fn env_opt(key: &str) -> Option<String> {
 pub struct AppConfig {
     /// Address the HTTP server will bind to.
     pub addr: SocketAddr,
-    /// Human readable application version (from Cargo).
-    pub version: &'static str,
+    /// Content identity of the image serving this process, baked in at image
+    /// build time (`BUILD_ID`, set by `backend/Containerfile`'s `ARG BUILD_ID`).
+    ///
+    /// This is the deployment's ONLY identity, and it replaced the crate version
+    /// that `/health` used to report. That version was written once at the first
+    /// commit of the repository and never bumped again, so it answered "is my
+    /// change live?" with the same string forever — a constant shaped like a
+    /// deploy identity, which is worse than none. Anything hand-maintained decays
+    /// into that; a derived id cannot.
+    ///
+    /// It is a hash of the sources the image is built from — NOT the commit sha —
+    /// so it changes exactly when the backend changes. That is what makes the
+    /// release gate correct for every commit: a frontend-only commit leaves it
+    /// untouched, so `.github/workflows/release.yml` observes the expected id
+    /// immediately instead of waiting for a redeploy that will never happen (and
+    /// the identical image means podman never needlessly restarts the unit).
+    /// [`UNRELEASED_BUILD_ID`] outside a released image.
+    pub build_id: String,
     /// Shared secret for admin-only endpoints (stats/feedbacks/migration).
     /// When `None` (env `ADMIN_TOKEN` unset) those endpoints are disabled
     /// (fail-closed) — they expose aggregate telemetry and raw feedback notes.
@@ -130,7 +162,7 @@ impl AppConfig {
 
         Ok(Self {
             addr,
-            version: env!("CARGO_PKG_VERSION"),
+            build_id: build_id_from(env_opt("BUILD_ID").as_deref()),
             admin_token,
             cors_allowed_origins,
             media,

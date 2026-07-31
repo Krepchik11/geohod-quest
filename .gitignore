@@ -2,6 +2,11 @@
 node_modules/
 .venv/
 
+# Vercel CLI state. The release pipeline runs `vercel pull` from the REPO ROOT
+# (the project's Root Directory is platform/frontend and the CLI applies it), so
+# the link + pulled production env land here, not under platform/frontend/.
+.vercel
+
 # Secrets
 .env
 .env.*
