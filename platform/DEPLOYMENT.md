@@ -228,7 +228,7 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    - **Disable the Data API for `public`**: Project Settings → API → remove
      `public` from the exposed schemas. The backend's pooler connection is
      unaffected; only the public PostgREST surface is.
-   - The schema (`0001_init.sql`) additionally enables RLS (deny-by-default) on
+   - The schema (`migrations/`) additionally enables RLS (deny-by-default) on
      **every** app table — including `auth_tokens` and `identities`, which hold
      reset-token hashes, password hashes and provider subjects — as defense in depth. It is a no-op
      for the app, which connects as the table-owner role (RLS-exempt).
