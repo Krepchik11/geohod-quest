@@ -33,7 +33,7 @@ const RATING_CHIPS: ReadonlyArray<{ value: number; label: string }> = [
 
 /** Stable key identifying one (player, quest) review across state updates. */
 function reviewKey(r: AdminReviewWire): string {
-  return `${r.identity.player_id} ${r.quest_id}`;
+  return `${r.identity.user_id} ${r.quest_id}`;
 }
 
 export default function AdminReviewsPage() {
@@ -71,7 +71,7 @@ export default function AdminReviewsPage() {
     setBusy(true);
     try {
       await api.adminHideReview({
-        player_id: confirm.identity.player_id,
+        user_id: confirm.identity.user_id,
         quest_id: confirm.quest_id,
       });
       setHidden(confirm, true);
@@ -86,7 +86,7 @@ export default function AdminReviewsPage() {
 
   const unhide = async (r: AdminReviewWire) => {
     try {
-      await api.adminUnhideReview({ player_id: r.identity.player_id, quest_id: r.quest_id });
+      await api.adminUnhideReview({ user_id: r.identity.user_id, quest_id: r.quest_id });
       setHidden(r, false);
       showToast('Отзыв снова виден');
     } catch {
@@ -108,7 +108,7 @@ export default function AdminReviewsPage() {
 
   const before = confirm ? questAverage(reviews ?? [], confirm.quest_id) : null;
   const after = confirm
-    ? questAverage(reviews ?? [], confirm.quest_id, confirm.identity.player_id)
+    ? questAverage(reviews ?? [], confirm.quest_id, confirm.identity.user_id)
     : null;
 
   return (
@@ -188,7 +188,7 @@ export default function AdminReviewsPage() {
                 onHide={() => setConfirm(r)}
                 onUnhide={() => void unhide(r)}
                 onJump={() =>
-                  showToast(`${r.identity.player_id} — в разделе «Пользователи» (вне прототипа)`)
+                  showToast(`${r.identity.user_id} — в разделе «Пользователи» (вне прототипа)`)
                 }
               />
             ))}
@@ -254,7 +254,7 @@ function ReviewCard({
         <div className="amod-card__head">
           <span className="amod-card__name">{identityName(review.identity)}</span>
           <span className={`amod-badge amod-badge--${badge.kind}`}>{badge.label}</span>
-          <span className="amod-card__pid">{review.identity.player_id}</span>
+          <span className="amod-card__pid">{review.identity.user_id}</span>
           <button type="button" className="amod-jump" onClick={onJump}>
             ↗ Пользователи
           </button>

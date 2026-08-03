@@ -4,11 +4,11 @@
  * Anonymous-first: the device mints one UUID (versioned localStorage key, locked
  * owner decision) and plays as `dev:<uuid>` with NO server round-trip — identity
  * exists before any network. Registration/login store a session here; while a
- * session exists the account's player_id is the current identity, and clearing
+ * session exists the account's user_id is the current identity, and clearing
  * it reverts to the device's anonymous id.
  *
  * Server trust model: a Bearer token authenticates registered accounts; the
- * X-Player-Id header carries the anonymous claim (device possession is the
+ * X-User-Id header carries the anonymous claim (device possession is the
  * anonymous credential). `authHeaders()` picks the right one — every API call
  * goes through it (see lib/api.ts).
  */
@@ -19,14 +19,14 @@ const SESSION_KEY = 'geohod-session:v1';
 /** Stored session: opaque server token + the account identity it resolves to. */
 export interface Session {
   token: string;
-  player_id: string;
+  user_id: string;
   /** Login email, or `null` for a social-only account (Telegram, or Google
    *  before an email is attached). The UI shows the display name in that case. */
   email: string | null;
   display_name?: string | null;
   /** Access role (admin/editor/player) captured at login/register. Drives the
    *  admin-surface nav link; may go stale if the role changes mid-session (a
-   *  re-login refreshes it, and the admin page re-checks /api/players/me anyway). */
+   *  re-login refreshes it, and the admin page re-checks /api/users/me anyway). */
   role?: string | null;
 }
 
@@ -51,8 +51,8 @@ export function getDeviceId(): string {
   }
 }
 
-/** The device-bound anonymous player id. */
-export function anonymousPlayerId(): string {
+/** The device-bound anonymous user id. */
+export function anonymousUserId(): string {
   return `dev:${getDeviceId()}`;
 }
 
@@ -94,8 +94,12 @@ export function getSession(): Session | null {
       sessionCache = null;
       return null;
     }
-    const parsed = JSON.parse(raw) as Session;
-    sessionCache = parsed.token && parsed.player_id ? parsed : null;
+    // Read-old-write-new: sessions stored before the player_id→user_id wire
+    // rename carry `player_id`; normalize (and drop the legacy key) so those
+    // users stay logged in and never re-persist the old shape.
+    const { player_id, ...parsed } = JSON.parse(raw) as Session & { player_id?: string };
+    const userId = parsed.user_id ?? player_id;
+    sessionCache = parsed.token && userId ? { ...parsed, user_id: userId } : null;
     return sessionCache;
   } catch {
     return null;
@@ -117,9 +121,9 @@ export function setSession(session: Session): void {
  *
  * Why rotate (the bug this fixes): registration attaches the account to the
  * device's anonymous id — `dev:<uuid>` becomes a registered account (see
- * app/auth/page.tsx, which registers with `anonymousPlayerId()`). If logout merely
- * reverted to that same id, every tokenless `X-Player-Id` call would be rejected
- * by the backend ("registered account requires login", resolve_player), so the
+ * app/auth/page.tsx, which registers with `anonymousUserId()`). If logout merely
+ * reverted to that same id, every tokenless `X-User-Id` call would be rejected
+ * by the backend ("registered account requires login", resolve_user), so the
  * device would be permanently bricked for anonymous use and the 401 would surface
  * as a misleading "сервер недоступен". Minting a new device id returns the device
  * to a clean anonymous visitor; account purchases/coins stay on the account and
@@ -145,14 +149,14 @@ export function logout(): void {
   clearSession();
 }
 
-/** The acting player id: account when logged in, anonymous device id otherwise. */
-export function currentPlayerId(): string {
-  return getSession()?.player_id ?? anonymousPlayerId();
+/** The acting user id: account when logged in, anonymous device id otherwise. */
+export function currentUserId(): string {
+  return getSession()?.user_id ?? anonymousUserId();
 }
 
-/** Identity headers for API calls: Bearer wins, X-Player-Id carries the anonymous claim. */
+/** Identity headers for API calls: Bearer wins, X-User-Id carries the anonymous claim. */
 export function authHeaders(): Record<string, string> {
   const session = getSession();
   if (session) return { Authorization: `Bearer ${session.token}` };
-  return { 'X-Player-Id': anonymousPlayerId() };
+  return { 'X-User-Id': anonymousUserId() };
 }

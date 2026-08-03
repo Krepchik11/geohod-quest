@@ -24,7 +24,7 @@ vi.mock('../../../lib/api', () => ({
   },
 }));
 vi.mock('../../../lib/identity', () => ({
-  currentPlayerId: () => 'dev:test',
+  currentUserId: () => 'dev:test',
   getSession: () => null,
   subscribeSession: () => () => {},
 }));
@@ -80,7 +80,7 @@ describe('QuestCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Получить' }));
     await waitFor(() => expect(screen.getByText('✓ Квест в «Моих квестах»')).toBeTruthy());
     expect(screen.getByRole('link', { name: 'Играть' }).getAttribute('href')).toBe('/quest/q1');
-    expect(checkoutMock).toHaveBeenCalledWith({ player_id: 'dev:test', quest_id: 'q1' });
+    expect(checkoutMock).toHaveBeenCalledWith({ user_id: 'dev:test', quest_id: 'q1' });
   });
 
   it('free-grant failure shows the red line in the card', async () => {

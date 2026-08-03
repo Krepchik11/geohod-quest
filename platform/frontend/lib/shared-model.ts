@@ -381,11 +381,11 @@ export function deriveSyncCorrections(local: ProjectedState, authoritative: Proj
 
 /**
  * A lifetime ownership record (the client mirror of the backend AccessGrant): one
- * player's access to one quest. Idempotent by (player_id, quest_id) — source is
+ * player's access to one quest. Idempotent by (user_id, quest_id) — source is
  * audit-only, first wins. Survives version publishes and gates attempt creation.
  */
 export interface AccessGrant {
-  player_id: string;
+  user_id: string;
   quest_id: string;
   granted_at: string;
   source: 'Payment' | 'CouponRedemption' | 'FreeQuest' | 'Admin';
@@ -398,11 +398,11 @@ export interface AccessGrant {
  * stamped with the current ISO timestamp. Deterministic and side-effect-free.
  */
 export function createGrantIdemp(existing: AccessGrant | null, player: string, quest: string, source: AccessGrant['source']): {grant: AccessGrant; created: boolean} {
-  if (existing && existing.player_id === player && existing.quest_id === quest) {
+  if (existing && existing.user_id === player && existing.quest_id === quest) {
     return { grant: existing, created: false };
   }
   const grant: AccessGrant = {
-    player_id: player,
+    user_id: player,
     quest_id: quest,
     granted_at: new Date().toISOString(),
     source,

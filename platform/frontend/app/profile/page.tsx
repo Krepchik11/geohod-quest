@@ -7,9 +7,10 @@ import SiteShell from '../components/SiteShell';
 import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
-import { api, ApiError } from '../../lib/api';
+import { api, ApiError, type Me } from '../../lib/api';
+import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
-import { currentPlayerId, getSession, setSession, subscribeSession } from '../../lib/identity';
+import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
 import { logoutAndReset } from '../../lib/session-actions';
 import {
   completedQuestDetails,
@@ -35,15 +36,6 @@ import { plural } from '../../lib/storefront';
  * Offline-first local data + the honest server-degradation note stay.
  */
 
-interface Me {
-  player_id: string;
-  registered: boolean;
-  email: string | null;
-  display_name: string | null;
-  email_confirmed_at?: number | null;
-  /** Active sign-in methods: "email" + linked "google"/"telegram". */
-  methods?: string[];
-}
 
 type ProfileData =
   | { source: 'loading' }
@@ -94,7 +86,7 @@ export default function ProfilePage() {
       local = foldLocalPlayerStats(logs);
     } catch { /* IndexedDB unavailable — local stays empty */ }
     try {
-      await flushAll({ playerId: currentPlayerId(), api });
+      await flushAll({ userId: currentUserId(), api });
     } catch { /* offline — local fold still carries the truth */ }
     let me: Me | null = null;
     let server: PlayerStatsFold | null = null;
@@ -263,8 +255,9 @@ export default function ProfilePage() {
 
               {/* Способы входа — linked methods + link/unlink (social-auth spec). */}
               <LoginMethods
-                methods={ready?.me?.methods ?? (emailLabel ? ['email'] : [])}
+                methods={ready?.me?.methods ?? []}
                 email={emailLabel}
+                canUnlink={ready?.me?.can_unlink ?? false}
                 onChanged={reload}
               />
             </div>
@@ -306,15 +299,17 @@ const METHOD_META: Record<string, { label: string; glyph: string }> = {
 function LoginMethods({
   methods,
   email,
+  canUnlink,
   onChanged,
 }: {
   methods: string[];
   email: string | null;
+  /** Server unlink-guard verdict (`can_unlink` from /api/users/me). */
+  canUnlink: boolean;
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const linked = methods.length > 0 ? methods : email ? ['email'] : [];
-  const canUnlink = linked.length > 1;
+  const { rows, linkedSocial, canUnlinkSocial } = loginMethodModel(methods, email, canUnlink);
 
   const unlink = async (provider: string) => {
     setBusy(true);
@@ -338,18 +333,20 @@ function LoginMethods({
     <div className="card pf-card pf-methods">
       <h4 className="pf-card__head">Способы входа</h4>
       <ul className="pf-methods__list">
-        {linked.map((m) => {
+        {rows.map(({ method: m, passwordless }) => {
           const meta = METHOD_META[m] ?? { label: m, glyph: '•' };
           return (
             <li className="pf-methods__row" key={m}>
               <span className={`pf-methods__glyph pf-methods__glyph--${m}`} aria-hidden>{meta.glyph}</span>
               <span className="pf-methods__label">
-                {meta.label}
+                {/* Honest label: an email without a password is contact +
+                    recovery, not a working «почта и пароль» sign-in. */}
+                {m === 'email' && passwordless ? 'Почта (пароль не задан)' : meta.label}
                 {m === 'email' && email && <small>{email}</small>}
               </span>
               {/* Email can't be unlinked here; only social providers, and only
-                  while another method remains (so the account stays reachable). */}
-              {m !== 'email' && canUnlink && (
+                  while another way in remains (so the account stays reachable). */}
+              {m !== 'email' && canUnlinkSocial && (
                 <button
                   className="pf-methods__unlink"
                   type="button"
@@ -366,7 +363,7 @@ function LoginMethods({
       {/* Add a provider not yet linked. Renders nothing when all configured
           providers are already linked (or none are configured). */}
       <SocialAuthButtons
-        exclude={linked}
+        exclude={linkedSocial}
         onSession={(s) => {
           setSession(s);
           toast('Способ входа добавлен');

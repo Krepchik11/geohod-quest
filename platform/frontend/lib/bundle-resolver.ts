@@ -39,10 +39,10 @@ export interface FetchedBundle {
 }
 
 export interface ResolverDeps {
-  playerId: string;
+  userId: string;
   online: boolean;
   /** Latest published bundle for the quest (grant-gated; 401/403 encoded in the error). */
-  getBundle: (questId: string, playerId: string) => Promise<FetchedBundle>;
+  getBundle: (questId: string, userId: string) => Promise<FetchedBundle>;
   /** Persist + precache a freshly fetched bundle. Best-effort; must resolve even on failure. */
   persist: (wire: FetchedBundle) => Promise<void>;
 }
@@ -71,7 +71,7 @@ export async function resolveGate(
 /** Fresh run: adopt the latest published version, downloading it if needed. */
 async function resolveRestart(questId: string, deps: ResolverDeps): Promise<GateResolution> {
   try {
-    const wire = await deps.getBundle(questId, deps.playerId);
+    const wire = await deps.getBundle(questId, deps.userId);
     const snapshot = loadQuestSnapshot(wire.snapshot);
     // Store the freshly-published bundle before binding the attempt, so a later
     // offline reopen resolves to it. Best-effort — a persist failure never blocks play.
@@ -100,7 +100,7 @@ async function resolveResume(questId: string, deps: ResolverDeps): Promise<GateR
     // IndexedDB unavailable — fall through to the network path.
   }
   try {
-    const wire = await deps.getBundle(questId, deps.playerId);
+    const wire = await deps.getBundle(questId, deps.userId);
     const snapshot = loadQuestSnapshot(wire.snapshot);
     void deps.persist(wire).catch(() => {});
     return { kind: 'ready', snapshot, snapshotId: wire.snapshot_id };

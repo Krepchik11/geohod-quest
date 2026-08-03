@@ -23,7 +23,7 @@ import {
   appendFact as queueAppendFact,
 } from '../../lib/queue';
 import { flushPending } from '../../lib/sync';
-import { currentPlayerId, getDeviceId } from '../../lib/identity';
+import { currentUserId, getDeviceId } from '../../lib/identity';
 import { mapsSearchUrl } from '../../lib/maps';
 import { useClientFeature, useUniversalAnswer } from '../../lib/client-features';
 import { StartGate } from './StartGate';
@@ -579,7 +579,7 @@ export default function QuestPlayerClient({
   const runFlush = useCallback(async () => {
     if (!online) return; // real connectivity gates every flush trigger
     try {
-      const result = await flushPending({ questId, playerId: currentPlayerId(), api });
+      const result = await flushPending({ questId, userId: currentUserId(), api });
       if (result && attemptKey) await refreshQueueStatus(attemptKey);
     } catch (err) {
       console.warn('sync failed — facts stay pending (local authoritative)', err);

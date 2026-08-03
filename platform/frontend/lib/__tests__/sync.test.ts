@@ -72,7 +72,7 @@ describe('flushPending', () => {
     await appendFact(a.attempt_key, fact({ type: 'gift_claimed', step_position: 2, coins_delta: 5 }));
 
     const api = stubApi();
-    const result = await flushPending({ questId: QUEST, playerId: PLAYER, api });
+    const result = await flushPending({ questId: QUEST, userId: PLAYER, api });
 
     expect(result).not.toBeNull();
     expect(result!.flushed).toBe(2);
@@ -89,9 +89,9 @@ describe('flushPending', () => {
     const a = await ensureActiveAttempt(QUEST, SNAP);
     await appendFact(a.attempt_key, fact());
     const api = stubApi();
-    await flushPending({ questId: QUEST, playerId: PLAYER, api });
+    await flushPending({ questId: QUEST, userId: PLAYER, api });
     await appendFact(a.attempt_key, fact({ step_position: 1 }));
-    await flushPending({ questId: QUEST, playerId: PLAYER, api });
+    await flushPending({ questId: QUEST, userId: PLAYER, api });
     expect(api.calls.createAttempt).toBe(1);
     expect(api.calls.appendFacts).toBe(2);
   });
@@ -110,7 +110,7 @@ describe('flushPending', () => {
     });
     api.createAttempt = failingCreate;
 
-    const result = await flushPending({ questId: QUEST, playerId: PLAYER, api });
+    const result = await flushPending({ questId: QUEST, userId: PLAYER, api });
     expect(result?.flushed).toBe(1);
     expect(api.calls.checkout).toBe(1);
     expect((await getActiveAttempt(QUEST))?.server_attempt_id).toBe('srv-after-checkout');
@@ -118,13 +118,13 @@ describe('flushPending', () => {
 
   it('no-ops with no attempt or with nothing pending', async () => {
     const api = stubApi();
-    expect(await flushPending({ questId: QUEST, playerId: PLAYER, api })).toBeNull();
+    expect(await flushPending({ questId: QUEST, userId: PLAYER, api })).toBeNull();
 
     const a = await ensureActiveAttempt(QUEST, SNAP);
     const f = fact();
     await appendFact(a.attempt_key, f);
     await markSent(a.attempt_key, [factNaturalKey(f)]);
-    expect(await flushPending({ questId: QUEST, playerId: PLAYER, api })).toBeNull();
+    expect(await flushPending({ questId: QUEST, userId: PLAYER, api })).toBeNull();
     expect(api.calls.appendFacts).toBe(0);
     expect(api.calls.createAttempt).toBe(0);
   });
@@ -137,11 +137,11 @@ describe('flushPending', () => {
         throw new Error('network down');
       }),
     });
-    await expect(flushPending({ questId: QUEST, playerId: PLAYER, api })).rejects.toThrow('network down');
+    await expect(flushPending({ questId: QUEST, userId: PLAYER, api })).rejects.toThrow('network down');
     expect(await getPendingFacts(a.attempt_key)).toHaveLength(1);
     // and a later retry succeeds
     const ok = stubApi();
-    expect((await flushPending({ questId: QUEST, playerId: PLAYER, api: ok }))?.flushed).toBe(1);
+    expect((await flushPending({ questId: QUEST, userId: PLAYER, api: ok }))?.flushed).toBe(1);
   });
 
   it('single-flight: concurrent flushes share one registration and one POST', async () => {
@@ -158,8 +158,8 @@ describe('flushPending', () => {
     api.createAttempt = slowCreate;
 
     const [r1, r2] = await Promise.all([
-      flushPending({ questId: QUEST, playerId: PLAYER, api }),
-      flushPending({ questId: QUEST, playerId: PLAYER, api }),
+      flushPending({ questId: QUEST, userId: PLAYER, api }),
+      flushPending({ questId: QUEST, userId: PLAYER, api }),
     ]);
     expect(api.calls.createAttempt).toBe(1);
     expect(api.calls.appendFacts).toBe(1);
@@ -179,13 +179,13 @@ describe('flushAll', () => {
 
     // The active-only flush ignores A entirely.
     const activeOnly = stubApi();
-    await flushPending({ questId: QUEST, playerId: PLAYER, api: activeOnly });
+    await flushPending({ questId: QUEST, userId: PLAYER, api: activeOnly });
     expect(activeOnly.calls.appendFacts).toBe(0);
     expect(await getPendingFacts(a.attempt_key)).toHaveLength(2); // still stranded
 
     // flushAll sweeps every attempt and drains A.
     const api = stubApi();
-    await flushAll({ playerId: PLAYER, api });
+    await flushAll({ userId: PLAYER, api });
     expect(api.calls.createAttempt).toBe(1); // registered A
     expect(api.calls.appendFacts).toBe(1);
     expect(await getPendingFacts(a.attempt_key)).toHaveLength(0);
@@ -200,7 +200,7 @@ describe('flushAll', () => {
     await ensureActiveAttempt('q3', SNAP);
 
     const api = stubApi();
-    await flushAll({ playerId: PLAYER, api });
+    await flushAll({ userId: PLAYER, api });
     expect(api.calls.createAttempt).toBe(2);
     expect(api.calls.appendFacts).toBe(2);
     expect(await getPendingFacts(a1.attempt_key)).toHaveLength(0);
@@ -226,7 +226,7 @@ describe('flushAll', () => {
       return {};
     });
 
-    await expect(flushAll({ playerId: PLAYER, api })).resolves.toBeUndefined();
+    await expect(flushAll({ userId: PLAYER, api })).resolves.toBeUndefined();
     expect(await getPendingFacts(good.attempt_key)).toHaveLength(0); // good synced
     expect(await getPendingFacts(bad.attempt_key)).toHaveLength(1); // bad left pending, retry-safe
   });
@@ -238,7 +238,7 @@ describe('flushAll', () => {
     await markSent(a.attempt_key, [factNaturalKey(f)]);
 
     const api = stubApi();
-    await flushAll({ playerId: PLAYER, api });
+    await flushAll({ userId: PLAYER, api });
     expect(api.calls.appendFacts).toBe(0);
     expect(api.calls.createAttempt).toBe(0);
   });

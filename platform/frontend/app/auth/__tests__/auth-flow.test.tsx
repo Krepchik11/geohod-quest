@@ -22,7 +22,7 @@ const { apiMock, sessionRef, routerMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
-  anonymousPlayerId: () => 'dev:test',
+  anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
   setSession: vi.fn((s: unknown) => { sessionRef.current = s; }),
   clearSession: vi.fn(),
@@ -71,7 +71,7 @@ describe('AuthPage — email-first (§6.1)', () => {
 
   it('new email → «Создадим аккаунт» with consent gating registration', async () => {
     apiMock.authIdentify.mockResolvedValue({ exists: false, confirmed: false });
-    apiMock.authRegister.mockResolvedValue({ token: 't', player_id: 'dev:test', email: 'novy@gmail.com', display_name: null, role: 'player' });
+    apiMock.authRegister.mockResolvedValue({ token: 't', user_id: 'dev:test', email: 'novy@gmail.com', display_name: null, role: 'player' });
     render(<AuthPage />);
     await enterEmail('novy@gmail.com');
     await waitFor(() => expect(screen.getByText('Создадим аккаунт')).toBeTruthy());
@@ -84,7 +84,7 @@ describe('AuthPage — email-first (§6.1)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Зарегистрироваться' }));
     await waitFor(() =>
       expect(apiMock.authRegister).toHaveBeenCalledWith({
-        player_id: 'dev:test',
+        user_id: 'dev:test',
         email: 'novy@gmail.com',
         password: 'password-123',
       }),
@@ -115,7 +115,7 @@ describe('AuthPage — email-first (§6.1)', () => {
 
   it('successful login redirects straight to the main page — no interim card', async () => {
     apiMock.authIdentify.mockResolvedValue({ exists: true, confirmed: true });
-    apiMock.authLogin.mockResolvedValue({ token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' });
+    apiMock.authLogin.mockResolvedValue({ token: 't', user_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' });
     render(<AuthPage />);
     await enterEmail('anna@gmail.com');
     await waitFor(() => screen.getByText('С возвращением!'));
@@ -126,7 +126,7 @@ describe('AuthPage — email-first (§6.1)', () => {
   });
 
   it('an already-signed-in visitor is redirected home instead of seeing a card', () => {
-    sessionRef.current = { token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
+    sessionRef.current = { token: 't', user_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
     render(<AuthPage />);
     expect(routerMock.replace).toHaveBeenCalledWith('/');
     expect(screen.queryByText('Вы вошли')).toBeNull();

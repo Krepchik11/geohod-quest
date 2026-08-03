@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { api, type PublishedQuestWire } from '../../lib/api';
-import { currentPlayerId } from '../../lib/identity';
+import { currentUserId } from '../../lib/identity';
 import { coverCss } from '../../lib/cover';
 import { downloadBundle } from '../../lib/download';
 import { fmtRating, priceLabel, ratingPlural, playersPlural } from '../../lib/storefront';
@@ -37,7 +37,7 @@ export default function QuestCard({
 
   // §3.4/§4.2: silent offline auto-download right after a successful grant.
   const autoDownload = () => {
-    void downloadBundle(quest.quest_id, currentPlayerId(), api).catch(() => {
+    void downloadBundle(quest.quest_id, currentUserId(), api).catch(() => {
       /* silent: the My Quests row offers a visible retry */
     });
   };
@@ -45,7 +45,7 @@ export default function QuestCard({
   const grantFree = async () => {
     setState('pending');
     try {
-      await api.checkout({ player_id: currentPlayerId(), quest_id: quest.quest_id });
+      await api.checkout({ user_id: currentUserId(), quest_id: quest.quest_id });
       setJustBought(true);
       setState('idle');
       autoDownload();

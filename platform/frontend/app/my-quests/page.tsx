@@ -9,7 +9,7 @@ import { projectState, latestRating } from '../../lib/shared-model';
 import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } from '../../lib/queue';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
 import { coverSrc } from '../../lib/cover';
-import { currentPlayerId } from '../../lib/identity';
+import { currentUserId } from '../../lib/identity';
 
 /**
  * «Мои квесты» v2 (SPEC §4 / My Quests v2.dc.html) — live collection:
@@ -156,8 +156,8 @@ async function loadCollection(): Promise<Collection> {
   let ownedIds = new Set<string>();
   try {
     const grants = await api.listGrants();
-    const playerId = currentPlayerId();
-    ownedIds = new Set(grants.filter((g) => g.player_id === playerId).map((g) => g.quest_id));
+    const userId = currentUserId();
+    ownedIds = new Set(grants.filter((g) => g.user_id === userId).map((g) => g.quest_id));
   } catch {
     ownedIds = new Set();
   }
@@ -189,7 +189,7 @@ export default function MyQuestsPage() {
   async function handleDownload(questId: string) {
     setDownloads((d) => ({ ...d, [questId]: 'fetching' }));
     try {
-      await downloadBundle(questId, currentPlayerId(), api, (stage) =>
+      await downloadBundle(questId, currentUserId(), api, (stage) =>
         setDownloads((d) => ({ ...d, [questId]: stage })),
       );
       setCollection(await loadCollection()); // re-compose (badge + step totals from the bundle)

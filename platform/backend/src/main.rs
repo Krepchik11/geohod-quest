@@ -153,13 +153,13 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     }
 }
 
-/// Resolve the acting player for a player-scoped request (player-identity spec).
+/// Resolve the acting user id for a player-scoped request (player-identity spec).
 ///
 /// A valid `Authorization: Bearer <token>` wins and must match a non-empty
 /// claimed id (mismatch = 403, catches client bugs). Without a token, the
 /// claimed id is accepted ONLY while unregistered — once an account exists for
 /// it, device possession is no longer a sufficient credential (401).
-async fn resolve_player(
+async fn resolve_user(
     state: &AppState,
     headers: &HeaderMap,
     claimed: &str,
@@ -171,17 +171,17 @@ async fn resolve_player(
         let token = raw
             .strip_prefix("Bearer ")
             .ok_or_else(|| AppError::Unauthorized("expected a bearer token".into()))?;
-        let player = state
+        let user_id = state
             .auth
             .get_session(token)
             .await?
             .ok_or_else(|| AppError::Unauthorized("invalid session".into()))?;
-        if !claimed.is_empty() && claimed != player {
+        if !claimed.is_empty() && claimed != user_id {
             return Err(AppError::Forbidden(
-                "session does not match the claimed player".into(),
+                "session does not match the claimed user id".into(),
             ));
         }
-        return Ok(player);
+        return Ok(user_id);
     }
     if claimed.is_empty() {
         return Err(AppError::Unauthorized("missing identity".into()));
@@ -194,11 +194,11 @@ async fn resolve_player(
     Ok(claimed.to_string())
 }
 
-/// Claimed identity for GET endpoints without a body: the `X-Player-Id` header
+/// Claimed identity for GET endpoints without a body: the `X-User-Id` header
 /// (anonymous devices) — ignored when a Bearer token is present.
 fn claimed_from_headers(headers: &HeaderMap) -> String {
     headers
-        .get("x-player-id")
+        .get("x-user-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_string()
@@ -224,7 +224,7 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> 
 
 /// Extract a `Bearer <token>` value from the Authorization header when present and
 /// well-formed. Returns None for a missing/malformed header (the caller decides the
-/// fallback) — unlike [`resolve_player`] it never errors on a missing header.
+/// fallback) — unlike [`resolve_user`] it never errors on a missing header.
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::AUTHORIZATION)
@@ -263,12 +263,12 @@ async fn session_account(
     state.auth.account_for_session(&token).await
 }
 
-/// The identity authorized to act on the admin user-management surface. `player_id`
+/// The identity authorized to act on the admin user-management surface. `user_id`
 /// is `Some` for a session-admin (the acting account) and `None` for the shared
 /// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
 /// from changing their own role while leaving the ops path unrestricted.
 struct AdminActor {
-    player_id: Option<String>,
+    user_id: Option<String>,
 }
 
 /// Authorize an admin user-management request. Two accepted credentials:
@@ -286,13 +286,13 @@ async fn require_admin_actor(
     headers: &HeaderMap,
 ) -> Result<AdminActor, AppError> {
     if ops_token_ok(state, headers) {
-        return Ok(AdminActor { player_id: None });
+        return Ok(AdminActor { user_id: None });
     }
     if let Some(account) = session_account(state, headers).await?
         && account.role == auth::ROLE_ADMIN
     {
         return Ok(AdminActor {
-            player_id: Some(account.player_id),
+            user_id: Some(account.user_id),
         });
     }
     Err(AppError::Forbidden("admin access required".into()))
@@ -531,7 +531,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/api/admin/users", get(list_users_handler))
         .route(
-            "/api/admin/users/{player_id}/role",
+            "/api/admin/users/{user_id}/role",
             post(set_user_role_handler),
         )
         .route("/api/admin/features", get(list_features_handler))
@@ -562,8 +562,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/auth/telegram", post(telegram_auth_handler))
         .route("/api/auth/unlink", post(unlink_handler))
         .route("/api/auth/providers", get(auth_providers_handler))
-        .route("/api/players/me", get(get_me_handler))
-        .route("/api/players/me/stats", get(get_my_stats_handler))
+        .route("/api/users/me", get(get_me_handler))
+        .route("/api/users/me/stats", get(get_my_stats_handler))
         .layer(TraceLayer::new_for_http())
         .layer(build_cors_layer(&state.config.cors_allowed_origins))
         .with_state(state)
@@ -592,7 +592,7 @@ fn origin_allowed(allowed: &[String], origin: &str) -> bool {
 ///
 /// Allowed methods/headers cover the client surface (JSON + identity headers).
 /// Credentials are NOT enabled: the client authenticates via `Authorization`/
-/// `X-Player-Id` headers, not cookies, so there is no ambient credential to ride.
+/// `X-User-Id` headers, not cookies, so there is no ambient credential to ride.
 fn build_cors_layer(allowed: &[String]) -> CorsLayer {
     use axum::http::{HeaderName, Method};
     use tower_http::cors::AllowOrigin;
@@ -601,7 +601,7 @@ fn build_cors_layer(allowed: &[String]) -> CorsLayer {
     let headers = [
         header::CONTENT_TYPE,
         header::AUTHORIZATION,
-        HeaderName::from_static("x-player-id"),
+        HeaderName::from_static("x-user-id"),
         HeaderName::from_static("x-admin-token"),
     ];
 
@@ -640,7 +640,7 @@ async fn health_handler(State(state): State<AppState>) -> Result<impl IntoRespon
 /// Body for POST /api/attempts.
 #[derive(serde::Deserialize, serde::Serialize)]
 struct CreateAttemptRequest {
-    player_id: String,
+    user_id: String,
     quest_id: String,
 }
 
@@ -652,8 +652,8 @@ async fn create_attempt_handler(
     headers: HeaderMap,
     Json(req): Json<CreateAttemptRequest>,
 ) -> Result<Json<AttemptMeta>, AppError> {
-    let player_id = resolve_player(&state, &headers, &req.player_id).await?;
-    if !state.grants.has_grant(&player_id, &req.quest_id).await? {
+    let user_id = resolve_user(&state, &headers, &req.user_id).await?;
+    if !state.grants.has_grant(&user_id, &req.quest_id).await? {
         return Err(AppError::Forbidden(format!(
             "no access grant for quest '{}'",
             req.quest_id
@@ -667,7 +667,7 @@ async fn create_attempt_handler(
         .snapshot_id;
     let meta = state
         .store
-        .create_attempt(&player_id, &req.quest_id, &snapshot_id)
+        .create_attempt(&user_id, &req.quest_id, &snapshot_id)
         .await?;
     Ok(Json(meta))
 }
@@ -730,7 +730,7 @@ async fn get_state_handler(
 
 #[derive(serde::Deserialize)]
 struct CheckoutRequest {
-    player_id: String,
+    user_id: String,
     quest_id: String,
     /// Server-validated promo code; the discount lives in the coupon registry,
     /// never in the request (a client cannot name its own percentage).
@@ -770,13 +770,13 @@ async fn checkout_handler(
     headers: HeaderMap,
     Json(req): Json<CheckoutRequest>,
 ) -> Result<Json<CheckoutResponse>, AppError> {
-    let player_id = resolve_player(&state, &headers, &req.player_id).await?;
-    if state.grants.has_grant(&player_id, &req.quest_id).await? {
+    let user_id = resolve_user(&state, &headers, &req.user_id).await?;
+    if state.grants.has_grant(&user_id, &req.quest_id).await? {
         // Already owned: return the stored grant unchanged (source is ignored
         // on an idempotent hit) without charging or spending a coupon.
         let (grant, created) = state
             .grants
-            .create_grant_idemp(&player_id, &req.quest_id, GrantSource::Payment, None)
+            .create_grant_idemp(&user_id, &req.quest_id, GrantSource::Payment, None)
             .await?;
         return Ok(Json(CheckoutResponse::Settled { grant, created }));
     }
@@ -784,11 +784,11 @@ async fn checkout_handler(
     match provider {
         "mock" => {
             require_provider_enabled(&state, Feature::PaymentsMock, provider).await?;
-            mock_checkout(&state, &player_id, &req).await
+            mock_checkout(&state, &user_id, &req).await
         }
         "yookassa" => {
             require_provider_enabled(&state, Feature::PaymentsYookassa, provider).await?;
-            yookassa_checkout(&state, &player_id, &req).await
+            yookassa_checkout(&state, &user_id, &req).await
         }
         other => Err(AppError::BadRequest(format!(
             "unknown payment provider: {other}"
@@ -817,7 +817,7 @@ async fn require_provider_enabled(
 /// is redeemed and the grant created in the same request.
 async fn mock_checkout(
     state: &AppState,
-    player_id: &str,
+    user_id: &str,
     req: &CheckoutRequest,
 ) -> Result<Json<CheckoutResponse>, AppError> {
     let (source, source_ref) = match &req.coupon_code {
@@ -828,23 +828,23 @@ async fn mock_checkout(
             })?;
             let redemption = state
                 .coupons
-                .redeem(&code, player_id, &req.quest_id, price)
+                .redeem(&code, user_id, &req.quest_id, price)
                 .await?;
             if redemption.amount_discounted >= price {
                 (GrantSource::CouponRedemption, None)
             } else {
-                let payment_ref = payments::mock_payment_ref(player_id, &req.quest_id);
+                let payment_ref = payments::mock_payment_ref(user_id, &req.quest_id);
                 (GrantSource::Payment, Some(payment_ref))
             }
         }
         None => {
-            let payment_ref = payments::mock_payment_ref(player_id, &req.quest_id);
+            let payment_ref = payments::mock_payment_ref(user_id, &req.quest_id);
             (GrantSource::Payment, Some(payment_ref))
         }
     };
     let (grant, created) = state
         .grants
-        .create_grant_idemp(player_id, &req.quest_id, source, source_ref)
+        .create_grant_idemp(user_id, &req.quest_id, source, source_ref)
         .await?;
     Ok(Json(CheckoutResponse::Settled { grant, created }))
 }
@@ -866,11 +866,11 @@ async fn quest_price(state: &AppState, quest_id: &str) -> Result<Option<i64>, Ap
 async fn quote_coupon(
     state: &AppState,
     code: &str,
-    player_id: &str,
+    user_id: &str,
     quest_id: &str,
     price: i64,
 ) -> Result<Result<(String, i64), &'static str>, AppError> {
-    let Some((coupon, used_total, used_by_player)) = state.coupons.preview(code, player_id).await?
+    let Some((coupon, used_total, used_by_player)) = state.coupons.preview(code, user_id).await?
     else {
         return Ok(Err("промокод не найден"));
     };
@@ -900,7 +900,7 @@ fn yookassa_gateway(state: &AppState) -> Result<&YookassaGateway, AppError> {
 /// never reach the gateway (nothing to charge).
 async fn yookassa_checkout(
     state: &AppState,
-    player_id: &str,
+    user_id: &str,
     req: &CheckoutRequest,
 ) -> Result<Json<CheckoutResponse>, AppError> {
     let gateway = yookassa_gateway(state)?;
@@ -908,7 +908,7 @@ async fn yookassa_checkout(
     // the gateway (the payer may have closed the tab mid-confirmation).
     if let Some(open) = state
         .payment_rows
-        .find_pending_for(player_id, &req.quest_id)
+        .find_pending_for(user_id, &req.quest_id)
         .await?
     {
         return Ok(Json(CheckoutResponse::Redirect {
@@ -927,7 +927,7 @@ async fn yookassa_checkout(
         // Free quest: nothing to charge — grant immediately, provider bypassed.
         let (grant, created) = state
             .grants
-            .create_grant_idemp(player_id, &req.quest_id, GrantSource::FreeQuest, None)
+            .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
             .await?;
         return Ok(Json(CheckoutResponse::Settled { grant, created }));
     };
@@ -938,11 +938,11 @@ async fn yookassa_checkout(
     let (coupon_code, amount) = match &req.coupon_code {
         Some(raw) => {
             let code = coupons::normalize_code(raw)?;
-            let (_, discount) = quote_coupon(state, &code, player_id, &req.quest_id, price)
+            let (_, discount) = quote_coupon(state, &code, user_id, &req.quest_id, price)
                 .await?
                 .map_err(|reason| AppError::Conflict(reason.into()))?;
             if discount >= price {
-                return mock_checkout(state, player_id, req).await;
+                return mock_checkout(state, user_id, req).await;
             }
             (Some(code), price - discount)
         }
@@ -961,7 +961,7 @@ async fn yookassa_checkout(
         amount,
         &format!("Квест «{}»", meta.name),
         &return_url,
-        player_id,
+        user_id,
         &req.quest_id,
     );
     let remote = gateway.create_payment(&payment_id, body).await?;
@@ -976,7 +976,7 @@ async fn yookassa_checkout(
         .insert(PendingPayment {
             id: payment_id.clone(),
             provider_payment_id: remote.id,
-            player_id: player_id.to_string(),
+            user_id: user_id.to_string(),
             quest_id: req.quest_id.clone(),
             coupon_code,
             amount,
@@ -1017,7 +1017,7 @@ async fn settle_payment(
                         // must not block the grant — log and move on.
                         if let Err(e) = state
                             .coupons
-                            .redeem(code, &row.player_id, &row.quest_id, row.price)
+                            .redeem(code, &row.user_id, &row.quest_id, row.price)
                             .await
                         {
                             tracing::warn!(
@@ -1047,7 +1047,7 @@ async fn settle_payment(
     let (grant, _) = state
         .grants
         .create_grant_idemp(
-            &row.player_id,
+            &row.user_id,
             &row.quest_id,
             GrantSource::Payment,
             Some(row.provider_payment_id.clone()),
@@ -1070,13 +1070,13 @@ async fn payment_status_handler(
     headers: HeaderMap,
 ) -> Result<Json<PaymentStatusResponse>, AppError> {
     let claimed = claimed_from_headers(&headers);
-    let player_id = resolve_player(&state, &headers, &claimed).await?;
+    let user_id = resolve_user(&state, &headers, &claimed).await?;
     let row = state
         .payment_rows
         .get(&payment_id)
         .await?
         // A foreign payment reads as absent — ids must not be probeable.
-        .filter(|p| p.player_id == player_id)
+        .filter(|p| p.user_id == user_id)
         .ok_or_else(|| AppError::NotFound("payment not found".into()))?;
     let (status, grant) = settle_payment(&state, &row).await?;
     Ok(Json(PaymentStatusResponse {
@@ -1129,7 +1129,7 @@ async fn payment_providers_handler(
 
 #[derive(serde::Deserialize)]
 struct ValidateCouponRequest {
-    player_id: String,
+    user_id: String,
     quest_id: String,
     code: String,
 }
@@ -1142,7 +1142,7 @@ async fn validate_coupon_handler(
     headers: HeaderMap,
     Json(req): Json<ValidateCouponRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let player_id = resolve_player(&state, &headers, &req.player_id).await?;
+    let user_id = resolve_user(&state, &headers, &req.user_id).await?;
     let invalid = |message: &str| serde_json::json!({"valid": false, "message": message});
     let Ok(code) = coupons::normalize_code(&req.code) else {
         return Ok(Json(invalid("промокод не найден")));
@@ -1159,7 +1159,7 @@ async fn validate_coupon_handler(
         )));
     };
     let (code, discount_amount) =
-        match quote_coupon(&state, &code, &player_id, &req.quest_id, price).await? {
+        match quote_coupon(&state, &code, &user_id, &req.quest_id, price).await? {
             Ok(quote) => quote,
             Err(reason) => return Ok(Json(invalid(reason))),
         };
@@ -1411,8 +1411,8 @@ async fn acting_author_role(
             .display_name
             .filter(|s| !s.trim().is_empty())
             .or(account.email)
-            .unwrap_or_else(|| account.player_id.clone());
-        return Ok((account.player_id, name, is_admin));
+            .unwrap_or_else(|| account.user_id.clone());
+        return Ok((account.user_id, name, is_admin));
     }
     let claimed = claimed_from_headers(headers);
     let id = if claimed.is_empty() {
@@ -1727,7 +1727,7 @@ async fn delete_constructor_quest_handler(
 
 #[derive(serde::Deserialize)]
 struct BundleQuery {
-    player_id: String,
+    user_id: String,
 }
 
 /// Bundle download primitive: latest frozen snapshot JSON, gated by grant
@@ -1739,13 +1739,13 @@ async fn get_bundle_handler(
     headers: HeaderMap,
     Query(q): Query<BundleQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let player_id = resolve_player(&state, &headers, &q.player_id).await?;
+    let user_id = resolve_user(&state, &headers, &q.user_id).await?;
     let (meta, snapshot) = state
         .grants
         .get_bundle(&quest_id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("quest '{quest_id}' is not published")))?;
-    if !state.grants.has_grant(&player_id, &quest_id).await? {
+    if !state.grants.has_grant(&user_id, &quest_id).await? {
         return Err(AppError::Forbidden(format!(
             "no access grant for quest '{quest_id}'"
         )));
@@ -1971,14 +1971,14 @@ async fn get_quest_product_handler(
     let reviews_total = facts::quest_reviews_total(&rating_rows, &hidden);
     let page = facts::quest_reviews(&rating_rows, &hidden, 10);
     // Author display names in ONE round-trip (was one get_user per review — an N+1).
-    let author_ids: Vec<String> = page.iter().map(|r| r.player_id.clone()).collect();
+    let author_ids: Vec<String> = page.iter().map(|r| r.user_id.clone()).collect();
     let authors = state.auth.get_users_by_ids(&author_ids).await?;
     let reviews: Vec<ReviewWire> = page
         .into_iter()
         .map(|r| ReviewWire {
             author: review_author_label(
                 authors
-                    .get(&r.player_id)
+                    .get(&r.user_id)
                     .and_then(|a| a.display_name.as_deref()),
             ),
             rating: r.rating,
@@ -2064,8 +2064,8 @@ async fn list_grants_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<AccessGrant>>, AppError> {
     let claimed = claimed_from_headers(&headers);
-    let player_id = resolve_player(&state, &headers, &claimed).await?;
-    Ok(Json(state.grants.grants_for_player(&player_id).await?))
+    let user_id = resolve_user(&state, &headers, &claimed).await?;
+    Ok(Json(state.grants.grants_for_user(&user_id).await?))
 }
 
 async fn get_version_stats_handler(
@@ -2106,7 +2106,7 @@ async fn get_version_feedbacks_handler(
 /// account row) carry no contact.
 #[derive(serde::Serialize, Clone)]
 struct AdminIdentityWire {
-    player_id: String,
+    user_id: String,
     display_name: Option<String>,
     /// "google" | "telegram" | "email" | "anon".
     kind: &'static str,
@@ -2121,16 +2121,14 @@ struct AdminIdentityWire {
 /// google > email > telegram > anon, arranged so a google/email kind always has an
 /// email and a telegram kind never does — keeping the single contact unambiguous.
 fn resolve_admin_identity(
-    player_id: &str,
+    user_id: &str,
     account: Option<&auth::UserAccount>,
     identities: &[store::AuthIdentity],
 ) -> AdminIdentityWire {
-    let has_google = identities
-        .iter()
-        .any(|i| i.provider == auth::PROVIDER_GOOGLE);
+    let has_google = identities.iter().any(|i| i.method == auth::PROVIDER_GOOGLE);
     let telegram = identities
         .iter()
-        .find(|i| i.provider == auth::PROVIDER_TELEGRAM);
+        .find(|i| i.method == auth::PROVIDER_TELEGRAM);
     let email = account.and_then(|a| a.email.clone());
     // One chain co-locates each kind with the single contact it surfaces, so a
     // newly added kind can never silently fall through to "no contact".
@@ -2139,12 +2137,12 @@ fn resolve_admin_identity(
     } else if email.is_some() {
         ("email", email, None)
     } else if let Some(tg) = telegram {
-        ("telegram", None, tg.username.clone())
+        ("telegram", None, tg.handle.clone())
     } else {
         ("anon", None, None)
     };
     AdminIdentityWire {
-        player_id: player_id.to_string(),
+        user_id: user_id.to_string(),
         display_name: account.and_then(|a| a.display_name.clone()),
         kind,
         email,
@@ -2176,20 +2174,20 @@ async fn resolve_quest_labels(
 }
 
 /// Batch-resolve identities for many players in exactly two store reads (accounts +
-/// linked identities) — never an N+1. Returns `player_id -> identity`.
+/// linked identities) — never an N+1. Returns `user_id -> identity`.
 async fn resolve_admin_identities(
     state: &AppState,
-    player_ids: &[String],
+    user_ids: &[String],
 ) -> Result<std::collections::HashMap<String, AdminIdentityWire>, AppError> {
     // Independent reads over the same ids — run concurrently (one RTT, not two).
     let (accounts, identities) = tokio::join!(
-        state.auth.get_users_by_ids(player_ids),
-        state.auth.identities_for_players(player_ids),
+        state.auth.get_users_by_ids(user_ids),
+        state.auth.identities_for_users(user_ids),
     );
     let accounts = accounts?;
     let identities = identities?;
     let empty: Vec<store::AuthIdentity> = Vec::new();
-    Ok(player_ids
+    Ok(user_ids
         .iter()
         .map(|pid| {
             let wire = resolve_admin_identity(
@@ -2237,17 +2235,17 @@ async fn admin_list_reviews_handler(
     let rows = rows?;
     let hidden = hidden?;
     let (labels, _) = labels?;
-    let player_ids: Vec<String> = rows.iter().map(|r| r.player_id.clone()).collect();
-    let identities = resolve_admin_identities(&state, &player_ids).await?;
+    let user_ids: Vec<String> = rows.iter().map(|r| r.user_id.clone()).collect();
+    let identities = resolve_admin_identities(&state, &user_ids).await?;
     let mut reviews: Vec<AdminReviewWire> = rows
         .into_iter()
         .map(|r| {
-            let is_hidden = hidden.contains(&(r.player_id.clone(), r.quest_id.clone()));
+            let is_hidden = hidden.contains(&(r.user_id.clone(), r.quest_id.clone()));
             let label = labels.get(&r.quest_id);
             let identity = identities
-                .get(&r.player_id)
+                .get(&r.user_id)
                 .cloned()
-                .unwrap_or_else(|| resolve_admin_identity(&r.player_id, None, &[]));
+                .unwrap_or_else(|| resolve_admin_identity(&r.user_id, None, &[]));
             AdminReviewWire {
                 quest_name: label.name,
                 quest_city: label.city,
@@ -2272,7 +2270,7 @@ async fn admin_list_reviews_handler(
 /// Body for hide/unhide — the `(player, quest)` the moderation decision keys on.
 #[derive(serde::Deserialize)]
 struct ReviewHideRequest {
-    player_id: String,
+    user_id: String,
     quest_id: String,
 }
 
@@ -2282,10 +2280,10 @@ async fn admin_hide_review_handler(
     Json(req): Json<ReviewHideRequest>,
 ) -> Result<StatusCode, AppError> {
     let actor = require_admin_actor(&state, &headers).await?;
-    let by = actor.player_id.unwrap_or_else(|| "ops-token".to_string());
+    let by = actor.user_id.unwrap_or_else(|| "ops-token".to_string());
     state
         .moderation
-        .hide_review(&req.player_id, &req.quest_id, store::now_secs(), &by)
+        .hide_review(&req.user_id, &req.quest_id, store::now_secs(), &by)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -2298,7 +2296,7 @@ async fn admin_unhide_review_handler(
     require_admin_actor(&state, &headers).await?;
     state
         .moderation
-        .unhide_review(&req.player_id, &req.quest_id)
+        .unhide_review(&req.user_id, &req.quest_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -2356,11 +2354,11 @@ async fn admin_list_feedback_handler(
         .map(|m| (m.quest_id.as_str(), m.snapshot_id.as_str()))
         .collect();
     // Identities in one batch across every report.
-    let player_ids: Vec<String> = core
+    let user_ids: Vec<String> = core
         .iter()
-        .flat_map(|g| g.reports.iter().map(|r| r.player_id.clone()))
+        .flat_map(|g| g.reports.iter().map(|r| r.user_id.clone()))
         .collect();
-    let identities = resolve_admin_identities(&state, &player_ids).await?;
+    let identities = resolve_admin_identities(&state, &user_ids).await?;
     // Frozen snapshot JSON per DISTINCT snapshot (for version + step labels).
     let mut snapshots: std::collections::HashMap<String, Option<serde_json::Value>> =
         std::collections::HashMap::new();
@@ -2395,9 +2393,9 @@ async fn admin_list_feedback_handler(
                     note: r.note,
                     recorded_at: r.recorded_at,
                     identity: identities
-                        .get(&r.player_id)
+                        .get(&r.user_id)
                         .cloned()
-                        .unwrap_or_else(|| resolve_admin_identity(&r.player_id, None, &[])),
+                        .unwrap_or_else(|| resolve_admin_identity(&r.user_id, None, &[])),
                 })
                 .collect();
             AdminFeedbackGroupWire {
@@ -2432,7 +2430,7 @@ async fn admin_resolve_feedback_handler(
     Json(req): Json<FeedbackResolveRequest>,
 ) -> Result<StatusCode, AppError> {
     let actor = require_admin_actor(&state, &headers).await?;
-    let by = actor.player_id.unwrap_or_else(|| "ops-token".to_string());
+    let by = actor.user_id.unwrap_or_else(|| "ops-token".to_string());
     // Acknowledge exactly the reports currently in this (quest, snapshot, step)
     // group; a later report grows the count past this watermark and reopens it.
     let acknowledged = state
@@ -2511,7 +2509,7 @@ async fn get_measure_rates_handler(
 /// existing anonymous player id (the id never changes — zero migration).
 #[derive(serde::Deserialize)]
 struct RegisterRequest {
-    player_id: String,
+    user_id: String,
     email: String,
     password: String,
     display_name: Option<String>,
@@ -2527,7 +2525,7 @@ struct LoginRequest {
 /// Successful register/login: the account identity + a fresh session token.
 #[derive(serde::Serialize)]
 struct AuthResponse {
-    player_id: String,
+    user_id: String,
     /// Login email — `null` for a social-only account (Telegram, or Google before
     /// an email is attached). The client shows the display name in that case.
     email: Option<String>,
@@ -2543,24 +2541,24 @@ async fn register_handler(
 ) -> Result<Json<AuthResponse>, AppError> {
     let email = auth::normalize_email(&req.email);
     auth::validate_credentials(&email, &req.password)?;
-    if req.player_id.is_empty() {
-        return Err(AppError::BadRequest("player_id is required".into()));
+    if req.user_id.is_empty() {
+        return Err(AppError::BadRequest("user_id is required".into()));
     }
     let password_hash = auth::hash_password(&req.password)?;
     let account = state
         .auth
-        .register_user(&req.player_id, &email, &password_hash, req.display_name)
+        .register_user(&req.user_id, &email, &password_hash, req.display_name)
         .await?;
     let token = auth::generate_token();
     state
         .auth
-        .create_session(&token, &account.player_id)
+        .create_session(&token, &account.user_id)
         .await?;
     // §6.3 soft confirmation: the account works immediately; the mail is
     // best-effort and the Profile banner offers a resend.
-    send_confirm_email(&state, &account.player_id, &email).await?;
+    send_confirm_email(&state, &account.user_id, &email).await?;
     Ok(Json(AuthResponse {
-        player_id: account.player_id,
+        user_id: account.user_id,
         email: account.email,
         display_name: account.display_name,
         role: account.role,
@@ -2579,16 +2577,21 @@ async fn login_handler(
         .find_by_email(&auth::normalize_email(&req.email))
         .await?
         .ok_or_else(bad)?;
-    if !auth::verify_password(&record.password_hash, &req.password) {
+    // A social-only account (no password set) rejects like a wrong password.
+    let password_ok = record
+        .password_hash
+        .as_deref()
+        .is_some_and(|hash| auth::verify_password(hash, &req.password));
+    if !password_ok {
         return Err(bad());
     }
     let token = auth::generate_token();
     state
         .auth
-        .create_session(&token, &record.account.player_id)
+        .create_session(&token, &record.account.user_id)
         .await?;
     Ok(Json(AuthResponse {
-        player_id: record.account.player_id,
+        user_id: record.account.user_id,
         email: record.account.email,
         display_name: record.account.display_name,
         role: record.account.role,
@@ -2609,16 +2612,16 @@ struct SocialIdentity {
     email_verified: bool,
     display_name: Option<String>,
     /// Telegram `@username` (handle, no `@`); `None` for Google and for a
-    /// handleless Telegram user. Persisted so admins get a `t.me/<username>` contact.
-    username: Option<String>,
+    /// handleless Telegram user. Persisted so admins get a `t.me/<handle>` contact.
+    handle: Option<String>,
 }
 
-/// POST /api/auth/google — `{credential, player_id}` where `credential` is a
+/// POST /api/auth/google — `{credential, user_id}` where `credential` is a
 /// Google Identity Services ID token. Fail-closed (501) when unconfigured.
 #[derive(serde::Deserialize)]
 struct GoogleAuthRequest {
     credential: String,
-    player_id: String,
+    user_id: String,
 }
 
 async fn google_auth_handler(
@@ -2642,19 +2645,19 @@ async fn google_auth_handler(
         email: claims.email,
         email_verified: claims.email_verified,
         display_name: claims.name,
-        username: None,
+        handle: None,
     };
-    complete_social_login(&state, &headers, &req.player_id, ident)
+    complete_social_login(&state, &headers, &req.user_id, ident)
         .await
         .map(Json)
 }
 
-/// POST /api/auth/telegram — `{id_token, player_id}` where `id_token` is the OIDC
+/// POST /api/auth/telegram — `{id_token, user_id}` where `id_token` is the OIDC
 /// JWT that `telegram-login.js` returns. Fail-closed (501) when unconfigured.
 #[derive(serde::Deserialize)]
 struct TelegramAuthRequest {
     id_token: String,
-    player_id: String,
+    user_id: String,
 }
 
 async fn telegram_auth_handler(
@@ -2678,15 +2681,15 @@ async fn telegram_auth_handler(
         email: None,
         email_verified: false,
         display_name: claims.display_name(),
-        username: claims.preferred_username.clone(),
+        handle: claims.preferred_username.clone(),
     };
-    complete_social_login(&state, &headers, &req.player_id, ident)
+    complete_social_login(&state, &headers, &req.user_id, ident)
         .await
         .map(Json)
 }
 
 /// Link a verified social identity to an account and return a fresh session,
-/// preserving the caller's anonymous player_id where possible (player-identity
+/// preserving the caller's anonymous user_id where possible (player-identity
 /// spec): (1) an already-linked identity logs into its account — unless the
 /// caller is logged into a DIFFERENT account, which is a 409, never a silent
 /// account switch; (2) a logged-in caller links it to their account; (3) a
@@ -2696,9 +2699,12 @@ async fn telegram_auth_handler(
 async fn complete_social_login(
     state: &AppState,
     headers: &HeaderMap,
-    claimed_player_id: &str,
+    claimed_user_id: &str,
     ident: SocialIdentity,
 ) -> Result<AuthResponse, AppError> {
+    /// The 409 for an identity owned by a different account than the caller's.
+    const FOREIGN_IDENTITY: &str = "этот способ входа уже привязан к другому аккаунту";
+
     let session = session_account(state, headers).await?;
 
     // 1. Existing identity → login to that account (any device). A logged-in
@@ -2710,16 +2716,14 @@ async fn complete_social_login(
         .find_identity(ident.provider, &ident.subject)
         .await?
     {
-        if session.as_ref().is_some_and(|a| a.player_id != pid) {
-            return Err(AppError::Conflict(
-                "этот способ входа уже привязан к другому аккаунту".into(),
-            ));
+        if session.as_ref().is_some_and(|a| a.user_id != pid) {
+            return Err(AppError::Conflict(FOREIGN_IDENTITY.into()));
         }
         // Keep a re-used identity's stored contact current (e.g. a changed
         // Telegram @username); an absent claim leaves the prior value untouched.
         state
             .auth
-            .set_identity_username(ident.provider, &ident.subject, ident.username.clone())
+            .set_identity_handle(ident.provider, &ident.subject, ident.handle.clone())
             .await?;
         return issue_session_for(state, &pid).await;
     }
@@ -2727,44 +2731,49 @@ async fn complete_social_login(
     // Choose the account to attach the NEW identity to.
     let target = if let Some(account) = session {
         // 2. Logged-in caller → link to their account.
-        account.player_id
+        account.user_id
     } else if ident.email_verified
         && let Some(email) = ident.email.as_ref()
         && let Some(record) = state.auth.find_by_email(email).await?
     {
         // 3. Verified provider email matches an existing account → link to it.
-        record.account.player_id
+        record.account.user_id
     } else {
         // 4. Attach to the caller's anonymous id (creating an account there).
-        create_social_on_claimed(state, headers, claimed_player_id, &ident).await?
+        create_social_on_claimed(state, headers, claimed_user_id, &ident).await?
     };
 
     // Link the identity. A concurrent duplicate is absorbed as a login below.
     match state
         .auth
         .create_identity(store::AuthIdentity {
-            provider: ident.provider.to_string(),
-            subject: ident.subject.clone(),
-            player_id: target.clone(),
-            email: ident.email.clone(),
-            username: ident.username.clone(),
+            method: ident.provider.to_string(),
+            identifier: ident.subject.clone(),
+            user_id: target.clone(),
+            handle: ident.handle.clone(),
             created_at: store::now_secs(),
         })
         .await
     {
         Ok(()) => {}
-        // Racing request linked this identity first. Absorb it as a login only
-        // when it landed on OUR target account; a foreign owner is the same
-        // conflict as above, not a success.
+        // The store says WHICH invariant rejected the link (typed constants).
+        // UNIQUE (user_id, method): the target account already links a
+        // DIFFERENT identity of this provider.
+        Err(AppError::Conflict(msg)) if msg == store::CONFLICT_METHOD_TAKEN => {
+            return Err(AppError::Conflict(
+                "к аккаунту уже привязан другой аккаунт этого провайдера".into(),
+            ));
+        }
+        // (method, identifier) was already owned at insert time. Absorb as a
+        // login only when a racing request linked it to OUR target account;
+        // any other owner is the same foreign-identity conflict as above.
         Err(AppError::Conflict(_)) => {
             let owner = state
                 .auth
                 .find_identity(ident.provider, &ident.subject)
                 .await?;
             if owner.as_deref() != Some(target.as_str()) {
-                return Err(AppError::Conflict(
-                    "этот способ входа уже привязан к другому аккаунту".into(),
-                ));
+                return Err(AppError::Conflict(FOREIGN_IDENTITY.into()));
             }
         }
         Err(e) => return Err(e),
@@ -2785,15 +2794,15 @@ async fn complete_social_login(
 }
 
 /// Attach step (4): resolve the anonymous claim (rejecting a registered id with no
-/// token — the exact resolve_player invariant), then create a social account keyed
+/// token — the exact resolve_user invariant), then create a social account keyed
 /// to it so prior grants/coins survive. A taken Google email degrades to no email.
 async fn create_social_on_claimed(
     state: &AppState,
     headers: &HeaderMap,
-    claimed_player_id: &str,
+    claimed_user_id: &str,
     ident: &SocialIdentity,
 ) -> Result<String, AppError> {
-    let pid = resolve_player(state, headers, claimed_player_id).await?;
+    let pid = resolve_user(state, headers, claimed_user_id).await?;
     if state.auth.get_user(&pid).await?.is_some() {
         // Already an account we're authorized to act as (bearer path) — link to it.
         return Ok(pid);
@@ -2809,7 +2818,7 @@ async fn create_social_on_claimed(
         .create_social_account(&pid, email.clone(), ident.display_name.clone(), confirmed)
         .await
     {
-        Ok(account) => Ok(account.player_id),
+        Ok(account) => Ok(account.user_id),
         // The Google email is taken by another account — create without an email;
         // the identity still links, so the user reaches a working account.
         Err(AppError::Conflict(_)) if email.is_some() => {
@@ -2817,23 +2826,23 @@ async fn create_social_on_claimed(
                 .auth
                 .create_social_account(&pid, None, ident.display_name.clone(), None)
                 .await?;
-            Ok(account.player_id)
+            Ok(account.user_id)
         }
         Err(e) => Err(e),
     }
 }
 
 /// Mint a session for an existing account and shape the standard `AuthResponse`.
-async fn issue_session_for(state: &AppState, player_id: &str) -> Result<AuthResponse, AppError> {
+async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthResponse, AppError> {
     let account = state
         .auth
-        .get_user(player_id)
+        .get_user(user_id)
         .await?
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("account not found after link")))?;
     let token = auth::generate_token();
-    state.auth.create_session(&token, player_id).await?;
+    state.auth.create_session(&token, user_id).await?;
     Ok(AuthResponse {
-        player_id: account.player_id,
+        user_id: account.user_id,
         email: account.email,
         display_name: account.display_name,
         role: account.role,
@@ -2877,22 +2886,22 @@ async fn unlink_handler(
     let account = session_account(&state, &headers)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
-    let identities = state.auth.identities_for_player(&account.player_id).await?;
+    let identities = state.auth.identities_for_user(&account.user_id).await?;
     // Not-linked is a 404 regardless of the method count — checked first so a
     // no-op unlink never masquerades as the "last method" conflict.
-    if !identities.iter().any(|i| i.provider == req.provider) {
+    if !identities.iter().any(|i| i.method == req.provider) {
         return Err(AppError::NotFound("этот способ входа не подключён".into()));
     }
-    // Sign-in methods = the email/password login (if any) + each linked provider.
-    let methods = identities.len() + usize::from(account.email.is_some());
-    if methods <= 1 {
+    // The reachability guard (auth::reachable_ways is THE rule; /me serves the
+    // same verdict as `can_unlink`, so the UI can never disagree with this 409).
+    if auth::reachable_ways(&account, &identities) <= 1 {
         return Err(AppError::Conflict(
             "нельзя отвязать единственный способ входа".into(),
         ));
     }
     state
         .auth
-        .delete_identity(&req.provider, &account.player_id)
+        .delete_identity(&req.provider, &account.user_id)
         .await?;
     Ok(Json(serde_json::json!({ "status": "unlinked" })))
 }
@@ -2949,7 +2958,7 @@ fn fixed_window_allow(
 /// tokens of the same kind (latest mail wins).
 async fn issue_auth_token(
     state: &AppState,
-    player_id: &str,
+    user_id: &str,
     kind: &str,
     ttl_secs: u64,
 ) -> Result<(String, String), AppError> {
@@ -2960,7 +2969,7 @@ async fn issue_auth_token(
         .create_auth_token(
             &media::sha256_hex(token.as_bytes()),
             store::AuthTokenRecord {
-                player_id: player_id.to_string(),
+                user_id: user_id.to_string(),
                 kind: kind.to_string(),
                 code_hash: media::sha256_hex(code.as_bytes()),
                 expires_at: store::now_secs() + ttl_secs,
@@ -2981,14 +2990,14 @@ async fn send_mail_best_effort(state: &AppState, to: &str, subject: &str, body: 
 
 async fn send_confirm_email(
     state: &AppState,
-    player_id: &str,
+    user_id: &str,
     email: &str,
 ) -> Result<(), AppError> {
     // Confirmation is link-only (§6.3 is soft, nobody types codes for it) —
     // the minted code is simply never mailed, so it is unusable.
     let (token, _code) = issue_auth_token(
         state,
-        player_id,
+        user_id,
         store::TOKEN_KIND_CONFIRM,
         CONFIRM_TOKEN_TTL_SECS,
     )
@@ -3064,7 +3073,7 @@ async fn recover_handler(
         if record.account.email_confirmed_at.is_some() {
             let (token, code) = issue_auth_token(
                 &state,
-                &record.account.player_id,
+                &record.account.user_id,
                 store::TOKEN_KIND_RESET,
                 RESET_TOKEN_TTL_SECS,
             )
@@ -3083,7 +3092,7 @@ async fn recover_handler(
             )
             .await;
         } else {
-            send_confirm_email(&state, &record.account.player_id, &email).await?;
+            send_confirm_email(&state, &record.account.user_id, &email).await?;
         }
     }
     Ok(Json(serde_json::json!({
@@ -3129,7 +3138,7 @@ async fn reset_password_handler(
         ));
     }
     let now = store::now_secs();
-    let player_id = match req {
+    let user_id = match req {
         ResetPasswordRequest::ByToken { token, .. } => {
             state
                 .auth
@@ -3150,7 +3159,7 @@ async fn reset_password_handler(
                     state
                         .auth
                         .consume_auth_token_by_code(
-                            &record.account.player_id,
+                            &record.account.user_id,
                             store::TOKEN_KIND_RESET,
                             &media::sha256_hex(code.trim().as_bytes()),
                             now,
@@ -3166,14 +3175,14 @@ async fn reset_password_handler(
     })?;
     state
         .auth
-        .set_password(&player_id, &auth::hash_password(&password)?)
+        .set_password(&user_id, &auth::hash_password(&password)?)
         .await?;
     // Using a valid reset credential also proves mailbox ownership (§6.3).
-    let account = state.auth.confirm_email(&player_id, now).await?;
+    let account = state.auth.confirm_email(&user_id, now).await?;
     let token = auth::generate_token();
-    state.auth.create_session(&token, &player_id).await?;
+    state.auth.create_session(&token, &user_id).await?;
     Ok(Json(AuthResponse {
-        player_id: account.player_id,
+        user_id: account.user_id,
         email: account.email,
         display_name: account.display_name,
         role: account.role,
@@ -3191,7 +3200,7 @@ async fn confirm_email_handler(
     State(state): State<AppState>,
     Json(req): Json<ConfirmEmailRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let player_id = state
+    let user_id = state
         .auth
         .consume_auth_token(
             &media::sha256_hex(req.token.as_bytes()),
@@ -3204,7 +3213,7 @@ async fn confirm_email_handler(
         })?;
     let account = state
         .auth
-        .confirm_email(&player_id, store::now_secs())
+        .confirm_email(&user_id, store::now_secs())
         .await?;
     Ok(Json(
         serde_json::json!({ "status": "confirmed", "email": account.email }),
@@ -3233,7 +3242,7 @@ async fn resend_confirm_handler(
         MAIL_SEND_WINDOW_SECS,
         MAIL_SEND_LIMIT,
     )?;
-    send_confirm_email(&state, &account.player_id, &email).await?;
+    send_confirm_email(&state, &account.user_id, &email).await?;
     Ok(Json(serde_json::json!({ "status": "sent" })))
 }
 
@@ -3260,7 +3269,7 @@ async fn set_display_name_handler(
     }
     let updated = state
         .auth
-        .set_display_name(&account.player_id, name)
+        .set_display_name(&account.user_id, name)
         .await?;
     Ok(Json(serde_json::json!({
         "status": "ok",
@@ -3283,17 +3292,19 @@ async fn change_password_handler(
     let account = session_account(&state, &headers)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
-    // Only email/password accounts have a password to change; a social-only
-    // account (no email) must add an email/password first (not modelled here).
-    let email = account.email.clone().ok_or_else(|| {
-        AppError::BadRequest("этот аккаунт входит через провайдера — пароль не задан".into())
-    })?;
     let record = state
         .auth
-        .find_by_email(&email)
+        .user_record(&account.user_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
-    if !auth::verify_password(&record.password_hash, &req.current_password) {
+    // No password (social-only account, or a Google-attached email whose
+    // password was never set) → honest guidance, not a lying "wrong password".
+    let Some(hash) = record.password_hash.as_deref() else {
+        return Err(AppError::BadRequest(
+            "этот аккаунт входит через провайдера — пароль не задан".into(),
+        ));
+    };
+    if !auth::verify_password(hash, &req.current_password) {
         return Err(AppError::Unauthorized("неверный текущий пароль".into()));
     }
     if req.new_password.len() < 8 {
@@ -3303,7 +3314,7 @@ async fn change_password_handler(
     }
     state
         .auth
-        .set_password(&account.player_id, &auth::hash_password(&req.new_password)?)
+        .set_password(&account.user_id, &auth::hash_password(&req.new_password)?)
         .await?;
     Ok(Json(serde_json::json!({ "status": "changed" })))
 }
@@ -3321,7 +3332,7 @@ async fn delete_account_handler(
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
     let published = state
         .constructor
-        .list_summaries_for_author(&account.player_id)
+        .list_summaries_for_author(&account.user_id)
         .await?
         .into_iter()
         .filter(|q| q.status == store::CTOR_STATUS_PUBLISHED)
@@ -3333,12 +3344,12 @@ async fn delete_account_handler(
     }
     // Play data first, identity last — a crash in between leaves a still-working
     // account with less data, never a deleted account with orphaned identity.
-    state.store.delete_player_data(&account.player_id).await?;
+    state.store.delete_user_data(&account.user_id).await?;
     state
         .grants
-        .delete_grants_for_player(&account.player_id)
+        .delete_grants_for_user(&account.user_id)
         .await?;
-    state.auth.delete_user(&account.player_id).await?;
+    state.auth.delete_user(&account.user_id).await?;
     Ok(Json(serde_json::json!({ "status": "deleted" })))
 }
 
@@ -3349,35 +3360,29 @@ async fn get_me_handler(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let claimed = claimed_from_headers(&headers);
-    let player_id = resolve_player(&state, &headers, &claimed).await?;
-    let account = state.auth.get_user(&player_id).await?;
+    let user_id = resolve_user(&state, &headers, &claimed).await?;
+    let account = state.auth.get_user(&user_id).await?;
     Ok(Json(match account {
         Some(a) => {
-            // Sign-in methods for the profile: "email" (when set) + each linked
-            // social provider, so the client shows/links/unlinks them honestly.
-            let identities = state.auth.identities_for_player(&a.player_id).await?;
-            let mut methods: Vec<&str> = Vec::new();
-            if a.email.is_some() {
-                methods.push(auth::METHOD_EMAIL);
-            }
-            for i in &identities {
-                if i.provider == auth::PROVIDER_GOOGLE {
-                    methods.push(auth::PROVIDER_GOOGLE);
-                } else if i.provider == auth::PROVIDER_TELEGRAM {
-                    methods.push(auth::PROVIDER_TELEGRAM);
-                }
-            }
+            let identities = state.auth.identities_for_user(&a.user_id).await?;
+            // Sign-in surface from the one source of truth (auth.rs): working
+            // methods for the list (a method works iff its identities row
+            // exists), the reachability verdict for unlink UI — the client
+            // renders these, it never re-derives the rules.
+            let methods = auth::signin_methods(&identities);
+            let can_unlink = auth::reachable_ways(&a, &identities) > 1;
             serde_json::json!({
-                "player_id": a.player_id, "registered": true,
+                "user_id": a.user_id, "registered": true,
                 "email": a.email, "display_name": a.display_name, "role": a.role,
                 "email_confirmed_at": a.email_confirmed_at,
                 "methods": methods,
+                "can_unlink": can_unlink,
             })
         }
         None => serde_json::json!({
-            "player_id": player_id, "registered": false,
+            "user_id": user_id, "registered": false,
             "email": null, "display_name": null, "role": null,
-            "methods": [],
+            "methods": [], "can_unlink": false,
         }),
     }))
 }
@@ -3388,7 +3393,7 @@ async fn get_me_handler(
 /// renders contact fields present-only and simply omits the ones it has no data for.
 #[derive(serde::Serialize)]
 struct AdminUserWire {
-    player_id: String,
+    user_id: String,
     /// `null` for a social-only account (no login email).
     email: Option<String>,
     display_name: Option<String>,
@@ -3399,7 +3404,7 @@ struct AdminUserWire {
 impl From<auth::UserAccount> for AdminUserWire {
     fn from(a: auth::UserAccount) -> Self {
         Self {
-            player_id: a.player_id,
+            user_id: a.user_id,
             email: a.email,
             display_name: a.display_name,
             role: a.role,
@@ -3408,7 +3413,7 @@ impl From<auth::UserAccount> for AdminUserWire {
     }
 }
 
-/// Body for POST /api/admin/users/{player_id}/role.
+/// Body for POST /api/admin/users/{user_id}/role.
 #[derive(serde::Deserialize)]
 struct SetRoleRequest {
     role: String,
@@ -3469,18 +3474,18 @@ async fn list_users_handler(
 ///   * an unknown/anonymous id → 404 (only registered accounts have a role).
 async fn set_user_role_handler(
     State(state): State<AppState>,
-    Path(player_id): Path<String>,
+    Path(user_id): Path<String>,
     headers: HeaderMap,
     Json(req): Json<SetRoleRequest>,
 ) -> Result<Json<AdminUserWire>, AppError> {
     let actor = require_admin_actor(&state, &headers).await?;
     auth::validate_role(&req.role)?;
-    if actor.player_id.as_deref() == Some(player_id.as_str()) {
+    if actor.user_id.as_deref() == Some(user_id.as_str()) {
         return Err(AppError::Conflict(
             "an admin cannot change their own role".into(),
         ));
     }
-    let updated = state.auth.set_role(&player_id, &req.role).await?;
+    let updated = state.auth.set_role(&user_id, &req.role).await?;
     Ok(Json(updated.into()))
 }
 
@@ -3945,10 +3950,10 @@ async fn get_my_stats_handler(
     headers: HeaderMap,
 ) -> Result<Json<facts::PlayerStats>, AppError> {
     let claimed = claimed_from_headers(&headers);
-    let player_id = resolve_player(&state, &headers, &claimed).await?;
-    let logs = state.store.attempt_logs_for_player(&player_id).await?;
+    let user_id = resolve_user(&state, &headers, &claimed).await?;
+    let logs = state.store.attempt_logs_for_user(&user_id).await?;
     // Caller-scoped, PK-indexed lookup — never load every player's grants to count one's own.
-    let grants_count = state.grants.grants_for_player(&player_id).await?.len();
+    let grants_count = state.grants.grants_for_user(&user_id).await?.len();
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
 }
 
@@ -4490,7 +4495,7 @@ mod tests {
     /// over the REAL signature/aud/iss/exp path. Mirrors `test_app` otherwise.
     /// State with the Telegram verifier seeded (offline JWKS). Returned (not just a
     /// Router) so a test can also inspect the shared Arc<Mutex> stores after driving
-    /// the handler — e.g. read back a persisted identity username.
+    /// the handler — e.g. read back a persisted identity handle.
     fn social_state() -> AppState {
         let mut state = test_state(AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
@@ -4514,10 +4519,10 @@ mod tests {
     }
 
     /// A `/api/auth/telegram` request body: a locally-signed OIDC id_token (name is
-    /// the profile display name) plus the caller's claimed player_id.
-    fn tg_payload(player_id: &str, id: i64, name: &str) -> Value {
+    /// the profile display name) plus the caller's claimed user_id.
+    fn tg_payload(user_id: &str, id: i64, name: &str) -> Value {
         json!({
-            "player_id": player_id,
+            "user_id": user_id,
             "id_token": social::test_support::telegram_id_token(id, name, None, 3600),
         })
     }
@@ -4536,7 +4541,7 @@ mod tests {
         let (st, _) = post_json(
             &app,
             "/api/auth/google",
-            json!({ "credential": "x.y.z", "player_id": "dev:x" }),
+            json!({ "credential": "x.y.z", "user_id": "dev:x" }),
         )
         .await;
         assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
@@ -4546,7 +4551,7 @@ mod tests {
     async fn telegram_invalid_token_is_rejected() {
         // A structurally-broken / unsigned token never verifies against the JWKS.
         let app = test_app_social();
-        let payload = json!({ "player_id": "dev:a", "id_token": "not.a.valid.jwt" });
+        let payload = json!({ "user_id": "dev:a", "id_token": "not.a.valid.jwt" });
         let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
     }
@@ -4556,7 +4561,7 @@ mod tests {
         // A correctly-signed token whose exp has passed is rejected (replay window).
         let app = test_app_social();
         let payload = json!({
-            "player_id": "dev:a",
+            "user_id": "dev:a",
             "id_token": social::test_support::telegram_id_token(7, "Old", None, -3600),
         });
         let (st, _) = post_json(&app, "/api/auth/telegram", payload).await;
@@ -4574,7 +4579,7 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         // The account is keyed to the SAME anonymous id (coins/grants survive).
-        assert_eq!(body["player_id"], "dev:keep-me");
+        assert_eq!(body["user_id"], "dev:keep-me");
         assert!(body["email"].is_null(), "telegram account has no email");
         assert_eq!(body["display_name"], "Ann");
         let token = body["token"].as_str().expect("token");
@@ -4582,7 +4587,7 @@ mod tests {
         // /me reports the telegram method and no email.
         let (st, me) = get_json_h(
             &app,
-            "/api/players/me",
+            "/api/users/me",
             &[("authorization", &format!("Bearer {token}"))],
         )
         .await;
@@ -4593,8 +4598,46 @@ mod tests {
         assert_eq!(methods, vec!["telegram".to_string()]);
     }
 
+    /// A Google-created account carries a verified email but NO password: the
+    /// email is contact data, not a working sign-in method — `methods` must not
+    /// claim "email" until a password is actually set.
     #[tokio::test]
-    async fn telegram_username_is_captured_and_refreshed() {
+    async fn email_without_password_is_not_a_sign_in_method() {
+        let state = social_state();
+        let app = build_router(state.clone());
+        state
+            .auth
+            .create_social_account("dev:g", Some("g@x.io".into()), Some("G".into()), Some(1))
+            .await
+            .expect("social account");
+        state
+            .auth
+            .create_identity(store::AuthIdentity {
+                method: auth::PROVIDER_GOOGLE.into(),
+                identifier: "sub-g".into(),
+                user_id: "dev:g".into(),
+                handle: None,
+                created_at: 1,
+            })
+            .await
+            .expect("identity");
+        state.auth.create_session("tok-g", "dev:g").await.expect("session");
+        let (st, me) = get_json_h(
+            &app,
+            "/api/users/me",
+            &[("authorization", "Bearer tok-g")],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(me["email"], "g@x.io", "contact email still reported");
+        let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
+        assert_eq!(methods, vec!["google".to_string()], "no phantom email method");
+        // Reachable two ways (google + recoverable email) → unlink allowed.
+        assert_eq!(me["can_unlink"], true, "server serves the unlink verdict");
+    }
+
+    #[tokio::test]
+    async fn telegram_handle_is_captured_and_refreshed() {
         let state = social_state();
         let app = build_router(state.clone());
 
@@ -4603,35 +4646,35 @@ mod tests {
             &app,
             "/api/auth/telegram",
             json!({
-                "player_id": "dev:tg-user",
+                "user_id": "dev:tg-user",
                 "id_token": social::test_support::telegram_id_token(900, "Milan", Some("milan_bg"), 3600),
             }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let pid = body["player_id"].as_str().expect("player_id").to_string();
+        let pid = body["user_id"].as_str().expect("user_id").to_string();
         let ids = state
             .auth
-            .identities_for_player(&pid)
+            .identities_for_user(&pid)
             .await
             .expect("identities");
         assert_eq!(ids.len(), 1);
-        assert_eq!(ids[0].username.as_deref(), Some("milan_bg"));
+        assert_eq!(ids[0].handle.as_deref(), Some("milan_bg"));
 
-        // 2. Re-sign-in with a CHANGED handle → the stored username is refreshed.
+        // 2. Re-sign-in with a CHANGED handle → the stored handle is refreshed.
         let (st, _) = post_json(
             &app,
             "/api/auth/telegram",
             json!({
-                "player_id": "dev:tg-user",
+                "user_id": "dev:tg-user",
                 "id_token": social::test_support::telegram_id_token(900, "Milan", Some("milan_new"), 3600),
             }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        let ids = state.auth.identities_for_user(&pid).await.expect("ids");
         assert_eq!(
-            ids[0].username.as_deref(),
+            ids[0].handle.as_deref(),
             Some("milan_new"),
             "a changed handle overwrites the stored one"
         );
@@ -4641,38 +4684,38 @@ mod tests {
             &app,
             "/api/auth/telegram",
             json!({
-                "player_id": "dev:tg-user",
+                "user_id": "dev:tg-user",
                 "id_token": social::test_support::telegram_id_token(900, "Milan", None, 3600),
             }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        let ids = state.auth.identities_for_user(&pid).await.expect("ids");
         assert_eq!(
-            ids[0].username.as_deref(),
+            ids[0].handle.as_deref(),
             Some("milan_new"),
             "an absent claim leaves the prior value untouched"
         );
     }
 
     #[tokio::test]
-    async fn telegram_handleless_user_has_no_username() {
+    async fn telegram_handleless_user_has_no_handle() {
         let state = social_state();
         let app = build_router(state.clone());
         let (st, body) = post_json(
             &app,
             "/api/auth/telegram",
             json!({
-                "player_id": "dev:no-handle",
+                "user_id": "dev:no-handle",
                 "id_token": social::test_support::telegram_id_token(901, "Guest", None, 3600),
             }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let pid = body["player_id"].as_str().expect("player_id").to_string();
-        let ids = state.auth.identities_for_player(&pid).await.expect("ids");
+        let pid = body["user_id"].as_str().expect("user_id").to_string();
+        let ids = state.auth.identities_for_user(&pid).await.expect("ids");
         assert_eq!(ids.len(), 1);
-        assert_eq!(ids[0].username, None, "no handle → no stored username");
+        assert_eq!(ids[0].handle, None, "no handle → no stored handle");
     }
 
     #[tokio::test]
@@ -4684,7 +4727,7 @@ mod tests {
             tg_payload("dev:one", 900, "Ann"),
         )
         .await;
-        assert_eq!(first["player_id"], "dev:one");
+        assert_eq!(first["user_id"], "dev:one");
         // A different anonymous device signs in with the SAME telegram id.
         let (st, second) = post_json(
             &app,
@@ -4694,7 +4737,7 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         // It resolves to the existing account, not a new one on dev:two.
-        assert_eq!(second["player_id"], "dev:one");
+        assert_eq!(second["user_id"], "dev:one");
     }
 
     #[tokio::test]
@@ -4704,7 +4747,7 @@ mod tests {
         let (st, reg) = post_json(
             &app,
             "/api/auth/register",
-            json!({ "player_id": "dev:acct", "email": "u@example.com", "password": "supersecret" }),
+            json!({ "user_id": "dev:acct", "email": "u@example.com", "password": "supersecret" }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -4720,11 +4763,11 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(linked["player_id"], "dev:acct"); // same account
+        assert_eq!(linked["user_id"], "dev:acct"); // same account
         assert_eq!(linked["email"], "u@example.com");
 
         // /me lists BOTH methods now.
-        let (_, me) = get_json_h(&app, "/api/players/me", &[("authorization", &bearer)]).await;
+        let (_, me) = get_json_h(&app, "/api/users/me", &[("authorization", &bearer)]).await;
         let mut methods: Vec<String> =
             serde_json::from_value(me["methods"].clone()).expect("methods");
         methods.sort();
@@ -4737,7 +4780,7 @@ mod tests {
             tg_payload("dev:other", 4242, "Ann"),
         )
         .await;
-        assert_eq!(elsewhere["player_id"], "dev:acct");
+        assert_eq!(elsewhere["user_id"], "dev:acct");
 
         // Unlink telegram is allowed (email remains).
         let (st, _) = post_json_h(
@@ -4766,13 +4809,13 @@ mod tests {
         let app = test_app_social();
         // Account A: telegram-only, created from an anonymous device.
         let (_, a) = post_json(&app, "/api/auth/telegram", tg_payload("dev:a", 555, "Ann")).await;
-        assert_eq!(a["player_id"], "dev:a");
+        assert_eq!(a["user_id"], "dev:a");
 
         // Account B: email-registered and logged in.
         let (_, reg) = post_json(
             &app,
             "/api/auth/register",
-            json!({ "player_id": "dev:b", "email": "b@example.com", "password": "supersecret" }),
+            json!({ "user_id": "dev:b", "email": "b@example.com", "password": "supersecret" }),
         )
         .await;
         let bearer = format!("Bearer {}", reg["token"].as_str().expect("token"));
@@ -4790,7 +4833,7 @@ mod tests {
         assert_eq!(st, StatusCode::CONFLICT, "got: {body}");
 
         // B's methods are unchanged (email only) — nothing was moved or lost.
-        let (_, me) = get_json_h(&app, "/api/players/me", &[("authorization", &bearer)]).await;
+        let (_, me) = get_json_h(&app, "/api/users/me", &[("authorization", &bearer)]).await;
         let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
         assert_eq!(methods, vec!["email".to_string()]);
 
@@ -4798,7 +4841,7 @@ mod tests {
         let (st, again) =
             post_json(&app, "/api/auth/telegram", tg_payload("dev:c", 555, "Ann")).await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(again["player_id"], "dev:a");
+        assert_eq!(again["user_id"], "dev:a");
     }
 
     #[tokio::test]
@@ -4815,7 +4858,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(body["player_id"], "dev:me");
+        assert_eq!(body["user_id"], "dev:me");
     }
 
     #[tokio::test]
@@ -4949,7 +4992,7 @@ mod tests {
         let (st, v) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": id, "email": email, "password": "hunter2hunter2"}),
+            json!({"user_id": id, "email": email, "password": "hunter2hunter2"}),
         )
         .await;
         let token = if st == StatusCode::OK {
@@ -5014,7 +5057,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -5031,7 +5074,7 @@ mod tests {
         let (st, meta) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -5045,7 +5088,7 @@ mod tests {
         let (st, body) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
@@ -5054,13 +5097,13 @@ mod tests {
         let _ = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         let (st, _) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(
@@ -5208,7 +5251,7 @@ mod tests {
         let (_, meta2) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         let second = meta2["attempt_id"].as_str().expect("attempt id");
@@ -5302,7 +5345,7 @@ mod tests {
         let (_, meta2) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
 
@@ -5323,7 +5366,7 @@ mod tests {
         let (_, v1) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "coupon_code": null}),
         )
         .await;
         assert_eq!(v1["created"], true);
@@ -5334,7 +5377,7 @@ mod tests {
         let (_, v2) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "coupon_code": "GHOST-1"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "coupon_code": "GHOST-1"}),
         )
         .await;
         assert_eq!(v2["created"], false, "idempotent");
@@ -5365,7 +5408,7 @@ mod tests {
         let (_, v3) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": other_quest,
+            json!({"user_id": ids.player, "quest_id": other_quest,
                    "coupon_code": code.to_ascii_lowercase()}),
         )
         .await;
@@ -5407,15 +5450,15 @@ mod tests {
         let (st, _) = get_json(app, "/api/grants").await;
         assert_eq!(st, StatusCode::UNAUTHORIZED, "grants require an identity");
 
-        let (_, grants) = get_json_h(app, "/api/grants", &[("x-player-id", &ids.player)]).await;
+        let (_, grants) = get_json_h(app, "/api/grants", &[("x-user-id", &ids.player)]).await;
         let grants = grants.as_array().expect("grants");
         assert!(
             grants
                 .iter()
-                .any(|g| g["player_id"] == ids.player.as_str() && g["source"] == "Payment")
+                .any(|g| g["user_id"] == ids.player.as_str() && g["source"] == "Payment")
         );
         assert!(
-            grants.iter().all(|g| g["player_id"] == ids.player.as_str()),
+            grants.iter().all(|g| g["user_id"] == ids.player.as_str()),
             "no other player's grants are exposed"
         );
     }
@@ -5510,7 +5553,7 @@ mod tests {
         // Unpublished -> 404 even with the player param.
         let (st, _) = get_json(
             app,
-            &format!("/api/quests/{}/bundle?player_id={}", ids.quest, ids.player),
+            &format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player),
         )
         .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
@@ -5527,7 +5570,7 @@ mod tests {
         // Published but no grant -> 403, no content.
         let (st, body) = get_json(
             app,
-            &format!("/api/quests/{}/bundle?player_id={}", ids.quest, ids.player),
+            &format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player),
         )
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
@@ -5537,12 +5580,12 @@ mod tests {
         let (_, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         let (st, body) = get_json(
             app,
-            &format!("/api/quests/{}/bundle?player_id={}", ids.quest, ids.player),
+            &format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -5698,14 +5741,14 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": quest}),
+            json!({"user_id": ids.player, "quest_id": quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
         let (st, meta) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": quest}),
+            json!({"user_id": ids.player, "quest_id": quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -5832,11 +5875,11 @@ mod tests {
         let (st, v) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": player, "email": email, "password": "hunter2hunter2"}),
+            json!({"user_id": player, "email": email, "password": "hunter2hunter2"}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["player_id"], player, "registration keeps the player id");
+        assert_eq!(v["user_id"], player, "registration keeps the player id");
         let token = v["token"].as_str().expect("token").to_string();
         assert_eq!(token.len(), 64);
         (email, token)
@@ -5847,7 +5890,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -5858,14 +5901,14 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": "p-x", "email": "no-at-sign", "password": "hunter2hunter2"}),
+            json!({"user_id": "p-x", "email": "no-at-sign", "password": "hunter2hunter2"}),
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
         let (st, _) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": "p-x", "email": "x@example.com", "password": "short"}),
+            json!({"user_id": "p-x", "email": "x@example.com", "password": "short"}),
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -5874,7 +5917,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": format!("{}-other", ids.player), "email": email,
+            json!({"user_id": format!("{}-other", ids.player), "email": email,
                    "password": "hunter2hunter2"}),
         )
         .await;
@@ -5882,7 +5925,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": ids.player, "email": format!("second-{email}"),
+            json!({"user_id": ids.player, "email": format!("second-{email}"),
                    "password": "hunter2hunter2"}),
         )
         .await;
@@ -5894,7 +5937,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": format!("{}-case", ids.player),
+            json!({"user_id": format!("{}-case", ids.player),
                    "email": email.to_uppercase(), "password": "hunter2hunter2"}),
         )
         .await;
@@ -5908,7 +5951,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["player_id"], ids.player.as_str());
+        assert_eq!(v["user_id"], ids.player.as_str());
         let login_token = v["token"].as_str().expect("token").to_string();
         assert_ne!(login_token, token, "each login mints a fresh session");
         let (st, v) = post_json(
@@ -5918,7 +5961,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "login is email-case-insensitive");
-        assert_eq!(v["player_id"], ids.player.as_str());
+        assert_eq!(v["user_id"], ids.player.as_str());
         let (st, _) = post_json(
             app,
             "/api/auth/login",
@@ -5947,7 +5990,7 @@ mod tests {
         let (st, _) = post_json_h(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
             &[("authorization", &bearer)],
         )
         .await;
@@ -5959,16 +6002,16 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
 
-        // Anonymous profile via X-Player-Id.
-        let (st, me) = get_json_h(app, "/api/players/me", &[("x-player-id", &ids.player)]).await;
+        // Anonymous profile via X-User-Id.
+        let (st, me) = get_json_h(app, "/api/users/me", &[("x-user-id", &ids.player)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["registered"], false);
-        assert_eq!(me["player_id"], ids.player.as_str());
+        assert_eq!(me["user_id"], ids.player.as_str());
 
         let (_, token) = register(app, &ids.player).await;
         let bearer = format!("Bearer {token}");
@@ -5977,7 +6020,7 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": "another-quest"}),
+            json!({"user_id": ids.player, "quest_id": "another-quest"}),
         )
         .await;
         assert_eq!(
@@ -5988,43 +6031,43 @@ mod tests {
         let (st, _) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
         let (st, _) = get_json_h(
             app,
-            "/api/players/me/stats",
-            &[("x-player-id", &ids.player)],
+            "/api/users/me/stats",
+            &[("x-user-id", &ids.player)],
         )
         .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
         let (st, _) = get_json(
             app,
-            &format!("/api/quests/{}/bundle?player_id={}", ids.quest, ids.player),
+            &format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player),
         )
         .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
 
         // With the session, the same requests pass identity (then normal gating).
-        let (st, me) = get_json_h(app, "/api/players/me", &[("authorization", &bearer)]).await;
+        let (st, me) = get_json_h(app, "/api/users/me", &[("authorization", &bearer)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["registered"], true);
         let (st, v) = post_json_h(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": "another-quest"}),
+            json!({"user_id": ids.player, "quest_id": "another-quest"}),
             &[("authorization", &bearer)],
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["grant"]["player_id"], ids.player.as_str());
+        assert_eq!(v["grant"]["user_id"], ids.player.as_str());
 
         // A session must not act as someone else (client-bug guard).
         let (st, _) = post_json_h(
             app,
             "/api/checkout",
-            json!({"player_id": "someone-else", "quest_id": ids.quest}),
+            json!({"user_id": "someone-else", "quest_id": ids.quest}),
             &[("authorization", &bearer)],
         )
         .await;
@@ -6034,7 +6077,7 @@ mod tests {
         let (st, _) = post_json_h(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
             &[("authorization", "Bearer not-a-real-token")],
         )
         .await;
@@ -6058,7 +6101,7 @@ mod tests {
 
         // /me carries the role; a fresh account is a player.
         let (st, me) =
-            get_json_h(app, "/api/players/me", &[("authorization", &alice_bearer)]).await;
+            get_json_h(app, "/api/users/me", &[("authorization", &alice_bearer)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["role"], "player");
 
@@ -6078,7 +6121,7 @@ mod tests {
         let users = list.as_array().expect("users array");
         let alice_row = users
             .iter()
-            .find(|u| u["player_id"] == alice.as_str())
+            .find(|u| u["user_id"] == alice.as_str())
             .expect("alice present in list");
         assert_eq!(alice_row["role"], "player");
         assert_eq!(alice_row["email"], alice_email.as_str());
@@ -6106,7 +6149,7 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(ub["role"], "editor");
-        let (_, me_b) = get_json_h(app, "/api/players/me", &[("authorization", &bob_bearer)]).await;
+        let (_, me_b) = get_json_h(app, "/api/users/me", &[("authorization", &bob_bearer)]).await;
         assert_eq!(me_b["role"], "editor", "bob sees his new role");
 
         // Anti-lockout: a session-admin cannot change their OWN role...
@@ -6166,7 +6209,7 @@ mod tests {
             app,
             "/api/quests/publish",
             body.clone(),
-            &[("x-player-id", &ids.player)],
+            &[("x-user-id", &ids.player)],
         )
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN, "anonymous cannot publish");
@@ -6177,7 +6220,7 @@ mod tests {
         let (st, rv) = post_json(
             app,
             "/api/auth/register",
-            json!({"player_id": pl, "email": pl_email, "password": "hunter2hunter2"}),
+            json!({"user_id": pl, "email": pl_email, "password": "hunter2hunter2"}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6253,7 +6296,7 @@ mod tests {
         let (_, _) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": quest_b}),
+            json!({"user_id": ids.player, "quest_id": quest_b}),
         )
         .await;
         let (_, _) = publish(
@@ -6266,7 +6309,7 @@ mod tests {
         let (_, meta_b) = post_json(
             app,
             "/api/attempts",
-            json!({"player_id": ids.player, "quest_id": quest_b}),
+            json!({"user_id": ids.player, "quest_id": quest_b}),
         )
         .await;
         let attempt_b = meta_b["attempt_id"].as_str().expect("attempt id");
@@ -6282,8 +6325,8 @@ mod tests {
         // Stats: signed cross-attempt fold; quest A completed, B not.
         let (st, stats) = get_json_h(
             app,
-            "/api/players/me/stats",
-            &[("x-player-id", &ids.player)],
+            "/api/users/me/stats",
+            &[("x-user-id", &ids.player)],
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6297,8 +6340,8 @@ mod tests {
         let (_, _) = post_json(app, &format!("/api/attempts/{attempt_b}/facts"), hint_batch).await;
         let (_, stats2) = get_json_h(
             app,
-            "/api/players/me/stats",
-            &[("x-player-id", &ids.player)],
+            "/api/users/me/stats",
+            &[("x-user-id", &ids.player)],
         )
         .await;
         assert_eq!(stats, stats2, "duplicate appends never move stats");
@@ -6309,7 +6352,7 @@ mod tests {
         let (st, v1) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6342,7 +6385,7 @@ mod tests {
         let (_, v2) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": coupon_quest, "coupon_code": code}),
+            json!({"user_id": ids.player, "quest_id": coupon_quest, "coupon_code": code}),
         )
         .await;
         assert_eq!(v2["grant"]["source"], "CouponRedemption");
@@ -6352,7 +6395,7 @@ mod tests {
         let (_, v3) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
         )
         .await;
         assert_eq!(v3["created"], false);
@@ -6597,7 +6640,7 @@ mod tests {
         let (st, v) = post_json(
             app,
             "/api/coupons/validate",
-            json!({"player_id": player, "quest_id": ids.quest, "code": code.to_ascii_lowercase()}),
+            json!({"user_id": player, "quest_id": ids.quest, "code": code.to_ascii_lowercase()}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6611,7 +6654,7 @@ mod tests {
             let (st, v) = post_json(
                 app,
                 "/api/coupons/validate",
-                json!({"player_id": player, "quest_id": ids.quest, "code": unknown}),
+                json!({"user_id": player, "quest_id": ids.quest, "code": unknown}),
             )
             .await;
             assert_eq!(st, StatusCode::OK);
@@ -6623,7 +6666,7 @@ mod tests {
         let (_, v) = post_json(
             app,
             "/api/coupons/validate",
-            json!({"player_id": player, "quest_id": "ghost-quest", "code": code}),
+            json!({"user_id": player, "quest_id": "ghost-quest", "code": code}),
         )
         .await;
         assert_eq!(v["valid"], false);
@@ -6633,7 +6676,7 @@ mod tests {
         let (st, out) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": player, "quest_id": ids.quest, "coupon_code": code}),
+            json!({"user_id": player, "quest_id": ids.quest, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6655,7 +6698,7 @@ mod tests {
         let (_, v) = post_json(
             app,
             "/api/coupons/validate",
-            json!({"player_id": player, "quest_id": other, "code": code}),
+            json!({"user_id": player, "quest_id": other, "code": code}),
         )
         .await;
         assert_eq!(v["valid"], false);
@@ -6714,7 +6757,7 @@ mod tests {
         let (st, body) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r1"), "quest_id": quest_c, "coupon_code": code}),
+            json!({"user_id": p("r1"), "quest_id": quest_c, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::CONFLICT);
@@ -6724,7 +6767,7 @@ mod tests {
         let (st, out) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r1"), "quest_id": quest_a, "coupon_code": code}),
+            json!({"user_id": p("r1"), "quest_id": quest_a, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6733,7 +6776,7 @@ mod tests {
         let (st, out) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r2"), "quest_id": quest_b, "coupon_code": code}),
+            json!({"user_id": p("r2"), "quest_id": quest_b, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -6743,7 +6786,7 @@ mod tests {
         let (st, body) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r3"), "quest_id": quest_a, "coupon_code": code}),
+            json!({"user_id": p("r3"), "quest_id": quest_a, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::CONFLICT);
@@ -6773,7 +6816,7 @@ mod tests {
         let (st, body) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r4"), "quest_id": quest_a, "coupon_code": code}),
+            json!({"user_id": p("r4"), "quest_id": quest_a, "coupon_code": code}),
         )
         .await;
         assert_eq!(st, StatusCode::CONFLICT);
@@ -6783,7 +6826,7 @@ mod tests {
         let (st, body) = post_json(
             app,
             "/api/checkout",
-            json!({"player_id": p("r5"), "quest_id": quest_a, "coupon_code": "NOPE-9"}),
+            json!({"user_id": p("r5"), "quest_id": quest_a, "coupon_code": "NOPE-9"}),
         )
         .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
@@ -6861,7 +6904,7 @@ mod tests {
             let (st, _) = post_json(
                 app,
                 "/api/checkout",
-                json!({ "player_id": buyer, "quest_id": quest }),
+                json!({ "user_id": buyer, "quest_id": quest }),
             )
             .await;
             assert_eq!(st, StatusCode::OK);
@@ -7045,14 +7088,14 @@ mod tests {
             let (st, _) = post_json(
                 app,
                 "/api/checkout",
-                json!({ "player_id": buyer, "quest_id": quest }),
+                json!({ "user_id": buyer, "quest_id": quest }),
             )
             .await;
             assert_eq!(st, StatusCode::OK);
             let (st, att) = post_json(
                 app,
                 "/api/attempts",
-                json!({ "player_id": buyer, "quest_id": quest }),
+                json!({ "user_id": buyer, "quest_id": quest }),
             )
             .await;
             assert_eq!(st, StatusCode::OK, "attempt: {att}");
@@ -7207,7 +7250,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "reset succeeds: {v}");
-        assert_eq!(v["player_id"], player);
+        assert_eq!(v["user_id"], player);
         assert_eq!(v["token"].as_str().map(str::len), Some(64), "signed in");
         let (st, _) = post_json(
             app,
@@ -7317,7 +7360,7 @@ mod tests {
         assert_eq!(st, StatusCode::UNAUTHORIZED, "account is gone");
         let (st, _) = get_json_h(
             app,
-            "/api/players/me",
+            "/api/users/me",
             &[("authorization", bearer.as_str())],
         )
         .await;
@@ -7524,7 +7567,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK, "reset by code: {v}");
-        assert_eq!(v["player_id"], ids.player.as_str());
+        assert_eq!(v["user_id"], ids.player.as_str());
         assert_eq!(v["token"].as_str().map(str::len), Some(64), "signed in");
         let (st, _) = post_json(
             app,
@@ -7741,11 +7784,11 @@ mod tests {
         let app = test_app();
         let owner: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-player-id", "dev-owner"),
+            ("x-user-id", "dev-owner"),
         ];
         let other: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-player-id", "dev-other"),
+            ("x-user-id", "dev-other"),
         ];
 
         // Upload the cover image the quest body will reference.
@@ -7797,7 +7840,7 @@ mod tests {
                 Request::builder()
                     .uri("/api/constructor/quests/q-export/export")
                     .header("x-admin-token", TEST_ADMIN_TOKEN)
-                    .header("x-player-id", "dev-owner")
+                    .header("x-user-id", "dev-owner")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -7978,11 +8021,11 @@ mod tests {
         let app = test_app();
         let a: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-player-id", "dev-a"),
+            ("x-user-id", "dev-a"),
         ];
         let b: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-player-id", "dev-b"),
+            ("x-user-id", "dev-b"),
         ];
 
         let mk = |id: &str, name: &str| {
@@ -8436,7 +8479,7 @@ mod tests {
         let dev_id = format!("dev-citest-{run}");
         let dev: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-player-id", dev_id.as_str()),
+            ("x-user-id", dev_id.as_str()),
         ];
         let other_qid = format!("q-citest-other-{run}");
         let (st, _) = post_json_h(
@@ -8636,7 +8679,7 @@ mod tests {
         let (_, meta2) = post_json(
             &app2,
             "/api/attempts",
-            json!({"player_id": happy_ids.player, "quest_id": happy_ids.quest}),
+            json!({"user_id": happy_ids.player, "quest_id": happy_ids.quest}),
         )
         .await;
         let second = meta2["attempt_id"].as_str().expect("attempt id");
@@ -8654,7 +8697,7 @@ mod tests {
         let (_, meta3) = post_json(
             &app2,
             "/api/attempts",
-            json!({"player_id": happy_ids.player, "quest_id": happy_ids.quest}),
+            json!({"user_id": happy_ids.player, "quest_id": happy_ids.quest}),
         )
         .await;
         let third = meta3["attempt_id"].as_str().expect("attempt id");
@@ -8676,10 +8719,10 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK, "users table survives restart");
         let bearer = format!("Bearer {}", v["token"].as_str().expect("token"));
-        let (st, me) = get_json_h(&app2, "/api/players/me", &[("authorization", &bearer)]).await;
+        let (st, me) = get_json_h(&app2, "/api/users/me", &[("authorization", &bearer)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["registered"], true);
-        assert_eq!(me["player_id"], enforce_ids.player.as_str());
+        assert_eq!(me["user_id"], enforce_ids.player.as_str());
     }
     // ===== YooKassa redirect flow (scripted fake gateway — the real API is
     // ===== never called from tests) =====
@@ -8720,7 +8763,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let mut body = json!({"player_id": ids.player, "quest_id": ids.quest,
+        let mut body = json!({"user_id": ids.player, "quest_id": ids.quest,
                               "provider": "yookassa"});
         if let Some(code) = coupon_code {
             body["coupon_code"] = json!(code);
@@ -8741,12 +8784,12 @@ mod tests {
         (payment_id, provider_id, confirmation_url)
     }
 
-    /// Owner poll for a payment (X-Player-Id identity, as the return page does).
+    /// Owner poll for a payment (X-User-Id identity, as the return page does).
     async fn poll_payment(app: &Router, player: &str, payment_id: &str) -> (StatusCode, Value) {
         get_json_h(
             app,
             &format!("/api/payments/{payment_id}"),
-            &[("x-player-id", player)],
+            &[("x-user-id", player)],
         )
         .await
     }
@@ -8783,8 +8826,8 @@ mod tests {
         assert!(v["grant"].is_null());
         let (_, grants) = get_json_h(
             &app,
-            &format!("/api/grants?player_id={}", ids.player),
-            &[("x-player-id", ids.player.as_str())],
+            &format!("/api/grants?user_id={}", ids.player),
+            &[("x-user-id", ids.player.as_str())],
         )
         .await;
         assert_eq!(
@@ -8797,7 +8840,7 @@ mod tests {
         let (st, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -8823,7 +8866,7 @@ mod tests {
         let (_, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
         )
         .await;
         assert_eq!(v["created"], false, "owned quest returns the stored grant");
@@ -8895,7 +8938,7 @@ mod tests {
         let (_, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
         )
         .await;
         let second = v["payment"]["payment_id"].as_str().expect("payment_id");
@@ -8944,7 +8987,7 @@ mod tests {
         let (st, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest,
+            json!({"user_id": ids.player, "quest_id": ids.quest,
                    "provider": "yookassa", "coupon_code": code}),
         )
         .await;
@@ -8998,7 +9041,7 @@ mod tests {
         let (st, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest,
+            json!({"user_id": ids.player, "quest_id": ids.quest,
                    "provider": "yookassa", "coupon_code": code}),
         )
         .await;
@@ -9025,7 +9068,7 @@ mod tests {
         let (st, v) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": free_quest, "provider": "yookassa"}),
+            json!({"user_id": ids.player, "quest_id": free_quest, "provider": "yookassa"}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -9043,14 +9086,14 @@ mod tests {
         let (st, _) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "provider": "yookassa"}),
         )
         .await;
         assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
         let (st, _) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": ids.player, "quest_id": ids.quest, "provider": "paypal"}),
+            json!({"user_id": ids.player, "quest_id": ids.quest, "provider": "paypal"}),
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -9283,7 +9326,7 @@ mod tests {
         let (st, _) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
+            json!({"user_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
         )
         .await;
         assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
@@ -9318,7 +9361,7 @@ mod tests {
         let (st, _) = post_json(
             &app,
             "/api/checkout",
-            json!({"player_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
+            json!({"user_id": "dev:ft", "quest_id": "q-ft", "coupon_code": null}),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -9666,11 +9709,10 @@ mod tests {
         state
             .auth
             .create_identity(store::AuthIdentity {
-                provider: "google".into(),
-                subject: "g1".into(),
-                player_id: "acct-google".into(),
-                email: Some("anna@gmail.com".into()),
-                username: None,
+                method: "google".into(),
+                identifier: "g1".into(),
+                user_id: "acct-google".into(),
+                handle: None,
                 created_at: 0,
             })
             .await
@@ -9693,11 +9735,10 @@ mod tests {
         state
             .auth
             .create_identity(store::AuthIdentity {
-                provider: "telegram".into(),
-                subject: "t1".into(),
-                player_id: "acct-tg".into(),
-                email: None,
-                username: Some("milan_bg".into()),
+                method: "telegram".into(),
+                identifier: "t1".into(),
+                user_id: "acct-tg".into(),
+                handle: Some("milan_bg".into()),
                 created_at: 0,
             })
             .await
@@ -9767,7 +9808,7 @@ mod tests {
         assert!((p["rating_avg"].as_f64().expect("avg") - 4.0).abs() < 1e-9);
 
         // Hide the anonymous 2★ → dropped from the average and flagged; idempotent.
-        let hide = json!({ "player_id": "dev-anon", "quest_id": "q1" });
+        let hide = json!({ "user_id": "dev-anon", "quest_id": "q1" });
         for _ in 0..2 {
             let (st, _) = post_json_h(&app, "/api/admin/reviews/hide", hide.clone(), &admin).await;
             assert_eq!(st, StatusCode::NO_CONTENT);
@@ -9978,7 +10019,7 @@ mod tests {
         seed_moderation(&state).await;
         let app = build_router(state);
         let key = json!({ "quest_id": "q1", "snapshot_id": "q1-v1", "step_position": 1 });
-        let hide = json!({ "player_id": "dev-anon", "quest_id": "q1" });
+        let hide = json!({ "user_id": "dev-anon", "quest_id": "q1" });
         for uri in ["/api/admin/reviews", "/api/admin/feedback"] {
             let (st, _) = get_json(&app, uri).await;
             assert_eq!(st, StatusCode::FORBIDDEN, "{uri} without admin");

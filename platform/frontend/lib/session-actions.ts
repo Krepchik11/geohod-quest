@@ -4,7 +4,7 @@
  * "who is playing".
  */
 import { api } from './api';
-import { currentPlayerId, logout as clearSessionAndRotate } from './identity';
+import { currentUserId, logout as clearSessionAndRotate } from './identity';
 import { clearLocalPlay } from './queue';
 import { flushAll } from './sync';
 
@@ -27,7 +27,7 @@ import { flushAll } from './sync';
  */
 export async function logoutAndReset(): Promise<void> {
   try {
-    await flushAll({ playerId: currentPlayerId(), api });
+    await flushAll({ userId: currentUserId(), api });
   } catch {
     // Offline / unrecoverable — already-synced history stays on the account.
   }

@@ -21,7 +21,7 @@ const { apiMock, sessionRef, setSessionMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
-  anonymousPlayerId: () => 'dev:test',
+  anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
   setSession: setSessionMock,
   clearSession: vi.fn(),
@@ -56,7 +56,7 @@ beforeEach(() => {
 describe('AuthPage — reset by code on the sent card (§6.2 R2)', () => {
   it('code + new password → resets, stores the session', async () => {
     await openSentState();
-    const session = { token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
+    const session = { token: 't', user_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
     apiMock.authResetPassword.mockResolvedValue(session);
     fireEvent.change(screen.getByLabelText('Код из письма'), { target: { value: '123456' } });
     fireEvent.change(screen.getByLabelText('Новый пароль'), { target: { value: 'password-123' } });

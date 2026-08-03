@@ -20,7 +20,7 @@ const { apiMock, sessionRef, setSessionMock, searchRef, routerMock } = vi.hoiste
 }));
 vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
-  anonymousPlayerId: () => 'dev:test',
+  anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
   setSession: setSessionMock,
   clearSession: vi.fn(),
@@ -87,7 +87,7 @@ describe('ResetPage — /auth/reset (§6.2)', () => {
 
   it('success → resets with the mailed token, stores the session, goes to /profile', async () => {
     searchRef.current = new URLSearchParams('token=tok-r');
-    const session = { token: 't', player_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
+    const session = { token: 't', user_id: 'dev:test', email: 'anna@gmail.com', display_name: null, role: 'player' };
     apiMock.authResetPassword.mockResolvedValue(session);
     render(<ResetPage />);
     fireEvent.change(screen.getByLabelText('Придумайте пароль'), { target: { value: 'password-123' } });

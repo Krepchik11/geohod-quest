@@ -47,7 +47,7 @@ export function relativeTime(unixSeconds: number, nowMs: number = Date.now()): s
 export function identityName(identity: AdminIdentityWire): string {
   const name = identity.display_name?.trim();
   if (name) return name;
-  return identity.kind === 'anon' ? 'Гость' : identity.player_id;
+  return identity.kind === 'anon' ? 'Гость' : identity.user_id;
 }
 
 export interface Badge {
@@ -122,18 +122,18 @@ export interface QuestAverage {
 /**
  * The quest's average over its NON-hidden ratings — the same per-player, hide-aware
  * grain the server folds, so the confirm-dialog preview matches what ships. Pass
- * `excludePlayerId` to compute the «after» value when hiding that player's rating.
+ * `excludeUserId` to compute the «after» value when hiding that player's rating.
  */
 export function questAverage(
   reviews: readonly AdminReviewWire[],
   questId: string,
-  excludePlayerId?: string,
+  excludeUserId?: string,
 ): QuestAverage {
   const kept = reviews.filter(
     (r) =>
       r.quest_id === questId &&
       !r.hidden &&
-      r.identity.player_id !== excludePlayerId,
+      r.identity.user_id !== excludeUserId,
   );
   if (kept.length === 0) return { avg: null, count: 0 };
   const sum = kept.reduce((acc, r) => acc + r.rating, 0);

@@ -13,7 +13,7 @@ import {
 import type { AdminIdentityWire, AdminReviewWire } from '../api';
 
 const id = (over: Partial<AdminIdentityWire>): AdminIdentityWire => ({
-  player_id: 'dev:1',
+  user_id: 'dev:1',
   display_name: null,
   kind: 'anon',
   email: null,
@@ -55,7 +55,7 @@ describe('identityBadge', () => {
 describe('identityName', () => {
   it('prefers the display name, else the id, else «Гость» for anon', () => {
     expect(identityName(id({ display_name: 'Анна' }))).toBe('Анна');
-    expect(identityName(id({ kind: 'email', player_id: 'dev:5' }))).toBe('dev:5');
+    expect(identityName(id({ kind: 'email', user_id: 'dev:5' }))).toBe('dev:5');
     expect(identityName(id({ kind: 'anon' }))).toBe('Гость');
   });
 });
@@ -69,7 +69,7 @@ describe('questAverage', () => {
     text: null,
     created_at: 0,
     hidden,
-    identity: id({ player_id: player }),
+    identity: id({ user_id: player }),
   });
   it('means the non-hidden ratings for the quest', () => {
     const rs = [rev('p1', 'q1', 5), rev('p2', 'q1', 1), rev('p3', 'q2', 3)];

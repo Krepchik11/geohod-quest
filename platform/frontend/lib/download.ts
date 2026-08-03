@@ -22,7 +22,7 @@ const isHttpUrl = (ref?: string | null): ref is string => !!ref && /^https?:\/\/
 
 /** The api surface the download needs — injected so tests can stub it. */
 export interface DownloadApi {
-  getBundle(questId: string, playerId: string): Promise<BundleWire>;
+  getBundle(questId: string, userId: string): Promise<BundleWire>;
 }
 
 /**
@@ -109,12 +109,12 @@ export async function precacheBundleMedia(
 /** Download and persist a quest bundle (snapshot + media + cover). Returns the stored row. */
 export async function downloadBundle(
   questId: string,
-  playerId: string,
+  userId: string,
   api: DownloadApi,
   onStage?: (stage: DownloadStage) => void,
 ): Promise<BundleRow> {
   onStage?.('fetching');
-  const wire = await api.getBundle(questId, playerId);
+  const wire = await api.getBundle(questId, userId);
 
   onStage?.('storing');
   const row = await storeBundle(wire);

@@ -63,7 +63,7 @@ pub fn build_create_payment(
     amount_rub: i64,
     description: &str,
     return_url: &str,
-    player_id: &str,
+    user_id: &str,
     quest_id: &str,
 ) -> serde_json::Value {
     let description: String = description.chars().take(MAX_DESCRIPTION_CHARS).collect();
@@ -72,7 +72,7 @@ pub fn build_create_payment(
         "capture": true,
         "confirmation": { "type": "redirect", "return_url": return_url },
         "description": description,
-        "metadata": { "player_id": player_id, "quest_id": quest_id },
+        "metadata": { "user_id": user_id, "quest_id": quest_id },
     })
 }
 
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(body["confirmation"]["type"], "redirect");
         assert_eq!(body["confirmation"]["return_url"], "https://f/q?payment=p1");
         assert_eq!(body["description"], "Квест «Тест»");
-        assert_eq!(body["metadata"]["player_id"], "dev:a");
+        assert_eq!(body["metadata"]["user_id"], "dev:a");
         assert_eq!(body["metadata"]["quest_id"], "q-1");
     }
 

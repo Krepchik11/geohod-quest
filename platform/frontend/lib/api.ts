@@ -1,6 +1,6 @@
 /**
  * Central API client. Every backend request goes through `apiFetch`, which attaches
- * the identity headers (Bearer for a registered session, X-Player-Id for an anonymous
+ * the identity headers (Bearer for a registered session, X-User-Id for an anonymous
  * device — see lib/identity) and normalizes non-2xx responses into `ApiError`
  * carrying the HTTP status.
  *
@@ -180,9 +180,28 @@ export type CouponVerdict =
   | { valid: true; code: string; price: number; discount_amount: number; final_price: number }
   | { valid: false; message: string };
 
+/** GET /api/users/me — profile for the resolved identity (registered or anonymous). */
+export interface Me {
+  user_id: string;
+  registered: boolean;
+  email: string | null;
+  display_name: string | null;
+  role: string | null;
+  /** §6.3: unix seconds when the email was confirmed; null/absent until then. */
+  email_confirmed_at?: number | null;
+  /** WORKING sign-in methods: "email" only when a password is set, plus each
+   *  linked provider ("google"/"telegram"). An email without a password shows
+   *  up in `email` only. Drives "Способы входа". */
+  methods?: string[];
+  /** Server verdict of the unlink guard: whether a social provider may be
+   *  unlinked while keeping a way back into the account. The client renders
+   *  this — it never re-derives the rule. */
+  can_unlink?: boolean;
+}
+
 /** One registered account as served by GET /api/admin/users (admin-users spec). */
 export interface AdminUserWire {
-  player_id: string;
+  user_id: string;
   email: string;
   display_name: string | null;
   role: string;
@@ -329,7 +348,7 @@ export interface MediaRefWire {
 
 /** AccessGrant as served by GET /api/grants. */
 export interface GrantWire {
-  player_id: string;
+  user_id: string;
   quest_id: string;
   granted_at: string;
   source: string;
@@ -376,7 +395,7 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      // Identity on every call: Bearer for registered sessions, X-Player-Id for
+      // Identity on every call: Bearer for registered sessions, X-User-Id for
       // anonymous devices (player-identity spec).
       ...authHeaders(),
       ...(init?.headers || {}),
@@ -414,7 +433,7 @@ let providersPromise: Promise<{ providers: string[] }> | null = null;
  * email/Google account, a Telegram `@username` otherwise; anonymous players carry none.
  */
 export interface AdminIdentityWire {
-  player_id: string;
+  user_id: string;
   display_name: string | null;
   kind: 'google' | 'telegram' | 'email' | 'anon';
   email: string | null;
@@ -465,7 +484,7 @@ export interface AdminFeedbackResponse {
 
 /** Body for the review hide/unhide — the `(player, quest)` the decision keys on. */
 export interface ReviewHideBody {
-  player_id: string;
+  user_id: string;
   quest_id: string;
 }
 
@@ -478,7 +497,7 @@ export interface FeedbackResolveBody {
 
 export const api = {
   checkout: (body: {
-    player_id: string;
+    user_id: string;
     quest_id: string;
     coupon_code?: string;
     provider?: string;
@@ -502,7 +521,7 @@ export const api = {
 
   // Purchase-sheet promo preview: the discount lives in the server-side coupon
   // registry — this never consumes the code and always resolves to a verdict.
-  validateCoupon: (body: { player_id: string; quest_id: string; code: string }) =>
+  validateCoupon: (body: { user_id: string; quest_id: string; code: string }) =>
     apiFetch<CouponVerdict>('/api/coupons/validate', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -522,7 +541,7 @@ export const api = {
     }),
 
   // Grant-gated attempt creation: 403 without a grant, 404 for unpublished quests.
-  createAttempt: (body: { player_id: string; quest_id: string }) =>
+  createAttempt: (body: { user_id: string; quest_id: string }) =>
     apiFetch<{ attempt_id: string; snapshot_id: string }>('/api/attempts', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -531,8 +550,8 @@ export const api = {
   getAttemptState: (attemptId: string) => apiFetch(`/api/attempts/${attemptId}/state`),
 
   // Bundle download primitive: latest frozen snapshot JSON, grant-gated (403 without grant).
-  getBundle: (questId: string, playerId: string): Promise<BundleWire> =>
-    apiFetch<BundleWire>(`/api/quests/${questId}/bundle?player_id=${encodeURIComponent(playerId)}`),
+  getBundle: (questId: string, userId: string): Promise<BundleWire> =>
+    apiFetch<BundleWire>(`/api/quests/${questId}/bundle?user_id=${encodeURIComponent(userId)}`),
 
   appendFacts: (attemptId: string, facts: unknown[]) =>
     apiFetch(`/api/attempts/${attemptId}/facts`, { method: 'POST', body: JSON.stringify({ facts }) }),
@@ -550,8 +569,8 @@ export const api = {
   // build configures it (otherwise the Bearer session is the sole credential).
   adminListUsers: () =>
     apiFetch<AdminUserWire[]>('/api/admin/users', { headers: adminHeaders() }),
-  adminSetUserRole: (playerId: string, role: string) =>
-    apiFetch<AdminUserWire>(`/api/admin/users/${encodeURIComponent(playerId)}/role`, {
+  adminSetUserRole: (userId: string, role: string) =>
+    apiFetch<AdminUserWire>(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ role }),
@@ -728,19 +747,19 @@ export const api = {
   },
 
   // Identity (player-identity spec): registration attaches email+password to the
-  // caller's EXISTING anonymous player id (id never changes); login returns the
+  // caller's EXISTING anonymous user id (id never changes); login returns the
   // account identity for this device to adopt. Both return a session.
-  authRegister: (body: { player_id: string; email: string; password: string; display_name?: string }) =>
+  authRegister: (body: { user_id: string; email: string; password: string; display_name?: string }) =>
     apiFetch<Session>('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   authLogin: (body: { email: string; password: string }) =>
     apiFetch<Session>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   // Social sign-in (social-auth spec). Both attach to the caller's anonymous
-  // player_id (coins/purchases survive) or link to a logged-in account; the
+  // user_id (coins/purchases survive) or link to a logged-in account; the
   // backend verifies the provider payload before any account effect. Both return
   // a Session exactly like register/login.
-  authGoogle: (body: { credential: string; player_id: string }) =>
+  authGoogle: (body: { credential: string; user_id: string }) =>
     apiFetch<Session>('/api/auth/google', { method: 'POST', body: JSON.stringify(body) }),
-  authTelegram: (body: { id_token: string; player_id: string }) =>
+  authTelegram: (body: { id_token: string; user_id: string }) =>
     apiFetch<Session>('/api/auth/telegram', { method: 'POST', body: JSON.stringify(body) }),
   // Unlink a linked social provider (refused server-side if it is the last method).
   authUnlink: (provider: string) =>
@@ -791,19 +810,7 @@ export const api = {
     }),
   authDeleteAccount: () =>
     apiFetch<{ status: string }>('/api/auth/delete-account', { method: 'POST', body: '{}' }),
-  me: () =>
-    apiFetch<{
-      player_id: string;
-      registered: boolean;
-      email: string | null;
-      display_name: string | null;
-      role: string | null;
-      /** §6.3: unix seconds when the email was confirmed; null/absent until then. */
-      email_confirmed_at?: number | null;
-      /** Active sign-in methods: "email" (when set) + each linked provider
-       *  ("google"/"telegram"). Drives the profile "Способы входа" block. */
-      methods?: string[];
-    }>('/api/players/me'),
+  me: () => apiFetch<Me>('/api/users/me'),
   myStats: () =>
     apiFetch<{
       balance: number;
@@ -811,5 +818,5 @@ export const api = {
       completed_quest_ids: string[];
       attempts_count: number;
       grants_count: number;
-    }>('/api/players/me/stats'),
+    }>('/api/users/me/stats'),
 };

@@ -258,12 +258,12 @@ where
 
 /// One player's effective rating for one quest — the input to the public,
 /// hide-aware rating fold (content-moderation). There is exactly one row per
-/// `(player_id, quest_id)`: the player's LATEST rated attempt, taken across every
+/// `(user_id, quest_id)`: the player's LATEST rated attempt, taken across every
 /// version. Grain: per player (a replaying player counts once), all versions (a
 /// rating survives a new publish), hide-aware (dropped by the fold below).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerRatingRow {
-    pub player_id: String,
+    pub user_id: String,
     pub quest_id: String,
     pub rating: i64,
     /// Trimmed review text; `None` for a star-only rating.
@@ -288,9 +288,9 @@ pub fn effective_rating(log: &[Fact]) -> Option<(i64, Option<String>)> {
     Some((rating, text))
 }
 
-/// True when this row's `(player_id, quest_id)` is in the hidden overlay set.
+/// True when this row's `(user_id, quest_id)` is in the hidden overlay set.
 fn row_hidden(row: &PlayerRatingRow, hidden: &std::collections::HashSet<(String, String)>) -> bool {
-    hidden.contains(&(row.player_id.clone(), row.quest_id.clone()))
+    hidden.contains(&(row.user_id.clone(), row.quest_id.clone()))
 }
 
 /// Public rating fold: mean + count over the effective per-player ratings whose
@@ -322,7 +322,7 @@ pub fn fold_rating_rows(
 /// One public review (rating text); the author label is resolved by the caller.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerReview {
-    pub player_id: String,
+    pub user_id: String,
     pub created_at: u64,
     pub rating: i64,
     pub text: String,
@@ -345,7 +345,7 @@ pub fn quest_reviews(
         .into_iter()
         .take(limit)
         .map(|r| PlayerReview {
-            player_id: r.player_id.clone(),
+            user_id: r.user_id.clone(),
             created_at: r.created_at,
             rating: r.rating,
             text: r
@@ -379,7 +379,7 @@ pub struct FeedbackReportRow {
     /// Frozen version identity the reporting attempt was bound to.
     pub snapshot_id: String,
     pub step_position: i32,
-    pub player_id: String,
+    pub user_id: String,
     pub note: String,
     pub recorded_at: u64,
 }
@@ -423,7 +423,7 @@ pub fn group_feedback(
             reps.sort_by(|a, b| {
                 b.recorded_at
                     .cmp(&a.recorded_at)
-                    .then_with(|| a.player_id.cmp(&b.player_id))
+                    .then_with(|| a.user_id.cmp(&b.user_id))
                     .then_with(|| a.note.cmp(&b.note))
             });
             let resolved = resolutions
@@ -655,7 +655,7 @@ mod tests {
         at: u64,
     ) -> PlayerRatingRow {
         PlayerRatingRow {
-            player_id: player.into(),
+            user_id: player.into(),
             quest_id: quest.into(),
             rating,
             text: text.map(str::to_string),
@@ -740,7 +740,7 @@ mod tests {
             quest_id: quest.into(),
             snapshot_id: snap.into(),
             step_position: step,
-            player_id: player.into(),
+            user_id: player.into(),
             note: note.into(),
             recorded_at: at,
         }
@@ -776,7 +776,7 @@ mod tests {
             ("q1", "s1", 4)
         );
         assert_eq!(top.reports.len(), 2);
-        assert_eq!(top.reports[0].player_id, "p2", "newest first");
+        assert_eq!(top.reports[0].user_id, "p2", "newest first");
         assert!(groups.iter().all(|g| !g.resolved));
     }
 

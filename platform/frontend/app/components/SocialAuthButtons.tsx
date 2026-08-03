@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, type AuthProviders } from '../../lib/api';
-import { anonymousPlayerId, type Session } from '../../lib/identity';
+import { anonymousUserId, type Session } from '../../lib/identity';
 
 /**
  * Google + Telegram sign-in buttons (social-auth spec). ONE component for both
@@ -228,7 +228,7 @@ export default function SocialAuthButtons({
       setBusy(true);
       setError(null);
       api
-        .authGoogle({ credential, player_id: anonymousPlayerId() })
+        .authGoogle({ credential, user_id: anonymousUserId() })
         .then((s) => {
           setBusy(false);
           onSession(s);
@@ -245,7 +245,7 @@ export default function SocialAuthButtons({
       setBusy(true);
       setError(null);
       api
-        .authTelegram({ id_token: idToken, player_id: anonymousPlayerId() })
+        .authTelegram({ id_token: idToken, user_id: anonymousUserId() })
         .then((s) => {
           setBusy(false);
           onSession(s);

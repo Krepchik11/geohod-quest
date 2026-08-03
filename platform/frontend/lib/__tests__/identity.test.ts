@@ -12,10 +12,10 @@ class StorageShim {
 (globalThis as Record<string, unknown>).localStorage = new StorageShim();
 
 import {
-  anonymousPlayerId,
+  anonymousUserId,
   authHeaders,
   clearSession,
-  currentPlayerId,
+  currentUserId,
   getDeviceId,
   getSession,
   setSession,
@@ -24,7 +24,7 @@ import {
 
 const SESSION: Session = {
   token: 'a'.repeat(64),
-  player_id: 'dev:11111111-1111-4111-8111-111111111111',
+  user_id: 'dev:11111111-1111-4111-8111-111111111111',
   email: 'p@example.com',
   display_name: null,
 };
@@ -42,7 +42,7 @@ describe('device identity', () => {
   });
 
   it('derives the anonymous player id as dev:<uuid>', () => {
-    expect(anonymousPlayerId()).toBe(`dev:${getDeviceId()}`);
+    expect(anonymousUserId()).toBe(`dev:${getDeviceId()}`);
   });
 });
 
@@ -60,18 +60,26 @@ describe('session', () => {
     localStorage.setItem('geohod-session:v1', '{not json');
     expect(getSession()).toBeNull();
   });
+
+  it('keeps a pre-rename session (stored player_id) logged in as user_id', () => {
+    localStorage.setItem(
+      'geohod-session:v1',
+      JSON.stringify({ token: 'tok-legacy', player_id: 'dev:old', email: null }),
+    );
+    expect(getSession()?.user_id).toBe('dev:old');
+  });
 });
 
-describe('currentPlayerId', () => {
+describe('currentUserId', () => {
   it('is the anonymous device id while logged out', () => {
-    expect(currentPlayerId()).toBe(anonymousPlayerId());
+    expect(currentUserId()).toBe(anonymousUserId());
   });
 
   it('is the account id while a session exists, and reverts on logout', () => {
     setSession(SESSION);
-    expect(currentPlayerId()).toBe(SESSION.player_id);
+    expect(currentUserId()).toBe(SESSION.user_id);
     clearSession();
-    expect(currentPlayerId()).toBe(anonymousPlayerId());
+    expect(currentUserId()).toBe(anonymousUserId());
   });
 });
 
@@ -93,15 +101,15 @@ describe('logout rotates the device id (un-bricks anonymous use)', () => {
     setSession(SESSION);
     clearSession();
     const headers = authHeaders();
-    expect(headers).toEqual({ 'X-Player-Id': anonymousPlayerId() });
+    expect(headers).toEqual({ 'X-User-Id': anonymousUserId() });
     // The post-logout claimed id must differ from the registered account id.
-    expect(headers['X-Player-Id']).not.toBe(SESSION.player_id);
+    expect(headers['X-User-Id']).not.toBe(SESSION.user_id);
   });
 });
 
 describe('authHeaders', () => {
-  it('sends X-Player-Id while anonymous (device possession is the credential)', () => {
-    expect(authHeaders()).toEqual({ 'X-Player-Id': anonymousPlayerId() });
+  it('sends X-User-Id while anonymous (device possession is the credential)', () => {
+    expect(authHeaders()).toEqual({ 'X-User-Id': anonymousUserId() });
   });
 
   it('sends the Bearer token while a session exists', () => {

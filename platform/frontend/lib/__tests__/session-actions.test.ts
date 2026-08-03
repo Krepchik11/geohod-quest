@@ -41,7 +41,7 @@ import { logoutAndReset } from '../session-actions';
 
 const SESSION: Session = {
   token: 't'.repeat(64),
-  player_id: 'dev:account-1111',
+  user_id: 'dev:account-1111',
   email: 'a@example.com',
   display_name: null,
 };

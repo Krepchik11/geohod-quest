@@ -27,7 +27,7 @@ import AdminReviewsPage from '../reviews/page';
 import { type AdminIdentityWire } from '../../../lib/api';
 
 const id = (over: Partial<AdminIdentityWire>): AdminIdentityWire => ({
-  player_id: 'dev:1',
+  user_id: 'dev:1',
   display_name: null,
   kind: 'anon',
   email: null,
@@ -45,7 +45,7 @@ const REVIEWS = {
       text: 'Отлично',
       created_at: 100,
       hidden: false,
-      identity: id({ player_id: 'acct:anna', display_name: 'Анна', kind: 'google', email: 'anna@gmail.com' }),
+      identity: id({ user_id: 'acct:anna', display_name: 'Анна', kind: 'google', email: 'anna@gmail.com' }),
     },
     {
       quest_id: 'q1',
@@ -55,7 +55,7 @@ const REVIEWS = {
       text: null,
       created_at: 90,
       hidden: false,
-      identity: id({ player_id: 'acct:milan', display_name: 'Milan', kind: 'telegram', telegram_username: 'milan_bg' }),
+      identity: id({ user_id: 'acct:milan', display_name: 'Milan', kind: 'telegram', telegram_username: 'milan_bg' }),
     },
     {
       quest_id: 'q1',
@@ -65,7 +65,7 @@ const REVIEWS = {
       text: null,
       created_at: 80,
       hidden: false,
-      identity: id({ player_id: 'dev:anon', kind: 'anon' }),
+      identity: id({ user_id: 'dev:anon', kind: 'anon' }),
     },
   ],
 };
@@ -103,7 +103,7 @@ describe('AdminReviewsPage', () => {
     expect(screen.getByText('4.5')).toBeTruthy();
     fireEvent.click(screen.getByText('Скрыть отзыв'));
     await waitFor(() =>
-      expect(hideMock).toHaveBeenCalledWith({ player_id: 'dev:anon', quest_id: 'q1' }),
+      expect(hideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
     );
     // Hidden (and showHidden off) → it leaves the list, the hidden counter ticks.
     await waitFor(() => expect(screen.getByText(/1 скрыто/)).toBeTruthy());
@@ -120,7 +120,7 @@ describe('AdminReviewsPage', () => {
     fireEvent.click(screen.getByText(/Показать скрытые/));
     fireEvent.click(await screen.findByText('Показать'));
     await waitFor(() =>
-      expect(unhideMock).toHaveBeenCalledWith({ player_id: 'dev:anon', quest_id: 'q1' }),
+      expect(unhideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
     );
   });
 });

@@ -25,7 +25,7 @@ vi.mock('../../../../../lib/api', () => ({
   },
 }));
 vi.mock('../../../../../lib/identity', () => ({
-  currentPlayerId: () => 'dev:test',
+  currentUserId: () => 'dev:test',
   getSession: () => null,
   subscribeSession: () => () => {},
 }));
@@ -89,7 +89,7 @@ describe('AboutClient', () => {
   });
 
   it('already-owned quest renders the owned card straight away', async () => {
-    listGrantsMock.mockResolvedValue([{ player_id: 'dev:test', quest_id: 'q1' }]);
+    listGrantsMock.mockResolvedValue([{ user_id: 'dev:test', quest_id: 'q1' }]);
     render(<AboutClient questId="q1" />);
     await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
   });

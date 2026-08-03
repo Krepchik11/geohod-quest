@@ -27,7 +27,7 @@ vi.mock('../../lib/api', () => ({
   hasAdminToken: () => false,
 }));
 vi.mock('../../lib/identity', () => ({
-  currentPlayerId: () => 'dev:test',
+  currentUserId: () => 'dev:test',
   getSession: () => null,
   subscribeSession: () => () => {},
 }));
@@ -177,7 +177,7 @@ describe('the store page and the URL', () => {
     expect(screen.queryByRole('button', { name: /Только не купленные/ })).toBeNull();
     unmount();
 
-    listGrantsMock.mockResolvedValue([{ player_id: 'dev:test', quest_id: 'a' }]);
+    listGrantsMock.mockResolvedValue([{ user_id: 'dev:test', quest_id: 'a' }]);
     await mountStore();
     await waitFor(() => expect(cards()).toHaveLength(3));
     fireEvent.click(filtersButton());

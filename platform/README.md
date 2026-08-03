@@ -82,15 +82,16 @@ platform/
   email is new or known, so the user never picks the wrong mode. Registration attaches
   the email and an argon2 hash to the SAME player id — purchases, coins and facts
   survive with zero migration. Login returns the account id and an opaque session token.
-- **Social sign-in**: Google and Telegram identities link to an account through
-  `auth_identities`; a Telegram account may have neither email nor password. Both are
-  behind feature flags and fail closed when the deployment has no credentials.
+- **Social sign-in**: Google and Telegram identities link to an account as rows in
+  `identities` (every sign-in method is one row there — password included); a
+  Telegram account may have neither email nor password. Both are behind feature
+  flags and fail closed when the deployment has no credentials.
 - **Recovery**: `POST /api/auth/recover` issues a hashed single-use token (mailed as
   both a link and a 6-digit code); `POST /api/auth/reset` consumes it. Email
   confirmation is soft — a banner nudges, nothing blocks.
 - **Two-tier enforcement**: a registered player id requires `Authorization: Bearer
   <token>` on player-scoped endpoints; anonymous ids are credentialed by device
-  possession (`X-Player-Id`, sent automatically by `frontend/lib/identity.ts`).
+  possession (`X-User-Id`, sent automatically by `frontend/lib/identity.ts`).
 
 ## Feature flags
 

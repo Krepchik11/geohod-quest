@@ -125,7 +125,7 @@ describe('AdminLayout', () => {
   });
 
   it('denies an expired session (401/403 from /me)', async () => {
-    meMock.mockRejectedValue(new ApiError(403, '/api/players/me', 'forbidden'));
+    meMock.mockRejectedValue(new ApiError(403, '/api/users/me', 'forbidden'));
     render(
       <AdminLayout>
         <div>page-body</div>

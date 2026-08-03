@@ -1,7 +1,7 @@
 //! Access grants: lifetime "this player owns this quest" records (the gate before
 //! attempt creation), mirroring the `facts.rs` split of pure helpers vs. storage.
 //!
-//! A grant is idempotent by `(player_id, quest_id)` — at most one per pair, ever.
+//! A grant is idempotent by `(user_id, quest_id)` — at most one per pair, ever.
 //! The `source` (Payment / CouponRedemption / FreeQuest / Admin) and optional
 //! `source_ref` are an audit trail recorded once at creation; a later checkout for
 //! the same pair returns the existing grant unchanged (first source wins). Grants
@@ -24,30 +24,30 @@ pub enum GrantSource {
     Admin,
 }
 
-/// A lifetime ownership record: one player's access to one quest.
+/// A lifetime ownership record: one user's access to one quest.
 ///
-/// Idempotent at most one per `(player_id, quest_id)`. `granted_at` is an RFC3339
+/// Idempotent at most one per `(user_id, quest_id)`. `granted_at` is an RFC3339
 /// timestamp stamped once at creation; `source` and `source_ref` are the audit
 /// trail (the latter is `None` for free/coupon paths with nothing to reference).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccessGrant {
-    pub player_id: String,
+    pub user_id: String,
     pub quest_id: String,
     pub granted_at: String,
     pub source: GrantSource,
     pub source_ref: Option<String>,
 }
 
-/// The idempotency key: `(player_id, quest_id)`. Source is deliberately excluded
+/// The idempotency key: `(user_id, quest_id)`. Source is deliberately excluded
 /// — a grant is "buy once, own forever", so a second checkout from a different
 /// source returns the existing grant rather than creating a new one.
 pub fn natural_grant_key(g: &AccessGrant) -> (String, String) {
-    (g.player_id.clone(), g.quest_id.clone())
+    (g.user_id.clone(), g.quest_id.clone())
 }
 
 /// Pure idempotent grant decision (the logic the store runs under its lock).
 ///
-/// If `existing` already covers this `(player, quest)`, it is returned unchanged
+/// If `existing` already covers this `(user, quest)`, it is returned unchanged
 /// (`created = false`) so the first source/ref/timestamp are preserved. Otherwise a
 /// new grant is built with the caller-supplied `granted_at` — the store injects the
 /// real clock read ([`crate::store::now_rfc3339`]), keeping this function pure and
@@ -56,7 +56,7 @@ pub fn natural_grant_key(g: &AccessGrant) -> (String, String) {
 /// # Arguments
 ///
 /// * `existing` - the prior grant for this pair, if any (from the store snapshot)
-/// * `player` - player id (anonymous `dev:<uuid>` or a registered account id)
+/// * `user_id` - user id (anonymous `dev:<uuid>` or a registered account id)
 /// * `quest` - quest id (e.g. `"mystery-fortress-v1"`)
 /// * `source` - audit source for a newly created grant (ignored on an idempotent hit)
 /// * `source_ref` - optional audit reference (e.g. a payment ref); first wins
@@ -67,20 +67,20 @@ pub fn natural_grant_key(g: &AccessGrant) -> (String, String) {
 /// `(grant, created)` where `created` is true only when a new grant was built.
 pub fn create_grant_idemp(
     existing: Option<&AccessGrant>,
-    player: &str,
+    user_id: &str,
     quest: &str,
     source: GrantSource,
     source_ref: Option<String>,
     granted_at: String,
 ) -> (AccessGrant, bool) {
     if let Some(e) = existing
-        && e.player_id == player
+        && e.user_id == user_id
         && e.quest_id == quest
     {
         return (e.clone(), false);
     }
     let grant = AccessGrant {
-        player_id: player.to_string(),
+        user_id: user_id.to_string(),
         quest_id: quest.to_string(),
         granted_at,
         source,
@@ -124,7 +124,7 @@ mod tests {
         );
         // Assert 1
         assert!(created1);
-        assert_eq!(g1.player_id, player);
+        assert_eq!(g1.user_id, player);
         assert_eq!(g1.quest_id, quest);
         assert_eq!(g1.source, GrantSource::Payment);
         assert_eq!(g1.source_ref.as_deref(), Some("mock-pay-1"));
@@ -177,14 +177,14 @@ mod tests {
         assert!(cf);
         assert_eq!(gf.source, GrantSource::FreeQuest);
         // Identical downstream (same shape, different source only; eligibility same via pure)
-        assert_eq!(gc.player_id, player);
+        assert_eq!(gc.user_id, player);
         assert_ne!(gc.quest_id, gf.quest_id); // different quest ok
     }
 
     #[test]
     fn grant_natural_key_and_same() {
         let g = AccessGrant {
-            player_id: "p".into(),
+            user_id: "p".into(),
             quest_id: "q".into(),
             granted_at: "t".into(),
             source: GrantSource::Admin,

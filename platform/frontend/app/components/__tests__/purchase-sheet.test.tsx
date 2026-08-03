@@ -33,7 +33,7 @@ vi.mock('../../../lib/api', () => ({
   },
 }));
 vi.mock('../../../lib/identity', () => ({
-  currentPlayerId: () => 'dev:test',
+  currentUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
   subscribeSession: () => () => {},
 }));
@@ -116,7 +116,7 @@ describe('PurchaseSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
     await waitFor(() => expect(screen.getByText('Промокод −178 ₽')).toBeTruthy());
     expect(validateMock).toHaveBeenCalledWith({
-      player_id: 'dev:test',
+      user_id: 'dev:test',
       quest_id: 'q1',
       code: 'geo-20',
     });
@@ -139,7 +139,7 @@ describe('PurchaseSheet', () => {
     const { onPurchased } = setup();
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' }));
     await waitFor(() => expect(onPurchased).toHaveBeenCalled());
-    expect(checkoutMock).toHaveBeenCalledWith({ player_id: 'dev:test', quest_id: 'q1' });
+    expect(checkoutMock).toHaveBeenCalledWith({ user_id: 'dev:test', quest_id: 'q1' });
   });
 
   it('passes coupon_code when a promo is applied', async () => {
@@ -159,7 +159,7 @@ describe('PurchaseSheet', () => {
     fireEvent.click(confirmBtn);
     await waitFor(() => expect(onPurchased).toHaveBeenCalled());
     expect(checkoutMock).toHaveBeenCalledWith({
-      player_id: 'dev:test',
+      user_id: 'dev:test',
       quest_id: 'q1',
       coupon_code: 'GEO-20',
     });
@@ -220,7 +220,7 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Оплатить 890 ₽' }));
       await waitFor(() => expect(assign).toHaveBeenCalledWith('https://yookassa.ru/confirm/x'));
       expect(checkoutMock).toHaveBeenCalledWith({
-        player_id: 'dev:test',
+        user_id: 'dev:test',
         quest_id: 'q1',
         provider: 'yookassa',
       });
@@ -308,6 +308,6 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /Тестовая оплата/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' }));
     await waitFor(() => expect(onPurchased).toHaveBeenCalled());
-    expect(checkoutMock).toHaveBeenCalledWith({ player_id: 'dev:test', quest_id: 'q1' });
+    expect(checkoutMock).toHaveBeenCalledWith({ user_id: 'dev:test', quest_id: 'q1' });
   });
 });
