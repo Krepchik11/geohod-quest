@@ -6,7 +6,8 @@ import { api, type ProductPageWire } from '../../../../lib/api';
 import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
-import { fmtRating, plural, ratingPlural, playersPlural } from '../../../../lib/storefront';
+import { plural } from '../../../../lib/ru';
+import { fmtRating, questPlural, ratingPlural, playersPlural } from '../../../../lib/storefront';
 import { pollPaymentSettlement } from '../../../../lib/payment-return';
 import { mapsSearchUrl } from '../../../../lib/maps';
 import PurchaseSheet from '../../../components/PurchaseSheet';
@@ -267,7 +268,7 @@ export default function AboutClient({ questId }: { questId: string }) {
               <span className="qp-author__avatar" aria-hidden>{p.author_name[0]?.toUpperCase()}</span>
               <span className="qp-author__body">
                 <span><b>{p.author_name}</b> — автор квеста</span>
-                <span>{`${p.author_published_count} ${plural(p.author_published_count, 'квест', 'квеста', 'квестов')} в магазине`}</span>
+                <span>{`${p.author_published_count} ${questPlural(p.author_published_count)} в магазине`}</span>
               </span>
             </div>
           )}

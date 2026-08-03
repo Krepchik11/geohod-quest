@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { api, ApiError, apiErrorMessage, type CouponPayload, type PublishedQuestWire } from '../../../lib/api';
 import {
   STATUS_LABELS,
-  formatRubles,
   generateCode,
   lastUsedLabel,
   tileColor,
@@ -13,6 +12,7 @@ import {
   usagePercent,
   type AdminCoupon,
 } from '../../../lib/admin-coupons';
+import { formatNumber } from '../../../lib/ru';
 import { AdminConfirmSheet, AdminToast } from '../ui';
 
 /**
@@ -542,7 +542,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                                 {q.offCatalog && ' · нет в каталоге'}
                               </span>
                               <span className="ac-quest__price">
-                                {q.offCatalog ? '—' : `${formatRubles(q.price ?? 0)} ₽`}
+                                {q.offCatalog ? '—' : `${formatNumber(q.price ?? 0)} ₽`}
                               </span>
                             </button>
                           );
@@ -620,7 +620,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                       </div>
                       <div>
                         <span>Сумма скидок</span>
-                        <b>{formatRubles(coupon.totalDiscounted)} ₽</b>
+                        <b>{formatNumber(coupon.totalDiscounted)} ₽</b>
                       </div>
                     </div>
                   </div>

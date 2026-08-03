@@ -5,11 +5,11 @@ import { api, type AdminFeedbackGroupWire, type AdminReportWire } from '../../..
 import {
   identityBadge,
   identityName,
-  plural,
   questFilterOptions,
   relativeTime,
   templateLabel,
 } from '../../../lib/admin-moderation';
+import { plural } from '../../../lib/ru';
 import { AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
 

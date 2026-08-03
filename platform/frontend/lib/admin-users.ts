@@ -12,6 +12,8 @@
  */
 import type { AdminUserWire } from './api';
 import type { Role } from './roles';
+import { dottedDay, pluralCount } from './ru';
+import { dayFromUnix } from './utc-day';
 
 // Re-exported so existing importers (`import { type Role } from './admin-users'`)
 // keep working while the canonical definition lives in ./roles (admin-roles, DRY).
@@ -113,18 +115,9 @@ export function filterUsers(users: AdminUser[], activeRoles: Role[], query: stri
     .filter((u) => matchesUser(u, query));
 }
 
-/** «N пользовател-ь / -я / -ей» with correct Russian plural agreement. */
-export function pluralizeUsers(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? 'пользователь'
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? 'пользователя'
-        : 'пользователей';
-  return `${n} ${word}`;
-}
+/** «N пользовател-ь / -я / -ей». */
+export const pluralizeUsers = (n: number) =>
+  pluralCount(n, 'пользователь', 'пользователя', 'пользователей');
 
 /**
  * Format unix seconds as DD.MM.YY (the design's join-date format). Uses UTC so the
@@ -133,9 +126,5 @@ export function pluralizeUsers(n: number): string {
  */
 export function formatJoined(unixSeconds: number): string {
   if (!unixSeconds || unixSeconds <= 0) return '—';
-  const d = new Date(unixSeconds * 1000);
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const yy = String(d.getUTCFullYear() % 100).padStart(2, '0');
-  return `${dd}.${mm}.${yy}`;
+  return dottedDay(dayFromUnix(unixSeconds), 'yy');
 }

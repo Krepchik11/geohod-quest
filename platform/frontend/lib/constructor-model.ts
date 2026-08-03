@@ -249,12 +249,6 @@ export function uid(): string {
   return 'p' + Math.random().toString(36).slice(2, 10);
 }
 
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m = n % 10;
-  const h = n % 100;
-  return m === 1 && h !== 11 ? one : m >= 2 && m <= 4 && (h < 12 || h > 14) ? few : many;
-}
-
 export function fmtTime(ts: number | null): string | null {
   if (!ts) return null;
   const d = new Date(ts);

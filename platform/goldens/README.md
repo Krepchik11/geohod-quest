@@ -39,6 +39,20 @@ Fold rules pinned by these fixtures:
   key; completion bonus once per player+quest) is asserted by facts-sync tests,
   not here.
 
+## UTC-day fixtures (`utc-day/*.json`)
+
+Shared calendar-day rules (issue #69), run by `backend` (`admin_stats` tests)
+and `frontend` (`lib/__tests__/utc-day.test.ts`):
+
+- `parse_day` — strict `YYYY-MM-DD` → Unix seconds; round-trip validation
+  rejects non-existent dates (`2026-02-30`, `2100-02-29`);
+- `day_from_unix` — instant → UTC day, negatives clamp to epoch;
+- `add_days` — day shifted by a delta (Rust has no `add_days`: the golden
+  folds the composition `parse_day` + delta, which is how backend code shifts);
+- `span_days` — inclusive day count of a range.
+
+Kept in its own directory: the parity readers glob every `*.json` in theirs.
+
 ## Quest goldens
 
 - `golden-mystery-fortress-v1.json` — quest snapshot derived from a real export.

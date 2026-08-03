@@ -20,7 +20,8 @@ import {
   type AttemptLog,
   type PlayerStatsFold,
 } from '../../lib/player-stats';
-import { plural } from '../../lib/storefront';
+import { plural } from '../../lib/ru';
+import { questPlural } from '../../lib/storefront';
 
 /**
  * Профиль v2 (SPEC §7 / Profile v2.dc.html).
@@ -473,7 +474,7 @@ function DeleteSheet({ purchases, balance, onClose, onDeleted }: {
         const n = m ? Number(m[1]) : 0;
         setBlocked(
           n > 0
-            ? `Сначала снимите с публикации ${n} ${plural(n, 'квест', 'квеста', 'квестов')}`
+            ? `Сначала снимите с публикации ${n} ${questPlural(n)}`
             : 'Сначала снимите с публикации опубликованные квесты',
         );
       } else {

@@ -6,6 +6,9 @@
  * unit-testable and has a single responsibility (mirrors lib/admin-users.ts).
  */
 import type { AdminCouponWire } from './api';
+import { dottedDay, formatNumber, pluralCount } from './ru';
+import { questPlural } from './storefront';
+import { addDays, dayFromUnix } from './utc-day';
 
 /** Derived lifecycle status, exactly as the backend serves it. */
 export type CouponStatus = 'active' | 'paused' | 'expired' | 'exhausted';
@@ -95,22 +98,16 @@ export function filterCoupons(
     .filter((c) => !q || c.code.toLowerCase().includes(q));
 }
 
-/** Group digits with a narrow gap the way the design writes rubles: 1 200. */
-export function formatRubles(n: number): string {
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n).replace(/ /g, ' ');
-}
-
 /** «−20%» / «−300 ₽» — the list's discount column. */
 export function discountLabel(c: Pick<AdminCoupon, 'discountType' | 'discountValue'>): string {
   return c.discountType === 'percent'
     ? `−${c.discountValue}%`
-    : `−${formatRubles(c.discountValue)} ₽`;
+    : `−${formatNumber(c.discountValue)} ₽`;
 }
 
-/** "YYYY-MM-DD" → "DD.MM.YYYY" (the design's date format); passthrough on junk. */
+/** "YYYY-MM-DD" → "DD.MM.YYYY"; passthrough on junk. */
 export function formatDate(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : iso;
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? dottedDay(iso) : iso;
 }
 
 /** Validity column: «до 15.09.2026» / «бессрочный» / «истёк 01.07.2026». */
@@ -120,31 +117,11 @@ export function validityLabel(c: Pick<AdminCoupon, 'validUntil' | 'status'>): st
   return c.status === 'expired' ? `истёк ${date}` : `до ${date}`;
 }
 
-/** «1 квест / 2 квеста / 5 квестов» with correct Russian plural agreement. */
-export function pluralizeQuests(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? 'квест'
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? 'квеста'
-        : 'квестов';
-  return `${n} ${word}`;
-}
+/** «1 квест / 2 квеста / 5 квестов». */
+export const pluralizeQuests = (n: number) => `${n} ${questPlural(n)}`;
 
 /** «N купон / купона / купонов». */
-export function pluralizeCoupons(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  const word =
-    mod10 === 1 && mod100 !== 11
-      ? 'купон'
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? 'купона'
-        : 'купонов';
-  return `${n} ${word}`;
-}
+export const pluralizeCoupons = (n: number) => pluralCount(n, 'купон', 'купона', 'купонов');
 
 /** Scope line under the code: «Все квесты · 1 на пользователя». */
 export function scopeLabel(
@@ -181,15 +158,13 @@ export function usagePercent(c: Pick<AdminCoupon, 'used' | 'maxRedemptions'>): n
  */
 export function lastUsedLabel(iso: string | null, now: Date): string {
   if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const day = (x: Date) => Math.floor(x.getTime() / 86_400_000);
-  const diff = day(now) - day(d);
-  if (diff <= 0) return 'сегодня';
-  if (diff === 1) return 'вчера';
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  return `${dd}.${mm}.${d.getUTCFullYear()}`;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '—';
+  const day = dayFromUnix(Math.floor(t / 1000));
+  const today = dayFromUnix(Math.floor(now.getTime() / 1000));
+  if (day >= today) return 'сегодня';
+  if (day === addDays(today, -1)) return 'вчера';
+  return formatDate(day);
 }
 
 /** Brand tile palette for quest rows without a cover (design's letter tiles). */

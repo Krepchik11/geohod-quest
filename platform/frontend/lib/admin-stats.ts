@@ -14,9 +14,9 @@ import type {
   AdminStatsTotalsWire,
 } from './api';
 import type { GameStep } from './shared-model';
-import { plural, questPlural } from './storefront';
-
-export { plural };
+import { formatNumber, plural } from './ru';
+import { questPlural } from './storefront';
+import { addDays, parseDay, spanDays, todayUtc } from './utc-day';
 
 export type StatsRangeKey = '7' | '30' | '90' | 'all' | 'custom';
 
@@ -27,19 +27,6 @@ export const RANGE_CHIPS: Array<{ key: StatsRangeKey; label: string }> = [
   { key: 'all', label: 'Всё время' },
   { key: 'custom', label: 'Период…' },
 ];
-
-/** Today as a UTC calendar day — the backend buckets by UTC days. */
-export function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** `iso` shifted by `days` (UTC, no DST surprises). */
-export function addDaysIso(iso: string, days: number): string {
-  const t = Date.parse(`${iso}T00:00:00Z`);
-  return new Date(t + days * 86_400_000).toISOString().slice(0, 10);
-}
-
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * The query bounds a range chip resolves to. `all` sends no `from` (the
@@ -57,18 +44,14 @@ export function boundsFor(
   if (key === 'all') return { to: today };
   if (key === 'custom') {
     const { from, to } = custom;
-    if (!DAY_RE.test(from) || !DAY_RE.test(to)) return null;
+    if (parseDay(from) == null || parseDay(to) == null) return null;
     return from <= to ? { from, to } : { from: to, to: from };
   }
   const n = Number(key);
-  return { from: addDaysIso(today, -(n - 1)), to: today };
+  return { from: addDays(today, -(n - 1)), to: today };
 }
 
 // ── formatting ───────────────────────────────────────────────────────────────
-
-export function fmtInt(n: number): string {
-  return n.toLocaleString('ru-RU');
-}
 
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
@@ -80,8 +63,7 @@ export function fmtDayShort(iso: string): string {
 
 /** «10 июл — 16 июл 2026 · 7 дн.» */
 export function periodLabel(from: string, to: string): string {
-  const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
-  return `${fmtDayShort(from)} — ${fmtDayShort(to)} ${to.slice(0, 4)} · ${days} дн.`;
+  return `${fmtDayShort(from)} — ${fmtDayShort(to)} ${to.slice(0, 4)} · ${spanDays(from, to)} дн.`;
 }
 
 // ── KPI deltas ───────────────────────────────────────────────────────────────
@@ -133,9 +115,9 @@ export function kpisFor(cur: AdminStatsTotalsWire, prev: AdminStatsTotalsWire | 
       ? deltaVm(ratio - completionRate(prev), 0.05, '0 п.п.', (abs) => `${abs.toFixed(1)} п.п.`)
       : NO_DELTA;
   return [
-    { label: 'Куплено квестов', value: fmtInt(cur.purchased), ...deltaOf(cur.purchased, prev && prev.purchased) },
-    { label: 'Начато прохождений', value: fmtInt(cur.started), ...deltaOf(cur.started, prev && prev.started) },
-    { label: 'Завершено', value: fmtInt(cur.finished), ...deltaOf(cur.finished, prev && prev.finished) },
+    { label: 'Куплено квестов', value: formatNumber(cur.purchased), ...deltaOf(cur.purchased, prev && prev.purchased) },
+    { label: 'Начато прохождений', value: formatNumber(cur.started), ...deltaOf(cur.started, prev && prev.started) },
+    { label: 'Завершено', value: formatNumber(cur.finished), ...deltaOf(cur.finished, prev && prev.finished) },
     { label: 'Завершаемость', value: `${ratio.toFixed(1)}%`, ...ratioDelta },
   ];
 }
@@ -193,7 +175,7 @@ export function chartVm(daily: AdminStatsDailyWire[]): ChartVm | null {
     area: `${lineStarted} L${R} ${B} L${L} ${B} Z`,
     grid: [0, 0.25, 0.5, 0.75, 1].map((f) => ({
       y: Number(y(nice * f).toFixed(1)),
-      label: fmtInt(Math.round(nice * f)),
+      label: formatNumber(Math.round(nice * f)),
     })),
     xLabels: Array.from({ length: nx }, (_, i) => {
       const bi = Math.round((i / Math.max(1, nx - 1)) * (buckets.length - 1));
@@ -244,11 +226,11 @@ export function questRowVm(row: AdminStatsQuestRowWire): QuestRowVm {
     // quest is still named and placed by the authoring registry — keep what is
     // known instead of replacing the whole line.
     meta: questMetaLine(row.city, row.published ? stepsLabel(row) : 'нет в каталоге'),
-    purchased: fmtInt(row.purchased),
-    started: fmtInt(row.started),
-    finished: fmtInt(row.finished),
+    purchased: formatNumber(row.purchased),
+    started: formatNumber(row.started),
+    finished: formatNumber(row.finished),
     pct,
-    pctNote: `${fmtInt(row.finished)} из ${fmtInt(row.started)}`,
+    pctNote: `${formatNumber(row.finished)} из ${formatNumber(row.started)}`,
     low: pct < COMPLETION_WARN_BELOW,
     published: row.published,
   };
@@ -312,14 +294,14 @@ export function funnelVm(detail: Pick<AdminStatsQuestWire, 'funnel' | 'funnel_st
       idx: i + 1,
       name: s.title,
       template: (TEMPLATE_RU as Record<string, string>)[s.template] ?? s.template,
-      count: fmtInt(s.reached),
+      count: formatNumber(s.reached),
       pct: Math.round(pctOf),
       barW: Math.max(1.5, pctOf),
       tone: (isWorst ? 'worst' : i === 0 ? 'start' : 'ok') as FunnelStepVm['tone'],
       drop:
         i > 0 && dropPct > 0
           ? {
-              label: `−${dropPct}% · ушли ${fmtInt(lost)} чел.`,
+              label: `−${dropPct}% · ушли ${formatNumber(lost)} чел.`,
               tone: (isWorst ? 'worst' : dropPct >= 10 ? 'warn' : 'quiet') as 'worst' | 'warn' | 'quiet',
             }
           : null,

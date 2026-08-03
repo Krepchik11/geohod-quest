@@ -6,11 +6,11 @@ import {
   formatAverage,
   identityBadge,
   identityName,
-  plural,
   questAverage,
   questFilterOptions,
   relativeTime,
 } from '../../../lib/admin-moderation';
+import { plural } from '../../../lib/ru';
 import { AdminConfirmSheet, AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
 
