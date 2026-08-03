@@ -6,7 +6,7 @@ import React from 'react';
 /**
  * SocialAuthButtons (social-auth spec): renders a provider button only when the
  * backend reports it configured, and on the provider callback forwards the OIDC
- * id_token (with the anonymous player_id) to the API, then hands the session back.
+ * id_token (with the anonymous user_id) to the API, then hands the session back.
  */
 const { apiMock } = vi.hoisted(() => ({
   apiMock: {
@@ -20,7 +20,7 @@ vi.mock('../../../lib/api', () => ({
   // Real helper shape: server message when present, fallback otherwise.
   apiErrorMessage: (_err: unknown, fallback: string) => fallback,
 }));
-vi.mock('../../../lib/identity', () => ({ anonymousPlayerId: () => 'dev:anon-1' }));
+vi.mock('../../../lib/identity', () => ({ anonymousUserId: () => 'dev:anon-1' }));
 
 import SocialAuthButtons from '../SocialAuthButtons';
 
@@ -59,7 +59,7 @@ describe('SocialAuthButtons', () => {
 
   it('opens the Telegram OIDC popup and forwards the id_token, returning the session', async () => {
     apiMock.getAuthProviders.mockResolvedValue({ google_client_id: null, telegram_client_id: '424242' });
-    const session = { token: 't', player_id: 'dev:anon-1', email: null, display_name: 'Ann', role: 'player' };
+    const session = { token: 't', user_id: 'dev:anon-1', email: null, display_name: 'Ann', role: 'player' };
     apiMock.authTelegram.mockResolvedValue(session);
     const onSession = vi.fn();
 
@@ -82,7 +82,7 @@ describe('SocialAuthButtons', () => {
       expect.any(Function),
     );
     await waitFor(() =>
-      expect(apiMock.authTelegram).toHaveBeenCalledWith({ id_token: 'JWT', player_id: 'dev:anon-1' }),
+      expect(apiMock.authTelegram).toHaveBeenCalledWith({ id_token: 'JWT', user_id: 'dev:anon-1' }),
     );
     await waitFor(() => expect(onSession).toHaveBeenCalledWith(session));
   });

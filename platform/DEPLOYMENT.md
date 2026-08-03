@@ -127,7 +127,7 @@ Leave `payments_mock` OFF in production: it grants access without charging.
   `https://app.quest.geohod.ru,https://*.vercel.app`. Each entry is an exact origin
   or a single-`*` wildcard. **If unset, the API reflects ANY origin** (dev
   convenience, logged as a warning) — so production must set it. Auth is carried in
-  `Authorization`/`X-Player-Id` **headers, not cookies**, so credentials are not
+  `Authorization`/`X-User-Id` **headers, not cookies**, so credentials are not
   enabled. Note: `https://*.vercel.app` allows *any* Vercel app's origin; scope it
   to your project (e.g. `https://geohod-quest-*.vercel.app`) if you want it tighter.
 
@@ -201,7 +201,7 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
    `player`; **bootstrap the first admin** with the shared token (it bypasses the
    self-change guard, so it can also recover if every admin is demoted):
    ```sh
-   curl -X POST "$API/api/admin/users/<player_id>/role" \
+   curl -X POST "$API/api/admin/users/<user_id>/role" \
      -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
      -d '{"role":"admin"}'
    ```
@@ -229,8 +229,8 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
      `public` from the exposed schemas. The backend's pooler connection is
      unaffected; only the public PostgREST surface is.
    - The schema (`0001_init.sql`) additionally enables RLS (deny-by-default) on
-     **every** app table — including `auth_tokens` and `auth_identities`, which hold
-     reset-token hashes and provider subjects — as defense in depth. It is a no-op
+     **every** app table — including `auth_tokens` and `identities`, which hold
+     reset-token hashes, password hashes and provider subjects — as defense in depth. It is a no-op
      for the app, which connects as the table-owner role (RLS-exempt).
 
 ## Verify

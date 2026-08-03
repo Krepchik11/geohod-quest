@@ -81,8 +81,8 @@ const depths = [
 ];
 for (let i = 0; i < depths.length; i++) {
   const player = `probe-${RUN}-p${i + 1}`;
-  await post('/api/checkout', { player_id: player, quest_id: QUEST });
-  const att = await post('/api/attempts', { player_id: player, quest_id: QUEST });
+  await post('/api/checkout', { user_id: player, quest_id: QUEST });
+  const att = await post('/api/attempts', { user_id: player, quest_id: QUEST });
   await post(`/api/attempts/${att.attempt_id}/facts`, { facts: depths[i] });
 }
 console.log(`seeded quest ${QUEST}`);

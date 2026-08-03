@@ -201,14 +201,14 @@ describe('queue-backed replay (P4)', () => {
         };
       },
     };
-    const first = await flushPending({ questId: QUEST, playerId: 'demo-player', api });
+    const first = await flushPending({ questId: QUEST, userId: 'demo-player', api });
     expect(first?.flushed).toBe(play.expected_facts.length);
     // server echoes the same projection → no corrections to derive
     const corr = model.deriveSyncCorrections(first!.localBefore, first!.authoritative);
     expect(corr.balanceNotice).toBeUndefined();
     expect(corr.advanceOffer).toBeUndefined();
     expect(await getPendingFacts(attempt.attempt_key)).toHaveLength(0);
-    expect(await flushPending({ questId: QUEST, playerId: 'demo-player', api })).toBeNull();
+    expect(await flushPending({ questId: QUEST, userId: 'demo-player', api })).toBeNull();
     expect(posts).toBe(1);
   });
 

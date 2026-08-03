@@ -15,7 +15,7 @@ import WorkspaceGate from './WorkspaceGate';
  *
  * The matching backend guard (`require_editor`) rejects publish regardless, so
  * this is purely UX: it makes the surface fully closed instead of half-open.
- * The authoritative role comes from /api/players/me (the stored session role can
+ * The authoritative role comes from /api/users/me (the stored session role can
  * be stale), mirroring the /admin page; the token path admits the operator before
  * any editor/admin account exists.
  */

@@ -3,7 +3,7 @@
 //!
 //! A coupon is identified by an immutable `coupon_id`; the human-facing `code`
 //! is unique among coupons but editable. Redemptions are recorded once per
-//! `(coupon_id, player_id, quest_id)` — the same natural granularity as access
+//! `(coupon_id, user_id, quest_id)` — the same natural granularity as access
 //! grants ("buy once, own forever"), which makes a checkout retry idempotent
 //! and closes the double-consume race between grant check and redemption.
 //!
@@ -59,7 +59,7 @@ pub struct Coupon {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CouponRedemption {
     pub coupon_id: String,
-    pub player_id: String,
+    pub user_id: String,
     pub quest_id: String,
     pub amount_discounted: i64,
     pub redeemed_at: String,

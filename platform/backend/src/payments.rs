@@ -6,8 +6,8 @@
 /// Always-approving mock: settles instantly with a payment ref recorded on the
 /// grant (`source_ref`) for audit. The ref is deterministic per (player, quest)
 /// so the idempotent grant keeps a stable audit trail across retries and tests.
-pub fn mock_payment_ref(player_id: &str, quest_id: &str) -> String {
-    format!("mock-pay-{player_id}-{quest_id}")
+pub fn mock_payment_ref(user_id: &str, quest_id: &str) -> String {
+    format!("mock-pay-{user_id}-{quest_id}")
 }
 
 /// Lifecycle of a redirect-provider payment (YooKassa). One-way:
@@ -50,7 +50,7 @@ impl PendingStatus {
 pub struct PendingPayment {
     pub id: String,
     pub provider_payment_id: String,
-    pub player_id: String,
+    pub user_id: String,
     pub quest_id: String,
     pub coupon_code: Option<String>,
     /// Whole rubles actually charged (price minus any partial discount).

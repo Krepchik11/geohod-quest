@@ -354,7 +354,7 @@ impl TelegramClaims {
         })
     }
 
-    /// Stable identity subject for `auth_identities`.
+    /// Stable identity identifier for the `identities` table.
     pub fn subject(&self) -> String {
         self.subject.clone()
     }

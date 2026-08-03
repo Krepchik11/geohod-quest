@@ -4,7 +4,7 @@ import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
-import { currentPlayerId, getSession, subscribeSession } from '../../lib/identity';
+import { currentUserId, getSession, subscribeSession } from '../../lib/identity';
 import { pollPaymentSettlement } from '../../lib/payment-return';
 import { coverCss } from '../../lib/cover';
 
@@ -82,7 +82,7 @@ export default function PurchaseSheet({
     setReturnNotice(null);
     try {
       const result = await api.checkout({
-        player_id: currentPlayerId(),
+        user_id: currentUserId(),
         quest_id: quest.quest_id,
         ...(applied ? { coupon_code: applied.code } : {}),
         ...(method === 'yookassa' ? { provider: 'yookassa' } : {}),
@@ -140,7 +140,7 @@ export default function PurchaseSheet({
     setPromoChecking(true);
     try {
       const verdict = await api.validateCoupon({
-        player_id: currentPlayerId(),
+        user_id: currentUserId(),
         quest_id: quest.quest_id,
         code,
       });

@@ -44,7 +44,7 @@ export interface AdminUser {
 /** Map a wire account to the view-model. */
 export function toAdminUser(w: AdminUserWire): AdminUser {
   return {
-    id: w.player_id,
+    id: w.user_id,
     email: w.email,
     displayName: w.display_name,
     role: asRole(w.role),

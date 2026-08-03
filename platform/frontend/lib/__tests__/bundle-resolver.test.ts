@@ -35,7 +35,7 @@ function wire(snapshotId: string, version: number) {
 
 function deps(over: Partial<ResolverDeps> = {}): ResolverDeps {
   return {
-    playerId: 'dev:x',
+    userId: 'dev:x',
     online: true,
     getBundle: vi.fn(async () => wire(NEW, 2)),
     persist: vi.fn(async () => {}),

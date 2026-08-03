@@ -26,7 +26,7 @@ import {
  *
  * Access is gated twice: the backend authorizes every /api/admin/* call (role==admin
  * session OR the shared ADMIN_TOKEN), and the route layout (app/admin/layout.tsx)
- * checks /api/players/me up front so non-admins see a clear "no access" screen
+ * checks /api/users/me up front so non-admins see a clear "no access" screen
  * instead of an empty list — pages only mount once access is granted. The operator
  * path (NEXT_PUBLIC_ADMIN_TOKEN configured) is admitted so the very first admin
  * can be promoted before any admin account exists.

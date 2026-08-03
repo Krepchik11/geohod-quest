@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ProductPageWire } from '../../../../lib/api';
-import { currentPlayerId } from '../../../../lib/identity';
+import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
 import { fmtRating, plural, ratingPlural, playersPlural } from '../../../../lib/storefront';
@@ -77,8 +77,8 @@ export default function AboutClient({ questId }: { questId: string }) {
     api.listGrants()
       .then((grants) => {
         if (cancelled) return;
-        const me = currentPlayerId();
-        setOwned(grants.some((g) => g.player_id === me && g.quest_id === questId));
+        const me = currentUserId();
+        setOwned(grants.some((g) => g.user_id === me && g.quest_id === questId));
       })
       .catch(() => { /* owned stays false; purchase still works */ });
     return () => { cancelled = true; };
@@ -89,7 +89,7 @@ export default function AboutClient({ questId }: { questId: string }) {
   // §3.4/§4.2 auto-download with visible progress in the order card.
   const startDownload = () => {
     setDl('fetching');
-    downloadBundle(questId, currentPlayerId(), api, (stage) => setDl(stage))
+    downloadBundle(questId, currentUserId(), api, (stage) => setDl(stage))
       .catch(() => setDl(null)); // silent here; My Quests offers the visible retry
   };
 
@@ -103,7 +103,7 @@ export default function AboutClient({ questId }: { questId: string }) {
     setGranting(true);
     setGrantError(false);
     try {
-      await api.checkout({ player_id: currentPlayerId(), quest_id: questId });
+      await api.checkout({ user_id: currentUserId(), quest_id: questId });
       setOwned(true);
       startDownload();
     } catch {

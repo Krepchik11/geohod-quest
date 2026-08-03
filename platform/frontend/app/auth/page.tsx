@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api } from '../../lib/api';
 import {
-  anonymousPlayerId,
+  anonymousUserId,
   clearSession,
   getSession,
   setSession,
@@ -180,7 +180,7 @@ export default function AuthPage() {
     setError(null);
     setFieldError(null);
     try {
-      applySession(await api.authRegister({ player_id: anonymousPlayerId(), email: s.email, password }));
+      applySession(await api.authRegister({ user_id: anonymousUserId(), email: s.email, password }));
     } catch (e) {
       const status = (e as { status?: number })?.status;
       // §6.1.6: this class should be unreachable now — defensive message only.

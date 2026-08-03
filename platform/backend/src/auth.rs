@@ -1,17 +1,25 @@
-//! Identity primitive: anonymous-first players, email registration, sessions.
+//! Identity primitive: anonymous-first users, email registration, sessions.
 //!
 //! The model (player-identity spec): the client mints a device UUID and uses
-//! `dev:<uuid>` as its player id with NO server round-trip — identity exists
-//! before any network. Registration attaches email + argon2 password hash to
-//! that SAME player id (a `users` row whose PK is the anonymous id), so every
+//! `dev:<uuid>` as its user id with NO server round-trip — identity exists
+//! before any network. Registration attaches an account (a `users` row whose PK
+//! is the anonymous id, carrying the contact email) plus a `password` row in
+//! `identities` (the argon2 hash) to that SAME user id, so every
 //! grant/attempt/fact/bonus key survives with zero migration. Login from another
-//! device returns the account's player id; the device adopts it.
+//! device returns the account's user id; the device adopts it.
 //!
-//! Naming: a row in `users` is a registered *account* ([`UserAccount`]); the
-//! `player_id` it carries is the *playing identity* (the same id an anonymous
-//! device uses before it ever registers). Account = user, identity = player_id.
+//! Every way to sign in — password, google, telegram — is one `identities` row
+//! (a tagged union keyed by `method`); a method works iff its row exists. The
+//! account's email is NOT an authenticator: it is the contact/recovery channel
+//! (and the password-login address), which is why [`reachable_ways`] counts it
+//! separately from the identity rows.
 //!
-//! Enforcement (honest two-tier threat model): a REGISTERED player id requires a
+//! Naming: `user_id` is the universal principal id — it exists before any
+//! registration (anonymous devices) and regardless of role (an admin who never
+//! plays carries one too; "player" is only a ROLE value). A row in `users` is a
+//! registered *account* ([`UserAccount`]) attached to that id.
+//!
+//! Enforcement (honest two-tier threat model): a REGISTERED user id requires a
 //! valid Bearer session token for player-scoped actions; an anonymous id is
 //! credentialed by device possession alone (locked owner decision — a token
 //! cannot exist before registration). Facts append stays attempt-scoped.
@@ -35,14 +43,20 @@ pub const DEFAULT_ROLE: &str = ROLE_PLAYER;
 /// The full set of assignable roles, in display order (admin → editor → player).
 pub const ROLES: [&str; 3] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_PLAYER];
 
-/// Linkable social providers (rows in `auth_identities`). The `email` method is
-/// NOT a provider row — it is derived from `users.email`/`password_hash` presence.
+/// Sign-in methods — rows in `identities`. `password` is the built-in
+/// email+password login: its row holds the argon2 secret and exists only once a
+/// password is actually set (the login ADDRESS lives on `users.email`, which is
+/// an account property — contact + reset delivery — not a credential). Social
+/// methods key on the provider's stable subject id.
+pub const METHOD_PASSWORD: &str = "password";
 pub const PROVIDER_GOOGLE: &str = "google";
 pub const PROVIDER_TELEGRAM: &str = "telegram";
-/// The synthetic method name the client shows for the built-in email+password
-/// login (see `identity-methods` in the profile). Never stored in `auth_identities`.
+/// The wire name the client shows for the password method (the profile's
+/// `methods` list says `"email"`); storage says [`METHOD_PASSWORD`].
 pub const METHOD_EMAIL: &str = "email";
-/// Providers accepted by the social endpoints / `auth_identities` CHECK.
+/// Providers accepted by the social endpoints (the linkable/unlinkable subset
+/// of methods — the password row is managed by register/reset/change, never
+/// link/unlink).
 pub const PROVIDERS: [&str; 2] = [PROVIDER_GOOGLE, PROVIDER_TELEGRAM];
 
 /// Reject a provider outside the known set (keeps the in-memory store honest,
@@ -70,11 +84,11 @@ pub fn validate_role(role: &str) -> Result<(), AppError> {
 }
 
 /// Public account data (never carries the password hash). One row in `users`.
-/// `player_id` is the playing identity the account is attached to (kept as-is so
-/// every grant/attempt/fact key survives registration — see module docs).
+/// `user_id` is the universal principal id the account is attached to (kept
+/// as-is so every grant/attempt/fact key survives registration — module docs).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserAccount {
-    pub player_id: String,
+    pub user_id: String,
     /// Login email. `None` for a social-only account (a Telegram account has no
     /// email; a Google account has one). Unique across accounts when present.
     pub email: Option<String>,
@@ -89,11 +103,44 @@ pub struct UserAccount {
     pub email_confirmed_at: Option<u64>,
 }
 
-/// Stored registration record: public account + secret hash (store-layer only).
+/// Credential view for the password flows (login, change-password): the public
+/// account joined with its `password` identity's secret. `password_hash` is
+/// `None` when no password row exists (social-only account, or a
+/// Google-attached email whose password was never set) — such an account cannot
+/// password-login until a reset creates the row.
 #[derive(Clone, Debug)]
 pub struct UserRecord {
     pub account: UserAccount,
-    pub password_hash: String,
+    pub password_hash: Option<String>,
+}
+
+/// WORKING sign-in methods for an account: a method works iff its `identities`
+/// row exists. The password method is served under its wire name `"email"`,
+/// first; social methods follow in store order. THE source of the `/me`
+/// `methods` list — distinct from [`reachable_ways`], which also counts a
+/// password-less email because the reset flow makes it a way back in.
+pub fn signin_methods(identities: &[crate::store::AuthIdentity]) -> Vec<&str> {
+    let mut methods: Vec<&str> = Vec::new();
+    if identities.iter().any(|i| !i.is_social()) {
+        methods.push(METHOD_EMAIL);
+    }
+    methods.extend(
+        identities
+            .iter()
+            .filter(|i| i.is_social())
+            .map(|i| i.method.as_str()),
+    );
+    methods
+}
+
+/// How many ways the account can still be REACHED: every linked social method
+/// plus an email even without a password (recoverable via the §6.2 reset
+/// flow); the password row adds nothing beyond the email that resets it. THE
+/// unlink guard and the `can_unlink` verdict served to the client, so the UI
+/// and the guard can never disagree.
+pub fn reachable_ways(account: &UserAccount, identities: &[crate::store::AuthIdentity]) -> usize {
+    let social = identities.iter().filter(|i| i.is_social()).count();
+    social + usize::from(account.email.is_some())
 }
 
 /// Hash a password with argon2id (default params, random salt).
@@ -214,6 +261,59 @@ mod tests {
         assert!(validate_credentials("no-at-sign", "longenough").is_err());
         assert!(validate_credentials("a @b.io", "longenough").is_err());
         assert!(validate_credentials("a@b.io", "short").is_err());
+    }
+
+    fn identity(method: &str) -> crate::store::AuthIdentity {
+        crate::store::AuthIdentity {
+            method: method.to_string(),
+            identifier: format!("id-{method}"),
+            user_id: "dev:u1".to_string(),
+            handle: None,
+            created_at: 1,
+        }
+    }
+
+    fn account(email: Option<&str>) -> UserAccount {
+        UserAccount {
+            user_id: "dev:u1".to_string(),
+            email: email.map(str::to_string),
+            display_name: None,
+            role: DEFAULT_ROLE.to_string(),
+            created_at: 1,
+            email_confirmed_at: None,
+        }
+    }
+
+    #[test]
+    fn signin_methods_serves_password_as_email_first_then_socials() {
+        let ids = [
+            identity(PROVIDER_GOOGLE),
+            identity(METHOD_PASSWORD),
+            identity(PROVIDER_TELEGRAM),
+        ];
+        assert_eq!(signin_methods(&ids), vec!["email", "google", "telegram"]);
+    }
+
+    #[test]
+    fn signin_methods_is_row_existence_only() {
+        assert!(signin_methods(&[]).is_empty());
+        // A social-only account: no password row → no "email" method, even
+        // though the ACCOUNT may well have an email (reachable, not sign-in-able).
+        let ids = [identity(PROVIDER_TELEGRAM)];
+        assert_eq!(signin_methods(&ids), vec!["telegram"]);
+    }
+
+    #[test]
+    fn reachable_counts_socials_plus_email_and_ignores_password_row() {
+        // Password row adds nothing beyond the email that resets it.
+        let ids = [identity(METHOD_PASSWORD), identity(PROVIDER_GOOGLE)];
+        assert_eq!(reachable_ways(&account(Some("a@b.io")), &ids), 2);
+        // Email without a password still counts (reset flow is a way back in).
+        assert_eq!(reachable_ways(&account(Some("a@b.io")), &[]), 1);
+        // Social-only, no email: exactly the linked methods.
+        let ids = [identity(PROVIDER_TELEGRAM)];
+        assert_eq!(reachable_ways(&account(None), &ids), 1);
+        assert_eq!(reachable_ways(&account(None), &[]), 0);
     }
 
     #[test]

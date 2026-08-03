@@ -4,9 +4,11 @@
 -- history to replay: this file IS the schema. Invariants live as constraints
 -- wherever the database can hold them:
 --   * facts UNIQUE(attempt_id, natural_key) -> idempotent, device-agnostic append
---   * bonus_awards PK(player_id, quest_id)  -> completion bonus once per player+quest
---   * coupon_redemptions PK(coupon, player, quest) -> checkout retry is idempotent
+--   * bonus_awards PK(user_id, quest_id)    -> completion bonus once per player+quest
+--   * coupon_redemptions PK(coupon, user, quest) -> checkout retry is idempotent
 --   * snapshots rows are immutable          -> version freeze (enforced in code)
+--   * identities PK(method, identifier) + UNIQUE(user_id, method) + per-method
+--     CHECKs -> every way to sign in is one row of one shape
 --
 -- Row-Level Security is enabled on every table, with no policies (see the block
 -- at the end for why).
@@ -15,12 +17,12 @@
 
 CREATE TABLE attempts (
     attempt_id  TEXT   PRIMARY KEY,
-    player_id   TEXT   NOT NULL,
+    user_id     TEXT   NOT NULL,
     quest_id    TEXT   NOT NULL,
     snapshot_id TEXT   NOT NULL,
     created_at  BIGINT NOT NULL
 );
-CREATE INDEX idx_attempts_player_quest ON attempts (player_id, quest_id);
+CREATE INDEX idx_attempts_user_quest ON attempts (user_id, quest_id);
 CREATE INDEX idx_attempts_snapshot ON attempts (snapshot_id);
 CREATE INDEX idx_attempts_created_at ON attempts (created_at);
 
@@ -47,20 +49,20 @@ CREATE INDEX idx_facts_completed_recorded_at ON facts (recorded_at)
 CREATE INDEX idx_facts_type ON facts ((data ->> 'type'));
 
 CREATE TABLE bonus_awards (
-    player_id TEXT NOT NULL,
-    quest_id  TEXT NOT NULL,
-    PRIMARY KEY (player_id, quest_id)
+    user_id  TEXT NOT NULL,
+    quest_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, quest_id)
 );
 -- quest_id is not the leading PK column, so a per-quest count would seq-scan.
 CREATE INDEX idx_bonus_awards_quest ON bonus_awards (quest_id);
 
 CREATE TABLE access_grants (
-    player_id  TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
     quest_id   TEXT NOT NULL,
     granted_at TEXT NOT NULL,
     source     TEXT NOT NULL,
     source_ref TEXT,
-    PRIMARY KEY (player_id, quest_id)
+    PRIMARY KEY (user_id, quest_id)
 );
 CREATE INDEX idx_access_grants_quest ON access_grants (quest_id);
 CREATE INDEX idx_access_grants_granted_at ON access_grants (granted_at);
@@ -99,27 +101,27 @@ CREATE TABLE migration_marks (
     key TEXT PRIMARY KEY
 );
 
--- ---- Accounts: users, sessions, auth tokens, provider identities ----------
+-- ---- Accounts: users, sessions, auth tokens, identities -------------------
 --
 -- A row exists ONLY once a device registers — anonymous players have no row by
--- design, so registration is metadata, never a data migration. `player_id` is the
--- *playing identity* (`dev:<uuid>`), kept as the partition key across
--- attempts/facts/grants/bonus_awards/sessions; `users.player_id` reads as "the
--- player identity this account is attached to". `role` is enforced at the DB too
+-- design, so registration is metadata, never a data migration. `user_id` is the
+-- universal principal id (`dev:<uuid>`): it exists before any registration and
+-- regardless of role, kept as the partition key across
+-- attempts/facts/grants/bonus_awards/sessions. `role` is enforced at the DB too
 -- (mirrors auth::validate_role).
 --
--- email and password_hash are NULLABLE because an account may be reached by a
--- provider identity instead: a Telegram account has neither, a Google account has
--- an email from the verified token but no password. The email UNIQUE constraint
--- still holds for non-NULL values (Postgres treats NULLs as distinct), so many
--- social-only accounts coexist. Emails are canonical (trimmed + lowercased) at
--- every auth API boundary; the CHECK stops any future code path from
--- reintroducing case-variant duplicate accounts.
+-- `email` is an ACCOUNT property — the contact/recovery channel (reset mails go
+-- there) and the password-login address — not a credential; credentials live in
+-- `identities`. It is NULLABLE because a social-only account may have none (a
+-- Telegram account carries no email). The UNIQUE constraint still holds for
+-- non-NULL values (Postgres treats NULLs as distinct), so many social-only
+-- accounts coexist. Emails are canonical (trimmed + lowercased) at every auth
+-- API boundary; the CHECK stops any future code path from reintroducing
+-- case-variant duplicate accounts.
 
 CREATE TABLE users (
-    player_id          TEXT   PRIMARY KEY,
+    user_id            TEXT   PRIMARY KEY,
     email              TEXT   UNIQUE,
-    password_hash      TEXT,
     display_name       TEXT,
     created_at         BIGINT NOT NULL,
     role               TEXT   NOT NULL DEFAULT 'player'
@@ -133,10 +135,10 @@ CREATE INDEX idx_users_created_at ON users (created_at DESC);
 -- Opaque server-side session tokens (revocation = DELETE; no expiry in MVP).
 CREATE TABLE sessions (
     token      TEXT   PRIMARY KEY,
-    player_id  TEXT   NOT NULL REFERENCES users (player_id),
+    user_id    TEXT   NOT NULL REFERENCES users (user_id),
     created_at BIGINT NOT NULL
 );
-CREATE INDEX idx_sessions_player ON sessions (player_id);
+CREATE INDEX idx_sessions_user ON sessions (user_id);
 
 -- Single-use auth tokens: password reset (both the link and the 6-digit code) and
 -- email confirmation. The link token and the code are both stored HASHED — a
@@ -146,33 +148,53 @@ CREATE INDEX idx_sessions_player ON sessions (player_id);
 -- the link.
 CREATE TABLE auth_tokens (
     token_hash TEXT   PRIMARY KEY,
-    player_id  TEXT   NOT NULL,
+    user_id    TEXT   NOT NULL,
     kind       TEXT   NOT NULL CHECK (kind IN ('reset', 'confirm')),
     expires_at BIGINT NOT NULL,
     used_at    BIGINT,
     code_hash  TEXT   NOT NULL DEFAULT '',
     attempts   BIGINT NOT NULL DEFAULT 0
 );
-CREATE INDEX idx_auth_tokens_player ON auth_tokens (player_id);
+CREATE INDEX idx_auth_tokens_user ON auth_tokens (user_id);
 
--- Linked provider identities. One account (player_id) may hold several rows
--- (e.g. google + telegram); one provider identity maps to exactly one account
--- (PK). `subject` is the provider's stable id: the Google `sub`, the Telegram
--- user id. `email` is the provider-supplied address (Google), kept for
--- reference/display; it is NOT the account's login email. `username` is the
--- verified Telegram @handle, so a Telegram account is a reachable
--- t.me/<username> contact — NULL for a Telegram user with no public handle and
--- for every Google identity. ON DELETE CASCADE drops identities with the account.
-CREATE TABLE auth_identities (
-    provider   TEXT   NOT NULL CHECK (provider IN ('google', 'telegram')),
-    subject    TEXT   NOT NULL,
-    player_id  TEXT   NOT NULL REFERENCES users (player_id) ON DELETE CASCADE,
-    email      TEXT,
-    created_at BIGINT NOT NULL,
-    username   TEXT,
-    PRIMARY KEY (provider, subject)
+-- Authenticators: every way to sign in is ONE row — a tagged union keyed by
+-- `method`. A method works iff its row exists; there is no "half-linked" state.
+--
+--   * password — the built-in email+password login. `identifier` is the
+--     account's own user_id (the login ADDRESS lives on users.email, which is
+--     an account property, not a credential); `secret_hash` is the argon2 hash.
+--     The row exists only once a password is actually set, so a social-created
+--     account gains password login exactly when a §6.2 reset creates the row.
+--   * google / telegram — `identifier` is the provider's stable subject id
+--     (the Google `sub`, the Telegram user id). `handle` is the verified
+--     Telegram @username, so a Telegram account is a reachable t.me/<handle>
+--     contact — NULL for a handleless Telegram user and every other method.
+--
+-- One identity maps to exactly one account (PK); one account holds at most one
+-- row per method (UNIQUE — unlink and the profile list work per method; the
+-- constraint NAME is matched in pg_store::create_identity, rename them
+-- together). The per-method CHECKs pin each variant's exact shape, so a NULL
+-- is never an accident: a password row without a secret or a google row with a
+-- handle cannot be stored. ON DELETE CASCADE drops identities with the account.
+CREATE TABLE identities (
+    method      TEXT   NOT NULL CHECK (method IN ('password', 'google', 'telegram')),
+    identifier  TEXT   NOT NULL,
+    user_id     TEXT   NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    secret_hash TEXT,
+    handle      TEXT,
+    created_at  BIGINT NOT NULL,
+    PRIMARY KEY (method, identifier),
+    CONSTRAINT identities_one_per_method UNIQUE (user_id, method),
+    CONSTRAINT identities_password_shape CHECK (
+        method <> 'password'
+        OR (identifier = user_id AND secret_hash IS NOT NULL AND handle IS NULL)),
+    CONSTRAINT identities_google_shape CHECK (
+        method <> 'google' OR (secret_hash IS NULL AND handle IS NULL)),
+    CONSTRAINT identities_telegram_shape CHECK (
+        method <> 'telegram' OR secret_hash IS NULL)
 );
-CREATE INDEX idx_auth_identities_player ON auth_identities (player_id);
+-- Per-account scans (profile method list, unlink, admin batches) are served by
+-- the UNIQUE (user_id, method) index — user_id is its leading column.
 
 -- ---- Constructor: authoring-side registry ---------------------------------
 --
@@ -237,11 +259,11 @@ CREATE INDEX idx_coupons_created_at ON coupons (created_at DESC);
 
 CREATE TABLE coupon_redemptions (
     coupon_id         TEXT   NOT NULL REFERENCES coupons (coupon_id) ON DELETE CASCADE,
-    player_id         TEXT   NOT NULL,
+    user_id           TEXT   NOT NULL,
     quest_id          TEXT   NOT NULL,
     amount_discounted BIGINT NOT NULL,
     redeemed_at       TEXT   NOT NULL,
-    PRIMARY KEY (coupon_id, player_id, quest_id)
+    PRIMARY KEY (coupon_id, user_id, quest_id)
 );
 
 -- Pending redirect payments (YooKassa): the in-flight state between checkout
@@ -259,7 +281,7 @@ CREATE TABLE coupon_redemptions (
 CREATE TABLE pending_payments (
     id                  TEXT   PRIMARY KEY,
     provider_payment_id TEXT   NOT NULL,
-    player_id           TEXT   NOT NULL,
+    user_id             TEXT   NOT NULL,
     quest_id            TEXT   NOT NULL,
     coupon_code         TEXT,
     -- Whole rubles actually charged (price minus any partial discount).
@@ -275,7 +297,7 @@ CREATE TABLE pending_payments (
 CREATE INDEX idx_pending_payments_provider_id ON pending_payments (provider_payment_id);
 -- Checkout reuse: an open payment for (player, quest) is returned instead of
 -- creating a duplicate at the gateway.
-CREATE INDEX idx_pending_payments_player_quest ON pending_payments (player_id, quest_id);
+CREATE INDEX idx_pending_payments_user_quest ON pending_payments (user_id, quest_id);
 
 -- ---- Runtime configuration: feature toggles and settings ------------------
 --
@@ -308,11 +330,11 @@ CREATE TABLE app_settings (
 -- Row present = that player's rating for that quest is hidden from the public page
 -- and dropped from the average. Unhide deletes the row.
 CREATE TABLE hidden_reviews (
-    player_id  TEXT   NOT NULL,
+    user_id    TEXT   NOT NULL,
     quest_id   TEXT   NOT NULL,
     hidden_at  BIGINT NOT NULL,
     hidden_by  TEXT   NOT NULL,
-    PRIMARY KEY (player_id, quest_id)
+    PRIMARY KEY (user_id, quest_id)
 );
 
 -- A feedback resolution watermark, keyed to (quest, snapshot, step). `acknowledged`
@@ -342,8 +364,8 @@ CREATE TABLE resolved_feedback (
 -- not replace) disabling the Data API in the dashboard.
 --
 -- EVERY table is listed. The old incremental chain enabled RLS per migration and
--- missed auth_tokens and auth_identities; one list in one file is why that class
--- of gap cannot recur.
+-- missed auth_tokens and the identities table; one list in one file is why that
+-- class of gap cannot recur.
 
 ALTER TABLE attempts           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE facts              ENABLE ROW LEVEL SECURITY;
@@ -355,7 +377,7 @@ ALTER TABLE migration_marks    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auth_tokens        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE auth_identities    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE identities         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE constructor_quests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coupons            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coupon_redemptions ENABLE ROW LEVEL SECURITY;

@@ -35,8 +35,8 @@ import {
 
 /** The api surface the flush needs — injected so tests can stub it. */
 export interface SyncApi {
-  createAttempt(body: { player_id: string; quest_id: string }): Promise<{ attempt_id: string; snapshot_id: string }>;
-  checkout(body: { player_id: string; quest_id: string }): Promise<unknown>;
+  createAttempt(body: { user_id: string; quest_id: string }): Promise<{ attempt_id: string; snapshot_id: string }>;
+  checkout(body: { user_id: string; quest_id: string }): Promise<unknown>;
   appendFacts(attemptId: string, facts: Fact[]): Promise<unknown>;
 }
 
@@ -69,7 +69,7 @@ export function __resetSyncForTests(): void {
  */
 async function ensureRegistered(
   attemptKey: string,
-  body: { player_id: string; quest_id: string },
+  body: { user_id: string; quest_id: string },
   api: SyncApi,
   boundId: string | undefined
 ): Promise<string> {
@@ -95,7 +95,7 @@ async function ensureRegistered(
  * row), so a row snapshot taken before a prior flush bound the id can never cause
  * a duplicate registration.
  */
-function flushAttempt(attempt: AttemptRow, playerId: string, api: SyncApi): Promise<FlushResult | null> {
+function flushAttempt(attempt: AttemptRow, userId: string, api: SyncApi): Promise<FlushResult | null> {
   const existing = inflight.get(attempt.attempt_key);
   if (existing) return existing;
 
@@ -104,7 +104,7 @@ function flushAttempt(attempt: AttemptRow, playerId: string, api: SyncApi): Prom
     if (pending.length === 0) return null;
 
     const localBefore = projectState((await getFacts(attempt.attempt_key)).map((r) => r.fact));
-    const body = { player_id: playerId, quest_id: attempt.quest_id };
+    const body = { user_id: userId, quest_id: attempt.quest_id };
     const boundId = (await getAttempt(attempt.attempt_key))?.server_attempt_id;
     const serverId = await ensureRegistered(attempt.attempt_key, body, api, boundId);
 
@@ -134,12 +134,12 @@ function flushAttempt(attempt: AttemptRow, playerId: string, api: SyncApi): Prom
  */
 export async function flushPending(opts: {
   questId: string;
-  playerId: string;
+  userId: string;
   api: SyncApi;
 }): Promise<FlushResult | null> {
   const attempt = await getActiveAttempt(opts.questId);
   if (!attempt) return null;
-  return flushAttempt(attempt, opts.playerId, opts.api);
+  return flushAttempt(attempt, opts.userId, opts.api);
 }
 
 /**
@@ -153,9 +153,9 @@ export async function flushPending(opts: {
  * registration). Idempotent — already-sent facts and the once-per-quest
  * completion bonus are absorbed server-side on replay.
  */
-export async function flushAll(opts: { playerId: string; api: SyncApi }): Promise<void> {
+export async function flushAll(opts: { userId: string; api: SyncApi }): Promise<void> {
   const attempts = await listAttempts();
   await Promise.all(
-    attempts.map((a) => flushAttempt(a, opts.playerId, opts.api).catch(() => null))
+    attempts.map((a) => flushAttempt(a, opts.userId, opts.api).catch(() => null))
   );
 }

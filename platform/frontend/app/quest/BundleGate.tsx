@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { storeBundle, precacheBundleMedia } from '../../lib/download';
 import { api } from '../../lib/api';
-import { currentPlayerId } from '../../lib/identity';
+import { currentUserId } from '../../lib/identity';
 import { resolveGate, type GateResolution } from '../../lib/bundle-resolver';
 import { PlayerFrame, Flourish } from '../player/PlayerComponents';
 import QuestPlayerClient from './QuestPlayerClient';
@@ -36,9 +36,9 @@ export default function BundleGate({ questId }: { questId: string }) {
         typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).get('restart') === '1';
       const resolution = await resolveGate(questId, restart, {
-        playerId: currentPlayerId(),
+        userId: currentUserId(),
         online: typeof navigator === 'undefined' || navigator.onLine,
-        getBundle: (id, playerId) => api.getBundle(id, playerId),
+        getBundle: (id, userId) => api.getBundle(id, userId),
         persist: async (wire) => {
           const row = await storeBundle(wire);
           void precacheBundleMedia(row.snapshot_id, row.snapshot, wire.primary_comic).catch(() => {});

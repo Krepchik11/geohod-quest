@@ -55,7 +55,7 @@ lib/
 - **Identity** (`lib/identity.ts`): the device mints `dev:<uuid>` and plays offline
   with no round-trip. Registration attaches an account to that same id (zero
   migration); a session swaps in the account id. `authHeaders()` sends `Bearer` for
-  a session, `X-Player-Id` for an anonymous device.
+  a session, `X-User-Id` for an anonymous device.
 - **Offline play** (`lib/queue.ts` + `lib/sync.ts`): facts append to IndexedDB
   immediately (write-through); `sync.flush*` drains pending facts to the server when
   online, single-flight per attempt. The reducer in `QuestPlayerClient` is the UI

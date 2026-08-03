@@ -26,7 +26,7 @@ import AdminFeedbackPage from '../feedback/page';
 import type { AdminIdentityWire } from '../../../lib/api';
 
 const id = (over: Partial<AdminIdentityWire>): AdminIdentityWire => ({
-  player_id: 'dev:1',
+  user_id: 'dev:1',
   display_name: null,
   kind: 'anon',
   email: null,
@@ -48,8 +48,8 @@ const GROUPS = {
       current: true,
       resolved: false,
       reports: [
-        { note: 'Ответ не принят', recorded_at: 100, identity: id({ player_id: 'acct:igor', display_name: 'Игорь', kind: 'email', email: 'igor@mail.ru' }) },
-        { note: 'not accepted', recorded_at: 90, identity: id({ player_id: 'acct:milan', display_name: 'Milan', kind: 'telegram', telegram_username: 'milan_bg' }) },
+        { note: 'Ответ не принят', recorded_at: 100, identity: id({ user_id: 'acct:igor', display_name: 'Игорь', kind: 'email', email: 'igor@mail.ru' }) },
+        { note: 'not accepted', recorded_at: 90, identity: id({ user_id: 'acct:milan', display_name: 'Milan', kind: 'telegram', telegram_username: 'milan_bg' }) },
       ],
     },
     {

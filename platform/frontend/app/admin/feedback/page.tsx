@@ -250,7 +250,7 @@ function FeedbackGroup({
       {expanded && (
         <div className="amod-group__detail">
           {group.reports.map((rep, i) => (
-            <ReportRow key={`${rep.identity.player_id}-${rep.recorded_at}-${i}`} report={rep} />
+            <ReportRow key={`${rep.identity.user_id}-${rep.recorded_at}-${i}`} report={rep} />
           ))}
           <div className="amod-group__actions">
             <button

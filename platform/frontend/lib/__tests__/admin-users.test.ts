@@ -40,7 +40,7 @@ describe('asRole', () => {
 describe('toAdminUser', () => {
   it('maps the wire row to the view-model and coerces the role', () => {
     const wire: AdminUserWire = {
-      player_id: 'dev:9',
+      user_id: 'dev:9',
       email: 'x@y.io',
       display_name: null,
       role: 'weird',

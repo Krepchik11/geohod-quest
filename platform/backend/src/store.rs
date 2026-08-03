@@ -81,7 +81,7 @@ pub(crate) fn rfc3339_from_unix(secs: u64) -> String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttemptMeta {
     pub attempt_id: String,
-    pub player_id: String,
+    pub user_id: String,
     pub quest_id: String,
     pub snapshot_id: String,
     /// Unix seconds at creation (0 on clock error; informational only).
@@ -120,14 +120,14 @@ impl InMemoryFactStore {
     /// new registry entry with a server-generated attempt id.
     pub fn create_attempt(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         quest_id: &str,
         snapshot_id: &str,
     ) -> AttemptMeta {
         self.next_attempt_seq += 1;
         let meta = AttemptMeta {
             attempt_id: format!("att-{}", self.next_attempt_seq),
-            player_id: player_id.to_string(),
+            user_id: user_id.to_string(),
             quest_id: quest_id.to_string(),
             snapshot_id: snapshot_id.to_string(),
             created_at: now_secs(),
@@ -157,7 +157,7 @@ impl InMemoryFactStore {
                 .get(attempt_id)
                 .is_some_and(|log| log.iter().any(|e| semantically_same(e, &f)));
             let duplicate_bonus = f.kind == FactKind::CompletionBonus
-                && self.bonus_already_awarded(&meta.player_id, &meta.quest_id);
+                && self.bonus_already_awarded(&meta.user_id, &meta.quest_id);
             if duplicate_in_log || duplicate_bonus {
                 continue;
             }
@@ -176,7 +176,7 @@ impl InMemoryFactStore {
 
     /// Effective per-player ratings for the given quests (or ALL quests when
     /// `None`) — the input to the public hide-aware fold in [`crate::facts`]. One
-    /// row per `(player_id, quest_id)`: the player's latest rated attempt across
+    /// row per `(user_id, quest_id)`: the player's latest rated attempt across
     /// all versions (ties broken by `(created_at, attempt_id)` for determinism).
     /// Star-only ratings are included (with `text = None`); the fold and review
     /// list decide how each is used.
@@ -186,7 +186,7 @@ impl InMemoryFactStore {
     ) -> Vec<crate::facts::PlayerRatingRow> {
         let wanted: Option<std::collections::HashSet<&str>> =
             quests.map(|qs| qs.iter().map(String::as_str).collect());
-        // (quest_id, player_id) -> (created_at, attempt_id, rating, text) — max wins.
+        // (quest_id, user_id) -> (created_at, attempt_id, rating, text) — max wins.
         let mut best: HashMap<(String, String), BestRating> = HashMap::new();
         for meta in self.attempts.values() {
             if let Some(w) = &wanted
@@ -200,7 +200,7 @@ impl InMemoryFactStore {
             let Some((rating, text)) = crate::facts::effective_rating(log) else {
                 continue;
             };
-            let key = (meta.quest_id.clone(), meta.player_id.clone());
+            let key = (meta.quest_id.clone(), meta.user_id.clone());
             let newer = match best.get(&key) {
                 Some((at, aid, _, _)) => (meta.created_at, meta.attempt_id.as_str()) > (*at, aid),
                 None => true,
@@ -214,9 +214,9 @@ impl InMemoryFactStore {
         }
         best.into_iter()
             .map(
-                |((quest_id, player_id), (created_at, _aid, rating, text))| {
+                |((quest_id, user_id), (created_at, _aid, rating, text))| {
                     crate::facts::PlayerRatingRow {
-                        player_id,
+                        user_id,
                         quest_id,
                         rating,
                         text,
@@ -228,11 +228,11 @@ impl InMemoryFactStore {
     }
 
     /// §7.4 delete account: drop the player's attempts and their fact logs.
-    pub fn delete_player_data(&mut self, player_id: &str) {
+    pub fn delete_user_data(&mut self, user_id: &str) {
         let attempt_ids: Vec<String> = self
             .attempts
             .iter()
-            .filter(|(_, m)| m.player_id == player_id)
+            .filter(|(_, m)| m.user_id == user_id)
             .map(|(id, _)| id.clone())
             .collect();
         for id in attempt_ids {
@@ -243,10 +243,10 @@ impl InMemoryFactStore {
     }
 
     /// True if any attempt of (player, quest) already holds a completion bonus.
-    fn bonus_already_awarded(&self, player_id: &str, quest_id: &str) -> bool {
+    fn bonus_already_awarded(&self, user_id: &str, quest_id: &str) -> bool {
         self.attempts
             .values()
-            .filter(|m| m.player_id == player_id && m.quest_id == quest_id)
+            .filter(|m| m.user_id == user_id && m.quest_id == quest_id)
             .filter_map(|m| self.fact_logs.get(&m.attempt_id))
             .flatten()
             .any(|f| f.kind == FactKind::CompletionBonus)
@@ -316,7 +316,7 @@ impl InMemoryFactStore {
                     quest_id: meta.quest_id.clone(),
                     snapshot_id: meta.snapshot_id.clone(),
                     step_position: f.step_position,
-                    player_id: meta.player_id.clone(),
+                    user_id: meta.user_id.clone(),
                     note: f.note.clone().unwrap_or_default(),
                     recorded_at,
                 });
@@ -354,10 +354,10 @@ impl InMemoryFactStore {
     /// All `(quest_id, fact log)` pairs for the player's attempts — the gather
     /// behind the pure player-stats fold (one pair per attempt, empty logs kept
     /// so attempts_count is honest).
-    pub fn attempt_logs_for_player(&self, player_id: &str) -> Vec<(String, Vec<Fact>)> {
+    pub fn attempt_logs_for_user(&self, user_id: &str) -> Vec<(String, Vec<Fact>)> {
         self.attempts
             .values()
-            .filter(|m| m.player_id == player_id)
+            .filter(|m| m.user_id == user_id)
             .map(|m| {
                 (
                     m.quest_id.clone(),
@@ -384,7 +384,7 @@ impl InMemoryFactStore {
             if completed {
                 sets.entry(meta.quest_id.clone())
                     .or_default()
-                    .insert(meta.player_id.clone());
+                    .insert(meta.user_id.clone());
             }
         }
         sets.into_iter().map(|(q, s)| (q, s.len())).collect()
@@ -402,7 +402,7 @@ impl InMemoryFactStore {
                         .get(&meta.attempt_id)
                         .is_some_and(|log| log.iter().any(|f| f.kind == FactKind::CompletionBonus))
             })
-            .map(|meta| meta.player_id.clone())
+            .map(|meta| meta.user_id.clone())
             .collect::<HashSet<String>>()
             .len()
     }
@@ -646,9 +646,9 @@ impl InMemoryGrantStore {
 
     /// §7.4 delete account: purge every grant of the player. Returns the count
     /// (the confirm dialog shows honest numbers).
-    pub fn delete_grants_for_player(&mut self, player_id: &str) -> usize {
+    pub fn delete_grants_for_user(&mut self, user_id: &str) -> usize {
         let before = self.grants.len();
-        self.grants.retain(|(p, _), _| p != player_id);
+        self.grants.retain(|(p, _), _| p != user_id);
         before - self.grants.len()
     }
 
@@ -679,10 +679,10 @@ impl InMemoryGrantStore {
 
     /// Grants owned by a single player — the only grant view safe to return to a
     /// player-scoped request (no cross-player leakage).
-    pub fn grants_for_player(&self, player_id: &str) -> Vec<AccessGrant> {
+    pub fn grants_for_user(&self, user_id: &str) -> Vec<AccessGrant> {
         self.grants
             .values()
-            .filter(|g| g.player_id == player_id)
+            .filter(|g| g.user_id == user_id)
             .cloned()
             .collect()
     }
@@ -692,7 +692,7 @@ impl InMemoryGrantStore {
 /// sha256 hash — a leaked store never yields working links.
 #[derive(Clone, Debug)]
 pub struct AuthTokenRecord {
-    pub player_id: String,
+    pub user_id: String,
     pub kind: String,
     /// sha256 of the emailed 6-digit code (§6.2 R2); `""` when none was minted
     /// (legacy rows) — no sha256 hex ever matches it.
@@ -707,39 +707,85 @@ pub struct AuthTokenRecord {
 pub const TOKEN_KIND_RESET: &str = "reset";
 pub const TOKEN_KIND_CONFIRM: &str = "confirm";
 
-/// One linked social identity (`auth_identities` row): a `(provider, subject)`
-/// pair that resolves to an account `player_id`. `email` is the provider-supplied
-/// address (Google) kept for display/reference — NOT the account's login email.
+/// One authenticator (`identities` row): a `(method, identifier)` pair that
+/// resolves to an account `user_id`. Every way to sign in is one row — the
+/// `password` method (identifier = the account's own user_id; the login
+/// ADDRESS lives in `users.email`, the single source of truth) and each social
+/// provider (identifier = the provider's stable subject id). This list shape
+/// never carries the per-method secret — see [`crate::auth::UserRecord`] for
+/// the credential view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AuthIdentity {
-    pub provider: String,
-    pub subject: String,
-    pub player_id: String,
-    pub email: Option<String>,
+    pub method: String,
+    pub identifier: String,
+    pub user_id: String,
     /// Provider handle for contact — the Telegram `@username` (without the `@`),
-    /// captured so admins can reach a Telegram-only reporter at `t.me/<username>`.
-    /// `None` for Google/email identities and for a handleless Telegram user.
-    pub username: Option<String>,
+    /// captured so admins can reach a Telegram-only reporter at `t.me/<handle>`.
+    /// `None` for every other method and for a handleless Telegram user.
+    pub handle: Option<String>,
     pub created_at: u64,
+}
+
+impl AuthIdentity {
+    /// A social (linkable/unlinkable) method — everything but the password row.
+    /// THE predicate behind "linked providers" wherever methods are filtered.
+    pub fn is_social(&self) -> bool {
+        self.method != crate::auth::METHOD_PASSWORD
+    }
+}
+
+/// `create_identity` conflict messages. Two distinct unique invariants can
+/// reject a link and the caller's recovery differs — an identity owned
+/// elsewhere may be a benign race to absorb as a login, a second identity of
+/// one method never is — so the store reports WHICH invariant fired
+/// (constants, so handler matching cannot drift).
+pub const CONFLICT_IDENTITY_TAKEN: &str = "identity already linked";
+pub const CONFLICT_METHOD_TAKEN: &str = "account already holds this method";
+
+/// 404 for an id with no `users` row — one message shape for every store path.
+pub(crate) fn no_account(user_id: &str) -> AppError {
+    AppError::NotFound(format!("no account for user '{user_id}'"))
+}
+
+/// One `identities` row as stored: the public identity plus the per-method
+/// secret (the argon2 hash for `password`, `None` for social methods). The
+/// secret leaves the store only through the credential views
+/// (`find_by_email` / `user_record`), never through the identity lists.
+#[derive(Clone, Debug)]
+struct StoredIdentity {
+    identity: AuthIdentity,
+    secret_hash: Option<String>,
 }
 
 /// A 6-digit code survives at most this many verify attempts (right or wrong):
 /// 5 guesses against 10^6 codes in a 30-minute window is negligible.
 pub const MAX_CODE_ATTEMPTS: u32 = 5;
 
-/// In-memory identity store: registrations (the `users` table) + opaque sessions.
-/// A record exists ONLY for registered users — anonymous ids have no row by
-/// design (registration is metadata on an existing id, never a migration).
+/// In-memory identity store: accounts (the `users` table), authenticators (the
+/// `identities` table) + opaque sessions. A record exists ONLY for registered
+/// users — anonymous ids have no row by design (registration is metadata on an
+/// existing id, never a migration).
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryAuthStore {
-    users: HashMap<String, UserRecord>,
+    users: HashMap<String, UserAccount>,
     email_index: HashMap<String, String>,
     sessions: HashMap<String, String>,
     /// Single-use auth tokens keyed by sha256(token): reset/confirm (§6).
     auth_tokens: HashMap<String, AuthTokenRecord>,
-    /// Linked social identities keyed by `(provider, subject)` (the `auth_identities`
-    /// table). One account (`player_id`) may hold several rows.
-    identities: HashMap<(String, String), AuthIdentity>,
+    /// Authenticators keyed by `(method, identifier)` (the `identities` table):
+    /// social links AND the password row. One account (`user_id`) may hold at
+    /// most one row per method (the `UNIQUE (user_id, method)` invariant).
+    identities: HashMap<(String, String), StoredIdentity>,
+}
+
+/// The `identities` key of an account's password row: the method authenticates
+/// the account directly, so its identifier is the account's own user_id (the
+/// login ADDRESS lives on `users.email`).
+fn password_key(user_id: &str) -> (String, String) {
+    (
+        crate::auth::METHOD_PASSWORD.to_string(),
+        user_id.to_string(),
+    )
 }
 
 impl InMemoryAuthStore {
@@ -748,89 +794,109 @@ impl InMemoryAuthStore {
         Self::default()
     }
 
-    /// Register `player_id` with credentials. Rejects (409) a taken email or an
-    /// already-registered user atomically (no partial state on failure).
+    /// Register `user_id` with credentials: the account row plus its `password`
+    /// identity. Rejects (409) a taken email or an already-registered user
+    /// atomically (no partial state on failure).
     pub fn register_user(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         email: &str,
         password_hash: &str,
         display_name: Option<String>,
     ) -> Result<UserAccount, AppError> {
-        if self.users.contains_key(player_id) {
+        if self.users.contains_key(user_id) {
             return Err(AppError::Conflict("player is already registered".into()));
         }
         if self.email_index.contains_key(email) {
             return Err(AppError::Conflict("email is already taken".into()));
         }
+        let created_at = now_secs();
         let account = UserAccount {
-            player_id: player_id.to_string(),
+            user_id: user_id.to_string(),
             email: Some(email.to_string()),
             display_name,
             role: crate::auth::DEFAULT_ROLE.to_string(),
-            created_at: now_secs(),
+            created_at,
             email_confirmed_at: None,
         };
-        self.users.insert(
-            player_id.to_string(),
-            UserRecord {
-                account: account.clone(),
-                password_hash: password_hash.to_string(),
-            },
-        );
+        self.users.insert(user_id.to_string(), account.clone());
+        self.upsert_password_row(user_id, password_hash);
         self.email_index
-            .insert(email.to_string(), player_id.to_string());
+            .insert(email.to_string(), user_id.to_string());
         Ok(account)
     }
 
-    /// Full record (account + hash) by email — the login lookup.
+    /// THE only writer of `password` rows: create-or-replace the secret. The
+    /// row shape (identifier = user_id, no handle) is stated here once.
+    fn upsert_password_row(&mut self, user_id: &str, password_hash: &str) {
+        self.identities
+            .entry(password_key(user_id))
+            .or_insert_with(|| StoredIdentity {
+                identity: AuthIdentity {
+                    method: crate::auth::METHOD_PASSWORD.to_string(),
+                    identifier: user_id.to_string(),
+                    user_id: user_id.to_string(),
+                    handle: None,
+                    created_at: now_secs(),
+                },
+                secret_hash: None,
+            })
+            .secret_hash = Some(password_hash.to_string());
+    }
+
+    /// The stored password secret, if a password identity exists.
+    fn password_hash_of(&self, user_id: &str) -> Option<String> {
+        self.identities
+            .get(&password_key(user_id))
+            .and_then(|s| s.secret_hash.clone())
+    }
+
+    /// Credential view (account + password secret) by email — the login lookup.
     pub fn find_by_email(&self, email: &str) -> Option<UserRecord> {
-        let player_id = self.email_index.get(email)?;
-        self.users.get(player_id).cloned()
+        self.user_record(self.email_index.get(email)?)
     }
 
     /// Public account by player id; `None` for anonymous (unregistered) ids.
-    pub fn get_user(&self, player_id: &str) -> Option<UserAccount> {
-        self.users.get(player_id).map(|r| r.account.clone())
+    pub fn get_user(&self, user_id: &str) -> Option<UserAccount> {
+        self.users.get(user_id).cloned()
     }
 
     /// Accounts for a batch of player ids (unknown/anonymous ids are simply
     /// absent) — the in-memory mirror of the Postgres `ANY($1)` batch lookup.
-    pub fn get_users_by_ids(&self, player_ids: &[String]) -> HashMap<String, UserAccount> {
-        player_ids
+    pub fn get_users_by_ids(&self, user_ids: &[String]) -> HashMap<String, UserAccount> {
+        user_ids
             .iter()
-            .filter_map(|id| self.users.get(id).map(|r| (id.clone(), r.account.clone())))
+            .filter_map(|id| self.users.get(id).map(|a| (id.clone(), a.clone())))
             .collect()
     }
 
     /// Assign `role` to a registered account (admin-users spec). Returns 404 for
     /// an unknown/anonymous id — only registered accounts have a role. The caller
     /// validates `role` against the known set before reaching here.
-    pub fn set_role(&mut self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
-        let record = self
+    pub fn set_role(&mut self, user_id: &str, role: &str) -> Result<UserAccount, AppError> {
+        let account = self
             .users
-            .get_mut(player_id)
-            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
-        record.account.role = role.to_string();
-        Ok(record.account.clone())
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        account.role = role.to_string();
+        Ok(account.clone())
     }
 
     /// All registered accounts, newest registration first (admin user list).
     /// Anonymous devices have no row, so only real accounts are returned. Two stable
-    /// passes give the total order (created_at desc, then player_id asc) without a
+    /// passes give the total order (created_at desc, then user_id asc) without a
     /// hand-formatted comparator chain.
     pub fn list_users(&self) -> Vec<UserAccount> {
-        let mut accounts: Vec<UserAccount> =
-            self.users.values().map(|r| r.account.clone()).collect();
-        accounts.sort_by_key(|a| a.player_id.clone());
+        let mut accounts: Vec<UserAccount> = self.users.values().cloned().collect();
+        accounts.sort_by_key(|a| a.user_id.clone());
         accounts.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         accounts
     }
 
     /// Store an opaque session token for the player.
-    pub fn create_session(&mut self, token: &str, player_id: &str) {
+    pub fn create_session(&mut self, token: &str, user_id: &str) {
         self.sessions
-            .insert(token.to_string(), player_id.to_string());
+            .insert(token.to_string(), user_id.to_string());
     }
 
     /// Resolve a session token to its player id.
@@ -841,44 +907,57 @@ impl InMemoryAuthStore {
     /// The account behind a session token in one step — mirror of the Postgres
     /// single-JOIN path. An anonymous session (no account row) yields `None`.
     pub fn account_for_session(&self, token: &str) -> Option<UserAccount> {
-        let player_id = self.sessions.get(token)?;
-        self.users.get(player_id).map(|r| r.account.clone())
+        let user_id = self.sessions.get(token)?;
+        self.users.get(user_id).cloned()
     }
 
     /// §7.3 «Изменить имя» — set/clear the display name.
     pub fn set_display_name(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         display_name: Option<String>,
     ) -> Result<UserAccount, AppError> {
-        let record = self
+        let account = self
             .users
-            .get_mut(player_id)
-            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
-        record.account.display_name = display_name;
-        Ok(record.account.clone())
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        account.display_name = display_name;
+        Ok(account.clone())
     }
 
-    /// Replace the account's password hash (§6.2 reset / §7.3 change).
-    pub fn set_password(&mut self, player_id: &str, password_hash: &str) -> Result<(), AppError> {
-        let record = self
-            .users
-            .get_mut(player_id)
-            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
-        record.password_hash = password_hash.to_string();
+    /// Set the account's password (§6.2 reset / §7.3 change): upsert the
+    /// `password` identity row. Creating the row is what makes the method start
+    /// existing for [`crate::auth::signin_methods`] — a social-only account
+    /// gains password login exactly here.
+    pub fn set_password(&mut self, user_id: &str, password_hash: &str) -> Result<(), AppError> {
+        if !self.users.contains_key(user_id) {
+            return Err(no_account(user_id));
+        }
+        self.upsert_password_row(user_id, password_hash);
         Ok(())
     }
 
+    /// Credential view (account + password secret) by user id — one read where
+    /// a handler needs both the public account and the credential state
+    /// (`get_user` deliberately never exposes the hash).
+    pub fn user_record(&self, user_id: &str) -> Option<UserRecord> {
+        let account = self.users.get(user_id)?.clone();
+        Some(UserRecord {
+            password_hash: self.password_hash_of(user_id),
+            account,
+        })
+    }
+
     /// Mark the email confirmed (§6.3); idempotent — the first timestamp wins.
-    pub fn confirm_email(&mut self, player_id: &str, at: u64) -> Result<UserAccount, AppError> {
-        let record = self
+    pub fn confirm_email(&mut self, user_id: &str, at: u64) -> Result<UserAccount, AppError> {
+        let account = self
             .users
-            .get_mut(player_id)
-            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
-        if record.account.email_confirmed_at.is_none() {
-            record.account.email_confirmed_at = Some(at);
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        if account.email_confirmed_at.is_none() {
+            account.email_confirmed_at = Some(at);
         }
-        Ok(record.account.clone())
+        Ok(account.clone())
     }
 
     /// Store a single-use token (hashed by the caller). Latest mail wins:
@@ -886,7 +965,7 @@ impl InMemoryAuthStore {
     /// in play, N outstanding credentials would be N× guessable.
     pub fn create_auth_token(&mut self, token_hash: &str, rec: AuthTokenRecord) {
         self.auth_tokens.retain(|_, r| {
-            r.player_id != rec.player_id || r.kind != rec.kind || r.used_at.is_some()
+            r.user_id != rec.user_id || r.kind != rec.kind || r.used_at.is_some()
         });
         self.auth_tokens.insert(token_hash.to_string(), rec);
     }
@@ -899,7 +978,7 @@ impl InMemoryAuthStore {
             return None;
         }
         rec.used_at = Some(now);
-        Some(rec.player_id.clone())
+        Some(rec.user_id.clone())
     }
 
     /// Consume by emailed code (§6.2 R2): the player's active (unused,
@@ -907,13 +986,13 @@ impl InMemoryAuthStore {
     /// only a code_hash match consumes the token and returns the player id.
     pub fn consume_auth_token_by_code(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         kind: &str,
         code_hash: &str,
         now: u64,
     ) -> Option<String> {
         let rec = self.auth_tokens.values_mut().find(|r| {
-            r.player_id == player_id
+            r.user_id == user_id
                 && r.kind == kind
                 && r.used_at.is_none()
                 && r.expires_at >= now
@@ -924,112 +1003,126 @@ impl InMemoryAuthStore {
             return None;
         }
         rec.used_at = Some(now);
-        Some(rec.player_id.clone())
+        Some(rec.user_id.clone())
     }
 
-    /// §7.4 delete account: user row, email index, sessions and tokens.
-    pub fn delete_user(&mut self, player_id: &str) -> bool {
-        let Some(record) = self.users.remove(player_id) else {
+    /// §7.4 delete account: user row, email index, sessions, tokens and every
+    /// identity (the password row dies with the account too).
+    pub fn delete_user(&mut self, user_id: &str) -> bool {
+        let Some(account) = self.users.remove(user_id) else {
             return false;
         };
-        if let Some(email) = &record.account.email {
+        if let Some(email) = &account.email {
             self.email_index.remove(email);
         }
-        self.sessions.retain(|_, p| p != player_id);
-        self.auth_tokens.retain(|_, r| r.player_id != player_id);
-        self.identities.retain(|_, i| i.player_id != player_id);
+        self.sessions.retain(|_, p| p != user_id);
+        self.auth_tokens.retain(|_, r| r.user_id != user_id);
+        self.identities.retain(|_, s| s.identity.user_id != user_id);
         true
     }
 
-    /// The account a verified `(provider, subject)` identity resolves to, if linked.
-    pub fn find_identity(&self, provider: &str, subject: &str) -> Option<String> {
+    /// The account a verified `(method, identifier)` resolves to, if linked.
+    pub fn find_identity(&self, method: &str, identifier: &str) -> Option<String> {
         self.identities
-            .get(&(provider.to_string(), subject.to_string()))
-            .map(|i| i.player_id.clone())
+            .get(&(method.to_string(), identifier.to_string()))
+            .map(|s| s.identity.user_id.clone())
     }
 
-    /// Link a social identity to an account. Rejects (409) a `(provider, subject)`
-    /// already linked (to any account) — the caller has already resolved that an
-    /// existing link means "login", so reaching here with a duplicate is a bug/race.
+    /// Link a SOCIAL identity to an account (the password row has its own
+    /// writer, [`Self::set_password`] — mirroring the DB shape CHECKs). Each
+    /// unique invariant rejects with its own message: the `(method,
+    /// identifier)` PK ([`CONFLICT_IDENTITY_TAKEN`]) and `UNIQUE (user_id,
+    /// method)` ([`CONFLICT_METHOD_TAKEN`]) — the caller's recovery differs.
     pub fn create_identity(&mut self, identity: AuthIdentity) -> Result<(), AppError> {
-        let key = (identity.provider.clone(), identity.subject.clone());
+        crate::auth::validate_provider(&identity.method)?;
+        let key = (identity.method.clone(), identity.identifier.clone());
         if self.identities.contains_key(&key) {
-            return Err(AppError::Conflict("identity already linked".into()));
+            return Err(AppError::Conflict(CONFLICT_IDENTITY_TAKEN.into()));
         }
-        self.identities.insert(key, identity);
+        if self.identities.values().any(|s| {
+            s.identity.user_id == identity.user_id && s.identity.method == identity.method
+        }) {
+            return Err(AppError::Conflict(CONFLICT_METHOD_TAKEN.into()));
+        }
+        self.identities.insert(
+            key,
+            StoredIdentity {
+                identity,
+                secret_hash: None,
+            },
+        );
         Ok(())
     }
 
-    /// Refresh a linked identity's stored `username` (e.g. a changed Telegram
-    /// handle). Only overwrites when a new value is present — an absent claim
+    /// Refresh a linked identity's stored `handle` (e.g. a changed Telegram
+    /// @username). Only overwrites when a new value is present — an absent claim
     /// leaves the prior value untouched. No-op when the identity is not linked.
-    pub fn set_identity_username(
-        &mut self,
-        provider: &str,
-        subject: &str,
-        username: Option<String>,
-    ) {
-        let Some(username) = username else {
+    pub fn set_identity_handle(&mut self, method: &str, identifier: &str, handle: Option<String>) {
+        let Some(handle) = handle else {
             return;
         };
-        if let Some(id) = self
+        if let Some(s) = self
             .identities
-            .get_mut(&(provider.to_string(), subject.to_string()))
+            .get_mut(&(method.to_string(), identifier.to_string()))
         {
-            id.username = Some(username);
+            s.identity.handle = Some(handle);
         }
     }
 
-    /// All social identities linked to an account (for the profile method list).
-    pub fn identities_for_player(&self, player_id: &str) -> Vec<AuthIdentity> {
+    /// All identities linked to an account — every method, password row
+    /// included (for the profile method list); secrets never leave the store.
+    pub fn identities_for_user(&self, user_id: &str) -> Vec<AuthIdentity> {
         let mut out: Vec<AuthIdentity> = self
             .identities
             .values()
-            .filter(|i| i.player_id == player_id)
-            .cloned()
+            .filter(|s| s.identity.user_id == user_id)
+            .map(|s| s.identity.clone())
             .collect();
-        out.sort_by(|a, b| a.provider.cmp(&b.provider));
+        out.sort_by(|a, b| a.method.cmp(&b.method));
         out
     }
 
-    /// Identities for MANY accounts in one pass — `player_id -> its identities` —
-    /// so admin identity resolution avoids an N+1 over `identities_for_player`.
-    pub fn identities_for_players(
+    /// Identities for MANY accounts in one pass — `user_id -> its identities` —
+    /// so admin identity resolution avoids an N+1 over `identities_for_user`.
+    pub fn identities_for_users(
         &self,
-        player_ids: &[String],
+        user_ids: &[String],
     ) -> HashMap<String, Vec<AuthIdentity>> {
         let wanted: std::collections::HashSet<&str> =
-            player_ids.iter().map(String::as_str).collect();
+            user_ids.iter().map(String::as_str).collect();
         let mut out: HashMap<String, Vec<AuthIdentity>> = HashMap::new();
-        for id in self.identities.values() {
-            if wanted.contains(id.player_id.as_str()) {
-                out.entry(id.player_id.clone())
+        for s in self.identities.values() {
+            if wanted.contains(s.identity.user_id.as_str()) {
+                out.entry(s.identity.user_id.clone())
                     .or_default()
-                    .push(id.clone());
+                    .push(s.identity.clone());
             }
         }
         out
     }
 
-    /// Unlink a provider from an account. Returns whether a row was removed.
-    pub fn delete_identity(&mut self, provider: &str, player_id: &str) -> bool {
+    /// Unlink a SOCIAL method from an account (the password row is never
+    /// unlinked, only replaced via [`Self::set_password`] — enforced here, not
+    /// by caller discipline). Returns whether a row was removed.
+    pub fn delete_identity(&mut self, method: &str, user_id: &str) -> Result<bool, AppError> {
+        crate::auth::validate_provider(method)?;
         let before = self.identities.len();
         self.identities
-            .retain(|_, i| !(i.provider == provider && i.player_id == player_id));
-        self.identities.len() != before
+            .retain(|_, s| !(s.identity.method == method && s.identity.user_id == user_id));
+        Ok(self.identities.len() != before)
     }
 
-    /// Create an account row for a social-only sign-in on `player_id` (no password;
+    /// Create an account row for a social-only sign-in on `user_id` (no password;
     /// email present only for a verified Google address). Preserves the id so any
-    /// prior anonymous grants/coins survive. Rejects a taken player_id or email (409).
+    /// prior anonymous grants/coins survive. Rejects a taken user_id or email (409).
     pub fn create_social_account(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         email: Option<String>,
         display_name: Option<String>,
         email_confirmed_at: Option<u64>,
     ) -> Result<UserAccount, AppError> {
-        if self.users.contains_key(player_id) {
+        if self.users.contains_key(user_id) {
             return Err(AppError::Conflict("player is already registered".into()));
         }
         if let Some(e) = &email
@@ -1038,23 +1131,17 @@ impl InMemoryAuthStore {
             return Err(AppError::Conflict("email is already taken".into()));
         }
         let account = UserAccount {
-            player_id: player_id.to_string(),
+            user_id: user_id.to_string(),
             email: email.clone(),
             display_name,
             role: crate::auth::DEFAULT_ROLE.to_string(),
             created_at: now_secs(),
             email_confirmed_at,
         };
-        self.users.insert(
-            player_id.to_string(),
-            UserRecord {
-                account: account.clone(),
-                // No password for a social account; an empty hash never verifies.
-                password_hash: String::new(),
-            },
-        );
+        // No password row for a social account until a reset creates one.
+        self.users.insert(user_id.to_string(), account.clone());
         if let Some(e) = email {
-            self.email_index.insert(e, player_id.to_string());
+            self.email_index.insert(e, user_id.to_string());
         }
         Ok(account)
     }
@@ -1065,28 +1152,28 @@ impl InMemoryAuthStore {
     /// Google is authoritative for a verified address.
     pub fn attach_email(
         &mut self,
-        player_id: &str,
+        user_id: &str,
         email: &str,
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
         if let Some(owner) = self.email_index.get(email)
-            && owner != player_id
+            && owner != user_id
         {
             return Err(AppError::Conflict("email is already taken".into()));
         }
-        let record = self
+        let account = self
             .users
-            .get_mut(player_id)
-            .ok_or_else(|| AppError::NotFound(format!("no account for player '{player_id}'")))?;
-        if record.account.email.is_none() {
-            record.account.email = Some(email.to_string());
-            if record.account.email_confirmed_at.is_none() {
-                record.account.email_confirmed_at = Some(confirmed_at);
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        if account.email.is_none() {
+            account.email = Some(email.to_string());
+            if account.email_confirmed_at.is_none() {
+                account.email_confirmed_at = Some(confirmed_at);
             }
             self.email_index
-                .insert(email.to_string(), player_id.to_string());
+                .insert(email.to_string(), user_id.to_string());
         }
-        Ok(record.account.clone())
+        Ok(account.clone())
     }
 }
 
@@ -1121,29 +1208,29 @@ impl FactStores {
         }
     }
 
-    /// See [`InMemoryFactStore::delete_player_data`].
-    pub async fn delete_player_data(&self, player_id: &str) -> Result<(), AppError> {
+    /// See [`InMemoryFactStore::delete_user_data`].
+    pub async fn delete_user_data(&self, user_id: &str) -> Result<(), AppError> {
         match self {
             Self::InMemory(m) => {
-                Self::lock_inmem(m)?.delete_player_data(player_id);
+                Self::lock_inmem(m)?.delete_user_data(user_id);
                 Ok(())
             }
-            Self::Postgres(pg) => pg.delete_player_data(player_id).await,
+            Self::Postgres(pg) => pg.delete_user_data(user_id).await,
         }
     }
 
     /// See [`InMemoryFactStore::create_attempt`].
     pub async fn create_attempt(
         &self,
-        player_id: &str,
+        user_id: &str,
         quest_id: &str,
         snapshot_id: &str,
     ) -> Result<AttemptMeta, AppError> {
         match self {
             Self::InMemory(m) => {
-                Ok(Self::lock_inmem(m)?.create_attempt(player_id, quest_id, snapshot_id))
+                Ok(Self::lock_inmem(m)?.create_attempt(user_id, quest_id, snapshot_id))
             }
-            Self::Postgres(pg) => pg.create_attempt(player_id, quest_id, snapshot_id).await,
+            Self::Postgres(pg) => pg.create_attempt(user_id, quest_id, snapshot_id).await,
         }
     }
 
@@ -1257,14 +1344,14 @@ impl FactStores {
         }
     }
 
-    /// See [`InMemoryFactStore::attempt_logs_for_player`].
-    pub async fn attempt_logs_for_player(
+    /// See [`InMemoryFactStore::attempt_logs_for_user`].
+    pub async fn attempt_logs_for_user(
         &self,
-        player_id: &str,
+        user_id: &str,
     ) -> Result<Vec<(String, Vec<Fact>)>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.attempt_logs_for_player(player_id)),
-            Self::Postgres(pg) => pg.attempt_logs_for_player(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.attempt_logs_for_user(user_id)),
+            Self::Postgres(pg) => pg.attempt_logs_for_user(user_id).await,
         }
     }
 
@@ -1305,17 +1392,17 @@ impl AuthStores {
     /// See [`InMemoryAuthStore::register_user`].
     pub async fn register_user(
         &self,
-        player_id: &str,
+        user_id: &str,
         email: &str,
         password_hash: &str,
         display_name: Option<String>,
     ) -> Result<UserAccount, AppError> {
         match self {
             Self::InMemory(m) => {
-                Self::lock_inmem(m)?.register_user(player_id, email, password_hash, display_name)
+                Self::lock_inmem(m)?.register_user(user_id, email, password_hash, display_name)
             }
             Self::Postgres(pg) => {
-                pg.register_user(player_id, email, password_hash, display_name)
+                pg.register_user(user_id, email, password_hash, display_name)
                     .await
             }
         }
@@ -1330,29 +1417,29 @@ impl AuthStores {
     }
 
     /// See [`InMemoryAuthStore::get_user`].
-    pub async fn get_user(&self, player_id: &str) -> Result<Option<UserAccount>, AppError> {
+    pub async fn get_user(&self, user_id: &str) -> Result<Option<UserAccount>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_user(player_id)),
-            Self::Postgres(pg) => pg.get_user(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_user(user_id)),
+            Self::Postgres(pg) => pg.get_user(user_id).await,
         }
     }
 
     /// See [`InMemoryAuthStore::get_users_by_ids`].
     pub async fn get_users_by_ids(
         &self,
-        player_ids: &[String],
+        user_ids: &[String],
     ) -> Result<std::collections::HashMap<String, UserAccount>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_users_by_ids(player_ids)),
-            Self::Postgres(pg) => pg.get_users_by_ids(player_ids).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.get_users_by_ids(user_ids)),
+            Self::Postgres(pg) => pg.get_users_by_ids(user_ids).await,
         }
     }
 
     /// See [`InMemoryAuthStore::set_role`].
-    pub async fn set_role(&self, player_id: &str, role: &str) -> Result<UserAccount, AppError> {
+    pub async fn set_role(&self, user_id: &str, role: &str) -> Result<UserAccount, AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.set_role(player_id, role),
-            Self::Postgres(pg) => pg.set_role(player_id, role).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_role(user_id, role),
+            Self::Postgres(pg) => pg.set_role(user_id, role).await,
         }
     }
 
@@ -1365,41 +1452,49 @@ impl AuthStores {
     }
 
     /// See [`InMemoryAuthStore::create_session`].
-    pub async fn create_session(&self, token: &str, player_id: &str) -> Result<(), AppError> {
+    pub async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
         match self {
             Self::InMemory(m) => {
-                Self::lock_inmem(m)?.create_session(token, player_id);
+                Self::lock_inmem(m)?.create_session(token, user_id);
                 Ok(())
             }
-            Self::Postgres(pg) => pg.create_session(token, player_id).await,
+            Self::Postgres(pg) => pg.create_session(token, user_id).await,
         }
     }
 
     /// See [`InMemoryAuthStore::set_display_name`].
     pub async fn set_display_name(
         &self,
-        player_id: &str,
+        user_id: &str,
         display_name: Option<String>,
     ) -> Result<UserAccount, AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.set_display_name(player_id, display_name),
-            Self::Postgres(pg) => pg.set_display_name(player_id, display_name).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_display_name(user_id, display_name),
+            Self::Postgres(pg) => pg.set_display_name(user_id, display_name).await,
         }
     }
 
     /// See [`InMemoryAuthStore::set_password`].
-    pub async fn set_password(&self, player_id: &str, password_hash: &str) -> Result<(), AppError> {
+    pub async fn set_password(&self, user_id: &str, password_hash: &str) -> Result<(), AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.set_password(player_id, password_hash),
-            Self::Postgres(pg) => pg.set_password(player_id, password_hash).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.set_password(user_id, password_hash),
+            Self::Postgres(pg) => pg.set_password(user_id, password_hash).await,
+        }
+    }
+
+    /// See [`InMemoryAuthStore::user_record`].
+    pub async fn user_record(&self, user_id: &str) -> Result<Option<UserRecord>, AppError> {
+        match self {
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.user_record(user_id)),
+            Self::Postgres(pg) => pg.user_record(user_id).await,
         }
     }
 
     /// See [`InMemoryAuthStore::confirm_email`].
-    pub async fn confirm_email(&self, player_id: &str, at: u64) -> Result<UserAccount, AppError> {
+    pub async fn confirm_email(&self, user_id: &str, at: u64) -> Result<UserAccount, AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.confirm_email(player_id, at),
-            Self::Postgres(pg) => pg.confirm_email(player_id, at).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.confirm_email(user_id, at),
+            Self::Postgres(pg) => pg.confirm_email(user_id, at).await,
         }
     }
 
@@ -1434,27 +1529,27 @@ impl AuthStores {
     /// See [`InMemoryAuthStore::consume_auth_token_by_code`].
     pub async fn consume_auth_token_by_code(
         &self,
-        player_id: &str,
+        user_id: &str,
         kind: &str,
         code_hash: &str,
         now: u64,
     ) -> Result<Option<String>, AppError> {
         match self {
             Self::InMemory(m) => Ok(
-                Self::lock_inmem(m)?.consume_auth_token_by_code(player_id, kind, code_hash, now)
+                Self::lock_inmem(m)?.consume_auth_token_by_code(user_id, kind, code_hash, now)
             ),
             Self::Postgres(pg) => {
-                pg.consume_auth_token_by_code(player_id, kind, code_hash, now)
+                pg.consume_auth_token_by_code(user_id, kind, code_hash, now)
                     .await
             }
         }
     }
 
     /// See [`InMemoryAuthStore::delete_user`].
-    pub async fn delete_user(&self, player_id: &str) -> Result<bool, AppError> {
+    pub async fn delete_user(&self, user_id: &str) -> Result<bool, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_user(player_id)),
-            Self::Postgres(pg) => pg.delete_user(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_user(user_id)),
+            Self::Postgres(pg) => pg.delete_user(user_id).await,
         }
     }
 
@@ -1494,69 +1589,69 @@ impl AuthStores {
         }
     }
 
-    /// See [`InMemoryAuthStore::set_identity_username`].
-    pub async fn set_identity_username(
+    /// See [`InMemoryAuthStore::set_identity_handle`].
+    pub async fn set_identity_handle(
         &self,
         provider: &str,
         subject: &str,
-        username: Option<String>,
+        handle: Option<String>,
     ) -> Result<(), AppError> {
         match self {
             Self::InMemory(m) => {
-                Self::lock_inmem(m)?.set_identity_username(provider, subject, username);
+                Self::lock_inmem(m)?.set_identity_handle(provider, subject, handle);
                 Ok(())
             }
-            Self::Postgres(pg) => pg.set_identity_username(provider, subject, username).await,
+            Self::Postgres(pg) => pg.set_identity_handle(provider, subject, handle).await,
         }
     }
 
-    /// See [`InMemoryAuthStore::identities_for_player`].
-    pub async fn identities_for_player(
+    /// See [`InMemoryAuthStore::identities_for_user`].
+    pub async fn identities_for_user(
         &self,
-        player_id: &str,
+        user_id: &str,
     ) -> Result<Vec<AuthIdentity>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_player(player_id)),
-            Self::Postgres(pg) => pg.identities_for_player(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_user(user_id)),
+            Self::Postgres(pg) => pg.identities_for_user(user_id).await,
         }
     }
 
-    /// See [`InMemoryAuthStore::identities_for_players`].
-    pub async fn identities_for_players(
+    /// See [`InMemoryAuthStore::identities_for_users`].
+    pub async fn identities_for_users(
         &self,
-        player_ids: &[String],
+        user_ids: &[String],
     ) -> Result<HashMap<String, Vec<AuthIdentity>>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_players(player_ids)),
-            Self::Postgres(pg) => pg.identities_for_players(player_ids).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.identities_for_users(user_ids)),
+            Self::Postgres(pg) => pg.identities_for_users(user_ids).await,
         }
     }
 
     /// See [`InMemoryAuthStore::delete_identity`].
-    pub async fn delete_identity(&self, provider: &str, player_id: &str) -> Result<bool, AppError> {
+    pub async fn delete_identity(&self, provider: &str, user_id: &str) -> Result<bool, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_identity(provider, player_id)),
-            Self::Postgres(pg) => pg.delete_identity(provider, player_id).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.delete_identity(provider, user_id),
+            Self::Postgres(pg) => pg.delete_identity(provider, user_id).await,
         }
     }
 
     /// See [`InMemoryAuthStore::create_social_account`].
     pub async fn create_social_account(
         &self,
-        player_id: &str,
+        user_id: &str,
         email: Option<String>,
         display_name: Option<String>,
         email_confirmed_at: Option<u64>,
     ) -> Result<UserAccount, AppError> {
         match self {
             Self::InMemory(m) => Self::lock_inmem(m)?.create_social_account(
-                player_id,
+                user_id,
                 email,
                 display_name,
                 email_confirmed_at,
             ),
             Self::Postgres(pg) => {
-                pg.create_social_account(player_id, email, display_name, email_confirmed_at)
+                pg.create_social_account(user_id, email, display_name, email_confirmed_at)
                     .await
             }
         }
@@ -1565,13 +1660,13 @@ impl AuthStores {
     /// See [`InMemoryAuthStore::attach_email`].
     pub async fn attach_email(
         &self,
-        player_id: &str,
+        user_id: &str,
         email: &str,
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.attach_email(player_id, email, confirmed_at),
-            Self::Postgres(pg) => pg.attach_email(player_id, email, confirmed_at).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.attach_email(user_id, email, confirmed_at),
+            Self::Postgres(pg) => pg.attach_email(user_id, email, confirmed_at).await,
         }
     }
 }
@@ -1690,19 +1785,19 @@ impl GrantStores {
         }
     }
 
-    /// See [`InMemoryGrantStore::delete_grants_for_player`].
-    pub async fn delete_grants_for_player(&self, player_id: &str) -> Result<usize, AppError> {
+    /// See [`InMemoryGrantStore::delete_grants_for_user`].
+    pub async fn delete_grants_for_user(&self, user_id: &str) -> Result<usize, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_grants_for_player(player_id)),
-            Self::Postgres(pg) => pg.delete_grants_for_player(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.delete_grants_for_user(user_id)),
+            Self::Postgres(pg) => pg.delete_grants_for_user(user_id).await,
         }
     }
 
-    /// See [`InMemoryGrantStore::grants_for_player`].
-    pub async fn grants_for_player(&self, player_id: &str) -> Result<Vec<AccessGrant>, AppError> {
+    /// See [`InMemoryGrantStore::grants_for_user`].
+    pub async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.grants_for_player(player_id)),
-            Self::Postgres(pg) => pg.grants_for_player(player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.grants_for_user(user_id)),
+            Self::Postgres(pg) => pg.grants_for_user(user_id).await,
         }
     }
 
@@ -2298,7 +2393,7 @@ impl ConstructorStores {
 
 /// In-memory coupon registry + redemption log (the executable spec the
 /// Postgres store mirrors). Redemptions are unique per
-/// `(coupon_id, player_id, quest_id)` — same granularity as access grants —
+/// `(coupon_id, user_id, quest_id)` — same granularity as access grants —
 /// so a checkout retry never double-consumes a coupon.
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryCouponStore {
@@ -2330,10 +2425,10 @@ impl InMemoryCouponStore {
         usage
     }
 
-    fn used_by(&self, coupon_id: &str, player_id: &str) -> u32 {
+    fn used_by(&self, coupon_id: &str, user_id: &str) -> u32 {
         self.redemptions
             .iter()
-            .filter(|r| r.coupon_id == coupon_id && r.player_id == player_id)
+            .filter(|r| r.coupon_id == coupon_id && r.user_id == user_id)
             .count() as u32
     }
 
@@ -2410,10 +2505,10 @@ impl InMemoryCouponStore {
 
     /// Redeemability snapshot for the purchase-sheet preview: the coupon (by
     /// normalized code) plus the counts the pure decision needs.
-    pub fn preview(&self, code: &str, player_id: &str) -> Option<(Coupon, u32, u32)> {
+    pub fn preview(&self, code: &str, user_id: &str) -> Option<(Coupon, u32, u32)> {
         let coupon = self.coupons.values().find(|c| c.code == code)?.clone();
         let used_total = self.usage_of(&coupon.coupon_id).used;
-        let used_by_player = self.used_by(&coupon.coupon_id, player_id);
+        let used_by_player = self.used_by(&coupon.coupon_id, user_id);
         Some((coupon, used_total, used_by_player))
     }
 
@@ -2424,7 +2519,7 @@ impl InMemoryCouponStore {
     pub fn redeem(
         &mut self,
         code: &str,
-        player_id: &str,
+        user_id: &str,
         quest_id: &str,
         price: i64,
     ) -> Result<CouponRedemption, AppError> {
@@ -2435,19 +2530,19 @@ impl InMemoryCouponStore {
             .cloned()
             .ok_or_else(|| AppError::NotFound("промокод не найден".into()))?;
         if let Some(existing) = self.redemptions.iter().find(|r| {
-            r.coupon_id == coupon.coupon_id && r.player_id == player_id && r.quest_id == quest_id
+            r.coupon_id == coupon.coupon_id && r.user_id == user_id && r.quest_id == quest_id
         }) {
             return Ok(existing.clone());
         }
         let now = now_rfc3339();
         let today = &now[..10];
         let used_total = self.usage_of(&coupon.coupon_id).used;
-        let used_by_player = self.used_by(&coupon.coupon_id, player_id);
+        let used_by_player = self.used_by(&coupon.coupon_id, user_id);
         check_redeemable(&coupon, quest_id, used_total, used_by_player, today)
             .map_err(|reject| AppError::Conflict(reject.message().into()))?;
         let redemption = CouponRedemption {
             coupon_id: coupon.coupon_id.clone(),
-            player_id: player_id.to_string(),
+            user_id: user_id.to_string(),
             quest_id: quest_id.to_string(),
             amount_discounted: discount_amount(&coupon.discount, price),
             redeemed_at: now,
@@ -2529,11 +2624,11 @@ impl CouponStores {
     pub async fn preview(
         &self,
         code: &str,
-        player_id: &str,
+        user_id: &str,
     ) -> Result<Option<(Coupon, u32, u32)>, AppError> {
         match self {
-            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.preview(code, player_id)),
-            Self::Postgres(pg) => pg.preview(code, player_id).await,
+            Self::InMemory(m) => Ok(Self::lock_inmem(m)?.preview(code, user_id)),
+            Self::Postgres(pg) => pg.preview(code, user_id).await,
         }
     }
 
@@ -2541,13 +2636,13 @@ impl CouponStores {
     pub async fn redeem(
         &self,
         code: &str,
-        player_id: &str,
+        user_id: &str,
         quest_id: &str,
         price: i64,
     ) -> Result<CouponRedemption, AppError> {
         match self {
-            Self::InMemory(m) => Self::lock_inmem(m)?.redeem(code, player_id, quest_id, price),
-            Self::Postgres(pg) => pg.redeem(code, player_id, quest_id, price).await,
+            Self::InMemory(m) => Self::lock_inmem(m)?.redeem(code, user_id, quest_id, price),
+            Self::Postgres(pg) => pg.redeem(code, user_id, quest_id, price).await,
         }
     }
 }
@@ -2582,9 +2677,9 @@ impl InMemoryPaymentStore {
 
     /// An open payment for (player, quest), replayed by checkout instead of
     /// creating a duplicate at the gateway.
-    pub fn find_pending_for(&self, player_id: &str, quest_id: &str) -> Option<&PendingPayment> {
+    pub fn find_pending_for(&self, user_id: &str, quest_id: &str) -> Option<&PendingPayment> {
         self.payments.values().find(|p| {
-            p.status == PendingStatus::Pending && p.player_id == player_id && p.quest_id == quest_id
+            p.status == PendingStatus::Pending && p.user_id == user_id && p.quest_id == quest_id
         })
     }
 
@@ -2663,14 +2758,14 @@ impl PaymentStores {
     /// See [`InMemoryPaymentStore::find_pending_for`].
     pub async fn find_pending_for(
         &self,
-        player_id: &str,
+        user_id: &str,
         quest_id: &str,
     ) -> Result<Option<PendingPayment>, AppError> {
         match self {
             Self::InMemory(m) => Ok(Self::lock_inmem(m)?
-                .find_pending_for(player_id, quest_id)
+                .find_pending_for(user_id, quest_id)
                 .cloned()),
-            Self::Postgres(pg) => pg.find_pending_for(player_id, quest_id).await,
+            Self::Postgres(pg) => pg.find_pending_for(user_id, quest_id).await,
         }
     }
 
@@ -2879,7 +2974,7 @@ impl SettingsStores {
 /// immutable fact log (content-moderation). Nothing here ever reads or writes `facts`.
 ///
 /// Two independent maps:
-/// - `hidden_reviews`: `(player_id, quest_id) -> (hidden_at, hidden_by)`. Presence is
+/// - `hidden_reviews`: `(user_id, quest_id) -> (hidden_at, hidden_by)`. Presence is
 ///   the whole signal — the pair's rating is dropped from the public page + average.
 /// - `resolved_feedback`: `(quest_id, snapshot_id, step_position) -> (acknowledged,
 ///   resolved_by)`. `acknowledged` is the report count the admin marked resolved; a
@@ -2910,7 +3005,7 @@ impl InMemoryModerationStore {
             .remove(&(player.to_string(), quest.to_string()));
     }
 
-    /// The set of hidden `(player_id, quest_id)` pairs — the fold's drop list.
+    /// The set of hidden `(user_id, quest_id)` pairs — the fold's drop list.
     pub fn hidden_review_keys(&self) -> std::collections::HashSet<(String, String)> {
         self.hidden_reviews.keys().cloned().collect()
     }
@@ -3891,12 +3986,12 @@ mod rating_row_tests {
         s.append_idempotent(&c.attempt_id, vec![rated_fact("4", Some("q2"))]);
 
         let mut rows = s.quest_rating_rows(Some(&["q1".to_string()]));
-        rows.sort_by(|x, y| x.player_id.cmp(&y.player_id));
+        rows.sort_by(|x, y| x.user_id.cmp(&y.user_id));
         assert_eq!(rows.len(), 2, "one row per player for q1");
-        assert_eq!(rows[0].player_id, "p1");
+        assert_eq!(rows[0].user_id, "p1");
         assert_eq!(rows[0].rating, 5, "latest attempt's rating");
         assert_eq!(rows[0].text.as_deref(), Some("new"));
-        assert_eq!(rows[1].player_id, "p2");
+        assert_eq!(rows[1].user_id, "p2");
         assert_eq!(rows[1].rating, 1);
         assert_eq!(rows[1].text, None, "star-only carries no text");
 
@@ -3973,12 +4068,116 @@ mod feedback_report_tests {
             2,
             "only feedback_reported facts, across attempts"
         );
-        reports.sort_by(|x, y| x.player_id.cmp(&y.player_id));
+        reports.sort_by(|x, y| x.user_id.cmp(&y.user_id));
         assert_eq!(reports[0].quest_id, "q1");
         assert_eq!(reports[0].snapshot_id, "snap-v1");
         assert_eq!(reports[0].step_position, 4);
-        assert_eq!(reports[0].player_id, "p1");
+        assert_eq!(reports[0].user_id, "p1");
         assert_eq!(reports[0].note, "stuck at fountain");
         assert!(reports[0].recorded_at > 0, "server recorded_at populated");
+    }
+
+    /// A social-only account stores NO password hash — `None`, never an
+    /// empty-string sentinel that only fails login because argon2 can't parse it.
+    #[test]
+    fn social_account_stores_no_password_hash() {
+        let mut store = InMemoryAuthStore::new();
+        store
+            .create_social_account("dev:s1", Some("anna@gmail.com".into()), None, Some(1))
+            .expect("create social account");
+        let record = store.find_by_email("anna@gmail.com").expect("record");
+        assert!(record.password_hash.is_none());
+    }
+
+    /// Registration and set_password store a real hash (`Some`).
+    #[test]
+    fn registration_and_reset_store_a_real_hash() {
+        let mut store = InMemoryAuthStore::new();
+        store
+            .register_user("dev:r1", "b@c.io", "phc-hash", None)
+            .expect("register");
+        assert_eq!(
+            store.find_by_email("b@c.io").unwrap().password_hash.as_deref(),
+            Some("phc-hash")
+        );
+        store.set_password("dev:r1", "phc-hash-2").expect("set");
+        assert_eq!(
+            store.find_by_email("b@c.io").unwrap().password_hash.as_deref(),
+            Some("phc-hash-2")
+        );
+    }
+
+    /// The password method is an identities row like any other: registration
+    /// creates it, a social-only account lacks it until set_password, and the
+    /// row's secret never leaks into the identity list shape.
+    #[test]
+    fn password_method_is_an_identity_row() {
+        let mut store = InMemoryAuthStore::new();
+        store
+            .register_user("dev:r1", "b@c.io", "phc-hash", None)
+            .expect("register");
+        let ids = store.identities_for_user("dev:r1");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].method, crate::auth::METHOD_PASSWORD);
+        assert_eq!(ids[0].identifier, "dev:r1");
+
+        let mut store = InMemoryAuthStore::new();
+        store
+            .create_social_account("dev:s1", Some("a@b.io".into()), None, None)
+            .expect("social");
+        assert!(
+            store.identities_for_user("dev:s1").is_empty(),
+            "no password row until a password is actually set"
+        );
+        store.set_password("dev:s1", "phc").expect("set");
+        let ids = store.identities_for_user("dev:s1");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].method, crate::auth::METHOD_PASSWORD);
+    }
+
+    fn social(method: &str, identifier: &str, user_id: &str) -> AuthIdentity {
+        AuthIdentity {
+            method: method.into(),
+            identifier: identifier.into(),
+            user_id: user_id.into(),
+            handle: None,
+            created_at: 1,
+        }
+    }
+
+    /// UNIQUE (user_id, method): one row per method per account — a second
+    /// telegram on the same account is a 409, not silent unreachable state
+    /// (unlink works per method, so a second row could never be removed alone).
+    /// Each violated invariant reports its own typed message.
+    #[test]
+    fn one_identity_per_method_per_account() {
+        let mut store = InMemoryAuthStore::new();
+        store
+            .create_social_account("dev:u", None, None, None)
+            .expect("account");
+        store
+            .create_identity(social("telegram", "tg-1", "dev:u"))
+            .expect("first link");
+        let err = store
+            .create_identity(social("telegram", "tg-2", "dev:u"))
+            .expect_err("second identity of one method must be rejected");
+        assert!(matches!(err, AppError::Conflict(m) if m == CONFLICT_METHOD_TAKEN));
+        let err = store
+            .create_identity(social("telegram", "tg-1", "dev:other"))
+            .expect_err("identity owned elsewhere must be rejected");
+        assert!(matches!(err, AppError::Conflict(m) if m == CONFLICT_IDENTITY_TAKEN));
+        // A DIFFERENT method still links fine.
+        store
+            .create_identity(social("google", "g-1", "dev:u"))
+            .expect("other method links");
+        // The password row has its own writer — the social path refuses it.
+        let err = store
+            .create_identity(social("password", "dev:u", "dev:u"))
+            .expect_err("password is not linkable");
+        assert!(matches!(err, AppError::BadRequest(_)));
+        assert!(
+            store.delete_identity("password", "dev:u").is_err(),
+            "password is not unlinkable"
+        );
     }
 }

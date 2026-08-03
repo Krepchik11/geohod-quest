@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 vi.mock('../../../lib/identity', () => ({
   getDeviceId: () => 'dev-test',
-  currentPlayerId: () => 'player-test',
+  currentUserId: () => 'player-test',
 }));
 
 vi.mock('../../../lib/sync', () => ({ flushPending: vi.fn(async () => null) }));

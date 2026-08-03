@@ -6,7 +6,7 @@ import { getSession, subscribeSession, type Session } from './identity';
 
 /**
  * ONE hook for "who is looking at the page": the live session plus the
- * AUTHORITATIVE role/name from /api/players/me.
+ * AUTHORITATIVE role/name from /api/users/me.
  *
  * The role stored in the session is a snapshot from login and can be STALE —
  * e.g. you registered (default role player) and were then promoted to

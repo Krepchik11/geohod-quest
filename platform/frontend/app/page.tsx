@@ -5,7 +5,7 @@ import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import { api, type PublishedQuestWire } from '../lib/api';
-import { currentPlayerId } from '../lib/identity';
+import { currentUserId } from '../lib/identity';
 import { catalogFacts, factsLine } from '../lib/storefront';
 import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
 import { sortQuests } from '../lib/store-query';
@@ -77,9 +77,9 @@ export default function GeoQuestHome() {
     api.listGrants()
       .then((grants) => {
         if (cancelled) return;
-        const playerId = currentPlayerId();
+        const userId = currentUserId();
         setOwned(Object.fromEntries(
-          grants.filter((g) => g.player_id === playerId).map((g) => [g.quest_id, true])
+          grants.filter((g) => g.user_id === userId).map((g) => [g.quest_id, true])
         ));
       })
       .catch(() => { if (!cancelled) setOwned({}); });

@@ -124,7 +124,7 @@ check('pause flips the badge to «На паузе»', true);
 
 const paused = await apiJson('/api/coupons/validate', {
   method: 'POST',
-  body: JSON.stringify({ player_id: `dev:e2e-${RUN}`, quest_id: QUEST, code: CODE }),
+  body: JSON.stringify({ user_id: `dev:e2e-${RUN}`, quest_id: QUEST, code: CODE }),
 });
 check('paused code refuses validation', paused.body.valid === false && /временно/.test(paused.body.message), JSON.stringify(paused.body));
 
