@@ -49,7 +49,7 @@ platform/
 ├── goldens/              # frozen demo snapshots + shared parity fixtures (parity/)
 ├── backend/
 │   ├── Cargo.toml · rust-toolchain.toml
-│   ├── migrations/       # 0001_init.sql — the whole schema, applied at startup
+│   ├── migrations/       # sqlx migrations, applied at startup
 │   └── src/
 │       ├── main.rs       # Axum router, handlers, auth gates, integration tests
 │       ├── config.rs     # env-driven AppConfig (no unwraps)

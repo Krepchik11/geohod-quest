@@ -43,7 +43,7 @@ an invariant fails those tests.
 
 ## Deploying
 
-The database schema is a single file — [`platform/backend/migrations/0001_init.sql`](./platform/backend/migrations/0001_init.sql) —
+The database schema lives in [`platform/backend/migrations/`](./platform/backend/migrations/),
 applied by sqlx at startup. Every feature flag ships **off**; a fresh deployment
 enables what it needs from the admin panel. See
 [`platform/DEPLOYMENT.md`](./platform/DEPLOYMENT.md) for the full first-boot procedure.
