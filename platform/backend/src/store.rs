@@ -1392,111 +1392,6 @@ impl FactStore for std::sync::Mutex<InMemoryFactStore> {
     }
 }
 
-#[async_trait::async_trait]
-impl FactStore for PgFactStore {
-    async fn quest_rating_rows(
-        &self,
-        quests: Option<&[String]>,
-    ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
-        PgFactStore::quest_rating_rows(self, quests).await
-    }
-
-    async fn delete_user_data(&self, user_id: &str) -> Result<(), AppError> {
-        PgFactStore::delete_user_data(self, user_id).await
-    }
-
-    async fn create_attempt(
-        &self,
-        user_id: &str,
-        quest_id: &str,
-        snapshot_id: &str,
-    ) -> Result<AttemptMeta, AppError> {
-        PgFactStore::create_attempt(self, user_id, quest_id, snapshot_id).await
-    }
-
-    async fn append_idempotent(
-        &self,
-        attempt_id: &str,
-        incoming: Vec<Fact>,
-    ) -> Result<Option<Vec<Fact>>, AppError> {
-        PgFactStore::append_idempotent(self, attempt_id, incoming).await
-    }
-
-    async fn get_projected(
-        &self,
-        attempt_id: &str,
-    ) -> Result<Option<(ProjectedState, String, usize)>, AppError> {
-        PgFactStore::get_projected(self, attempt_id).await
-    }
-
-    async fn get_version_stats(
-        &self,
-        snap: &str,
-        grants_count: usize,
-    ) -> Result<PerVersionStats, AppError> {
-        PgFactStore::get_version_stats(self, snap, grants_count).await
-    }
-
-    async fn list_feedbacks_for_version(&self, snap: &str) -> Result<Vec<Fact>, AppError> {
-        PgFactStore::list_feedbacks_for_version(self, snap).await
-    }
-
-    async fn all_feedback_reports(&self) -> Result<Vec<crate::facts::FeedbackReportRow>, AppError> {
-        PgFactStore::all_feedback_reports(self).await
-    }
-
-    async fn stats_start_events(
-        &self,
-        from: i64,
-        to_excl: i64,
-        quest: Option<&str>,
-    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
-        PgFactStore::stats_start_events(self, from, to_excl, quest).await
-    }
-
-    async fn stats_finish_events(
-        &self,
-        from: i64,
-        to_excl: i64,
-        quest: Option<&str>,
-    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
-        PgFactStore::stats_finish_events(self, from, to_excl, quest).await
-    }
-
-    async fn funnel_logs(
-        &self,
-        snapshot_id: &str,
-        from: i64,
-        to_excl: i64,
-    ) -> Result<Vec<Vec<Fact>>, AppError> {
-        PgFactStore::funnel_logs(self, snapshot_id, from, to_excl).await
-    }
-
-    async fn run_legacy_migration(
-        &self,
-        historical_grants: Vec<serde_json::Value>,
-        answer_cards: Vec<serde_json::Value>,
-        key: &str,
-    ) -> Result<MigrationResult, AppError> {
-        PgFactStore::run_legacy_migration(self, historical_grants, answer_cards, key).await
-    }
-
-    async fn attempt_logs_for_user(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<(String, Vec<Fact>)>, AppError> {
-        PgFactStore::attempt_logs_for_user(self, user_id).await
-    }
-
-    async fn completions_by_quest(&self) -> Result<HashMap<String, usize>, AppError> {
-        PgFactStore::completions_by_quest(self).await
-    }
-
-    async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
-        PgFactStore::completions_for_quest(self, quest_id).await
-    }
-}
-
 /// Identity storage backend (see [`FactStore`] for the pattern).
 #[async_trait::async_trait]
 pub trait AuthStore: Send + Sync {
@@ -1787,161 +1682,6 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
     }
 }
 
-#[async_trait::async_trait]
-impl AuthStore for PgAuthStore {
-    async fn register_user(
-        &self,
-        user_id: &str,
-        email: &str,
-        password_hash: &str,
-        display_name: Option<String>,
-    ) -> Result<UserAccount, AppError> {
-        PgAuthStore::register_user(self, user_id, email, password_hash, display_name).await
-    }
-
-    async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
-        PgAuthStore::find_by_email(self, email).await
-    }
-
-    async fn get_user(&self, user_id: &str) -> Result<Option<UserAccount>, AppError> {
-        PgAuthStore::get_user(self, user_id).await
-    }
-
-    async fn get_users_by_ids(
-        &self,
-        user_ids: &[String],
-    ) -> Result<HashMap<String, UserAccount>, AppError> {
-        PgAuthStore::get_users_by_ids(self, user_ids).await
-    }
-
-    async fn set_role(&self, user_id: &str, role: &str) -> Result<UserAccount, AppError> {
-        PgAuthStore::set_role(self, user_id, role).await
-    }
-
-    async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
-        PgAuthStore::list_users(self).await
-    }
-
-    async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
-        PgAuthStore::create_session(self, token, user_id).await
-    }
-
-    async fn set_display_name(
-        &self,
-        user_id: &str,
-        display_name: Option<String>,
-    ) -> Result<UserAccount, AppError> {
-        PgAuthStore::set_display_name(self, user_id, display_name).await
-    }
-
-    async fn set_password(&self, user_id: &str, password_hash: &str) -> Result<(), AppError> {
-        PgAuthStore::set_password(self, user_id, password_hash).await
-    }
-
-    async fn user_record(&self, user_id: &str) -> Result<Option<UserRecord>, AppError> {
-        PgAuthStore::user_record(self, user_id).await
-    }
-
-    async fn confirm_email(&self, user_id: &str, at: u64) -> Result<UserAccount, AppError> {
-        PgAuthStore::confirm_email(self, user_id, at).await
-    }
-
-    async fn create_auth_token(
-        &self,
-        token_hash: &str,
-        rec: AuthTokenRecord,
-    ) -> Result<(), AppError> {
-        PgAuthStore::create_auth_token(self, token_hash, rec).await
-    }
-
-    async fn consume_auth_token(
-        &self,
-        token_hash: &str,
-        kind: &str,
-        now: u64,
-    ) -> Result<Option<String>, AppError> {
-        PgAuthStore::consume_auth_token(self, token_hash, kind, now).await
-    }
-
-    async fn consume_auth_token_by_code(
-        &self,
-        user_id: &str,
-        kind: &str,
-        code_hash: &str,
-        now: u64,
-    ) -> Result<Option<String>, AppError> {
-        PgAuthStore::consume_auth_token_by_code(self, user_id, kind, code_hash, now).await
-    }
-
-    async fn delete_user(&self, user_id: &str) -> Result<bool, AppError> {
-        PgAuthStore::delete_user(self, user_id).await
-    }
-
-    async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
-        PgAuthStore::get_session(self, token).await
-    }
-
-    async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
-        PgAuthStore::account_for_session(self, token).await
-    }
-
-    async fn find_identity(
-        &self,
-        provider: &str,
-        subject: &str,
-    ) -> Result<Option<String>, AppError> {
-        PgAuthStore::find_identity(self, provider, subject).await
-    }
-
-    async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
-        PgAuthStore::create_identity(self, identity).await
-    }
-
-    async fn set_identity_handle(
-        &self,
-        provider: &str,
-        subject: &str,
-        handle: Option<String>,
-    ) -> Result<(), AppError> {
-        PgAuthStore::set_identity_handle(self, provider, subject, handle).await
-    }
-
-    async fn identities_for_user(&self, user_id: &str) -> Result<Vec<AuthIdentity>, AppError> {
-        PgAuthStore::identities_for_user(self, user_id).await
-    }
-
-    async fn identities_for_users(
-        &self,
-        user_ids: &[String],
-    ) -> Result<HashMap<String, Vec<AuthIdentity>>, AppError> {
-        PgAuthStore::identities_for_users(self, user_ids).await
-    }
-
-    async fn delete_identity(&self, provider: &str, user_id: &str) -> Result<bool, AppError> {
-        PgAuthStore::delete_identity(self, provider, user_id).await
-    }
-
-    async fn create_social_account(
-        &self,
-        user_id: &str,
-        email: Option<String>,
-        display_name: Option<String>,
-        email_confirmed_at: Option<u64>,
-    ) -> Result<UserAccount, AppError> {
-        PgAuthStore::create_social_account(self, user_id, email, display_name, email_confirmed_at)
-            .await
-    }
-
-    async fn attach_email(
-        &self,
-        user_id: &str,
-        email: &str,
-        confirmed_at: u64,
-    ) -> Result<UserAccount, AppError> {
-        PgAuthStore::attach_email(self, user_id, email, confirmed_at).await
-    }
-}
-
 /// Grant/published-quest storage backend (see [`FactStore`] for the pattern).
 #[async_trait::async_trait]
 pub trait GrantStore: Send + Sync {
@@ -2078,80 +1818,6 @@ impl GrantStore for std::sync::Mutex<InMemoryGrantStore> {
 
     async fn get_snapshot(&self, snapshot_id: &str) -> Result<Option<serde_json::Value>, AppError> {
         Ok(lock(self, "grants")?.get_snapshot(snapshot_id))
-    }
-}
-
-#[async_trait::async_trait]
-impl GrantStore for PgGrantStore {
-    async fn create_grant_idemp(
-        &self,
-        player: &str,
-        quest: &str,
-        source: GrantSource,
-        source_ref: Option<String>,
-    ) -> Result<(AccessGrant, bool), AppError> {
-        PgGrantStore::create_grant_idemp(self, player, quest, source, source_ref).await
-    }
-
-    async fn has_grant(&self, player: &str, quest: &str) -> Result<bool, AppError> {
-        PgGrantStore::has_grant(self, player, quest).await
-    }
-
-    async fn list_published(&self) -> Result<Vec<PublishedMeta>, AppError> {
-        PgGrantStore::list_published(self).await
-    }
-
-    async fn get_published(&self, quest_id: &str) -> Result<Option<PublishedMeta>, AppError> {
-        PgGrantStore::get_published(self, quest_id).await
-    }
-
-    async fn register_published(
-        &self,
-        quest_id: &str,
-        meta: PublishedMeta,
-        snapshot: Option<serde_json::Value>,
-    ) -> Result<(), AppError> {
-        PgGrantStore::register_published(self, quest_id, meta, snapshot).await
-    }
-
-    async fn stats_purchase_events(
-        &self,
-        from: i64,
-        to_excl: i64,
-        quest: Option<&str>,
-    ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
-        PgGrantStore::stats_purchase_events(self, from, to_excl, quest).await
-    }
-
-    async fn list_all_grants(&self) -> Result<Vec<AccessGrant>, AppError> {
-        PgGrantStore::list_all_grants(self).await
-    }
-
-    async fn buyers_by_quest(&self) -> Result<HashMap<String, usize>, AppError> {
-        PgGrantStore::buyers_by_quest(self).await
-    }
-
-    async fn buyers_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
-        PgGrantStore::buyers_for_quest(self, quest_id).await
-    }
-
-    async fn delete_grants_for_user(&self, user_id: &str) -> Result<usize, AppError> {
-        PgGrantStore::delete_grants_for_user(self, user_id).await
-    }
-
-    async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError> {
-        PgGrantStore::grants_for_user(self, user_id).await
-    }
-
-    async fn get_bundle(
-        &self,
-        quest_id: &str,
-    ) -> Result<Option<(PublishedMeta, Option<serde_json::Value>)>, AppError> {
-        PgGrantStore::get_bundle(self, quest_id).await
-    }
-
-    async fn get_snapshot(&self, snapshot_id: &str) -> Result<Option<serde_json::Value>, AppError> {
-        PgGrantStore::get_snapshot(self, snapshot_id).await
     }
 }
 
@@ -2717,83 +2383,6 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
     }
 }
 
-#[async_trait::async_trait]
-impl ConstructorStore for PgConstructorStore {
-    async fn create(&self, quest: ConstructorQuest) -> Result<ConstructorQuestSummary, AppError> {
-        PgConstructorStore::create(self, quest).await
-    }
-
-    async fn list_summaries_for_author(
-        &self,
-        author_id: &str,
-    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        PgConstructorStore::list_summaries_for_author(self, author_id).await
-    }
-
-    async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        PgConstructorStore::get(self, quest_id).await
-    }
-
-    async fn save_body(
-        &self,
-        quest_id: &str,
-        name: &str,
-        cover: Option<String>,
-        steps_count: u32,
-        attrs: QuestAttributes,
-        body: serde_json::Value,
-        updated_at: u64,
-    ) -> Result<ConstructorQuestSummary, AppError> {
-        PgConstructorStore::save_body(
-            self,
-            quest_id,
-            name,
-            cover,
-            steps_count,
-            attrs,
-            body,
-            updated_at,
-        )
-        .await
-    }
-
-    async fn set_status(
-        &self,
-        quest_id: &str,
-        status: &str,
-        updated_at: u64,
-    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
-        PgConstructorStore::set_status(self, quest_id, status, updated_at).await
-    }
-
-    async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        PgConstructorStore::list_all_summaries(self).await
-    }
-
-    async fn listings_by_quest(&self) -> Result<HashMap<String, CatalogListing>, AppError> {
-        PgConstructorStore::listings_by_quest(self).await
-    }
-
-    async fn summary_for_quest(
-        &self,
-        quest_id: &str,
-    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
-        PgConstructorStore::summary_for_quest(self, quest_id).await
-    }
-
-    async fn labels_by_quest(&self) -> Result<HashMap<String, QuestLabel>, AppError> {
-        PgConstructorStore::labels_by_quest(self).await
-    }
-
-    async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
-        PgConstructorStore::label_for_quest(self, quest_id).await
-    }
-
-    async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
-        PgConstructorStore::delete(self, quest_id).await
-    }
-}
-
 /// In-memory coupon registry + redemption log (the executable spec the
 /// Postgres store mirrors). Redemptions are unique per
 /// `(coupon_id, user_id, quest_id)` — same granularity as access grants —
@@ -3047,54 +2636,6 @@ impl CouponStore for std::sync::Mutex<InMemoryCouponStore> {
     }
 }
 
-#[async_trait::async_trait]
-impl CouponStore for PgCouponStore {
-    async fn create(&self, coupon: Coupon) -> Result<Coupon, AppError> {
-        PgCouponStore::create(self, coupon).await
-    }
-
-    async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
-        PgCouponStore::update(self, coupon).await
-    }
-
-    async fn get(&self, coupon_id: &str) -> Result<Option<Coupon>, AppError> {
-        PgCouponStore::get(self, coupon_id).await
-    }
-
-    async fn delete(&self, coupon_id: &str) -> Result<(), AppError> {
-        PgCouponStore::delete(self, coupon_id).await
-    }
-
-    async fn list_with_usage(&self) -> Result<Vec<(Coupon, CouponUsage)>, AppError> {
-        PgCouponStore::list_with_usage(self).await
-    }
-
-    async fn get_with_usage(
-        &self,
-        coupon_id: &str,
-    ) -> Result<Option<(Coupon, CouponUsage)>, AppError> {
-        PgCouponStore::get_with_usage(self, coupon_id).await
-    }
-
-    async fn preview(
-        &self,
-        code: &str,
-        user_id: &str,
-    ) -> Result<Option<(Coupon, u32, u32)>, AppError> {
-        PgCouponStore::preview(self, code, user_id).await
-    }
-
-    async fn redeem(
-        &self,
-        code: &str,
-        user_id: &str,
-        quest_id: &str,
-        price: i64,
-    ) -> Result<CouponRedemption, AppError> {
-        PgCouponStore::redeem(self, code, user_id, quest_id, price).await
-    }
-}
-
 /// In-flight redirect payments (YooKassa), keyed by our id. See the
 /// `pending_payments` table in `migrations/0001_init.sql` for the model rationale.
 #[derive(Debug, Default)]
@@ -3226,40 +2767,6 @@ impl PaymentStore for std::sync::Mutex<InMemoryPaymentStore> {
     }
 }
 
-#[async_trait::async_trait]
-impl PaymentStore for PgPaymentStore {
-    async fn insert(&self, payment: PendingPayment) -> Result<(), AppError> {
-        PgPaymentStore::insert(self, payment).await
-    }
-
-    async fn get(&self, id: &str) -> Result<Option<PendingPayment>, AppError> {
-        PgPaymentStore::get(self, id).await
-    }
-
-    async fn find_by_provider_id(
-        &self,
-        provider_payment_id: &str,
-    ) -> Result<Option<PendingPayment>, AppError> {
-        PgPaymentStore::find_by_provider_id(self, provider_payment_id).await
-    }
-
-    async fn find_pending_for(
-        &self,
-        user_id: &str,
-        quest_id: &str,
-    ) -> Result<Option<PendingPayment>, AppError> {
-        PgPaymentStore::find_pending_for(self, user_id, quest_id).await
-    }
-
-    async fn settle_succeeded(&self, id: &str) -> Result<bool, AppError> {
-        PgPaymentStore::settle_succeeded(self, id).await
-    }
-
-    async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
-        PgPaymentStore::mark_canceled(self, id).await
-    }
-}
-
 /// Admin-set feature-toggle overrides, keyed by `Feature::key()` (the flag
 /// registry itself is code — `crate::features`). Absence of a key means "use
 /// the compiled-in default"; that is why `clear` exists as a first-class
@@ -3334,66 +2841,19 @@ pub trait FlagStore: KvStore<bool> {
 /// Shared feature-override storage handle.
 pub type FlagStores = std::sync::Arc<dyn FlagStore>;
 
-/// The synchronous KV core an in-memory store exposes. [`KvStore`] is
-/// implemented once for `Mutex<S: SyncKv>` on top of this — one async body for
-/// both value types instead of a copy per store.
-pub trait SyncKv: Send {
-    /// The value type this store holds.
-    type Value: Send;
-    /// Axis label for the lock-poisoned error message.
-    const LABEL: &'static str;
-    fn kv_get(&self, key: &str) -> Option<Self::Value>;
-    fn kv_set(&mut self, key: &str, value: Self::Value);
-    fn kv_clear(&mut self, key: &str);
-}
-
-impl SyncKv for InMemoryFlagStore {
-    type Value = bool;
-    const LABEL: &'static str = "flags";
-
-    fn kv_get(&self, key: &str) -> Option<bool> {
-        self.get(key)
-    }
-
-    fn kv_set(&mut self, key: &str, value: bool) {
-        self.set(key, value);
-    }
-
-    fn kv_clear(&mut self, key: &str) {
-        self.clear(key);
-    }
-}
-
-impl SyncKv for InMemorySettingsStore {
-    type Value = String;
-    const LABEL: &'static str = "settings";
-
-    fn kv_get(&self, key: &str) -> Option<String> {
-        self.get(key)
-    }
-
-    fn kv_set(&mut self, key: &str, value: String) {
-        self.set(key, &value);
-    }
-
-    fn kv_clear(&mut self, key: &str) {
-        self.clear(key);
-    }
-}
-
 #[async_trait::async_trait]
-impl<S: SyncKv> KvStore<S::Value> for std::sync::Mutex<S> {
-    async fn get(&self, key: &str) -> Result<Option<S::Value>, AppError> {
-        Ok(lock(self, S::LABEL)?.kv_get(key))
+impl KvStore<bool> for std::sync::Mutex<InMemoryFlagStore> {
+    async fn get(&self, key: &str) -> Result<Option<bool>, AppError> {
+        Ok(lock(self, "flags")?.get(key))
     }
 
-    async fn set(&self, key: &str, value: S::Value) -> Result<(), AppError> {
-        lock(self, S::LABEL)?.kv_set(key, value);
+    async fn set(&self, key: &str, value: bool) -> Result<(), AppError> {
+        lock(self, "flags")?.set(key, value);
         Ok(())
     }
 
     async fn clear(&self, key: &str) -> Result<(), AppError> {
-        lock(self, S::LABEL)?.kv_clear(key);
+        lock(self, "flags")?.clear(key);
         Ok(())
     }
 }
@@ -3406,24 +2866,19 @@ impl FlagStore for std::sync::Mutex<InMemoryFlagStore> {
 }
 
 #[async_trait::async_trait]
-impl KvStore<bool> for PgFlagStore {
-    async fn get(&self, key: &str) -> Result<Option<bool>, AppError> {
-        PgFlagStore::get(self, key).await
+impl KvStore<String> for std::sync::Mutex<InMemorySettingsStore> {
+    async fn get(&self, key: &str) -> Result<Option<String>, AppError> {
+        Ok(lock(self, "settings")?.get(key))
     }
 
-    async fn set(&self, key: &str, value: bool) -> Result<(), AppError> {
-        PgFlagStore::set(self, key, value).await
+    async fn set(&self, key: &str, value: String) -> Result<(), AppError> {
+        lock(self, "settings")?.set(key, &value);
+        Ok(())
     }
 
     async fn clear(&self, key: &str) -> Result<(), AppError> {
-        PgFlagStore::clear(self, key).await
-    }
-}
-
-#[async_trait::async_trait]
-impl FlagStore for PgFlagStore {
-    async fn all(&self) -> Result<HashMap<String, bool>, AppError> {
-        PgFlagStore::all(self).await
+        lock(self, "settings")?.clear(key);
+        Ok(())
     }
 }
 
@@ -3461,21 +2916,6 @@ impl InMemorySettingsStore {
 /// Shared runtime-setting storage handle — the plain KV shape with string
 /// values (registry in `crate::settings`; no row = unset).
 pub type SettingsStores = std::sync::Arc<dyn KvStore<String>>;
-
-#[async_trait::async_trait]
-impl KvStore<String> for PgSettingsStore {
-    async fn get(&self, key: &str) -> Result<Option<String>, AppError> {
-        PgSettingsStore::get(self, key).await
-    }
-
-    async fn set(&self, key: &str, value: String) -> Result<(), AppError> {
-        PgSettingsStore::set(self, key, &value).await
-    }
-
-    async fn clear(&self, key: &str) -> Result<(), AppError> {
-        PgSettingsStore::clear(self, key).await
-    }
-}
 
 /// In-memory moderation overlay — the mutable admin decisions that sit *beside* the
 /// immutable fact log (content-moderation). Nothing here ever reads or writes `facts`.
@@ -3629,46 +3069,6 @@ impl ModerationStore for std::sync::Mutex<InMemoryModerationStore> {
 
     async fn feedback_resolutions(&self) -> Result<HashMap<(String, String, i32), u64>, AppError> {
         Ok(lock(self, "moderation")?.feedback_resolutions())
-    }
-}
-
-#[async_trait::async_trait]
-impl ModerationStore for PgModerationStore {
-    async fn hide_review(
-        &self,
-        player: &str,
-        quest: &str,
-        at: u64,
-        by: &str,
-    ) -> Result<(), AppError> {
-        PgModerationStore::hide_review(self, player, quest, at, by).await
-    }
-
-    async fn unhide_review(&self, player: &str, quest: &str) -> Result<(), AppError> {
-        PgModerationStore::unhide_review(self, player, quest).await
-    }
-
-    async fn hidden_review_keys(&self) -> Result<HashSet<(String, String)>, AppError> {
-        PgModerationStore::hidden_review_keys(self).await
-    }
-
-    async fn resolve_feedback(
-        &self,
-        quest: &str,
-        snap: &str,
-        step: i32,
-        acknowledged: u64,
-        by: &str,
-    ) -> Result<(), AppError> {
-        PgModerationStore::resolve_feedback(self, quest, snap, step, acknowledged, by).await
-    }
-
-    async fn reopen_feedback(&self, quest: &str, snap: &str, step: i32) -> Result<(), AppError> {
-        PgModerationStore::reopen_feedback(self, quest, snap, step).await
-    }
-
-    async fn feedback_resolutions(&self) -> Result<HashMap<(String, String, i32), u64>, AppError> {
-        PgModerationStore::feedback_resolutions(self).await
     }
 }
 

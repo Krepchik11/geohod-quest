@@ -4143,14 +4143,11 @@ mod tests {
     /// a deployment that has never been configured.
     fn test_state(config: AppConfig) -> AppState {
         let mut state = pristine_state(config);
-        let flags = Mutex::new(store::InMemoryFlagStore::new());
-        {
-            let mut flags = flags.lock().expect("flags lock");
-            for f in TEST_ENABLED_FLAGS {
-                flags.set(f.key(), true);
-            }
+        let mut flags = store::InMemoryFlagStore::new();
+        for f in TEST_ENABLED_FLAGS {
+            flags.set(f.key(), true);
         }
-        state.flags = Arc::new(flags);
+        state.flags = Arc::new(Mutex::new(flags));
         state
     }
 
@@ -8277,27 +8274,12 @@ mod tests {
     /// with the fixed seed ids the 0006 cleanup targets.
     #[tokio::test]
     async fn pg_constructor_lifecycle() {
-        dotenv().ok();
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_constructor_lifecycle: skipped (DATABASE_URL not set)");
+        let Some(h) = pg_harness("pg_constructor_lifecycle").await else {
             return;
         };
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            // Pg tests run CONCURRENTLY (one per scenario): ~32 pools must fit
-            // under Postgres's default max_connections=100, and each scenario's
-            // requests are sequential — 2 connections suffice.
-            .max_connections(2)
-            .connect(&url)
-            .await
-            .expect("connect to DATABASE_URL");
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("run migrations");
-        let (app, _mails) = pg_app(pool).await;
+        let app = h.app;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
-        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
-        let qid = format!("q-citest-{run}");
+        let qid = format!("q-citest-{}", h.run);
 
         // create
         let (st, created) = post_json_h(
@@ -8326,12 +8308,12 @@ mod tests {
         // A second author (ops token + a distinct device id) is invisible to the
         // first: the foreign quest never appears in the "ops" list, and the foreign
         // author cannot fetch the "ops" author's quest (404 — existence hidden).
-        let dev_id = format!("dev-citest-{run}");
+        let dev_id = format!("dev-citest-{}", h.run);
         let dev: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
             ("x-user-id", dev_id.as_str()),
         ];
-        let other_qid = format!("q-citest-other-{run}");
+        let other_qid = format!("q-citest-other-{}", h.run);
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests",
@@ -8596,13 +8578,10 @@ mod tests {
         let enforce_ids = Ids::new(&format!("enforcere-{run}"));
         scenario_auth_enforcement(&h.app, &enforce_ids).await;
 
-        let url = std::env::var("DATABASE_URL").expect("checked by pg_harness");
-        let pool2 = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(2)
-            .connect(&url)
+        let h2 = pg_harness("pg_restart_survival (restart)")
             .await
-            .expect("reconnect");
-        let (app2, _mails2) = pg_app(pool2).await;
+            .expect("DATABASE_URL checked by the first harness");
+        let app2 = h2.app;
         let (st, gv) = get_json(&app2, &format!("/api/attempts/{happy_attempt}/state")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(gv["projected"]["balance"], 5, "projection survives restart");
@@ -9344,24 +9323,10 @@ mod tests {
     /// restores the default by clearing the override it set.
     #[tokio::test]
     async fn pg_feature_override_round_trip() {
-        dotenv().ok();
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_feature_override_round_trip: skipped (DATABASE_URL not set)");
+        let Some(h) = pg_harness("pg_feature_override_round_trip").await else {
             return;
         };
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            // Pg tests run CONCURRENTLY (one per scenario): ~32 pools must fit
-            // under Postgres's default max_connections=100, and each scenario's
-            // requests are sequential — 2 connections suffice.
-            .max_connections(2)
-            .connect(&url)
-            .await
-            .expect("connect to DATABASE_URL");
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("run migrations");
-        let (app, _mails) = pg_app(pool).await;
+        let app = h.app;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
 
         // The pg suites share ONE database and run concurrently, so this test
