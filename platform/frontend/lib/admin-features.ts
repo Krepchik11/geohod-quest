@@ -8,17 +8,9 @@
  * polish keyed by the stable wire key, with the key itself as fallback.
  */
 
-/** One feature as served by GET /api/admin/features. */
-export interface AdminFeatureWire {
-  key: string;
-  default_enabled: boolean;
-  /** Stored admin override; `null` = the code default applies. */
-  override: boolean | null;
-  /** The enforced toggle verdict (`override ?? default`). */
-  effective: boolean;
-  /** Capability: the deployment is configured for the feature (credentials present). */
-  available: boolean;
-}
+import type { AdminFeatureWire, AdminSettingWire } from './generated';
+
+export type { AdminFeatureWire, AdminSettingWire };
 
 /** A runtime setting hosted under a flag's row on the features page: the
  *  value half of a flag-gated feature (registry in backend settings.rs). */
@@ -71,13 +63,6 @@ const META: Record<string, { label: string; description: string; setting?: Featu
     },
   },
 };
-
-/** One runtime setting as served by GET/POST /api/admin/settings/{key}. */
-export interface AdminSettingWire {
-  key: string;
-  /** Stored value; `null` = unset (settings have no default values). */
-  value: string | null;
-}
 
 export function toAdminFeature(w: AdminFeatureWire): AdminFeature {
   const meta = META[w.key];

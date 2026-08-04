@@ -8,25 +8,45 @@
  * (see `resolveApiBase` for the production-safety guard against the localhost fallback).
  */
 
-import type { AdminFeatureWire, AdminSettingWire } from './admin-features';
 import { authHeaders, type Session } from './identity';
+import type {
+  AdminCouponWire,
+  AdminFeatureWire,
+  AdminFeedbackResponse,
+  AdminIdentityWire,
+  AdminReviewsResponse,
+  AdminSettingWire,
+  AdminStatsOverviewWire,
+  AdminStatsQuestWire,
+  AdminUserWire,
+  AttemptMeta,
+  AuthProviders,
+  BundleWire,
+  CheckoutResult,
+  ConstructorQuestFullWire,
+  ConstructorQuestWire,
+  CouponPayload,
+  CouponVerdict,
+  GrantWire,
+  Me,
+  MediaRefWire,
+  PaymentStatusWire,
+  PlayerStats,
+  ProductPageWire,
+  PublicFeatures,
+  PublishedQuestWire,
+  ReviewHideBody,
+  FeedbackResolveBody,
+  StartPointWire,
+} from './generated';
 
-/** GET /api/features: client-visible flag verdicts + player runtime values. */
-export interface PublicFeatures {
-  flags: Record<string, boolean>;
-  /** Platform-wide universal answer; `null` unless its flag is on AND a value is set. */
-  universal_answer: string | null;
-}
-
-/** Which social sign-in providers this deployment has configured. Both `null`
- *  when unset, so the client hides the corresponding button (fail-closed UI that
- *  mirrors the fail-closed 501 backend). Both are PUBLIC client ids: `google_client_id`
- *  for Google Identity Services; `telegram_client_id` (the bot's Client ID) for
- *  `Telegram.Login.init`. */
-export interface AuthProviders {
-  google_client_id: string | null;
-  telegram_client_id: string | null;
-}
+/**
+ * Wire types are GENERATED from the backend's serde structs (ts-rs; see
+ * backend `cargo test export_bindings` and lib/generated/). Nothing here is
+ * hand-maintained — a renamed server field changes lib/generated/ in the same
+ * commit, and CI fails if the two sides drift (issue #66).
+ */
+export type * from './generated';
 
 /**
  * Resolved at BUILD time: NEXT_PUBLIC_* is string-inlined into the browser
@@ -82,249 +102,8 @@ function statsRangeQuery(range: { from?: string; to?: string }): string {
   return qs ? `?${qs}` : '';
 }
 
-/** Raw counters for one admin-stats period (`GET /api/admin/stats*`). */
-export interface AdminStatsTotalsWire {
-  purchased: number;
-  started: number;
-  finished: number;
-}
-
-export interface AdminStatsDailyWire {
-  date: string;
-  started: number;
-  finished: number;
-}
-
-export interface AdminStatsQuestRowWire {
-  quest_id: string;
-  name: string;
-  city: string | null;
-  template_summary: string;
-  pages: number | null;
-  /** false = delisted quest kept for reconciliation; no detail page exists. */
-  published: boolean;
-  purchased: number;
-  started: number;
-  finished: number;
-}
-
-export interface AdminStatsOverviewWire {
-  from: string;
-  to: string;
-  totals: AdminStatsTotalsWire;
-  /** Same-length previous window; null for «Всё время». */
-  prev: AdminStatsTotalsWire | null;
-  daily: AdminStatsDailyWire[];
-  quests: AdminStatsQuestRowWire[];
-}
-
-export interface AdminStatsFunnelStepWire {
-  position: number;
-  title: string;
-  template: string;
-  reached: number;
-}
-
-export interface AdminStatsQuestWire {
-  quest_id: string;
-  name: string;
-  city: string | null;
-  template_summary: string;
-  /** Step-count chip frozen at publish; same field as the overview rows. */
-  pages: number | null;
-  from: string;
-  to: string;
-  totals: AdminStatsTotalsWire;
-  prev: AdminStatsTotalsWire | null;
-  snapshot_id: string;
-  snapshot_version: number;
-  /** Funnel denominator: attempts of the current snapshot started in range. */
-  funnel_started: number;
-  funnel: AdminStatsFunnelStepWire[];
-}
-
-/** One coupon as served by the admin coupon endpoints (coupons spec): the
- *  stored record plus the DERIVED status and the usage fold. `quest_ids: null`
- *  means «все квесты»; null limits mean unlimited. */
-export interface AdminCouponWire {
-  coupon_id: string;
-  code: string;
-  discount_type: 'percent' | 'fixed';
-  discount_value: number;
-  valid_until: string | null;
-  max_redemptions: number | null;
-  per_user_limit: number | null;
-  quest_ids: string[] | null;
-  paused: boolean;
-  status: 'active' | 'paused' | 'expired' | 'exhausted';
-  used: number;
-  last_redeemed_at: string | null;
-  total_discounted: number;
-  created_at: string;
-}
-
-/** Editable coupon fields as the admin form submits them (create + save). */
-export interface CouponPayload {
-  code: string;
-  discount_type: 'percent' | 'fixed';
-  discount_value: number;
-  valid_until: string | null;
-  max_redemptions: number | null;
-  per_user_limit: number | null;
-  quest_ids: string[] | null;
-  paused: boolean;
-}
-
-/** Verdict of POST /api/coupons/validate — always 200, never consumes. */
-export type CouponVerdict =
-  | { valid: true; code: string; price: number; discount_amount: number; final_price: number }
-  | { valid: false; message: string };
-
-/** GET /api/users/me — profile for the resolved identity (registered or anonymous). */
-export interface Me {
-  user_id: string;
-  registered: boolean;
-  email: string | null;
-  display_name: string | null;
-  role: string | null;
-  /** §6.3: unix seconds when the email was confirmed; null/absent until then. */
-  email_confirmed_at?: number | null;
-  /** WORKING sign-in methods: "email" only when a password is set, plus each
-   *  linked provider ("google"/"telegram"). An email without a password shows
-   *  up in `email` only. Drives "Способы входа". */
-  methods?: string[];
-  /** Server verdict of the unlink guard: whether a social provider may be
-   *  unlinked while keeping a way back into the account. The client renders
-   *  this — it never re-derives the rule. */
-  can_unlink?: boolean;
-}
-
-/** One registered account as served by GET /api/admin/users (admin-users spec). */
-export interface AdminUserWire {
-  user_id: string;
-  email: string;
-  display_name: string | null;
-  role: string;
-  created_at: number;
-}
-
-/** Published quest meta as served by GET /api/quests (mirrors backend CatalogQuest:
- *  the stored PublishedMeta + the live aggregate rating). `city`/`duration`/`price`
- *  are the author's real store-card fields (null when left blank / unset); the store
- *  card shows exactly these, never fabricated values. `rating_count === 0` means
- *  "no ratings yet" — shown honestly rather than as a number. */
-export interface PublishedQuestWire {
-  quest_id: string;
-  name: string;
-  primary_comic: string | null;
-  template_summary: string;
-  snapshot_version: number;
-  snapshot_id: string;
-  city: string | null;
-  duration: string | null;
-  /** Whole rubles; 0 is an explicitly free quest, null is unset (legacy). */
-  price: number | null;
-  /** Mean finale rating (1–5) of the published version; 0.0 when unrated. */
-  rating_avg: number;
-  /** Number of attempts that left a finale rating. */
-  rating_count: number;
-  /** Public players counter = real distinct completions + the author's marketing
-   *  bonus (set in the constructor). Server-computed; the raw bonus never ships. */
-  players: number;
-  /** Author attributes from the constructor row (store filters); null/empty for
-   *  a legacy/direct publish that has no constructor row. */
-  complexity: string | null;
-  age_target: string | null;
-  tags: string[];
-}
-
-/** Product page payload (§3.1) — the published card + live rating + author
- *  attribution + snapshot-derived content chips + the store description. */
-export interface ProductPageWire extends PublishedQuestWire {
-  description: string | null;
-  /** Author display label; null for legacy/direct publishes. */
-  author_name: string | null;
-  /** How many of this author's quests are currently on sale. */
-  author_published_count: number;
-  /** Content chips; null when the version predates chip derivation. */
-  pages: number | null;
-  tasks: number | null;
-  paid_hints: boolean | null;
-  /** §11 reviews v1: newest-first, first 10; total with text for the header. */
-  reviews: ReviewWire[];
-  reviews_total: number;
-  /** «Место старта» — the quest's first map point; null hides the button. */
-  start_point: StartPointWire | null;
-}
-
-/** The quest start point frozen at publish. Coordinates only — the button
- *  always reads «Место старта», never an address. */
-export interface StartPointWire {
-  lat: number;
-  lng: number;
-}
-
-/** §11: one public review (author first name only, month-precision date). */
-export interface ReviewWire {
-  author: string;
-  rating: number;
-  text: string;
-  created_at: number;
-}
-
-/** The grant-gated bundle envelope returned by `GET /api/quests/{id}/bundle` — the
- *  frozen snapshot JSON plus its identity. The download flow stores/precaches from it. */
-export interface BundleWire {
-  quest_id: string;
-  snapshot_id: string;
-  snapshot_version: number;
-  /** Catalog cover (`primary_comic`) — lives in the bundle envelope, not the frozen
-   *  snapshot, so the client can precache it for offline alongside the snapshot media. */
-  primary_comic: string | null;
-  snapshot: unknown;
-}
-
 /** Editorial lifecycle of a constructor quest (mirrors backend CTOR_STATUS_*). */
-export type CtorStatus = 'draft' | 'test' | 'published';
-
-/** One constructor dashboard row (mirrors backend ConstructorQuestWire). */
-export interface ConstructorQuestWire {
-  quest_id: string;
-  name: string;
-  /** Author display label (denormalized at creation). */
-  author: string;
-  author_id: string;
-  status: CtorStatus;
-  /** Page count. */
-  steps: number;
-  /** Distinct players who completed the quest ("прохождения"; derived from facts). */
-  completed: number;
-  /** Distinct grant holders — the honest «{N} купивших» for destructive confirms (§9.1). */
-  buyers: number;
-  /** Live published snapshot version; null ⇒ test/published need the publish panel first. */
-  published_version: number | null;
-  /** Сложность (закрытый набор low/medium/high) — фильтруемая колонка дашборда. */
-  complexity: string;
-  /** Аудитория (закрытый набор kids/everyone/18plus). */
-  age_target: string;
-  /** Собственные теги автора (свободные строки). */
-  tags: string[];
-  // No `cover`: the dashboard renders a name-derived thumbnail, so the backend
-  // omits the heavy base64 cover from list rows (it bloated the list to megabytes
-  // for media-heavy quests). The cover is on the full wire below; the builder
-  // reads it from `body.meta.cover` anyway.
-  /** Unix seconds. */
-  created_at: number;
-  updated_at: number;
-}
-
-/** A constructor quest WITH its full editable body — returned by GET one (for the
- *  builder to open). `body` is the opaque CtorQuest JSON the server round-trips. */
-export interface ConstructorQuestFullWire extends ConstructorQuestWire {
-  body: unknown;
-  /** Stored cover image (GET-one only; the list omits it). */
-  cover: string | null;
-}
+export type CtorStatus = ConstructorQuestWire['status'];
 
 /** Create/save payload: the denormalized list fields + the full opaque body. */
 export interface ConstructorQuestUpsert {
@@ -335,24 +114,6 @@ export interface ConstructorQuestUpsert {
   age_target: string;
   tags: string[];
   body: unknown;
-}
-
-/** Reference returned by POST /api/media (mirrors backend MediaRef). The quest body
- *  stores `url`; the bytes live content-addressed in R2 under `hash`. */
-export interface MediaRefWire {
-  url: string;
-  hash: string;
-  content_type: string;
-  size: number;
-}
-
-/** AccessGrant as served by GET /api/grants. */
-export interface GrantWire {
-  user_id: string;
-  quest_id: string;
-  granted_at: string;
-  source: string;
-  source_ref: string | null;
 }
 
 /**
@@ -409,91 +170,7 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
   return res.json() as Promise<T>;
 }
 
-/**
- * POST /api/checkout is grant-or-redirect: the mock provider (and free /
- * coupon-100% orders) settles instantly with `{grant, created}`; a redirect
- * provider (ЮKassa) answers `{payment}` — send the payer to `confirmation_url`,
- * then poll `paymentStatus(payment_id)` on return.
- */
-export type CheckoutResult =
-  | { grant: GrantWire; created: boolean; payment?: never }
-  | { payment: { payment_id: string; confirmation_url: string }; grant?: never };
-
-/** Verdict of GET /api/payments/{id} — the owner poll after a redirect. */
-export interface PaymentStatusWire {
-  status: 'pending' | 'succeeded' | 'canceled';
-  grant: GrantWire | null;
-}
-
 let providersPromise: Promise<{ providers: string[] }> | null = null;
-
-/**
- * Resolved author identity for an admin moderation surface (content-moderation):
- * a display name, a provider `kind`, and a single reachable contact — email for an
- * email/Google account, a Telegram `@username` otherwise; anonymous players carry none.
- */
-export interface AdminIdentityWire {
-  user_id: string;
-  display_name: string | null;
-  kind: 'google' | 'telegram' | 'email' | 'anon';
-  email: string | null;
-  telegram_username: string | null;
-}
-
-/** One global reviews-moderation row: a per-`(player,quest)` rating (star-only when `text` is null). */
-export interface AdminReviewWire {
-  quest_id: string;
-  quest_name: string;
-  quest_city: string | null;
-  rating: number;
-  text: string | null;
-  created_at: number;
-  hidden: boolean;
-  identity: AdminIdentityWire;
-}
-
-export interface AdminReviewsResponse {
-  reviews: AdminReviewWire[];
-}
-
-/** One report inside a feedback group. */
-export interface AdminReportWire {
-  note: string;
-  recorded_at: number;
-  identity: AdminIdentityWire;
-}
-
-/** A feedback group `(quest, snapshot, step)` with its resolution status + reports. */
-export interface AdminFeedbackGroupWire {
-  quest_id: string;
-  quest_name: string;
-  quest_city: string | null;
-  snapshot_id: string;
-  version: number | null;
-  step_position: number;
-  step_title: string | null;
-  step_template: string | null;
-  current: boolean;
-  resolved: boolean;
-  reports: AdminReportWire[];
-}
-
-export interface AdminFeedbackResponse {
-  groups: AdminFeedbackGroupWire[];
-}
-
-/** Body for the review hide/unhide — the `(player, quest)` the decision keys on. */
-export interface ReviewHideBody {
-  user_id: string;
-  quest_id: string;
-}
-
-/** Body for the feedback resolve/reopen — the `(quest, snapshot, step)` group key. */
-export interface FeedbackResolveBody {
-  quest_id: string;
-  snapshot_id: string;
-  step_position: number;
-}
 
 export const api = {
   checkout: (body: {

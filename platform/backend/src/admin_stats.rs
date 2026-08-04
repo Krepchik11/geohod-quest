@@ -148,22 +148,33 @@ impl DayRange {
 
 /// Raw counters for one period. Deltas are the client's presentation concern.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsTotalsWire"))]
 pub struct StatsTotals {
+    #[cfg_attr(test, ts(type = "number"))]
     pub purchased: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     pub started: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     pub finished: u64,
 }
 
 /// One day of the trend chart (zero-filled — every day of the range is present).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsDailyWire"))]
 pub struct DailyPoint {
     pub date: String,
+    #[cfg_attr(test, ts(type = "number"))]
     pub started: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     pub finished: u64,
 }
 
 /// One row of the per-quest table.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsQuestRowWire"))]
 pub struct QuestStatsRow {
     pub quest_id: String,
     pub name: String,
@@ -175,13 +186,18 @@ pub struct QuestStatsRow {
     /// catalog (delisted) — its history must stay visible so the table always
     /// reconciles with the KPI totals, but there is no detail page to open.
     pub published: bool,
+    #[cfg_attr(test, ts(type = "number"))]
     pub purchased: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     pub started: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     pub finished: u64,
 }
 
 /// `GET /api/admin/stats` body.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsOverviewWire"))]
 pub struct OverviewResponse {
     pub from: String,
     pub to: String,
@@ -195,16 +211,22 @@ pub struct OverviewResponse {
 
 /// One funnel step of the quest detail view.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsFunnelStepWire"))]
 pub struct FunnelStep {
+    #[cfg_attr(test, ts(type = "number"))]
     pub position: usize,
     pub title: String,
     pub template: String,
     /// Attempts (of the current snapshot, started in range) that reached this step.
+    #[cfg_attr(test, ts(type = "number"))]
     pub reached: u64,
 }
 
 /// `GET /api/admin/stats/{quest_id}` body.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminStatsQuestWire"))]
 pub struct QuestStatsResponse {
     pub quest_id: String,
     pub name: String,
@@ -220,6 +242,7 @@ pub struct QuestStatsResponse {
     /// The funnel is computed over the CURRENT published snapshot only — step
     /// labels are frozen per snapshot, so mixing versions would mislabel bars.
     pub snapshot_id: String,
+    #[cfg_attr(test, ts(type = "number"))]
     pub snapshot_version: u32,
     /// Denominator of the funnel (attempts of this snapshot started in range);
     /// may be smaller than `totals.started`, which spans all versions.
@@ -229,6 +252,7 @@ pub struct QuestStatsResponse {
     /// finished after it still reaches the terminal bar, while `totals.finished`
     /// (a period counter) excludes that finish. The client shows this
     /// denominator next to the funnel so the two semantics stay legible.
+    #[cfg_attr(test, ts(type = "number"))]
     pub funnel_started: u64,
     pub funnel: Vec<FunnelStep>,
 }

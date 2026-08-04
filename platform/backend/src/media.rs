@@ -21,12 +21,15 @@ use crate::errors::AppError;
 
 /// Reference returned after an upload; stored verbatim in quest JSON.
 #[derive(serde::Serialize, Clone, Debug)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "MediaRefWire"))]
 pub struct MediaRef {
     /// Public URL the bytes are served from (`"{public_base}/{hash}"`).
     pub url: String,
     /// Lowercase-hex sha256 of the bytes — the object key / content address.
     pub hash: String,
     pub content_type: String,
+    #[cfg_attr(test, ts(type = "number"))]
     pub size: usize,
 }
 

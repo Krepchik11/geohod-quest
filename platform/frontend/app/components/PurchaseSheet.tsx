@@ -87,7 +87,7 @@ export default function PurchaseSheet({
         ...(applied ? { coupon_code: applied.code } : {}),
         ...(method === 'yookassa' ? { provider: 'yookassa' } : {}),
       });
-      if (result.payment) {
+      if ('payment' in result) {
         // Redirect provider: hand the payer to ЮKassa. The return_url brings
         // them back to the quest page with ?payment={id}, where the poll
         // settles the purchase (AboutClient).

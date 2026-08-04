@@ -743,6 +743,8 @@ struct CheckoutRequest {
 /// Untagged: settled checkouts keep the historical `{grant, created}` shape;
 /// redirect checkouts answer `{payment: {payment_id, confirmation_url}}`.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "CheckoutResult"))]
 #[serde(untagged)]
 enum CheckoutResponse {
     Settled { grant: AccessGrant, created: bool },
@@ -752,6 +754,7 @@ enum CheckoutResponse {
 /// The client's marching orders for a redirect provider: send the payer to
 /// `confirmation_url`, then poll `GET /api/payments/{payment_id}` on return.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 struct RedirectPayment {
     payment_id: String,
     confirmation_url: String,
@@ -1057,7 +1060,10 @@ async fn settle_payment(
 }
 
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "PaymentStatusWire"))]
 struct PaymentStatusResponse {
+    #[cfg_attr(test, ts(type = "\"pending\" | \"succeeded\" | \"canceled\""))]
     status: &'static str,
     grant: Option<AccessGrant>,
 }
@@ -1134,6 +1140,32 @@ struct ValidateCouponRequest {
     code: String,
 }
 
+/// Verdict of the promo preview: `valid: true` carries the priced discount,
+/// `valid: false` the player-facing reason. Untagged — the boolean IS the
+/// discriminant on the wire.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "CouponVerdict"))]
+#[serde(untagged)]
+enum CouponVerdict {
+    Valid {
+        #[cfg_attr(test, ts(type = "true"))]
+        valid: bool,
+        code: String,
+        #[cfg_attr(test, ts(type = "number"))]
+        price: i64,
+        #[cfg_attr(test, ts(type = "number"))]
+        discount_amount: i64,
+        #[cfg_attr(test, ts(type = "number"))]
+        final_price: i64,
+    },
+    Invalid {
+        #[cfg_attr(test, ts(type = "false"))]
+        valid: bool,
+        message: String,
+    },
+}
+
 /// Purchase-sheet promo preview: never mutates, always 200 with a verdict.
 /// `{valid: true, ...}` carries the priced discount; `{valid: false, message}`
 /// carries the player-facing reason (unknown and deleted codes read the same).
@@ -1141,9 +1173,12 @@ async fn validate_coupon_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<ValidateCouponRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<CouponVerdict>, AppError> {
     let user_id = resolve_user(&state, &headers, &req.user_id).await?;
-    let invalid = |message: &str| serde_json::json!({"valid": false, "message": message});
+    let invalid = |message: &str| CouponVerdict::Invalid {
+        valid: false,
+        message: message.to_string(),
+    };
     let Ok(code) = coupons::normalize_code(&req.code) else {
         return Ok(Json(invalid("промокод не найден")));
     };
@@ -1163,13 +1198,13 @@ async fn validate_coupon_handler(
             Ok(quote) => quote,
             Err(reason) => return Ok(Json(invalid(reason))),
         };
-    Ok(Json(serde_json::json!({
-        "valid": true,
-        "code": code,
-        "price": price,
-        "discount_amount": discount_amount,
-        "final_price": price - discount_amount,
-    })))
+    Ok(Json(CouponVerdict::Valid {
+        valid: true,
+        code,
+        price,
+        discount_amount,
+        final_price: price - discount_amount,
+    }))
 }
 
 #[derive(serde::Deserialize)]
@@ -1258,6 +1293,8 @@ fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
 /// Wire shape of the quest start point (see [`snapshot_start_point`]). Bare
 /// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, Debug, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "StartPointWire"))]
 struct StartPointWire {
     lat: f64,
     lng: f64,
@@ -1325,18 +1362,23 @@ async fn publish_quest_handler(
 
 /// One dashboard list row.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "ConstructorQuestWire"))]
 struct ConstructorQuestWire {
     quest_id: String,
     name: String,
     /// Display label of the author (denormalized at creation).
     author: String,
     author_id: String,
+    #[cfg_attr(test, ts(type = "\"draft\" | \"test\" | \"published\""))]
     status: String,
     steps: u32,
     /// Distinct players who completed this quest (derived from the fact log).
+    #[cfg_attr(test, ts(type = "number"))]
     completed: usize,
     /// Distinct grant holders — the honest «{N} купивших» for destructive
     /// status confirms (§9.1). Count only, no identities.
+    #[cfg_attr(test, ts(type = "number"))]
     buyers: usize,
     /// Live published snapshot version, if any. None ⇒ the coherence guard will
     /// reject `test`/`published`, so the UI routes into the publish panel.
@@ -1347,26 +1389,35 @@ struct ConstructorQuestWire {
     // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
     // cover image, so the base64 cover was dead weight that bloated the list
     // (megabytes for media-heavy quests). It stays on the GET-one full wire.
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     updated_at: u64,
 }
 
 /// A single quest with its full editable body (for opening in the builder).
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "ConstructorQuestFullWire"))]
 struct ConstructorQuestFullWire {
     quest_id: String,
     name: String,
     author: String,
     author_id: String,
+    #[cfg_attr(test, ts(type = "\"draft\" | \"test\" | \"published\""))]
     status: String,
     steps: u32,
+    #[cfg_attr(test, ts(type = "number"))]
     completed: usize,
     cover: Option<String>,
     complexity: String,
     age_target: String,
     tags: Vec<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     updated_at: u64,
+    #[cfg_attr(test, ts(type = "unknown"))]
     body: serde_json::Value,
 }
 
@@ -1730,6 +1781,22 @@ struct BundleQuery {
     user_id: String,
 }
 
+/// The grant-gated bundle envelope: the frozen snapshot JSON plus its identity.
+/// `primary_comic` is the catalog cover (lives in meta, not the frozen snapshot)
+/// so the client can precache it for offline alongside the snapshot's media —
+/// same value the store card resolves, so the precached bytes match what renders.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "BundleWire"))]
+struct BundleWire {
+    quest_id: String,
+    snapshot_id: String,
+    snapshot_version: u32,
+    primary_comic: Option<String>,
+    #[cfg_attr(test, ts(type = "unknown"))]
+    snapshot: Option<serde_json::Value>,
+}
+
 /// Bundle download primitive: latest frozen snapshot JSON, gated by grant
 /// (SPEC: "Grant before attempt/bundle"). Asset packing comes with the media
 /// store phase.
@@ -1738,7 +1805,7 @@ async fn get_bundle_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
     Query(q): Query<BundleQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<BundleWire>, AppError> {
     let user_id = resolve_user(&state, &headers, &q.user_id).await?;
     let (meta, snapshot) = state
         .grants
@@ -1750,16 +1817,13 @@ async fn get_bundle_handler(
             "no access grant for quest '{quest_id}'"
         )));
     }
-    Ok(Json(serde_json::json!({
-        "quest_id": meta.quest_id,
-        "snapshot_id": meta.snapshot_id,
-        "snapshot_version": meta.snapshot_version,
-        // Catalog cover (lives in meta, not the frozen snapshot) so the client can
-        // precache it for offline alongside the snapshot's media — same value the
-        // store card resolves, so the precached bytes match what renders.
-        "primary_comic": meta.primary_comic,
-        "snapshot": snapshot,
-    })))
+    Ok(Json(BundleWire {
+        quest_id: meta.quest_id,
+        snapshot_id: meta.snapshot_id,
+        snapshot_version: meta.snapshot_version,
+        primary_comic: meta.primary_comic,
+        snapshot,
+    }))
 }
 
 /// Marketplace catalog row: the stored [`PublishedMeta`] plus the live aggregate
@@ -1767,13 +1831,17 @@ async fn get_bundle_handler(
 /// finale `quest_rated` facts (never stored), so a freshly published quest reports
 /// `rating_count: 0` and the client shows "no ratings yet" instead of a fake score.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "PublishedQuestWire"))]
 struct CatalogQuest {
     #[serde(flatten)]
     meta: PublishedMeta,
     rating_avg: f64,
+    #[cfg_attr(test, ts(type = "number"))]
     rating_count: usize,
     /// Public players counter: real distinct completions + the author's marketing
     /// `players_bonus`. The raw bonus is never sent on its own (see PublishedMeta).
+    #[cfg_attr(test, ts(type = "number"))]
     players: i64,
     /// Author attributes from the constructor row (store-page filters); `None` /
     /// empty for a legacy/direct publish that has no constructor row.
@@ -1872,12 +1940,16 @@ async fn list_quests_handler(
 /// name + how many of their quests are on sale, and snapshot-derived content
 /// chips. Visibility matches the catalog: a delisted quest 404s here too.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "ProductPageWire"))]
 struct ProductPageWire {
     #[serde(flatten)]
     meta: PublishedMeta,
     rating_avg: f64,
+    #[cfg_attr(test, ts(type = "number"))]
     rating_count: usize,
     /// Public players counter: real distinct completions + marketing `players_bonus`.
+    #[cfg_attr(test, ts(type = "number"))]
     players: i64,
     /// Author display label from the constructor row; None for legacy/direct
     /// publishes that have no constructor lifecycle.
@@ -1887,6 +1959,7 @@ struct ProductPageWire {
     /// §11 reviews v1: newest-first, first page of 10.
     reviews: Vec<ReviewWire>,
     /// Total ratings that carry text («{M} с отзывом»).
+    #[cfg_attr(test, ts(type = "number"))]
     reviews_total: usize,
     /// «Место старта» — see [`snapshot_start_point`]; None hides the button.
     start_point: Option<StartPointWire>,
@@ -1895,10 +1968,14 @@ struct ProductPageWire {
 /// §11: one public review — author FIRST NAME only (display name's first word;
 /// anonymous → «Игрок»), never an email; month-precision timestamp client-side.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "ReviewWire"))]
 struct ReviewWire {
     author: String,
+    #[cfg_attr(test, ts(type = "number"))]
     rating: i64,
     text: String,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
 }
 
@@ -2105,10 +2182,13 @@ async fn get_version_feedbacks_handler(
 /// account, a Telegram `@username` (`t.me/…`) otherwise. Anonymous players (no
 /// account row) carry no contact.
 #[derive(serde::Serialize, Clone)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminIdentityWire"))]
 struct AdminIdentityWire {
     user_id: String,
     display_name: Option<String>,
     /// "google" | "telegram" | "email" | "anon".
+    #[cfg_attr(test, ts(type = "\"google\" | \"telegram\" | \"email\" | \"anon\""))]
     kind: &'static str,
     /// Present (for `mailto:`) only when `kind` is google/email.
     email: Option<String>,
@@ -2203,19 +2283,25 @@ async fn resolve_admin_identities(
 /// One row of the global reviews list: an effective per-`(player, quest)` rating
 /// (star-only included), whether it is hidden, and the resolved author identity.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminReviewWire"))]
 struct AdminReviewWire {
     quest_id: String,
     quest_name: String,
     quest_city: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     rating: i64,
     /// `None` for a star-only rating (counts toward the average, no text).
     text: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
     hidden: bool,
     identity: AdminIdentityWire,
 }
 
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminReviewsResponse"))]
 struct AdminReviewsResponse {
     reviews: Vec<AdminReviewWire>,
 }
@@ -2269,6 +2355,8 @@ async fn admin_list_reviews_handler(
 
 /// Body for hide/unhide — the `(player, quest)` the moderation decision keys on.
 #[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "ReviewHideBody"))]
 struct ReviewHideRequest {
     user_id: String,
     quest_id: String,
@@ -2303,8 +2391,11 @@ async fn admin_unhide_review_handler(
 
 /// One report inside a feedback group — its note, server time, and author identity.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminReportWire"))]
 struct AdminReportWire {
     note: String,
+    #[cfg_attr(test, ts(type = "number"))]
     recorded_at: u64,
     identity: AdminIdentityWire,
 }
@@ -2313,6 +2404,8 @@ struct AdminReportWire {
 /// step label, its human version number, whether it is the current version, and its
 /// reports newest-first.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminFeedbackGroupWire"))]
 struct AdminFeedbackGroupWire {
     quest_id: String,
     quest_name: String,
@@ -2328,6 +2421,8 @@ struct AdminFeedbackGroupWire {
 }
 
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminFeedbackResponse"))]
 struct AdminFeedbackResponse {
     groups: Vec<AdminFeedbackGroupWire>,
 }
@@ -2418,6 +2513,8 @@ async fn admin_list_feedback_handler(
 
 /// Body for resolve/reopen — the `(quest, snapshot, step)` group key.
 #[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "FeedbackResolveBody"))]
 struct FeedbackResolveRequest {
     quest_id: String,
     snapshot_id: String,
@@ -2854,19 +2951,27 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
 /// the PUBLIC client ids they need (Google client id for GIS, Telegram bot client
 /// id for `Telegram.Login.init`). `null` when unconfigured OR switched off by
 /// the admin feature toggle — either way the UI hides the button.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AuthProviders"))]
+struct AuthProviders {
+    google_client_id: Option<String>,
+    telegram_client_id: Option<String>,
+}
+
 async fn auth_providers_handler(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<AuthProviders>, AppError> {
     let overrides = state.flags.all_overrides().await?;
     let on = |f: Feature| f.effective(overrides.get(f.key()).copied());
-    Ok(Json(serde_json::json!({
-        "google_client_id": on(Feature::AuthGoogle)
+    Ok(Json(AuthProviders {
+        google_client_id: on(Feature::AuthGoogle)
             .then(|| state.config.google_client_id.clone())
             .flatten(),
-        "telegram_client_id": on(Feature::AuthTelegram)
+        telegram_client_id: on(Feature::AuthTelegram)
             .then(|| state.config.telegram_client_id.clone())
             .flatten(),
-    })))
+    }))
 }
 
 /// POST /api/auth/unlink — `{provider}`. Removes a linked social provider from the
@@ -3355,10 +3460,28 @@ async fn delete_account_handler(
 
 /// Profile for the resolved identity: the account when registered, a synthetic
 /// anonymous profile otherwise (registered=false).
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "Me"))]
+struct Me {
+    user_id: String,
+    registered: bool,
+    email: Option<String>,
+    display_name: Option<String>,
+    role: Option<String>,
+    /// §6.3: absent for an anonymous profile, `null`-able for an account —
+    /// the double Option keeps «absent» and «null» distinct on the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional, type = "number | null"))]
+    email_confirmed_at: Option<Option<u64>>,
+    methods: Vec<String>,
+    can_unlink: bool,
+}
+
 async fn get_me_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<Me>, AppError> {
     let claimed = claimed_from_headers(&headers);
     let user_id = resolve_user(&state, &headers, &claimed).await?;
     let account = state.auth.get_user(&user_id).await?;
@@ -3369,21 +3492,32 @@ async fn get_me_handler(
             // methods for the list (a method works iff its identities row
             // exists), the reachability verdict for unlink UI — the client
             // renders these, it never re-derives the rules.
-            let methods = auth::signin_methods(&identities);
+            let methods = auth::signin_methods(&identities)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
             let can_unlink = auth::reachable_ways(&a, &identities) > 1;
-            serde_json::json!({
-                "user_id": a.user_id, "registered": true,
-                "email": a.email, "display_name": a.display_name, "role": a.role,
-                "email_confirmed_at": a.email_confirmed_at,
-                "methods": methods,
-                "can_unlink": can_unlink,
-            })
+            Me {
+                user_id: a.user_id,
+                registered: true,
+                email: a.email,
+                display_name: a.display_name,
+                role: Some(a.role),
+                email_confirmed_at: Some(a.email_confirmed_at),
+                methods,
+                can_unlink,
+            }
         }
-        None => serde_json::json!({
-            "user_id": user_id, "registered": false,
-            "email": null, "display_name": null, "role": null,
-            "methods": [], "can_unlink": false,
-        }),
+        None => Me {
+            user_id,
+            registered: false,
+            email: None,
+            display_name: None,
+            role: None,
+            email_confirmed_at: None,
+            methods: vec![],
+            can_unlink: false,
+        },
     }))
 }
 
@@ -3392,12 +3526,15 @@ async fn get_me_handler(
 /// hash or session tokens. The backend does not model telegram/phone, so the UI
 /// renders contact fields present-only and simply omits the ones it has no data for.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminUserWire"))]
 struct AdminUserWire {
     user_id: String,
     /// `null` for a social-only account (no login email).
     email: Option<String>,
     display_name: Option<String>,
     role: String,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
 }
 
@@ -3493,6 +3630,8 @@ async fn set_user_role_handler(
 /// default) plus the runtime state (override, effective toggle) and whether
 /// the deployment is configured for it at all.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminFeatureWire"))]
 struct FeatureWire {
     key: &'static str,
     default_enabled: bool,
@@ -3539,6 +3678,8 @@ async fn list_features_handler(
 /// universal answer is plaintext by design — the same trust model as the
 /// acceptable lists inside quest snapshots (the client is the matcher).
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "PublicFeatures"))]
 struct PublicFeaturesResponse {
     flags: std::collections::HashMap<&'static str, bool>,
     /// The platform-wide universal answer; `None` unless the
@@ -3603,6 +3744,8 @@ async fn set_feature_handler(
 /// Wire shape of a runtime setting: its stable key and the stored value
 /// (`null` = unset — settings have no default values).
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminSettingWire"))]
 struct SettingWire {
     key: &'static str,
     value: Option<String>,
@@ -3785,6 +3928,8 @@ async fn admin_stats_quest_handler(
 /// Body for coupon create/save: the editable fields exactly as the admin form
 /// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
 #[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "CouponPayload"))]
 struct CouponPayload {
     code: String,
     #[serde(flatten)]
@@ -3833,6 +3978,8 @@ impl CouponPayload {
 /// One coupon as served to the admin UI: the stored record plus the DERIVED
 /// status and the usage fold (never persisted — always честный пересчёт).
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export, rename = "AdminCouponWire"))]
 struct AdminCouponWire {
     #[serde(flatten)]
     coupon: Coupon,
@@ -4117,6 +4264,98 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+
+    /// The committed wire contract (frontend/lib/generated/) must equal what
+    /// the serde structs export TODAY — a backend change that alters the wire
+    /// fails here unless the regenerated types land in the same commit
+    /// (issue #66). Regenerate with:
+    ///   rm -rf ../frontend/lib/generated && \
+    ///   TS_RS_EXPORT_DIR=../frontend/lib/generated cargo test export_bindings
+    /// then rebuild index.ts (sorted `export type {X} from './X';` lines).
+    #[test]
+    fn wire_bindings_are_committed() {
+        use ts_rs::TS;
+        let tmp = std::env::temp_dir().join(format!("geohod-wire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        macro_rules! export_all {
+            ($($t:ty),* $(,)?) => { $(<$t as TS>::export_all_to(&tmp).expect("export");)* }
+        }
+        export_all!(
+            CheckoutResponse,
+            PaymentStatusResponse,
+            CouponVerdict,
+            StartPointWire,
+            ConstructorQuestWire,
+            ConstructorQuestFullWire,
+            BundleWire,
+            CatalogQuest,
+            ProductPageWire,
+            ReviewWire,
+            AdminIdentityWire,
+            AdminReviewWire,
+            AdminReviewsResponse,
+            ReviewHideRequest,
+            AdminReportWire,
+            AdminFeedbackGroupWire,
+            AdminFeedbackResponse,
+            FeedbackResolveRequest,
+            AuthProviders,
+            Me,
+            AdminUserWire,
+            FeatureWire,
+            PublicFeaturesResponse,
+            SettingWire,
+            CouponPayload,
+            AdminCouponWire,
+            store::AttemptMeta,
+            facts::PlayerStats,
+            crate::grants::AccessGrant,
+            crate::media::MediaRef,
+            admin_stats::StatsTotals,
+            admin_stats::DailyPoint,
+            admin_stats::QuestStatsRow,
+            admin_stats::OverviewResponse,
+            admin_stats::FunnelStep,
+            admin_stats::QuestStatsResponse,
+        );
+        let committed =
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/lib/generated"));
+        let list = |dir: &std::path::Path| -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(dir)
+                .expect("read dir")
+                .map(|e| e.expect("entry").file_name().into_string().expect("utf8"))
+                .filter(|n| n.ends_with(".ts") && n != "index.ts")
+                .collect();
+            names.sort();
+            names
+        };
+        let fresh = list(&tmp);
+        assert_eq!(
+            fresh,
+            list(committed),
+            "generated type set drifted — regenerate frontend/lib/generated"
+        );
+        for name in &fresh {
+            let a = std::fs::read_to_string(tmp.join(name)).expect("fresh");
+            let b = std::fs::read_to_string(committed.join(name)).expect("committed");
+            assert_eq!(a, b, "{name} drifted — regenerate frontend/lib/generated");
+        }
+        let index: Vec<String> = fresh
+            .iter()
+            .map(|n| {
+                let t = n.trim_end_matches(".ts");
+                format!("export type {{ {t} }} from './{t}';")
+            })
+            .collect();
+        let committed_index =
+            std::fs::read_to_string(committed.join("index.ts")).expect("index.ts");
+        assert_eq!(
+            committed_index.trim().split('\n').collect::<Vec<_>>(),
+            index.iter().map(String::as_str).collect::<Vec<_>>(),
+            "index.ts drifted — regenerate frontend/lib/generated"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
     use facts::FactKind;
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
