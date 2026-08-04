@@ -78,7 +78,7 @@ function mediaEntries(step: GameStep): MediaEntry[] {
  */
 export function mediaRefs(snapshot: QuestSnapshot): string[] {
   const refs = new Set<string>();
-  for (const step of snapshot.steps ?? []) {
+  for (const step of snapshot.steps) {
     for (const e of mediaEntries(step)) {
       if (e.ref) refs.add(e.ref);
     }
@@ -92,7 +92,7 @@ export function mediaRefs(snapshot: QuestSnapshot): string[] {
  * backend `snapshot::snapshot_chips` (shared goldens enforce).
  */
 export function chips(snapshot: QuestSnapshot): SnapshotChips {
-  const steps = snapshot.steps ?? [];
+  const steps = snapshot.steps;
   return {
     pages: steps.length,
     tasks: steps.filter((s) => s.template === 'task_no' || s.template === 'task_answer').length,
@@ -118,7 +118,7 @@ function pointOf(v: unknown): StartPoint | null {
  */
 export function startPoint(snapshot: QuestSnapshot): StartPoint | null {
   if ('start_point' in snapshot) return pointOf(snapshot.start_point);
-  for (const step of snapshot.steps ?? []) {
+  for (const step of snapshot.steps) {
     const p = pointOf(step.supporting?.navigator);
     if (p) return p;
   }
@@ -146,7 +146,7 @@ export function mediaStats(snapshot: QuestSnapshot): MediaStats {
   let images = 0;
   let videos = 0;
   let estimatedBytes = 0;
-  for (const step of snapshot.steps ?? []) {
+  for (const step of snapshot.steps) {
     for (const e of mediaEntries(step)) {
       if (e.ref) {
         if (seen.has(e.ref)) continue;

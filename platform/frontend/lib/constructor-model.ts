@@ -526,8 +526,14 @@ export function computeGates(quest: CtorQuest): Gates {
   // Size/counters honestly derive from the PUBLISHED snapshot (issue #64): the
   // draft is serialized through the same adapter publish uses, so what weighs
   // here is exactly what ships — off-hint images drop out, videos/atmosphere/
-  // bonus animations count, duplicates are one cached copy.
-  const stats = mediaStats(serializeDraft(quest));
+  // bonus animations count, duplicates are one cached copy. A draft the
+  // adapter cannot serialize is a publish-blocking gate error, never a crash.
+  let stats = { images: 0, videos: 0, estimatedBytes: 0 };
+  try {
+    stats = mediaStats(serializeDraft(quest));
+  } catch (e) {
+    add(null, 'err', `Сериализация снапшота упала: ${(e as Error).message}`);
+  }
   const imgs = stats.images;
   const vids = stats.videos;
   const mb = 0.4 + stats.estimatedBytes / (1024 * 1024);
