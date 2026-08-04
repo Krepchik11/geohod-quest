@@ -59,10 +59,8 @@ use payments::{PendingPayment, PendingStatus};
 use settings::Setting;
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
-    CouponStores, FactStores, FlagStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
-    InMemoryCouponStore, InMemoryFactStore, InMemoryFlagStore, InMemoryGrantStore,
-    InMemoryModerationStore, InMemoryPaymentStore, InMemorySettingsStore, ModerationStores,
-    PaymentStores, PublishedMeta, SettingsStores,
+    CouponStores, FactStores, FlagStores, GrantStores, ModerationStores, PaymentStores,
+    PublishedMeta, SettingsStores, Storage,
 };
 use yookassa::YookassaGateway;
 
@@ -129,22 +127,19 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     let google = build_google_verifier(&config);
     let telegram = build_telegram_verifier(&config);
     let yookassa = config.yookassa.clone().map(YookassaGateway::Http);
+    let storage = Storage::in_memory();
     AppState {
         config,
-        store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
-        grants: GrantStores::InMemory(Arc::new(Mutex::new(InMemoryGrantStore::new()))),
-        auth: AuthStores::InMemory(Arc::new(Mutex::new(InMemoryAuthStore::new()))),
-        constructor: ConstructorStores::InMemory(Arc::new(Mutex::new(
-            InMemoryConstructorStore::new(),
-        ))),
-        coupons: CouponStores::InMemory(Arc::new(Mutex::new(InMemoryCouponStore::new()))),
+        store: storage.facts,
+        grants: storage.grants,
+        auth: storage.auth,
+        constructor: storage.constructor,
+        coupons: storage.coupons,
         media,
-        payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
-        flags: FlagStores::InMemory(Arc::new(Mutex::new(InMemoryFlagStore::new()))),
-        settings: SettingsStores::InMemory(Arc::new(Mutex::new(InMemorySettingsStore::new()))),
-        moderation: ModerationStores::InMemory(Arc::new(
-            Mutex::new(InMemoryModerationStore::new()),
-        )),
+        payment_rows: storage.payments,
+        flags: storage.flags,
+        settings: storage.settings,
+        moderation: storage.moderation,
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -327,7 +322,7 @@ async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), App
 /// endpoints themselves, so a flag can never enable what the deployment
 /// cannot do.
 async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
-    Ok(feature.effective(state.flags.override_for(feature.key()).await?))
+    Ok(feature.effective(state.flags.get(feature.key()).await?))
 }
 
 /// The capability half: whether this deployment is configured for the feature
@@ -1114,7 +1109,7 @@ async fn yookassa_webhook_handler(
 async fn payment_providers_handler(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let on =
         |f: Feature| feature_available(&state, f) && f.effective(overrides.get(f.key()).copied());
     let mut providers = Vec::new();
@@ -2857,7 +2852,7 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
 async fn auth_providers_handler(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let on = |f: Feature| f.effective(overrides.get(f.key()).copied());
     Ok(Json(serde_json::json!({
         "google_client_id": on(Feature::AuthGoogle)
@@ -3526,7 +3521,7 @@ async fn list_features_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<FeatureWire>>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let rows = Feature::ALL
         .into_iter()
         .map(|f| feature_wire(&state, f, overrides.get(f.key()).copied()))
@@ -3556,8 +3551,8 @@ async fn public_features_handler(
     // unconditionally (and discarded when its flag is off) rather than
     // serializing a second round-trip behind the overrides read.
     let (overrides, stored_answer) = tokio::try_join!(
-        state.flags.all_overrides(),
-        state.settings.value_for(Setting::UniversalAnswer.key())
+        state.flags.all(),
+        state.settings.get(Setting::UniversalAnswer.key())
     )?;
     let flags: std::collections::HashMap<&'static str, bool> = Feature::ALL
         .into_iter()
@@ -3594,8 +3589,8 @@ async fn set_feature_handler(
     let feature = Feature::parse(&key)
         .ok_or_else(|| AppError::NotFound(format!("unknown feature: {key}")))?;
     match req.enabled {
-        Some(enabled) => state.flags.set_override(feature.key(), enabled).await?,
-        None => state.flags.clear_override(feature.key()).await?,
+        Some(enabled) => state.flags.set(feature.key(), enabled).await?,
+        None => state.flags.clear(feature.key()).await?,
     }
     Ok(Json(feature_wire(&state, feature, req.enabled)))
 }
@@ -3618,7 +3613,7 @@ async fn get_setting_handler(
     require_admin_actor(&state, &headers).await?;
     let setting = Setting::parse(&key)
         .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
-    let value = state.settings.value_for(setting.key()).await?;
+    let value = state.settings.get(setting.key()).await?;
     Ok(Json(SettingWire {
         key: setting.key(),
         value,
@@ -3646,8 +3641,8 @@ async fn set_setting_handler(
         .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
     let value = Setting::normalize(req.value.as_deref());
     match &value {
-        Some(v) => state.settings.set_value(setting.key(), v).await?,
-        None => state.settings.clear_value(setting.key()).await?,
+        Some(v) => state.settings.set(setting.key(), v.clone()).await?,
+        None => state.settings.clear(setting.key()).await?,
     }
     Ok(Json(SettingWire {
         key: setting.key(),
@@ -4032,22 +4027,19 @@ async fn main() -> anyhow::Result<()> {
             );
             let google = build_google_verifier(&config);
             let telegram = build_telegram_verifier(&config);
+            let storage = Storage::postgres(pool);
             AppState {
                 config: config.clone(),
-                store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
-                grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-                auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-                constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
-                    pool.clone(),
-                )),
-                coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
+                store: storage.facts,
+                grants: storage.grants,
+                auth: storage.auth,
+                constructor: storage.constructor,
+                coupons: storage.coupons,
                 media,
-                payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
-                moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(
-                    pool.clone(),
-                )),
-                flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone())),
-                settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
+                payment_rows: storage.payments,
+                moderation: storage.moderation,
+                flags: storage.flags,
+                settings: storage.settings,
                 yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -4150,16 +4142,15 @@ mod tests {
     /// comes up with [`TEST_ENABLED_FLAGS`] on; use [`pristine_state`] to observe
     /// a deployment that has never been configured.
     fn test_state(config: AppConfig) -> AppState {
-        let state = pristine_state(config);
-        let FlagStores::InMemory(flags) = &state.flags else {
-            panic!("in-memory tests build an in-memory flag store");
-        };
+        let mut state = pristine_state(config);
+        let flags = Mutex::new(store::InMemoryFlagStore::new());
         {
             let mut flags = flags.lock().expect("flags lock");
             for f in TEST_ENABLED_FLAGS {
                 flags.set(f.key(), true);
             }
         }
+        state.flags = Arc::new(flags);
         state
     }
 
@@ -8382,10 +8373,11 @@ mod tests {
         // Same baseline as the in-memory harness: nothing seeds overrides any
         // more, so a harness must switch on the features it exercises. Idempotent
         // upserts — the pg suites share one database and run concurrently.
-        let flag_store = FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone()));
+        let storage = Storage::postgres(pool);
         for f in TEST_ENABLED_FLAGS {
-            flag_store
-                .set_override(f.key(), true)
+            storage
+                .flags
+                .set(f.key(), true)
                 .await
                 .expect("enable baseline flag");
         }
@@ -8403,18 +8395,16 @@ mod tests {
                 telegram_client_id: None,
                 yookassa: None,
             },
-            store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
-            grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-            auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-            constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
-                pool.clone(),
-            )),
-            coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
+            store: storage.facts,
+            grants: storage.grants,
+            auth: storage.auth,
+            constructor: storage.constructor,
+            coupons: storage.coupons,
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
-            payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
-            moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(pool.clone())),
-            flags: flag_store,
-            settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
+            payment_rows: storage.payments,
+            moderation: storage.moderation,
+            flags: storage.flags,
+            settings: storage.settings,
             yookassa: None,
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),

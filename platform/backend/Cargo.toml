@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # Quest export archive (manifest + quest.json + media/*). Deflate only — no
 # bzip2/lzma/zstd codecs, which would each pull in a separate C/Rust codec dep.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+async-trait = "0.1.91"
 
 [dev-dependencies]
 http-body-util = "0.1.3"
