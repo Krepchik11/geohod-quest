@@ -59,7 +59,7 @@ describe('answers and the wrong-answer ordinal', () => {
   it('repeated identical wrong answers carry ordinals so restart dedup keeps them', () => {
     const c = ctx([answerStep(), physicalStep()]);
     let s = initialPlayState();
-    const notes: Array<string | null> = [];
+    const notes: Array<string | null | undefined> = [];
     for (let i = 0; i < 3; i += 1) {
       const r = transition(s, { type: 'answer', value: 'фонтан' }, c);
       s = r.state;
@@ -136,7 +136,7 @@ describe('gifts and completion', () => {
   it('entering the terminal completes once with the +5 bonus', () => {
     const steps = [physicalStep({ position: 0 }), terminalStep({ position: 1 })];
     const c = ctx(steps);
-    let s = transition(initialPlayState(), { type: 'physical_confirm' }, c).state;
+    const s = transition(initialPlayState(), { type: 'physical_confirm' }, c).state;
     const r = transition(s, { type: 'enter_terminal' }, c);
     expect(r.effects.appended.map((f) => f.type)).toEqual(['attempt_completed', 'completion_bonus']);
     expect(r.effects.appended[1].coins_delta).toBe(5);
