@@ -39,7 +39,11 @@ describe('useClientFeature', () => {
   it('unknown keys are false even after load', async () => {
     apiMock.getPublicFeatures.mockResolvedValue(wire({ player_back_button: true }));
     const { useClientFeature } = await loadModule();
-    const { result } = renderHook(() => useClientFeature('no_such_flag'));
+    // The type now forbids unknown keys in product code; the cast keeps the
+    // runtime fail-closed rule pinned for a wire/build mismatch.
+    const { result } = renderHook(() =>
+      useClientFeature('no_such_flag' as Parameters<typeof useClientFeature>[0]),
+    );
     await waitFor(() => expect(apiMock.getPublicFeatures).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });

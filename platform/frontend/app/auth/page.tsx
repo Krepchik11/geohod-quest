@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api } from '../../lib/api';
+import { PASSWORD_ERROR, emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import {
   anonymousUserId,
   clearSession,
@@ -126,9 +127,9 @@ export default function AuthPage() {
   };
 
   const identify = async () => {
-    const v = email.trim().toLowerCase();
-    if (v.length < 3 || !v.includes('@')) {
-      setError('Укажите почту — например, anna@gmail.com');
+    const v = normalizeEmail(email);
+    if (!emailValid(v)) {
+      setError(emailError(v));
       return;
     }
     setLoading(true);
@@ -172,8 +173,8 @@ export default function AuthPage() {
       setError('Отметьте согласие с условиями — без него аккаунт создать нельзя.');
       return;
     }
-    if (password.length < 8) {
-      setFieldError('Минимум 8 символов');
+    if (!passwordValid(password)) {
+      setFieldError(PASSWORD_ERROR);
       return;
     }
     setLoading(true);
@@ -370,8 +371,8 @@ function RecoverSent({
       setError('Код из письма — 6 цифр.');
       return;
     }
-    if (newPassword.length < 8) {
-      setError('Минимум 8 символов');
+    if (!passwordValid(newPassword)) {
+      setError(PASSWORD_ERROR);
       return;
     }
     setSubmitting(true);

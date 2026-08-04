@@ -61,8 +61,16 @@ function usePublicFeatures(): PublicFeatures | null {
   return features;
 }
 
+/**
+ * Flags the player runtime may read — the client_visible slice of the registry
+ * (goldens/wire/features-registry.json pins it). A typo in a screen's flag
+ * name is a compile error, not a silently-off feature.
+ */
+export const CLIENT_FEATURE_KEYS = ['player_back_button', 'player_universal_answer'] as const;
+export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];
+
 /** Effective verdict of one client-visible flag; `false` until loaded. */
-export function useClientFeature(key: string): boolean {
+export function useClientFeature(key: ClientFeatureKey): boolean {
   return usePublicFeatures()?.flags?.[key] ?? false;
 }
 

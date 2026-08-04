@@ -4,6 +4,7 @@ import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
+import { PASSWORD_ERROR, passwordValid } from '../../../lib/credentials';
 import { setSession } from '../../../lib/identity';
 import { PasswordField } from '../page';
 
@@ -19,8 +20,8 @@ function ResetInner() {
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (password.length < 8) {
-      setError('Минимум 8 символов');
+    if (!passwordValid(password)) {
+      setError(PASSWORD_ERROR);
       return;
     }
     setLoading(true);

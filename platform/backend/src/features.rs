@@ -91,6 +91,36 @@ impl Feature {
 mod tests {
     use super::*;
 
+    /// Shared wire golden (platform/goldens/wire/features-registry.json) — the
+    /// SAME file the frontend admin/client feature tests run.
+    #[test]
+    fn registry_matches_wire_golden() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Fixture {
+            name: String,
+            description: String,
+            keys: Vec<String>,
+            client_visible: Vec<String>,
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/wire/features-registry.json"
+        );
+        let fx: Fixture =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("parse golden");
+        let keys: Vec<&str> = Feature::ALL.iter().map(|f| f.key()).collect();
+        assert_eq!(keys, fx.keys, "flag registry drifted from the golden");
+        let visible: Vec<&str> = Feature::ALL
+            .iter()
+            .filter(|f| f.client_visible())
+            .map(|f| f.key())
+            .collect();
+        assert_eq!(visible, fx.client_visible, "client_visible set drifted");
+    }
+
     #[test]
     fn keys_round_trip_and_are_unique() {
         for f in Feature::ALL {

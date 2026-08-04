@@ -1,0 +1,13 @@
+{
+  "name": "features-registry",
+  "description": "The ONE list of feature-flag keys. Backend features.rs, admin META and the player's client-visible union all assert against it — a typo or a missed registration breaks a test, not silently disables a feature.",
+  "keys": [
+    "auth_google",
+    "auth_telegram",
+    "payments_mock",
+    "payments_yookassa",
+    "player_back_button",
+    "player_universal_answer"
+  ],
+  "client_visible": ["player_back_button", "player_universal_answer"]
+}

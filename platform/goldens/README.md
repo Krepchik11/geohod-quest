@@ -39,6 +39,19 @@ Fold rules pinned by these fixtures:
   key; completion bonus once per player+quest) is asserted by facts-sync tests,
   not here.
 
+## Wire fixtures (`wire/*.json`)
+
+Shared boundary rules (issue #66), run by both suites:
+
+- `credentials.json` — email normalize (trim+lowercase) then validate
+  (len>=3, has `@`, no whitespace), password min 8. Rust: `auth.rs` tests;
+  TS: `lib/credentials.ts` via `wire-goldens.test.ts`.
+- `natural-key.json` — byte-exact dedup key of play facts. Rust:
+  `facts::natural_key_string`; TS: `queue.factNaturalKey`.
+- `features-registry.json` — the ONE list of feature-flag keys and its
+  client-visible slice. Rust: `features.rs`; TS: `FEATURE_KEYS`
+  (admin-features) and `CLIENT_FEATURE_KEYS` (client-features).
+
 ## Quest goldens
 
 - `golden-mystery-fortress-v1.json` — quest snapshot derived from a real export.

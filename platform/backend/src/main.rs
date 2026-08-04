@@ -3132,10 +3132,8 @@ async fn reset_password_handler(
         ResetPasswordRequest::ByToken { password, .. }
         | ResetPasswordRequest::ByCode { password, .. } => password.clone(),
     };
-    if password.len() < 8 {
-        return Err(AppError::BadRequest(
-            "password must be at least 8 characters".into(),
-        ));
+    if !auth::password_valid(&password) {
+        return Err(AppError::BadRequest(auth::PASSWORD_ERROR.into()));
     }
     let now = store::now_secs();
     let user_id = match req {
@@ -3307,10 +3305,8 @@ async fn change_password_handler(
     if !auth::verify_password(hash, &req.current_password) {
         return Err(AppError::Unauthorized("неверный текущий пароль".into()));
     }
-    if req.new_password.len() < 8 {
-        return Err(AppError::BadRequest(
-            "password must be at least 8 characters".into(),
-        ));
+    if !auth::password_valid(&req.new_password) {
+        return Err(AppError::BadRequest(auth::PASSWORD_ERROR.into()));
     }
     state
         .auth
