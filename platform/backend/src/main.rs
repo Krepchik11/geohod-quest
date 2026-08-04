@@ -29,6 +29,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod admin_stats;
 mod auth;
+mod authz;
 mod config;
 mod coupons;
 mod errors;
@@ -48,14 +49,18 @@ mod yookassa;
 
 use std::sync::{Arc, Mutex};
 
+use authz::{
+    acting_author, acting_author_role, claimed_from_headers, require_admin_actor, require_editor,
+    require_ops_token, require_owned_constructor_quest, require_owned_constructor_summary,
+    resolve_user, session_account,
+};
 use config::AppConfig;
 use coupons::{Coupon, CouponUsage, Discount};
 use errors::AppError;
 use facts::{Fact, MigrationResult, ProjectedState};
 use features::Feature;
-use grants::{AccessGrant, GrantSource};
+use grants::AccessGrant;
 use media::{MediaRef, MediaStores};
-use payments::{PendingPayment, PendingStatus};
 use settings::Setting;
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
@@ -66,44 +71,44 @@ use yookassa::YookassaGateway;
 
 /// Shared application state.
 #[derive(Clone)]
-struct AppState {
-    config: AppConfig,
-    store: FactStores,
-    grants: GrantStores,
-    auth: AuthStores,
+pub struct AppState {
+    pub config: AppConfig,
+    pub store: FactStores,
+    pub grants: GrantStores,
+    pub auth: AuthStores,
     /// Authoring-side quest registry (drafts + lifecycle) behind the constructor.
-    constructor: ConstructorStores,
+    pub constructor: ConstructorStores,
     /// Admin-managed discount codes + their redemption log (coupons spec).
-    coupons: CouponStores,
+    pub coupons: CouponStores,
     /// Content-addressed media blobs (Cloudflare R2 in prod; in-process otherwise).
-    media: MediaStores,
+    pub media: MediaStores,
     /// In-flight redirect payments (YooKassa): checkout writes, settlement flips.
-    payment_rows: PaymentStores,
+    pub payment_rows: PaymentStores,
     /// Admin-set feature-toggle overrides (registry in `features.rs`; evaluation
     /// in [`feature_enabled`] — code default unless overridden).
-    flags: FlagStores,
+    pub flags: FlagStores,
     /// Admin-set runtime string settings (registry in `settings.rs`; no row =
     /// unset — settings have no compiled-in default values).
-    settings: SettingsStores,
+    pub settings: SettingsStores,
     /// Mutable moderation overlay (content-moderation) — hidden reviews +
     /// feedback resolution watermarks, kept entirely separate from the immutable
     /// fact log. Admin-only reads/writes; the read-side folds consult it.
-    moderation: ModerationStores,
+    pub moderation: ModerationStores,
     /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
     /// disabled (501, fail-closed); tests inject the scripted fake.
-    yookassa: Option<YookassaGateway>,
+    pub yookassa: Option<YookassaGateway>,
     /// Transactional mail (§6.2/§6.3) — SMTP in prod, log fallback, recorder in tests.
-    mailer: mailer::Mailer,
+    pub mailer: mailer::Mailer,
     /// Fixed-window rate limiter for abusable auth endpoints (§6.1 identify,
     /// §6.2 recover, §6.3 resend). Keyed by `"<scope>:<email>"`; the value is
     /// `(resets_at, count)`. See [`fixed_window_allow`].
-    rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
+    pub rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
     /// Google ID-token verifier (holds the cached JWKS). `Some` only when
     /// `GOOGLE_CLIENT_ID` is configured; `None` disables `/api/auth/google` (501).
-    google: Option<Arc<social::OidcVerifier>>,
+    pub google: Option<Arc<social::OidcVerifier>>,
     /// Telegram OIDC ID-token verifier (holds the cached JWKS). `Some` only when
     /// `TELEGRAM_CLIENT_ID` is configured; `None` disables `/api/auth/telegram` (501).
-    telegram: Option<Arc<social::OidcVerifier>>,
+    pub telegram: Option<Arc<social::OidcVerifier>>,
 }
 
 /// Build the Google verifier when a client id is configured (fail-closed otherwise).
@@ -148,180 +153,12 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     }
 }
 
-/// Resolve the acting user id for a player-scoped request (player-identity spec).
-///
-/// A valid `Authorization: Bearer <token>` wins and must match a non-empty
-/// claimed id (mismatch = 403, catches client bugs). Without a token, the
-/// claimed id is accepted ONLY while unregistered — once an account exists for
-/// it, device possession is no longer a sufficient credential (401).
-async fn resolve_user(
-    state: &AppState,
-    headers: &HeaderMap,
-    claimed: &str,
-) -> Result<String, AppError> {
-    if let Some(value) = headers.get(header::AUTHORIZATION) {
-        let raw = value
-            .to_str()
-            .map_err(|_| AppError::Unauthorized("malformed authorization header".into()))?;
-        let token = raw
-            .strip_prefix("Bearer ")
-            .ok_or_else(|| AppError::Unauthorized("expected a bearer token".into()))?;
-        let user_id = state
-            .auth
-            .get_session(token)
-            .await?
-            .ok_or_else(|| AppError::Unauthorized("invalid session".into()))?;
-        if !claimed.is_empty() && claimed != user_id {
-            return Err(AppError::Forbidden(
-                "session does not match the claimed user id".into(),
-            ));
-        }
-        return Ok(user_id);
-    }
-    if claimed.is_empty() {
-        return Err(AppError::Unauthorized("missing identity".into()));
-    }
-    if state.auth.get_user(claimed).await?.is_some() {
-        return Err(AppError::Unauthorized(
-            "registered account requires login (bearer token)".into(),
-        ));
-    }
-    Ok(claimed.to_string())
-}
-
-/// Claimed identity for GET endpoints without a body: the `X-User-Id` header
-/// (anonymous devices) — ignored when a Bearer token is present.
-fn claimed_from_headers(headers: &HeaderMap) -> String {
-    headers
-        .get("x-user-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string()
-}
-
-/// Gate admin-only endpoints (per-version stats/feedbacks, legacy migration)
-/// behind the shared `ADMIN_TOKEN` secret carried in `X-Admin-Token`. These
-/// surfaces expose aggregate telemetry, raw feedback notes and device ids, so
-/// they fail closed: when no secret is configured the endpoints are disabled.
-fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    let expected = state.config.admin_token.as_deref().ok_or_else(|| {
-        AppError::Forbidden("admin endpoints are disabled (ADMIN_TOKEN not set)".into())
-    })?;
-    let provided = headers
-        .get("x-admin-token")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    if provided.is_empty() || provided != expected {
-        return Err(AppError::Unauthorized("invalid admin token".into()));
-    }
-    Ok(())
-}
-
-/// Extract a `Bearer <token>` value from the Authorization header when present and
-/// well-formed. Returns None for a missing/malformed header (the caller decides the
-/// fallback) — unlike [`resolve_user`] it never errors on a missing header.
-fn bearer_token(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|raw| raw.strip_prefix("Bearer "))
-        .map(str::to_string)
-}
-
-/// True when the shared `ADMIN_TOKEN` is configured AND the request presents it in
-/// `X-Admin-Token`. This is the operator/bootstrap credential the admin and editor
-/// gates share; it carries no identity (no "self"), so it is exempt from the
-/// self-change guard. Fails closed when no token is configured.
-fn ops_token_ok(state: &AppState, headers: &HeaderMap) -> bool {
-    let Some(expected) = state.config.admin_token.as_deref() else {
-        return false;
-    };
-    let provided = headers
-        .get("x-admin-token")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    !provided.is_empty() && provided == expected
-}
-
-/// The registered account behind a valid `Bearer` session, if any. A missing or
-/// malformed token, an unknown session, and an anonymous id (no account row) all
-/// collapse to `None`, so callers express authorization as a plain role check.
-async fn session_account(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<Option<auth::UserAccount>, AppError> {
-    let Some(token) = bearer_token(headers) else {
-        return Ok(None);
-    };
-    // One round-trip (session⋈users), not get_session then get_user — this runs on
-    // the front of nearly every authenticated request.
-    state.auth.account_for_session(&token).await
-}
-
-/// The identity authorized to act on the admin user-management surface. `user_id`
-/// is `Some` for a session-admin (the acting account) and `None` for the shared
-/// `ADMIN_TOKEN` ops path (no "self"); the role handler uses this to forbid an admin
-/// from changing their own role while leaving the ops path unrestricted.
-struct AdminActor {
-    user_id: Option<String>,
-}
-
-/// Authorize an admin user-management request. Two accepted credentials:
-///
-/// 1. The shared `ADMIN_TOKEN` in `X-Admin-Token` — the ops/bootstrap path that
-///    promotes the first admin (and recovers if every admin is demoted). It carries
-///    no identity, so it is exempt from the self-change guard.
-/// 2. A `Bearer` session whose account has role `admin` — the user-facing path the
-///    admin page uses once an admin exists.
-///
-/// Every other caller (anonymous, non-admin account, bad/expired token) gets a
-/// single opaque 403 that never reveals which credential was tried or missing.
-async fn require_admin_actor(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<AdminActor, AppError> {
-    if ops_token_ok(state, headers) {
-        return Ok(AdminActor { user_id: None });
-    }
-    if let Some(account) = session_account(state, headers).await?
-        && account.role == auth::ROLE_ADMIN
-    {
-        return Ok(AdminActor {
-            user_id: Some(account.user_id),
-        });
-    }
-    Err(AppError::Forbidden("admin access required".into()))
-}
-
-/// Authorize a quest-authoring request (the constructor / `/quest-editor` surface).
-///
-/// Authoring is the `editor` capability: a `Bearer` session whose account role is
-/// `editor` or `admin` (admin ⊃ editor), OR the shared `ADMIN_TOKEN` operator
-/// credential. Anonymous devices and plain `player` accounts get an opaque 403.
-///
-/// This is the server-side half of the role model — the `/quest-editor` page hides
-/// itself from non-editors, but publish is a direct API call, so it must be gated
-/// here too (a player could otherwise POST `/api/quests/publish` straight). It does
-/// NOT bind authorship to the editor (any editor may publish any quest); per-author
-/// ownership remains a separate, tracked follow-up.
-async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    if ops_token_ok(state, headers) {
-        return Ok(());
-    }
-    if let Some(account) = session_account(state, headers).await?
-        && (account.role == auth::ROLE_EDITOR || account.role == auth::ROLE_ADMIN)
-    {
-        return Ok(());
-    }
-    Err(AppError::Forbidden("editor access required".into()))
-}
-
 /// The runtime toggle verdict for a feature: the admin override when one is
 /// stored, the code default otherwise. This is only the *toggle* half of the
 /// evaluation — capability ([`feature_available`]) is enforced by the gated
 /// endpoints themselves, so a flag can never enable what the deployment
 /// cannot do.
-async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
+pub async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
     Ok(feature.effective(state.flags.get(feature.key()).await?))
 }
 
@@ -723,332 +560,15 @@ async fn get_state_handler(
     }))
 }
 
-#[derive(serde::Deserialize)]
-struct CheckoutRequest {
-    user_id: String,
-    quest_id: String,
-    /// Server-validated promo code; the discount lives in the coupon registry,
-    /// never in the request (a client cannot name its own percentage).
-    coupon_code: Option<String>,
-    /// Payment provider: `"mock"` (default) settles instantly; `"yookassa"`
-    /// starts a redirect flow (501 when the deployment has no credentials).
-    provider: Option<String>,
-}
-
-/// Untagged: settled checkouts keep the historical `{grant, created}` shape;
-/// redirect checkouts answer `{payment: {payment_id, confirmation_url}}`.
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-enum CheckoutResponse {
-    Settled { grant: AccessGrant, created: bool },
-    Redirect { payment: RedirectPayment },
-}
-
-/// The client's marching orders for a redirect provider: send the payer to
-/// `confirmation_url`, then poll `GET /api/payments/{payment_id}` on return.
-#[derive(serde::Serialize)]
-struct RedirectPayment {
-    payment_id: String,
-    confirmation_url: String,
-}
-
-/// Checkout, dispatched per request on `provider`: the mock settles instantly,
-/// YooKassa opens a redirect flow settled later by [`settle_payment`].
-///
-/// With a coupon code the registry is consulted: the redemption is recorded
-/// atomically against the coupon's caps, and a discount that zeroes the price
-/// grants as CouponRedemption bypassing every provider; a partial discount
-/// still charges and grants as Payment. Idempotent (first grant + first audit
-/// ref win), and a re-checkout of an owned quest never consumes a coupon.
+/// Thin HTTP shim over [`payments::checkout`]: resolve the identity, then let
+/// the payment module run the provider dispatch and coupon rules.
 async fn checkout_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<CheckoutRequest>,
-) -> Result<Json<CheckoutResponse>, AppError> {
+    Json(req): Json<payments::CheckoutRequest>,
+) -> Result<Json<payments::CheckoutResponse>, AppError> {
     let user_id = resolve_user(&state, &headers, &req.user_id).await?;
-    if state.grants.has_grant(&user_id, &req.quest_id).await? {
-        // Already owned: return the stored grant unchanged (source is ignored
-        // on an idempotent hit) without charging or spending a coupon.
-        let (grant, created) = state
-            .grants
-            .create_grant_idemp(&user_id, &req.quest_id, GrantSource::Payment, None)
-            .await?;
-        return Ok(Json(CheckoutResponse::Settled { grant, created }));
-    }
-    let provider = req.provider.as_deref().unwrap_or("mock");
-    match provider {
-        "mock" => {
-            require_provider_enabled(&state, Feature::PaymentsMock, provider).await?;
-            mock_checkout(&state, &user_id, &req).await
-        }
-        "yookassa" => {
-            require_provider_enabled(&state, Feature::PaymentsYookassa, provider).await?;
-            yookassa_checkout(&state, &user_id, &req).await
-        }
-        other => Err(AppError::BadRequest(format!(
-            "unknown payment provider: {other}"
-        ))),
-    }
-}
-
-/// Checkout gate for one payment provider's feature toggle. Same 501 as an
-/// unconfigured provider — the client treats "disabled by an admin toggle"
-/// and "deployment lacks credentials" identically.
-async fn require_provider_enabled(
-    state: &AppState,
-    feature: Feature,
-    provider: &str,
-) -> Result<(), AppError> {
-    if feature_enabled(state, feature).await? {
-        Ok(())
-    } else {
-        Err(AppError::NotImplemented(format!(
-            "payment provider {provider} is disabled on this server"
-        )))
-    }
-}
-
-/// The historical synchronous path: the mock settles instantly, so the coupon
-/// is redeemed and the grant created in the same request.
-async fn mock_checkout(
-    state: &AppState,
-    user_id: &str,
-    req: &CheckoutRequest,
-) -> Result<Json<CheckoutResponse>, AppError> {
-    let (source, source_ref) = match &req.coupon_code {
-        Some(raw) => {
-            let code = coupons::normalize_code(raw)?;
-            let price = quest_price(state, &req.quest_id).await?.ok_or_else(|| {
-                AppError::Conflict(coupons::RedeemReject::NotApplicable.message().into())
-            })?;
-            let redemption = state
-                .coupons
-                .redeem(&code, user_id, &req.quest_id, price)
-                .await?;
-            if redemption.amount_discounted >= price {
-                (GrantSource::CouponRedemption, None)
-            } else {
-                let payment_ref = payments::mock_payment_ref(user_id, &req.quest_id);
-                (GrantSource::Payment, Some(payment_ref))
-            }
-        }
-        None => {
-            let payment_ref = payments::mock_payment_ref(user_id, &req.quest_id);
-            (GrantSource::Payment, Some(payment_ref))
-        }
-    };
-    let (grant, created) = state
-        .grants
-        .create_grant_idemp(user_id, &req.quest_id, source, source_ref)
-        .await?;
-    Ok(Json(CheckoutResponse::Settled { grant, created }))
-}
-
-/// A quest's positive price; `None` for free (0), unpriced, or unpublished.
-async fn quest_price(state: &AppState, quest_id: &str) -> Result<Option<i64>, AppError> {
-    Ok(state
-        .grants
-        .get_published(quest_id)
-        .await?
-        .and_then(|meta| meta.price)
-        .filter(|p| *p > 0))
-}
-
-/// Quote a normalized coupon against a priced quest: preview + redeemability +
-/// the priced discount. Never consumes the code. The inner `Err` is the
-/// player-facing reason (unknown and deleted codes read the same, by design);
-/// `Ok` carries the coupon's canonical code and the discount in rubles.
-async fn quote_coupon(
-    state: &AppState,
-    code: &str,
-    user_id: &str,
-    quest_id: &str,
-    price: i64,
-) -> Result<Result<(String, i64), &'static str>, AppError> {
-    let Some((coupon, used_total, used_by_player)) = state.coupons.preview(code, user_id).await?
-    else {
-        return Ok(Err("промокод не найден"));
-    };
-    if let Err(reject) = coupons::check_redeemable(
-        &coupon,
-        quest_id,
-        used_total,
-        used_by_player,
-        &store::today_utc(),
-    ) {
-        return Ok(Err(reject.message()));
-    }
-    let discount = coupons::discount_amount(&coupon.discount, price);
-    Ok(Ok((coupon.code, discount)))
-}
-
-/// The configured YooKassa transport, or 501 (fail-closed) when absent.
-fn yookassa_gateway(state: &AppState) -> Result<&YookassaGateway, AppError> {
-    state.yookassa.as_ref().ok_or_else(|| {
-        AppError::NotImplemented("card payments are not configured on this deployment".into())
-    })
-}
-
-/// The redirect path: create a YooKassa payment and answer with its payer page.
-/// NOTHING settles here — the grant (and any coupon redemption) waits for a
-/// verified `succeeded` in [`settle_payment`]. Free and coupon-100% orders
-/// never reach the gateway (nothing to charge).
-async fn yookassa_checkout(
-    state: &AppState,
-    user_id: &str,
-    req: &CheckoutRequest,
-) -> Result<Json<CheckoutResponse>, AppError> {
-    let gateway = yookassa_gateway(state)?;
-    // An open payment for this order is replayed instead of double-creating at
-    // the gateway (the payer may have closed the tab mid-confirmation).
-    if let Some(open) = state
-        .payment_rows
-        .find_pending_for(user_id, &req.quest_id)
-        .await?
-    {
-        return Ok(Json(CheckoutResponse::Redirect {
-            payment: RedirectPayment {
-                payment_id: open.id,
-                confirmation_url: open.confirmation_url,
-            },
-        }));
-    }
-    let meta = state
-        .grants
-        .get_published(&req.quest_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
-    let Some(price) = meta.price.filter(|p| *p > 0) else {
-        // Free quest: nothing to charge — grant immediately, provider bypassed.
-        let (grant, created) = state
-            .grants
-            .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
-            .await?;
-        return Ok(Json(CheckoutResponse::Settled { grant, created }));
-    };
-    // A coupon prices the charge now but is redeemed only at settlement — an
-    // abandoned payment must not burn the code. Coupon-100% has nothing to
-    // charge, so it settles instantly through the synchronous path (redeem +
-    // CouponRedemption grant), never reaching the gateway.
-    let (coupon_code, amount) = match &req.coupon_code {
-        Some(raw) => {
-            let code = coupons::normalize_code(raw)?;
-            let (_, discount) = quote_coupon(state, &code, user_id, &req.quest_id, price)
-                .await?
-                .map_err(|reason| AppError::Conflict(reason.into()))?;
-            if discount >= price {
-                return mock_checkout(state, user_id, req).await;
-            }
-            (Some(code), price - discount)
-        }
-        None => (None, price),
-    };
-    // Our id keys the poll endpoint, rides the return_url, and doubles as the
-    // YooKassa Idempotence-Key (64 hex chars — within the 64-char cap).
-    let payment_id = auth::generate_token();
-    let return_url = format!(
-        "{}/quest/{}/about?payment={}",
-        state.config.frontend_base.trim_end_matches('/'),
-        req.quest_id,
-        payment_id
-    );
-    let body = yookassa::build_create_payment(
-        amount,
-        &format!("Квест «{}»", meta.name),
-        &return_url,
-        user_id,
-        &req.quest_id,
-    );
-    let remote = gateway.create_payment(&payment_id, body).await?;
-    let confirmation_url = remote.confirmation_url.clone().ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "yookassa created payment {} without a confirmation_url",
-            remote.id
-        ))
-    })?;
-    state
-        .payment_rows
-        .insert(PendingPayment {
-            id: payment_id.clone(),
-            provider_payment_id: remote.id,
-            user_id: user_id.to_string(),
-            quest_id: req.quest_id.clone(),
-            coupon_code,
-            amount,
-            price,
-            confirmation_url: confirmation_url.clone(),
-            status: PendingStatus::Pending,
-            created_at: store::now_rfc3339(),
-        })
-        .await?;
-    Ok(Json(CheckoutResponse::Redirect {
-        payment: RedirectPayment {
-            payment_id,
-            confirmation_url,
-        },
-    }))
-}
-
-/// Re-check a pending payment against YooKassa and apply the outcome. Safe to
-/// call from the webhook and the owner poll concurrently: the status flip is a
-/// store CAS, the grant is `create_grant_idemp`, and only the CAS winner
-/// redeems the held coupon. The notification body is never trusted — this is
-/// the only place a redirect payment can mint a grant, and it always re-fetches
-/// the authoritative status from the API.
-async fn settle_payment(
-    state: &AppState,
-    row: &PendingPayment,
-) -> Result<(PendingStatus, Option<AccessGrant>), AppError> {
-    let status = match row.status {
-        PendingStatus::Pending => {
-            let remote = yookassa_gateway(state)?
-                .fetch_payment(&row.provider_payment_id)
-                .await?;
-            match remote.status {
-                yookassa::RemoteStatus::Succeeded => {
-                    let won = state.payment_rows.settle_succeeded(&row.id).await?;
-                    if won && let Some(code) = &row.coupon_code {
-                        // The money is taken: a cap exhausted since checkout
-                        // must not block the grant — log and move on.
-                        if let Err(e) = state
-                            .coupons
-                            .redeem(code, &row.user_id, &row.quest_id, row.price)
-                            .await
-                        {
-                            tracing::warn!(
-                                payment = %row.id,
-                                code,
-                                error = ?e,
-                                "coupon redemption failed at settlement; grant created anyway"
-                            );
-                        }
-                    }
-                    PendingStatus::Succeeded
-                }
-                yookassa::RemoteStatus::Canceled => {
-                    state.payment_rows.mark_canceled(&row.id).await?;
-                    PendingStatus::Canceled
-                }
-                yookassa::RemoteStatus::Pending | yookassa::RemoteStatus::WaitingForCapture => {
-                    PendingStatus::Pending
-                }
-            }
-        }
-        settled => settled,
-    };
-    if status != PendingStatus::Succeeded {
-        return Ok((status, None));
-    }
-    let (grant, _) = state
-        .grants
-        .create_grant_idemp(
-            &row.user_id,
-            &row.quest_id,
-            GrantSource::Payment,
-            Some(row.provider_payment_id.clone()),
-        )
-        .await?;
-    Ok((PendingStatus::Succeeded, Some(grant)))
+    Ok(Json(payments::checkout(&state, &user_id, &req).await?))
 }
 
 #[derive(serde::Serialize)]
@@ -1073,7 +593,7 @@ async fn payment_status_handler(
         // A foreign payment reads as absent — ids must not be probeable.
         .filter(|p| p.user_id == user_id)
         .ok_or_else(|| AppError::NotFound("payment not found".into()))?;
-    let (status, grant) = settle_payment(&state, &row).await?;
+    let (status, grant) = payments::settle(&state, &row).await?;
     Ok(Json(PaymentStatusResponse {
         status: status.as_str(),
         grant,
@@ -1098,7 +618,7 @@ async fn yookassa_webhook_handler(
         tracing::info!(payment = %provider_payment_id, "webhook for unknown payment ignored");
         return Ok(StatusCode::OK);
     };
-    settle_payment(&state, &row).await?;
+    payments::settle(&state, &row).await?;
     Ok(StatusCode::OK)
 }
 
@@ -1154,7 +674,7 @@ async fn validate_coupon_handler(
         )));
     };
     let (code, discount_amount) =
-        match quote_coupon(&state, &code, &user_id, &req.quest_id, price).await? {
+        match payments::quote_coupon(&state, &code, &user_id, &req.quest_id, price).await? {
             Ok(quote) => quote,
             Err(reason) => return Ok(Json(invalid(reason))),
         };
@@ -1387,92 +907,6 @@ fn ctor_wire(
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
-}
-
-/// The acting editor's (id, display label, is_admin) for a constructor request,
-/// resolved from a SINGLE session lookup. A Bearer session resolves to the real
-/// account (admin iff role == admin); the ops-token path (no "self") is labeled
-/// generically, keyed by the claimed device id, and is never admin — the
-/// constructor keeps that bootstrap path author-scoped so an operator never gains
-/// cross-author reach. Callers that also need the admin flag use this directly
-/// instead of a second `session_account` round-trip.
-async fn acting_author_role(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<(String, String, bool), AppError> {
-    if let Some(account) = session_account(state, headers).await? {
-        let is_admin = account.role == auth::ROLE_ADMIN;
-        let name = account
-            .display_name
-            .filter(|s| !s.trim().is_empty())
-            .or(account.email)
-            .unwrap_or_else(|| account.user_id.clone());
-        return Ok((account.user_id, name, is_admin));
-    }
-    let claimed = claimed_from_headers(headers);
-    let id = if claimed.is_empty() {
-        "ops".to_string()
-    } else {
-        claimed
-    };
-    Ok((id, "Оператор".to_string(), false))
-}
-
-/// The acting editor's (id, display label) for author attribution. See
-/// [`acting_author_role`] when the admin flag is also needed.
-async fn acting_author(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<(String, String), AppError> {
-    let (id, name, _) = acting_author_role(state, headers).await?;
-    Ok((id, name))
-}
-
-/// Authorize the caller for `quest_id` and return its LIST row (no body, no cover).
-///
-/// Authoring is editor-gated (capability), then ownership-gated: a quest stays the
-/// author's, but an ADMIN is the superuser and may act on any author's quest in any
-/// state (the stated lifecycle: a published quest is "owned by author" yet "can be
-/// edited by admin"). For a non-admin, a quest they did not author is
-/// indistinguishable from one that does not exist — the same opaque 404, never a
-/// signal that another author's quest exists. `author_id` is immutable (there is
-/// no quest-transfer), so the fetched row can be reused for the follow-up
-/// mutation with no TOCTOU ownership gap. This is the single chokepoint every
-/// per-quest constructor handler routes through — including
-/// [`require_owned_constructor_quest`] — so the owner-or-admin rule exists in
-/// exactly one place and cannot be re-derived (and forgotten) per call site.
-///
-/// Authorizing on the SUMMARY is what keeps the heavy read opt-in: save, status
-/// and delete only need to know who owns the quest, and the authoring body they
-/// used to load along the way runs to megabytes for a media-rich import.
-async fn require_owned_constructor_summary(
-    state: &AppState,
-    headers: &HeaderMap,
-    quest_id: &str,
-) -> Result<ConstructorQuestSummary, AppError> {
-    require_editor(state, headers).await?;
-    let (author_id, _, admin) = acting_author_role(state, headers).await?;
-    state
-        .constructor
-        .summary_for_quest(quest_id)
-        .await?
-        .filter(|q| admin || q.author_id == author_id)
-        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
-}
-
-/// The same gate, then the FULL entity — for the two callers that genuinely read
-/// the authoring body (GET-one and export). Everything else takes the summary.
-async fn require_owned_constructor_quest(
-    state: &AppState,
-    headers: &HeaderMap,
-    quest_id: &str,
-) -> Result<ConstructorQuest, AppError> {
-    require_owned_constructor_summary(state, headers, quest_id).await?;
-    state
-        .constructor
-        .get(quest_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
 }
 
 async fn list_constructor_quests_handler(
@@ -2068,7 +1502,7 @@ async fn get_version_stats_handler(
     headers: HeaderMap,
     Path(snapshot_id): Path<String>,
 ) -> Result<Json<facts::PerVersionStats>, AppError> {
-    require_admin(&state, &headers)?;
+    require_ops_token(&state, &headers)?;
     let grants_count = state.grants.list_all_grants().await?.len();
     Ok(Json(
         state
@@ -2083,7 +1517,7 @@ async fn get_version_feedbacks_handler(
     headers: HeaderMap,
     Path(snapshot_id): Path<String>,
 ) -> Result<Json<Vec<facts::Fact>>, AppError> {
-    require_admin(&state, &headers)?;
+    require_ops_token(&state, &headers)?;
     Ok(Json(
         state.store.list_feedbacks_for_version(&snapshot_id).await?,
     ))
@@ -2477,7 +1911,7 @@ async fn run_migration_handler(
     headers: HeaderMap,
     Json(req): Json<MigrateRequest>,
 ) -> Result<Json<MigrationResult>, AppError> {
-    require_admin(&state, &headers)?;
+    require_ops_token(&state, &headers)?;
     let res = state
         .store
         .run_legacy_migration(
@@ -2545,10 +1979,7 @@ async fn register_handler(
         .register_user(&req.user_id, &email, &password_hash, req.display_name)
         .await?;
     let token = auth::generate_token();
-    state
-        .auth
-        .create_session(&token, &account.user_id)
-        .await?;
+    state.auth.create_session(&token, &account.user_id).await?;
     // §6.3 soft confirmation: the account works immediately; the mail is
     // best-effort and the Profile banner offers a resend.
     send_confirm_email(&state, &account.user_id, &email).await?;
@@ -2983,11 +2414,7 @@ async fn send_mail_best_effort(state: &AppState, to: &str, subject: &str, body: 
     }
 }
 
-async fn send_confirm_email(
-    state: &AppState,
-    user_id: &str,
-    email: &str,
-) -> Result<(), AppError> {
+async fn send_confirm_email(state: &AppState, user_id: &str, email: &str) -> Result<(), AppError> {
     // Confirmation is link-only (§6.3 is soft, nobody types codes for it) —
     // the minted code is simply never mailed, so it is unusable.
     let (token, _code) = issue_auth_token(
@@ -3262,10 +2689,7 @@ async fn set_display_name_handler(
     if name.as_deref().is_some_and(|n| n.chars().count() > 60) {
         return Err(AppError::BadRequest("name is too long (max 60)".into()));
     }
-    let updated = state
-        .auth
-        .set_display_name(&account.user_id, name)
-        .await?;
+    let updated = state.auth.set_display_name(&account.user_id, name).await?;
     Ok(Json(serde_json::json!({
         "status": "ok",
         "display_name": updated.display_name,
@@ -4609,17 +4033,21 @@ mod tests {
             })
             .await
             .expect("identity");
-        state.auth.create_session("tok-g", "dev:g").await.expect("session");
-        let (st, me) = get_json_h(
-            &app,
-            "/api/users/me",
-            &[("authorization", "Bearer tok-g")],
-        )
-        .await;
+        state
+            .auth
+            .create_session("tok-g", "dev:g")
+            .await
+            .expect("session");
+        let (st, me) =
+            get_json_h(&app, "/api/users/me", &[("authorization", "Bearer tok-g")]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["email"], "g@x.io", "contact email still reported");
         let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
-        assert_eq!(methods, vec!["google".to_string()], "no phantom email method");
+        assert_eq!(
+            methods,
+            vec!["google".to_string()],
+            "no phantom email method"
+        );
         // Reachable two ways (google + recoverable email) → unlink allowed.
         assert_eq!(me["can_unlink"], true, "server serves the unlink verdict");
     }
@@ -6024,12 +5452,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
-        let (st, _) = get_json_h(
-            app,
-            "/api/users/me/stats",
-            &[("x-user-id", &ids.player)],
-        )
-        .await;
+        let (st, _) = get_json_h(app, "/api/users/me/stats", &[("x-user-id", &ids.player)]).await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
         let (st, _) = get_json(
             app,
@@ -6089,8 +5512,7 @@ mod tests {
         let bob_bearer = format!("Bearer {bob_token}");
 
         // /me carries the role; a fresh account is a player.
-        let (st, me) =
-            get_json_h(app, "/api/users/me", &[("authorization", &alice_bearer)]).await;
+        let (st, me) = get_json_h(app, "/api/users/me", &[("authorization", &alice_bearer)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(me["role"], "player");
 
@@ -6312,12 +5734,8 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
 
         // Stats: signed cross-attempt fold; quest A completed, B not.
-        let (st, stats) = get_json_h(
-            app,
-            "/api/users/me/stats",
-            &[("x-user-id", &ids.player)],
-        )
-        .await;
+        let (st, stats) =
+            get_json_h(app, "/api/users/me/stats", &[("x-user-id", &ids.player)]).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(stats["balance"], -2, "5 + 5 - 12, unclamped");
         assert_eq!(stats["quests_completed"], 1);
@@ -6327,12 +5745,8 @@ mod tests {
 
         // Idempotent re-append changes nothing.
         let (_, _) = post_json(app, &format!("/api/attempts/{attempt_b}/facts"), hint_batch).await;
-        let (_, stats2) = get_json_h(
-            app,
-            "/api/users/me/stats",
-            &[("x-user-id", &ids.player)],
-        )
-        .await;
+        let (_, stats2) =
+            get_json_h(app, "/api/users/me/stats", &[("x-user-id", &ids.player)]).await;
         assert_eq!(stats, stats2, "duplicate appends never move stats");
     }
 
@@ -7257,12 +6671,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::UNAUTHORIZED, "account is gone");
-        let (st, _) = get_json_h(
-            app,
-            "/api/users/me",
-            &[("authorization", bearer.as_str())],
-        )
-        .await;
+        let (st, _) = get_json_h(app, "/api/users/me", &[("authorization", bearer.as_str())]).await;
         // The pre-delete session must be dead too (claims fall back to anonymous or 401).
         assert_ne!(st, StatusCode::INTERNAL_SERVER_ERROR);
         let (_, v) = post_json(app, "/api/auth/identify", json!({ "email": email })).await;
@@ -7864,14 +7273,8 @@ mod tests {
     #[tokio::test]
     async fn constructor_is_author_scoped() {
         let app = test_app();
-        let a: [(&str, &str); 2] = [
-            ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-user-id", "dev-a"),
-        ];
-        let b: [(&str, &str); 2] = [
-            ("x-admin-token", TEST_ADMIN_TOKEN),
-            ("x-user-id", "dev-b"),
-        ];
+        let a: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-user-id", "dev-a")];
+        let b: [(&str, &str); 2] = [("x-admin-token", TEST_ADMIN_TOKEN), ("x-user-id", "dev-b")];
 
         let mk = |id: &str, name: &str| {
             json!({
@@ -7940,6 +7343,57 @@ mod tests {
             full["name"], "Квест А",
             "A's quest is untouched by B's attempts"
         );
+    }
+
+    /// Pins the ops-token capability split (`authz`): the shared `ADMIN_TOKEN`
+    /// grants the admin surface and passes the editor gate, but in the
+    /// constructor it is author-scoped (never admin) — a bare ops token cannot
+    /// see or open a session editor's quest, while a session ADMIN can.
+    #[tokio::test]
+    async fn ops_token_grants_admin_surface_but_never_foreign_constructor_quests() {
+        let app = test_app();
+        let editor = editor_bearer(&app, "opspin").await;
+        let (st, _) = post_json_h(
+            &app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": "q-ops-pin", "name": "Свой", "cover": null, "steps_count": 1,
+                "body": { "id": "q-ops-pin", "meta": { "title": "Свой" }, "steps": [1], "versions": [] }
+            }),
+            &[("authorization", editor.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let ops = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        // Admin surface: OK for the bare ops token.
+        let (st, _) = get_json_h(&app, "/api/admin/users", &ops).await;
+        assert_eq!(st, StatusCode::OK, "ops token reaches the admin surface");
+        // Editor gate: passes, but the workspace is the ops author's own (empty),
+        // never every author's.
+        let (st, list) = get_json_h(&app, "/api/constructor/quests", &ops).await;
+        assert_eq!(st, StatusCode::OK, "ops token passes the editor gate");
+        assert_eq!(
+            list.as_array().expect("array").len(),
+            0,
+            "ops token lists no foreign quests"
+        );
+        // Per-quest reach: a foreign quest reads as absent for the ops token...
+        let (st, _) = get_json_h(&app, "/api/constructor/quests/q-ops-pin", &ops).await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "ops token cannot open another author's quest"
+        );
+        // ...but a session ADMIN is the superuser and opens it fine.
+        let admin = admin_bearer(&app, "opspin").await;
+        let (st, _) = get_json_h(
+            &app,
+            "/api/constructor/quests/q-ops-pin",
+            &[("authorization", admin.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "session admin opens any author's quest");
     }
 
     /// Admin superuser reach over the constructor (the stated model: a published
@@ -9440,7 +8894,7 @@ mod tests {
             .expect("publish");
         state
             .grants
-            .create_grant_idemp("p1", "q1", GrantSource::Payment, None)
+            .create_grant_idemp("p1", "q1", grants::GrantSource::Payment, None)
             .await
             .expect("grant");
         let att = state

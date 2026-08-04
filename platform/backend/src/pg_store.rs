@@ -141,8 +141,7 @@ impl FactStore for PgFactStore {
                     WHERE f.data->>'type' = 'quest_rated'
                     ORDER BY f.attempt_id, f.seq DESC ) AS last_rated
              JOIN attempts a ON a.attempt_id = last_rated.attempt_id";
-        const ORDER: &str =
-            " ORDER BY a.quest_id, a.user_id, a.created_at DESC, a.attempt_id DESC";
+        const ORDER: &str = " ORDER BY a.quest_id, a.user_id, a.created_at DESC, a.attempt_id DESC";
         let rows = match quests {
             Some([]) => return Ok(Vec::new()),
             Some(qs) => sqlx::query(&format!("{SELECT} WHERE a.quest_id = ANY($1){ORDER}"))
@@ -1024,8 +1023,7 @@ fn account_from_row(row: &sqlx::postgres::PgRow) -> Result<UserAccount, AppError
 /// Credential-view SELECT (account + password secret): the ONE JOIN both
 /// `find_by_email` and `user_record` share — they differ only in the WHERE key.
 /// A social-only account has no password row → NULL secret (login rejects).
-const USER_RECORD_SELECT: &str =
-    "SELECT u.user_id, u.email, u.display_name, u.role, u.created_at, u.email_confirmed_at, \
+const USER_RECORD_SELECT: &str = "SELECT u.user_id, u.email, u.display_name, u.role, u.created_at, u.email_confirmed_at, \
             i.secret_hash AS password_hash \
      FROM users u \
      LEFT JOIN identities i ON i.method = 'password' AND i.identifier = u.user_id";
@@ -1304,14 +1302,12 @@ impl AuthStore for PgAuthStore {
         rec: crate::store::AuthTokenRecord,
     ) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await.map_err(internal)?;
-        sqlx::query(
-            "DELETE FROM auth_tokens WHERE user_id = $1 AND kind = $2 AND used_at IS NULL",
-        )
-        .bind(&rec.user_id)
-        .bind(&rec.kind)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal)?;
+        sqlx::query("DELETE FROM auth_tokens WHERE user_id = $1 AND kind = $2 AND used_at IS NULL")
+            .bind(&rec.user_id)
+            .bind(&rec.kind)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
         sqlx::query(
             "INSERT INTO auth_tokens (token_hash, user_id, kind, code_hash, expires_at, used_at, attempts)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
