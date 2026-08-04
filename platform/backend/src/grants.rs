@@ -32,7 +32,7 @@ pub enum GrantSource {
 /// trail (the latter is `None` for free/coupon paths with nothing to reference).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "GrantWire"))]
+#[cfg_attr(test, ts(rename = "GrantWire"))]
 pub struct AccessGrant {
     pub user_id: String,
     pub quest_id: String,

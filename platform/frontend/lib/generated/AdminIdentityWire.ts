@@ -6,11 +6,7 @@
  * account, a Telegram `@username` (`t.me/…`) otherwise. Anonymous players (no
  * account row) carry no contact.
  */
-export type AdminIdentityWire = { user_id: string, display_name: string | null, 
-/**
- * "google" | "telegram" | "email" | "anon".
- */
-kind: "google" | "telegram" | "email" | "anon", 
+export type AdminIdentityWire = { user_id: string, display_name: string | null, kind: "google" | "telegram" | "email" | "anon", 
 /**
  * Present (for `mailto:`) only when `kind` is google/email.
  */

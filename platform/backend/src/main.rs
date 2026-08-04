@@ -744,7 +744,7 @@ struct CheckoutRequest {
 /// redirect checkouts answer `{payment: {payment_id, confirmation_url}}`.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "CheckoutResult"))]
+#[cfg_attr(test, ts(rename = "CheckoutResult"))]
 #[serde(untagged)]
 enum CheckoutResponse {
     Settled { grant: AccessGrant, created: bool },
@@ -1061,7 +1061,7 @@ async fn settle_payment(
 
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "PaymentStatusWire"))]
+#[cfg_attr(test, ts(rename = "PaymentStatusWire"))]
 struct PaymentStatusResponse {
     #[cfg_attr(test, ts(type = "\"pending\" | \"succeeded\" | \"canceled\""))]
     status: &'static str,
@@ -1145,7 +1145,7 @@ struct ValidateCouponRequest {
 /// discriminant on the wire.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "CouponVerdict"))]
+#[cfg_attr(test, ts(rename = "CouponVerdict"))]
 #[serde(untagged)]
 enum CouponVerdict {
     Valid {
@@ -1294,7 +1294,7 @@ fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
 /// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, Debug, PartialEq)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "StartPointWire"))]
+#[cfg_attr(test, ts(rename = "StartPointWire"))]
 struct StartPointWire {
     lat: f64,
     lng: f64,
@@ -1363,7 +1363,7 @@ async fn publish_quest_handler(
 /// One dashboard list row.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "ConstructorQuestWire"))]
+#[cfg_attr(test, ts(rename = "ConstructorQuestWire"))]
 struct ConstructorQuestWire {
     quest_id: String,
     name: String,
@@ -1398,7 +1398,7 @@ struct ConstructorQuestWire {
 /// A single quest with its full editable body (for opening in the builder).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "ConstructorQuestFullWire"))]
+#[cfg_attr(test, ts(rename = "ConstructorQuestFullWire"))]
 struct ConstructorQuestFullWire {
     quest_id: String,
     name: String,
@@ -1787,7 +1787,7 @@ struct BundleQuery {
 /// same value the store card resolves, so the precached bytes match what renders.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "BundleWire"))]
+#[cfg_attr(test, ts(rename = "BundleWire"))]
 struct BundleWire {
     quest_id: String,
     snapshot_id: String,
@@ -1832,7 +1832,7 @@ async fn get_bundle_handler(
 /// `rating_count: 0` and the client shows "no ratings yet" instead of a fake score.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "PublishedQuestWire"))]
+#[cfg_attr(test, ts(rename = "PublishedQuestWire"))]
 struct CatalogQuest {
     #[serde(flatten)]
     meta: PublishedMeta,
@@ -1941,7 +1941,7 @@ async fn list_quests_handler(
 /// chips. Visibility matches the catalog: a delisted quest 404s here too.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "ProductPageWire"))]
+#[cfg_attr(test, ts(rename = "ProductPageWire"))]
 struct ProductPageWire {
     #[serde(flatten)]
     meta: PublishedMeta,
@@ -1969,7 +1969,7 @@ struct ProductPageWire {
 /// anonymous → «Игрок»), never an email; month-precision timestamp client-side.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "ReviewWire"))]
+#[cfg_attr(test, ts(rename = "ReviewWire"))]
 struct ReviewWire {
     author: String,
     #[cfg_attr(test, ts(type = "number"))]
@@ -2183,11 +2183,10 @@ async fn get_version_feedbacks_handler(
 /// account row) carry no contact.
 #[derive(serde::Serialize, Clone)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminIdentityWire"))]
+#[cfg_attr(test, ts(rename = "AdminIdentityWire"))]
 struct AdminIdentityWire {
     user_id: String,
     display_name: Option<String>,
-    /// "google" | "telegram" | "email" | "anon".
     #[cfg_attr(test, ts(type = "\"google\" | \"telegram\" | \"email\" | \"anon\""))]
     kind: &'static str,
     /// Present (for `mailto:`) only when `kind` is google/email.
@@ -2284,7 +2283,7 @@ async fn resolve_admin_identities(
 /// (star-only included), whether it is hidden, and the resolved author identity.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminReviewWire"))]
+#[cfg_attr(test, ts(rename = "AdminReviewWire"))]
 struct AdminReviewWire {
     quest_id: String,
     quest_name: String,
@@ -2301,7 +2300,7 @@ struct AdminReviewWire {
 
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminReviewsResponse"))]
+#[cfg_attr(test, ts(rename = "AdminReviewsResponse"))]
 struct AdminReviewsResponse {
     reviews: Vec<AdminReviewWire>,
 }
@@ -2356,7 +2355,7 @@ async fn admin_list_reviews_handler(
 /// Body for hide/unhide — the `(player, quest)` the moderation decision keys on.
 #[derive(serde::Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "ReviewHideBody"))]
+#[cfg_attr(test, ts(rename = "ReviewHideBody"))]
 struct ReviewHideRequest {
     user_id: String,
     quest_id: String,
@@ -2392,7 +2391,7 @@ async fn admin_unhide_review_handler(
 /// One report inside a feedback group — its note, server time, and author identity.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminReportWire"))]
+#[cfg_attr(test, ts(rename = "AdminReportWire"))]
 struct AdminReportWire {
     note: String,
     #[cfg_attr(test, ts(type = "number"))]
@@ -2405,7 +2404,7 @@ struct AdminReportWire {
 /// reports newest-first.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminFeedbackGroupWire"))]
+#[cfg_attr(test, ts(rename = "AdminFeedbackGroupWire"))]
 struct AdminFeedbackGroupWire {
     quest_id: String,
     quest_name: String,
@@ -2422,7 +2421,7 @@ struct AdminFeedbackGroupWire {
 
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminFeedbackResponse"))]
+#[cfg_attr(test, ts(rename = "AdminFeedbackResponse"))]
 struct AdminFeedbackResponse {
     groups: Vec<AdminFeedbackGroupWire>,
 }
@@ -2514,7 +2513,7 @@ async fn admin_list_feedback_handler(
 /// Body for resolve/reopen — the `(quest, snapshot, step)` group key.
 #[derive(serde::Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "FeedbackResolveBody"))]
+#[cfg_attr(test, ts(rename = "FeedbackResolveBody"))]
 struct FeedbackResolveRequest {
     quest_id: String,
     snapshot_id: String,
@@ -2953,7 +2952,7 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
 /// the admin feature toggle — either way the UI hides the button.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AuthProviders"))]
+#[cfg_attr(test, ts(rename = "AuthProviders"))]
 struct AuthProviders {
     google_client_id: Option<String>,
     telegram_client_id: Option<String>,
@@ -3462,7 +3461,7 @@ async fn delete_account_handler(
 /// anonymous profile otherwise (registered=false).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "Me"))]
+#[cfg_attr(test, ts(rename = "Me"))]
 struct Me {
     user_id: String,
     registered: bool,
@@ -3527,7 +3526,7 @@ async fn get_me_handler(
 /// renders contact fields present-only and simply omits the ones it has no data for.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminUserWire"))]
+#[cfg_attr(test, ts(rename = "AdminUserWire"))]
 struct AdminUserWire {
     user_id: String,
     /// `null` for a social-only account (no login email).
@@ -3631,7 +3630,7 @@ async fn set_user_role_handler(
 /// the deployment is configured for it at all.
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminFeatureWire"))]
+#[cfg_attr(test, ts(rename = "AdminFeatureWire"))]
 struct FeatureWire {
     key: &'static str,
     default_enabled: bool,
@@ -3679,7 +3678,7 @@ async fn list_features_handler(
 /// acceptable lists inside quest snapshots (the client is the matcher).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "PublicFeatures"))]
+#[cfg_attr(test, ts(rename = "PublicFeatures"))]
 struct PublicFeaturesResponse {
     flags: std::collections::HashMap<&'static str, bool>,
     /// The platform-wide universal answer; `None` unless the
@@ -3745,7 +3744,7 @@ async fn set_feature_handler(
 /// (`null` = unset — settings have no default values).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminSettingWire"))]
+#[cfg_attr(test, ts(rename = "AdminSettingWire"))]
 struct SettingWire {
     key: &'static str,
     value: Option<String>,
@@ -3929,7 +3928,7 @@ async fn admin_stats_quest_handler(
 /// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
 #[derive(serde::Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "CouponPayload"))]
+#[cfg_attr(test, ts(rename = "CouponPayload"))]
 struct CouponPayload {
     code: String,
     #[serde(flatten)]
@@ -3979,7 +3978,7 @@ impl CouponPayload {
 /// status and the usage fold (never persisted — always честный пересчёт).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminCouponWire"))]
+#[cfg_attr(test, ts(rename = "AdminCouponWire"))]
 struct AdminCouponWire {
     #[serde(flatten)]
     coupon: Coupon,
@@ -4268,14 +4267,22 @@ mod tests {
     /// The committed wire contract (frontend/lib/generated/) must equal what
     /// the serde structs export TODAY — a backend change that alters the wire
     /// fails here unless the regenerated types land in the same commit
-    /// (issue #66). Regenerate with:
-    ///   rm -rf ../frontend/lib/generated && \
-    ///   TS_RS_EXPORT_DIR=../frontend/lib/generated cargo test export_bindings
-    /// then rebuild index.ts (sorted `export type {X} from './X';` lines).
+    /// (issue #66). This test is ALSO the generator — regenerate with:
+    ///   UPDATE_WIRE=1 cargo test wire_bindings_are_committed
     #[test]
     fn wire_bindings_are_committed() {
         use ts_rs::TS;
-        let tmp = std::env::temp_dir().join(format!("geohod-wire-{}", std::process::id()));
+        let update = std::env::var("UPDATE_WIRE").is_ok();
+        let committed = std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../frontend/lib/generated"
+        ));
+        let tmp = if update {
+            let _ = std::fs::remove_dir_all(&committed);
+            committed.clone()
+        } else {
+            std::env::temp_dir().join(format!("geohod-wire-{}", std::process::id()))
+        };
         let _ = std::fs::remove_dir_all(&tmp);
         macro_rules! export_all {
             ($($t:ty),* $(,)?) => { $(<$t as TS>::export_all_to(&tmp).expect("export");)* }
@@ -4318,8 +4325,6 @@ mod tests {
             admin_stats::FunnelStep,
             admin_stats::QuestStatsResponse,
         );
-        let committed =
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/lib/generated"));
         let list = |dir: &std::path::Path| -> Vec<String> {
             let mut names: Vec<String> = std::fs::read_dir(dir)
                 .expect("read dir")
@@ -4330,30 +4335,30 @@ mod tests {
             names
         };
         let fresh = list(&tmp);
+        let index: String = fresh
+            .iter()
+            .map(|n| {
+                let t = n.trim_end_matches(".ts");
+                format!("export type {{ {t} }} from './{t}';\n")
+            })
+            .collect();
+        if update {
+            std::fs::write(committed.join("index.ts"), index).expect("write index.ts");
+            return;
+        }
         assert_eq!(
             fresh,
-            list(committed),
-            "generated type set drifted — regenerate frontend/lib/generated"
+            list(&committed),
+            "generated type set drifted — rerun with UPDATE_WIRE=1"
         );
         for name in &fresh {
             let a = std::fs::read_to_string(tmp.join(name)).expect("fresh");
             let b = std::fs::read_to_string(committed.join(name)).expect("committed");
-            assert_eq!(a, b, "{name} drifted — regenerate frontend/lib/generated");
+            assert_eq!(a, b, "{name} drifted — rerun with UPDATE_WIRE=1");
         }
-        let index: Vec<String> = fresh
-            .iter()
-            .map(|n| {
-                let t = n.trim_end_matches(".ts");
-                format!("export type {{ {t} }} from './{t}';")
-            })
-            .collect();
         let committed_index =
             std::fs::read_to_string(committed.join("index.ts")).expect("index.ts");
-        assert_eq!(
-            committed_index.trim().split('\n').collect::<Vec<_>>(),
-            index.iter().map(String::as_str).collect::<Vec<_>>(),
-            "index.ts drifted — regenerate frontend/lib/generated"
-        );
+        assert_eq!(committed_index, index, "index.ts drifted — rerun with UPDATE_WIRE=1");
         let _ = std::fs::remove_dir_all(&tmp);
     }
     use facts::FactKind;

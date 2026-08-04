@@ -22,7 +22,7 @@ use crate::errors::AppError;
 /// Reference returned after an upload; stored verbatim in quest JSON.
 #[derive(serde::Serialize, Clone, Debug)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "MediaRefWire"))]
+#[cfg_attr(test, ts(rename = "MediaRefWire"))]
 pub struct MediaRef {
     /// Public URL the bytes are served from (`"{public_base}/{hash}"`).
     pub url: String,

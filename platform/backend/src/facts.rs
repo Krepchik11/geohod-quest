@@ -153,7 +153,7 @@ pub fn project_analytics(facts: &[Fact]) -> Analytics {
 /// for "rating" is client-side only (SPEC).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "PlayerStats"))]
+#[cfg_attr(test, ts(rename = "PlayerStats"))]
 pub struct PlayerStats {
     pub balance: i32,
     #[cfg_attr(test, ts(type = "number"))]

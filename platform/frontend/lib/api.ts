@@ -13,7 +13,6 @@ import type {
   AdminCouponWire,
   AdminFeatureWire,
   AdminFeedbackResponse,
-  AdminIdentityWire,
   AdminReviewsResponse,
   AdminSettingWire,
   AdminStatsOverviewWire,
@@ -27,6 +26,7 @@ import type {
   ConstructorQuestWire,
   CouponPayload,
   CouponVerdict,
+  FeedbackResolveBody,
   GrantWire,
   Me,
   MediaRefWire,
@@ -36,8 +36,6 @@ import type {
   PublicFeatures,
   PublishedQuestWire,
   ReviewHideBody,
-  FeedbackResolveBody,
-  StartPointWire,
 } from './generated';
 
 /**
@@ -219,7 +217,7 @@ export const api = {
 
   // Grant-gated attempt creation: 403 without a grant, 404 for unpublished quests.
   createAttempt: (body: { user_id: string; quest_id: string }) =>
-    apiFetch<{ attempt_id: string; snapshot_id: string }>('/api/attempts', {
+    apiFetch<AttemptMeta>('/api/attempts', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -489,11 +487,5 @@ export const api = {
     apiFetch<{ status: string }>('/api/auth/delete-account', { method: 'POST', body: '{}' }),
   me: () => apiFetch<Me>('/api/users/me'),
   myStats: () =>
-    apiFetch<{
-      balance: number;
-      quests_completed: number;
-      completed_quest_ids: string[];
-      attempts_count: number;
-      grants_count: number;
-    }>('/api/users/me/stats'),
+    apiFetch<PlayerStats>('/api/users/me/stats'),
 };

@@ -8,9 +8,9 @@
  * polish keyed by the stable wire key, with the key itself as fallback.
  */
 
-import type { AdminFeatureWire, AdminSettingWire } from './generated';
+import type { AdminFeatureWire } from './generated';
 
-export type { AdminFeatureWire, AdminSettingWire };
+export type { AdminFeatureWire };
 
 /** A runtime setting hosted under a flag's row on the features page: the
  *  value half of a flag-gated feature (registry in backend settings.rs). */

@@ -149,7 +149,7 @@ impl DayRange {
 /// Raw counters for one period. Deltas are the client's presentation concern.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsTotalsWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsTotalsWire"))]
 pub struct StatsTotals {
     #[cfg_attr(test, ts(type = "number"))]
     pub purchased: u64,
@@ -162,7 +162,7 @@ pub struct StatsTotals {
 /// One day of the trend chart (zero-filled — every day of the range is present).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsDailyWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsDailyWire"))]
 pub struct DailyPoint {
     pub date: String,
     #[cfg_attr(test, ts(type = "number"))]
@@ -174,7 +174,7 @@ pub struct DailyPoint {
 /// One row of the per-quest table.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsQuestRowWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsQuestRowWire"))]
 pub struct QuestStatsRow {
     pub quest_id: String,
     pub name: String,
@@ -197,7 +197,7 @@ pub struct QuestStatsRow {
 /// `GET /api/admin/stats` body.
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsOverviewWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsOverviewWire"))]
 pub struct OverviewResponse {
     pub from: String,
     pub to: String,
@@ -212,7 +212,7 @@ pub struct OverviewResponse {
 /// One funnel step of the quest detail view.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsFunnelStepWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsFunnelStepWire"))]
 pub struct FunnelStep {
     #[cfg_attr(test, ts(type = "number"))]
     pub position: usize,
@@ -226,7 +226,7 @@ pub struct FunnelStep {
 /// `GET /api/admin/stats/{quest_id}` body.
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AdminStatsQuestWire"))]
+#[cfg_attr(test, ts(rename = "AdminStatsQuestWire"))]
 pub struct QuestStatsResponse {
     pub quest_id: String,
     pub name: String,

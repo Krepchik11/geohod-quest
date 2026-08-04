@@ -80,7 +80,7 @@ pub(crate) fn rfc3339_from_unix(secs: u64) -> String {
 /// The snapshot binding is set once at creation and never changes (version freeze).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export, rename = "AttemptMeta"))]
+#[cfg_attr(test, ts(rename = "AttemptMeta"))]
 pub struct AttemptMeta {
     pub attempt_id: String,
     pub user_id: String,
