@@ -15,7 +15,8 @@ const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock } =
   downloadMock: vi.fn(async () => ({})),
   pollMock: vi.fn(),
 }));
-vi.mock('../../../../../lib/api', () => ({
+vi.mock('../../../../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   api: {
     getQuestProduct: getProductMock,
     listGrants: listGrantsMock,
@@ -33,6 +34,7 @@ vi.mock('../../../../../lib/download', () => ({ downloadBundle: downloadMock }))
 vi.mock('../../../../../lib/payment-return', () => ({ pollPaymentSettlement: pollMock }));
 
 import AboutClient, { productChips } from '../AboutClient';
+import { ApiError } from '../../../../../lib/api';
 
 const PRODUCT = {
   quest_id: 'q1', name: 'Тайны старого Белграда', primary_comic: null,
@@ -125,7 +127,7 @@ describe('AboutClient', () => {
   });
 
   it('a 404 product renders the honest gone state', async () => {
-    getProductMock.mockRejectedValue({ status: 404 });
+    getProductMock.mockRejectedValue(new ApiError(404, '/api/quests/q/product', ''));
     render(<AboutClient questId="qX" />);
     await waitFor(() => expect(screen.getByText('Этого квеста больше нет в магазине.')).toBeTruthy());
   });

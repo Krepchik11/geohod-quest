@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ApiError } from '../../../lib/api';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
@@ -20,7 +21,7 @@ const { apiMock, sessionRef, routerMock } = vi.hoisted(() => ({
   sessionRef: { current: null as unknown },
   routerMock: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
 }));
-vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
+vi.mock('../../../lib/api', async (importOriginal) => ({ ...(await importOriginal<object>()), api: apiMock, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
   anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
@@ -58,7 +59,7 @@ describe('AuthPage — email-first (§6.1)', () => {
 
   it('known email → «С возвращением!» login step; wrong password errors at the field', async () => {
     apiMock.authIdentify.mockResolvedValue({ exists: true, confirmed: true });
-    apiMock.authLogin.mockRejectedValue(Object.assign(new Error('401'), { status: 401 }));
+    apiMock.authLogin.mockRejectedValue(new ApiError(401, '/api/auth/login', ''));
     render(<AuthPage />);
     await enterEmail('anna@gmail.com');
     await waitFor(() => expect(screen.getByText('С возвращением!')).toBeTruthy());

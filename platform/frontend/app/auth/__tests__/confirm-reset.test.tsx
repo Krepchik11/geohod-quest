@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ApiError } from '../../../lib/api';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
@@ -18,7 +19,7 @@ const { apiMock, sessionRef, setSessionMock, searchRef, routerMock } = vi.hoiste
   searchRef: { current: new URLSearchParams() },
   routerMock: { push: vi.fn() },
 }));
-vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
+vi.mock('../../../lib/api', async (importOriginal) => ({ ...(await importOriginal<object>()), api: apiMock, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
   anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
@@ -56,7 +57,7 @@ describe('ConfirmPage — /auth/confirm (§6.3)', () => {
 
   it('stale/used token (400) → «Ссылка не сработала» with the resend hint', async () => {
     searchRef.current = new URLSearchParams('token=stale');
-    apiMock.authConfirmEmail.mockRejectedValue(Object.assign(new Error('400'), { status: 400 }));
+    apiMock.authConfirmEmail.mockRejectedValue(new ApiError(400, '/api/auth', ''));
     render(<ConfirmPage />);
     await waitFor(() => expect(screen.getByText('Ссылка не сработала')).toBeTruthy());
     expect(screen.getByText(/Запросите новое письмо из профиля/)).toBeTruthy();
@@ -101,7 +102,7 @@ describe('ResetPage — /auth/reset (§6.2)', () => {
 
   it('stale/used token (400) → explains and points to requesting a new link', async () => {
     searchRef.current = new URLSearchParams('token=stale');
-    apiMock.authResetPassword.mockRejectedValue(Object.assign(new Error('400'), { status: 400 }));
+    apiMock.authResetPassword.mockRejectedValue(new ApiError(400, '/api/auth', ''));
     render(<ResetPage />);
     fireEvent.change(screen.getByLabelText('Придумайте пароль'), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сменить пароль и войти' }));

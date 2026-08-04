@@ -22,15 +22,9 @@ const { meMock, tokenMock, sessionMock, segmentMock } = vi.hoisted(() => ({
   sessionMock: vi.fn(),
   segmentMock: vi.fn(),
 }));
-vi.mock('../../../lib/api', () => ({
+vi.mock('../../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   api: { me: meMock },
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(status: number, _path?: string, message?: string) {
-      super(message ?? `api ${status}`);
-      this.status = status;
-    }
-  },
   hasAdminToken: tokenMock,
 }));
 vi.mock('../../../lib/identity', () => ({

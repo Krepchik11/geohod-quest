@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useSelectedLayoutSegment } from 'next/navigation';
-import { ApiError, hasAdminToken } from '../../lib/api';
+import { hasAdminToken, isAuthFailure } from '../../lib/api';
 import { getSession, subscribeSession } from '../../lib/identity';
 import { isAdmin } from '../../lib/roles';
 import { fetchMe } from '../../lib/use-me';
@@ -63,8 +63,7 @@ function useAdminAccess(): AdminAccess {
           setChecked({ token, verdict: 'granted' });
           return;
         }
-        const status = err instanceof ApiError ? err.status : null;
-        setChecked({ token, verdict: status === 401 || status === 403 ? 'denied' : 'error' });
+        setChecked({ token, verdict: isAuthFailure(err) ? 'denied' : 'error' });
       });
     return () => {
       cancelled = true;

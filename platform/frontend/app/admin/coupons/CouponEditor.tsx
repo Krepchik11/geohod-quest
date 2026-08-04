@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, ApiError, apiErrorMessage, type CouponPayload, type PublishedQuestWire } from '../../../lib/api';
+import { api, apiErrorMessage, classify, type CouponPayload, type PublishedQuestWire } from '../../../lib/api';
 import {
   STATUS_LABELS,
   formatRubles,
@@ -225,8 +225,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
         })
         .catch((err) => {
           if (cancelled) return;
-          const status = err instanceof ApiError ? err.status : null;
-          setLoadState(status === 404 ? 'missing' : 'error');
+          setLoadState(classify(err).kind === 'not-found' ? 'missing' : 'error');
         });
     }
     return () => {

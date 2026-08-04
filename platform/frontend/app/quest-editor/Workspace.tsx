@@ -18,7 +18,7 @@ import {
   type CtorSelection,
   type CtorTemplate,
 } from '../../lib/constructor-model';
-import { api, ApiError, type ConstructorQuestWire, type CtorStatus } from '../../lib/api';
+import { api, classify, isAuthFailure, type ConstructorQuestWire, type CtorStatus } from '../../lib/api';
 import { BuilderScreen } from './Builder';
 import Dashboard from './Dashboard';
 import { TestOverlay } from './TestPlayer';
@@ -76,11 +76,9 @@ export default function Workspace() {
   }, []);
 
   const errMessage = (e: unknown): string => {
-    if (e instanceof ApiError) {
-      if (e.status === 401 || e.status === 403) return 'Нет доступа — войдите под учётной записью редактора.';
-      return 'Сервер недоступен — попробуйте ещё раз.';
-    }
-    return 'Не удалось связаться с сервером.';
+    if (isAuthFailure(e)) return 'Нет доступа — войдите под учётной записью редактора.';
+    if (classify(e).kind === 'offline') return 'Не удалось связаться с сервером.';
+    return 'Сервер недоступен — попробуйте ещё раз.';
   };
 
   const refreshList = useCallback(async () => {
@@ -241,7 +239,8 @@ export default function Workspace() {
       // put a quest in the store — publishing is the gated action in the editor — so
       // open the quest there instead of failing silently. (Delisting to «Проект»
       // never hits this.)
-      if (e instanceof ApiError && e.status === 400 && status !== 'draft') {
+      const f = classify(e);
+      if (f.kind === 'rejected' && f.status === 400 && status !== 'draft') {
         showToast('Сначала опубликуйте версию в редакторе — затем выберите статус.');
         void openQuest(row.quest_id);
       } else {

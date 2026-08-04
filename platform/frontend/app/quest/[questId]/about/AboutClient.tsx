@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, type ProductPageWire } from '../../../../lib/api';
+import { api, classify, type ProductPageWire } from '../../../../lib/api';
 import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
@@ -72,7 +72,7 @@ export default function AboutClient({ questId }: { questId: string }) {
       .then((p) => { if (!cancelled) setProduct(p); })
       .catch((e: unknown) => {
         if (cancelled) return;
-        setFailed((e as { status?: number })?.status === 404 ? 'notfound' : 'load');
+        setFailed(classify(e).kind === 'not-found' ? 'notfound' : 'load');
       });
     api.listGrants()
       .then((grants) => {

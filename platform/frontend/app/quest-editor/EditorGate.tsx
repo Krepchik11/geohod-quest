@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { getSession, subscribeSession } from '../../lib/identity';
-import { api, ApiError, hasAdminToken } from '../../lib/api';
+import { api, hasAdminToken, isAuthFailure } from '../../lib/api';
 import { canEditQuests } from '../../lib/roles';
 import WorkspaceGate from './WorkspaceGate';
 
@@ -41,9 +41,8 @@ export default function EditorGate() {
           setAccess('granted');
           return;
         }
-        // 401/403 → unauthenticated/anonymous identity; anything else → outage.
-        const status = err instanceof ApiError ? err.status : null;
-        setAccess(status === 401 || status === 403 ? 'anon' : 'error');
+        // Unauthenticated/anonymous identity goes to the login screen; anything else is an outage.
+        setAccess(isAuthFailure(err) ? 'anon' : 'error');
       }
     })();
     return () => {

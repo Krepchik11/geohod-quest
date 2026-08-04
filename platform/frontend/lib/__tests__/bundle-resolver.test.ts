@@ -8,6 +8,7 @@
  * freeze). Network is injected; the queue is the real fake-indexeddb store.
  */
 import 'fake-indexeddb/auto';
+import { ApiError } from '../api';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { QuestSnapshot } from '../shared-model';
@@ -101,7 +102,7 @@ describe('resolveGate — resume keeps the pinned snapshot (version freeze)', ()
 });
 
 describe('resolveGate — error classification', () => {
-  const err = (status: number) => new Error(`API ${status} boom`);
+  const err = (status: number) => new ApiError(status, '/api/quests/q/bundle', 'boom');
 
   it('403 → denied, 401 → login-required, other → unavailable(offline flag)', async () => {
     expect(await resolveGate(QUEST, false, deps({ getBundle: vi.fn(async () => { throw err(403); }) }))).toEqual({ kind: 'denied' });
