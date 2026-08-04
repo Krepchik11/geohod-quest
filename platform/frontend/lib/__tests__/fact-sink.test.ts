@@ -26,7 +26,7 @@ vi.mock('../queue', () => ({
   ),
 }));
 
-import { memoryFactSink, queueFactSink } from '../fact-sink';
+import { queueFactSink } from '../fact-sink';
 
 const fact = (value: string): Fact => ({
   type: 'answer_submitted',
@@ -124,15 +124,5 @@ describe('queueFactSink ordering', () => {
     expect(storageCalls.map((c) => c.fact.submitted_value)).toEqual(['b']);
     storageCalls[0].resolve();
     await flush();
-  });
-});
-
-describe('memoryFactSink', () => {
-  it('appends into the target array synchronously', () => {
-    const target: Fact[] = [];
-    const sink = memoryFactSink(target);
-    const a = fact('a');
-    sink.append(a);
-    expect(target).toEqual([a]);
   });
 });

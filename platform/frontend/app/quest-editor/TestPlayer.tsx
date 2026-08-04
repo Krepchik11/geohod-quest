@@ -5,13 +5,14 @@ import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
 import { projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
+  COMPLETION_BONUS,
   hydratedPlayState,
+  isTerminalStep,
   transition,
   type PlayCtx,
   type PlayEvent,
   type PlayState,
 } from '../../lib/play-loop';
-import { memoryFactSink } from '../../lib/fact-sink';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import {
   CoinToast,
@@ -29,12 +30,11 @@ import { useEscape } from './controls';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и
- * тем же isAnswerAccepted (список шага + универсальный ответ квеста).
+ * тем же движком (lib/play-loop): список шага + универсальный ответ квеста.
  * Снапшот берётся на момент запуска, прогресс
  * эфемерный — dry-run будущей версии (design/ctor2/test-player.jsx).
  */
 
-const COMPLETION_BONUS = 5;
 const TOAST_MS = 1900;
 const NAV_TOAST_MS = 2600;
 
@@ -75,7 +75,6 @@ function TestPopup({ title, text, primary, ghost }: {
 function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: number; onNav: (msg: string) => void }) {
   const total = quest.steps.length;
   const clamp = (n: number) => Math.max(0, Math.min(n, total - 1));
-  const isTerminalStep = (s: GameStep) => s.template === 'congrats' || !!s.supporting?.terminal;
   const ctx: PlayCtx = { steps: quest.steps, deviceId: 'test-player', universalAnswers: [quest.universalAnswer] };
 
   // ONE rule state — the same engine the real player runs (lib/play-loop).
@@ -99,13 +98,12 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const [toast, setToast] = useState<{ amount: number; narrative?: string } | null>(null);
   const [overlay, setOverlay] = useState<'menu' | 'feedback' | 'paused' | 'over' | null>(null);
 
-  // Прогон эфемерный — факты уходят в память и умирают вместе с оверлеем.
-  const [sink] = useState(() => memoryFactSink([]));
-
   const pos = play.stepIdx;
   const step = quest.steps[pos];
   const display = quest.display[pos];
-  const coins = projectState(play.facts).balance;
+  // Прогон эфемерный — факты живут только в play.facts и умирают с оверлеем.
+  const proj = projectState(play.facts);
+  const coins = proj.balance;
 
   // One shared dismiss timer (mirrors the real player): a new toast restarts the
   // clock, so a step gift's pending clear can't wipe a hint spend toast shown on
@@ -127,31 +125,22 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   };
 
   /** Единственный путь правил: transition движка → стейт + слив эффектов.
-   *  Шаг, приземлившийся на терминал, тут же входит в него тем же событием
-   *  (бонус один раз — идемпотентно по логу), поэтому эффектов-на-стейт нет. */
+   *  Приземление на терминал движок завершает сам (бонус один раз —
+   *  идемпотентно по логу), поэтому эффектов-на-стейт нет. */
   const runEvent = (event: PlayEvent) => {
-    const results = [transition(play, event, ctx)];
-    const landed = results[0].state;
-    if (isTerminalStep(quest.steps[landed.stepIdx]) && !landed.facts.some((f) => f.type === 'attempt_completed')) {
-      results.push(transition(landed, { type: 'enter_terminal' }, ctx));
-      setFinalTime(elapsed());
+    const result = transition(play, event, ctx);
+    setPlay(result.state);
+    if (result.effects.appended.some((f) => f.type === 'attempt_completed')) setFinalTime(elapsed());
+    if (result.effects.toast) showToast(result.effects.toast.amount, result.effects.toast.narrative);
+    if (result.effects.advanced) {
+      setAnswer('');
+      setWrongFlash(false);
     }
-    setPlay(results[results.length - 1].state);
-    for (const result of results) {
-      result.effects.appended.forEach((f) => sink.append(f));
-      if (result.effects.toast) showToast(result.effects.toast.amount, result.effects.toast.narrative);
-      if (result.effects.advanced) {
-        setAnswer('');
-        setWrongFlash(false);
-      }
-      if (result.effects.openMaps) {
-        const nav = step.supporting?.navigator;
-        onNav(`→ Системные карты: ${nav?.label || 'точка'} · ${result.effects.openMaps.lat}, ${result.effects.openMaps.lng}`);
-      }
-      const answered = result.effects.appended.find((f) => f.type === 'answer_submitted');
-      if (answered && !answered.local_is_correct) setWrongFlash(true);
+    if (result.effects.openMaps) {
+      onNav(`→ Системные карты: ${result.effects.openMaps.label || 'точка'} · ${result.effects.openMaps.lat}, ${result.effects.openMaps.lng}`);
     }
-    return results[results.length - 1];
+    if (result.effects.answered && !result.effects.answered.correct) setWrongFlash(true);
+    return result;
   };
 
   const next = () => runEvent({ type: 'advance_to', to: pos + 1 });
@@ -197,7 +186,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const stepState = {
     answer,
     wrong: wrongFlash,
-    hintRevealed: projectState(play.facts).revealedHints.includes(pos),
+    hintRevealed: proj.revealedHints.includes(pos),
     coinsEarned: coins,
     time: finalTime,
     steps: `${total} / ${total}`,

@@ -30,12 +30,3 @@ export function queueFactSink(getAttemptKey: () => Promise<string>): FactSink {
     },
   };
 }
-
-/** In-memory sink for the constructor's test player — ephemeral by design. */
-export function memoryFactSink(target: Fact[]): FactSink {
-  return {
-    append(fact: Fact): void {
-      target.push(fact);
-    },
-  };
-}

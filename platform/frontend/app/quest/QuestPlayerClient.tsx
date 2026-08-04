@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
 import { projectState, latestRating } from '../../lib/shared-model';
 import {
+  COMPLETION_BONUS,
   hydratedPlayState,
   initialPlayState,
+  isTerminalStep,
   transition,
   type PlayCtx,
   type PlayEvent,
@@ -344,10 +346,10 @@ export default function QuestPlayerClient({
       const result = runEvent({ type: 'answer', value });
       // SPEC Wrong-Answer flow: the inline error flash derives from the verdict
       // the engine recorded; the popup state (2nd wrong) lives in PlayState.
-      const answered = result.effects.appended.find((f) => f.type === 'answer_submitted');
+      const answered = result.effects.answered;
       if (!answered) return;
       setUi((u) =>
-        answered.local_is_correct
+        answered.correct
           ? { ...u, wrong: false, answer: '' }
           : { ...u, wrong: true, answer: value }
       );
@@ -370,13 +372,13 @@ export default function QuestPlayerClient({
     runEvent({ type: 'navigator' });
   }, [runEvent]);
 
-  // Emit attempt_completed + completion bonus once on entering the terminal step.
-  // Local guard for this attempt; the server enforces once-per-(player, quest) ever.
-  const isTerminalStep = !!currentStep?.supporting?.terminal || currentStep?.template === 'congrats';
-  const hasCompleted = facts.some((f) => f.type === 'attempt_completed');
+  // The engine completes the attempt when an advance lands on the finale; this
+  // effect covers ONLY hydrate/start ON the finale (no advance happens then).
+  // The engine's own log guard makes a repeat enter_terminal a no-op.
+  const onFinale = isTerminalStep(currentStep);
   useEffect(() => {
-    if (isTerminalStep && !hasCompleted) runEvent({ type: 'enter_terminal' });
-  }, [isTerminalStep, hasCompleted, runEvent]);
+    if (onFinale) runEvent({ type: 'enter_terminal' });
+  }, [onFinale, runEvent]);
 
   // «Начать заново»: re-enter the gate with the restart intent so the fresh run
   // adopts the LATEST published version — resolution + version freeze live in one
@@ -446,8 +448,8 @@ export default function QuestPlayerClient({
   // Prefetch the catalog when the player reaches the finale, so «что дальше»
   // reveals the next quests without a loading flash.
   useEffect(() => {
-    if (isTerminalStep) loadCatalog();
-  }, [isTerminalStep, loadCatalog]);
+    if (onFinale) loadCatalog();
+  }, [onFinale, loadCatalog]);
 
   // Re-mirror per-fact queue status into state (chips + pending counts).
   const refreshQueueStatus = useCallback(async (key: string) => {
@@ -572,12 +574,12 @@ export default function QuestPlayerClient({
   // City/duration are the author's real values frozen into the snapshot at publish
   // (undefined for snapshots published before the field existed — the player then
   // simply omits them rather than showing a hardcoded place). completionBonus is the
-  // canonical +5 (SPEC), not quest-specific data.
+  // canonical bonus (SPEC), not quest-specific data.
   const questMeta = {
     title: snapshot.name,
     city: snapshot.city,
     duration: snapshot.duration,
-    completionBonus: 5,
+    completionBonus: COMPLETION_BONUS,
   };
   const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
 
@@ -641,7 +643,7 @@ export default function QuestPlayerClient({
   ) : stepBody;
 
   // The final and catalog screens are chromeless (no top bar) — matching the design.
-  const showTop = !isTerminalStep && !ui.showCatalog;
+  const showTop = !onFinale && !ui.showCatalog;
 
   return (
     <PlayerFrame

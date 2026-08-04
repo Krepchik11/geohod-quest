@@ -9,10 +9,19 @@
  */
 import {
   isAnswerAccepted,
+  latestRating,
   shouldOfferHint,
   type Fact,
   type GameStep,
 } from './shared-model';
+
+/** The canonical once-per-quest completion bonus (SPEC). */
+export const COMPLETION_BONUS = 5;
+
+/** The ONE terminal predicate — both players and the engine share it. */
+export function isTerminalStep(step: GameStep): boolean {
+  return !!step.supporting?.terminal || step.template === 'congrats';
+}
 
 export interface PlayState {
   facts: Fact[];
@@ -34,7 +43,9 @@ export interface PlayEffects {
   /** stepIdx moved forward (the caller pushes history / clears the input). */
   advanced: boolean;
   /** The navigator handoff target, when the event was `navigator`. */
-  openMaps: { lat: number; lng: number } | null;
+  openMaps: { lat: number; lng: number; label: string | null } | null;
+  /** The verdict of an `answer` event (null for every other event / blank input). */
+  answered: { correct: boolean } | null;
 }
 
 export interface PlayCtx {
@@ -66,7 +77,13 @@ export function hydratedPlayState(facts: Fact[], stepIdx: number): PlayState {
   return { ...initialPlayState(), facts, stepIdx, maxStepIdx: stepIdx };
 }
 
-const NO_EFFECTS: PlayEffects = { appended: [], toast: null, advanced: false, openMaps: null };
+const NO_EFFECTS: PlayEffects = Object.freeze({
+  appended: [],
+  toast: null,
+  advanced: false,
+  openMaps: null,
+  answered: null,
+});
 
 interface Builder {
   state: PlayState;
@@ -90,6 +107,37 @@ function advanceTo(b: Builder, to: number): void {
     stepIdx: clamped,
     maxStepIdx: Math.max(b.state.maxStepIdx, clamped),
   };
+  // Landing on the terminal step IS completion — the engine owns the rule, so
+  // neither player needs a follow-up enter_terminal after an advance.
+  if (isTerminalStep(b.ctx.steps[clamped])) completeAttempt(b);
+}
+
+/** attempt_completed + once-per-log bonus + the terminal step's gift.
+ *  Idempotent over the whole fact log (reread / rehydrate appends nothing). */
+function completeAttempt(b: Builder): void {
+  if (b.state.facts.some((f) => f.type === 'attempt_completed')) return;
+  const pos = b.state.stepIdx;
+  const step = b.ctx.steps[pos];
+  append(b, {
+    type: 'attempt_completed',
+    step_position: pos,
+    submitted_value: null,
+    local_is_correct: true,
+    coins_delta: 0,
+    note: step.rich_content.button_text || 'Квест пройден',
+  });
+  if (!b.state.facts.some((f) => f.type === 'completion_bonus')) {
+    append(b, {
+      type: 'completion_bonus',
+      step_position: pos,
+      submitted_value: null,
+      local_is_correct: true,
+      coins_delta: COMPLETION_BONUS,
+      note: 'Бонус за прохождение',
+    });
+    b.effects = { ...b.effects, toast: { amount: COMPLETION_BONUS, narrative: 'Бонус за прохождение' } };
+  }
+  claimGiftIfNeeded(b, pos);
 }
 
 /** Gift is claimed when its step COMPLETES (confirm / correct answer / terminal),
@@ -154,11 +202,8 @@ export function transition(
     case 'answer': {
       const value = event.value;
       if (!value.trim()) break;
-      const correct = isAnswerAccepted(
-        value,
-        (step.completion as { acceptable?: string[] }).acceptable ?? [],
-        ctx.universalAnswers,
-      );
+      const correct = isAnswerAccepted(value, step.completion.acceptable, ctx.universalAnswers);
+      b.effects = { ...b.effects, answered: { correct } };
       append(b, {
         type: 'answer_submitted',
         step_position: state.stepIdx,
@@ -211,30 +256,11 @@ export function transition(
       b.state = { ...b.state, hintRevealPos: null };
       break;
 
-    case 'enter_terminal': {
-      if (state.facts.some((f) => f.type === 'attempt_completed')) break;
-      append(b, {
-        type: 'attempt_completed',
-        step_position: state.stepIdx,
-        submitted_value: null,
-        local_is_correct: true,
-        coins_delta: 0,
-        note: step.rich_content.button_text || 'Квест пройден',
-      });
-      if (!state.facts.some((f) => f.type === 'completion_bonus')) {
-        append(b, {
-          type: 'completion_bonus',
-          step_position: state.stepIdx,
-          submitted_value: null,
-          local_is_correct: true,
-          coins_delta: 5,
-          note: 'Бонус за прохождение',
-        });
-        b.effects = { ...b.effects, toast: { amount: 5, narrative: 'Бонус за прохождение' } };
-      }
-      claimGiftIfNeeded(b, state.stepIdx);
+    // Hydrate/start ON the finale: no advance lands there, so the caller fires
+    // this explicitly. Same guarded logic as an advance landing.
+    case 'enter_terminal':
+      completeAttempt(b);
       break;
-    }
 
     case 'feedback':
       append(b, {
@@ -258,7 +284,7 @@ export function transition(
         coins_delta: 0,
         note: nav.label || null,
       });
-      b.effects = { ...b.effects, openMaps: { lat: nav.lat, lng: nav.lng } };
+      b.effects = { ...b.effects, openMaps: { lat: nav.lat, lng: nav.lng, label: nav.label || null } };
       break;
     }
 
@@ -266,8 +292,7 @@ export function transition(
       const text = event.text?.trim().slice(0, 500) || null;
       // Re-append when the score OR the text is new; identical repeats are
       // absorbed by natural-key dedup anyway.
-      const last = [...state.facts].reverse().find((f) => f.type === 'quest_rated');
-      if (event.value <= 0 || (last && Number(last.submitted_value) === event.value && !text)) break;
+      if (event.value <= 0 || (latestRating(state.facts) === event.value && !text)) break;
       append(b, {
         type: 'quest_rated',
         step_position: state.stepIdx,
