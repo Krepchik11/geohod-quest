@@ -1,0 +1,50 @@
+{
+  "name": "legacy-first-navigator",
+  "description": "A pre-start_point snapshot: the key is ABSENT, so the first VALID step navigator stands in (a malformed navigator is skipped, never a crash). No paid hints, no media.",
+  "snapshot": {
+    "golden_id": "golden-legacy",
+    "name": "Старый снапшот",
+    "snapshot_version": 1,
+    "steps": [
+      {
+        "position": 0,
+        "template": "start",
+        "rich_content": { "title": "Старый снапшот", "main_text": "Без точки старта", "button_text": "начать квест" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": { "is_start": true }
+      },
+      {
+        "position": 1,
+        "template": "task_no",
+        "rich_content": { "title": "Сломанная точка", "main_text": "Навигатор без широты" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": { "navigator": { "lng": 19.8 }, "hint": null }
+      },
+      {
+        "position": 2,
+        "template": "task_no",
+        "rich_content": { "title": "Церковь", "main_text": "Дойдите до церкви" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": { "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Церковь" } }
+      },
+      {
+        "position": 3,
+        "template": "congrats",
+        "rich_content": { "title": "Квест пройден!", "main_text": "Поздравляем" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": { "terminal": true }
+      }
+    ]
+  },
+  "expected": {
+    "media_refs": [],
+    "pages": 4,
+    "tasks": 2,
+    "paid_hints": false,
+    "start_point": { "lat": 45.2551, "lng": 19.8451 }
+  }
+}

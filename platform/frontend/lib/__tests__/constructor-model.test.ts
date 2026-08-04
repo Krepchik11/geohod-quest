@@ -271,6 +271,26 @@ describe('computeGates', () => {
     q.meta.cover = 'data:image/jpeg;base64,' + 'A'.repeat(8 * 1024 * 1024);
     expect(computeGates(q).warnings.some((w) => w.text.includes('выше цели 5 МБ'))).toBe(true);
   });
+
+  it('size derives from the PUBLISHED snapshot: a switched-off hint image is not counted', () => {
+    const q = quest();
+    const s = newStep('task_answer');
+    s.image = '/img.jpg';
+    s.acceptable = ['1730'];
+    s.hint = { ...s.hint, on: false, cost: 5, text: '', image: '/hint.jpg' };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    // The off-hint image never reaches the snapshot, so it must not weigh in.
+    expect(computeGates(q).imgs).toBe(1);
+  });
+
+  it('counts a video step into the size estimate (the honest «размер квеста»)', () => {
+    const q = quest();
+    const noVideo = computeGates(q);
+    q.steps = [q.steps[0], newStep('route_video'), q.steps[1]];
+    const g = computeGates(q);
+    expect(g.vids).toBe(1);
+    expect(g.sizeMb).toBeCloseTo(noVideo.sizeMb + 1.6, 5);
+  });
 });
 
 describe('stepToGameStep → toDesignStep (production render path)', () => {

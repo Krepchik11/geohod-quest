@@ -12,6 +12,7 @@
  */
 import type { CropRect } from './image-crop';
 import type { GameStep, QuestSnapshot, Supporting } from './shared-model';
+import { mediaStats } from './snapshot';
 
 /**
  * Исходник кадрированного изображения: URL несрезанной картинки плюс выбранная
@@ -470,12 +471,6 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
 
 const isTaskTemplate = (t: CtorTemplate) => t === 'task_no' || t === 'task_answer';
 
-/** Грубая оценка веса медиа: data-URL считаем честно по base64, внешние пути — константой. */
-function imageMb(src: string): number {
-  if (src.startsWith('data:')) return (src.length * 3) / 4 / (1024 * 1024);
-  return 0.35;
-}
-
 export function computeGates(quest: CtorQuest): Gates {
   const errors: GateMessage[] = [];
   const warnings: GateMessage[] = [];
@@ -528,23 +523,14 @@ export function computeGates(quest: CtorQuest): Gates {
     add(null, 'err', BAD_START_COORDS_TEXT, 'start');
   }
 
-  let imgs = 0;
-  let vids = 0;
-  let mb = 0.4;
-  const countImage = (src: string | null | undefined) => {
-    if (!src) return;
-    imgs += 1;
-    mb += imageMb(src);
-  };
-  steps.forEach((s) => {
-    countImage(s.image);
-    countImage(s.hint.image);
-    if (s.video) {
-      vids += 1;
-      mb += 1.6;
-    }
-  });
-  countImage(quest.meta.cover);
+  // Size/counters honestly derive from the PUBLISHED snapshot (issue #64): the
+  // draft is serialized through the same adapter publish uses, so what weighs
+  // here is exactly what ships — off-hint images drop out, videos/atmosphere/
+  // bonus animations count, duplicates are one cached copy.
+  const stats = mediaStats(serializeDraft(quest));
+  const imgs = stats.images;
+  const vids = stats.videos;
+  const mb = 0.4 + stats.estimatedBytes / (1024 * 1024);
 
   const sizeLabel = mb.toFixed(1).replace('.', ',') + ' МБ';
   if (mb > 5) {

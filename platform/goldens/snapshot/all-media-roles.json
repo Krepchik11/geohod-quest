@@ -1,0 +1,79 @@
+{
+  "name": "all-media-roles",
+  "description": "A snapshot exercising EVERY media-bearing field (image roles, video ref, inline media_video, bonus animation + voice), a repeated ref (dedup), task steps, a paid hint and an explicit quest-level start_point.",
+  "snapshot": {
+    "golden_id": "golden-all-media",
+    "name": "Все роли медиа",
+    "snapshot_version": 1,
+    "start_point": { "lat": 44.8176, "lng": 20.4569 },
+    "steps": [
+      {
+        "position": 0,
+        "template": "start",
+        "rich_content": { "title": "Все роли медиа", "main_text": "Обложка", "button_text": "начать квест" },
+        "media": { "task": "https://m/cover.jpg", "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": { "is_start": true }
+      },
+      {
+        "position": 1,
+        "template": "video",
+        "rich_content": { "title": "Видео", "main_text": "Приветствие", "button_text": "продолжить" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": { "ref": "https://m/intro.mp4", "duration_label": "2 мин", "caption": "Интро" } },
+        "completion": { "mode": "physical" },
+        "supporting": { "media_video": "https://m/inline.mp4" }
+      },
+      {
+        "position": 2,
+        "template": "task_answer",
+        "rich_content": { "title": "Вопрос", "main_text": "Сколько колонн?", "question_prompt": "Введите ответ" },
+        "media": { "task": "https://m/task3.jpg", "character": "https://m/char3.jpg", "hint": "https://m/hint3.jpg", "atmosphere": "https://m/atm3.jpg", "video": null },
+        "completion": { "mode": "answer", "acceptable": ["8"] },
+        "supporting": {
+          "hint": { "cost_coins": 5, "reveal_text": "Посчитайте слева направо" },
+          "navigator": { "lat": 1.0, "lng": 2.0, "label": "Колоннада" },
+          "gift": { "coins": 5, "narrative_text": "" }
+        }
+      },
+      {
+        "position": 3,
+        "template": "task_no",
+        "rich_content": { "title": "Дойти", "main_text": "Дойдите до входа" },
+        "media": { "task": "https://m/cover.jpg", "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": {
+          "physical_action": { "description": "Подойти к дверям", "confirm_label": "Я на месте" },
+          "gift": { "coins": 5, "narrative_text": "" }
+        }
+      },
+      {
+        "position": 4,
+        "template": "congrats",
+        "rich_content": { "title": "Квест пройден!", "main_text": "Поздравляем" },
+        "media": { "task": null, "character": null, "hint": null, "atmosphere": null, "video": null },
+        "completion": { "mode": "physical" },
+        "supporting": {
+          "terminal": true,
+          "bonus_animation": { "asset_ref": "https://m/anim.webp", "voice_ref": "https://m/voice.mp3" }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "media_refs": [
+      "https://m/cover.jpg",
+      "https://m/intro.mp4",
+      "https://m/inline.mp4",
+      "https://m/task3.jpg",
+      "https://m/char3.jpg",
+      "https://m/hint3.jpg",
+      "https://m/atm3.jpg",
+      "https://m/anim.webp",
+      "https://m/voice.mp3"
+    ],
+    "pages": 5,
+    "tasks": 2,
+    "paid_hints": true,
+    "start_point": { "lat": 44.8176, "lng": 20.4569 }
+  }
+}

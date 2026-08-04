@@ -12,6 +12,7 @@
  * byte progress; real sizes arrive with the media phase (P6 measurement item).
  */
 import { loadQuestSnapshot, type QuestSnapshot } from './shared-model';
+import { mediaRefs } from './snapshot';
 import type { BundleWire } from './api';
 import { putBundle, type BundleRow } from './queue';
 
@@ -30,27 +31,12 @@ export interface DownloadApi {
  * snapshot — the ones the service worker's same-origin shell cache can't reach, so they
  * must be explicitly precached for offline play. Same-origin refs are covered by the
  * SW's shell cache; inline `data:` URIs (legacy) live in the snapshot JSON and need no
- * caching. Walks EVERY media-bearing field (image roles, video, inline media_video,
- * bonus animation + voice) so nothing the player can render is missing offline.
+ * caching. The walk itself lives in lib/snapshot (`mediaRefs` — EVERY media-bearing
+ * field) so nothing the player can render is missing offline; this only keeps the
+ * cacheability filter.
  */
 export function collectMediaRefs(snapshot: QuestSnapshot): string[] {
-  const refs = new Set<string>();
-  const add = (ref?: string | null) => {
-    if (isHttpUrl(ref)) refs.add(ref);
-  };
-  for (const step of snapshot.steps) {
-    const m = step.media;
-    add(m?.task);
-    add(m?.character);
-    add(m?.hint);
-    add(m?.atmosphere);
-    add(m?.video?.ref);
-    const sup = step.supporting;
-    add(sup?.media_video);
-    add(sup?.bonus_animation?.asset_ref);
-    add(sup?.bonus_animation?.voice_ref);
-  }
-  return [...refs];
+  return mediaRefs(snapshot).filter(isHttpUrl);
 }
 
 /**

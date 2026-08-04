@@ -11,6 +11,7 @@ import {
 } from '../../lib/shared-model';
 import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
 import { toDesignStep } from '../../lib/design-step';
+import { stepAt } from '../../lib/snapshot';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { nextQuestsForCatalog } from '../../lib/catalog';
 import {
@@ -206,7 +207,7 @@ export default function QuestPlayerClient({
   // would race. A single run also means a stable dispatch — no `cancelled` flag.
   const didHydrateRef = useRef(false);
 
-  const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
+  const currentStep: GameStep = stepAt(snapshot, stepIdx);
   const proj = projectState(facts);
 
   // The global coin wallet: prior attempts (all quests) + this attempt's live facts,
@@ -226,7 +227,8 @@ export default function QuestPlayerClient({
   const pendingCount = Object.values(queueStatus).filter((s) => s === 'pending').length;
 
   const displaySteps = useMemo(() => steps.map(toDesignStep), [steps]);
-  const currentDisplayStep = displaySteps[Math.min(stepIdx, displaySteps.length - 1)];
+  // Same clamp as currentStep — displaySteps mirrors steps index-for-index.
+  const currentDisplayStep = useMemo(() => toDesignStep(currentStep), [currentStep]);
 
   // Ephemeral per-step UI state. Facts/reducer remain the sole durable source.
   // Client-only component (gated by BundleGate), so the sound preference can be
