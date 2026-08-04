@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { api, type PublishedQuestWire } from '../../lib/api';
+import { markOwned } from '../../lib/collection';
 import { currentUserId } from '../../lib/identity';
 import { coverCss } from '../../lib/cover';
 import { downloadBundle } from '../../lib/download';
@@ -47,6 +48,7 @@ export default function QuestCard({
     try {
       await api.checkout({ user_id: currentUserId(), quest_id: quest.quest_id });
       setJustBought(true);
+      markOwned(quest.quest_id);
       setState('idle');
       autoDownload();
     } catch {
@@ -57,6 +59,7 @@ export default function QuestCard({
   const onPurchased = () => {
     setSheetOpen(false);
     setJustBought(true);
+    markOwned(quest.quest_id);
     setState('idle');
     autoDownload();
   };

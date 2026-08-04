@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resetCollectionForTests } from '../../lib/collection';
 import '@testing-library/jest-dom/vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
@@ -66,6 +67,7 @@ async function mountStore() {
 }
 
 beforeEach(() => {
+  resetCollectionForTests();
   listQuestsMock.mockResolvedValue(CATALOG);
   listGrantsMock.mockResolvedValue([]);
   window.history.replaceState(null, '', '/');
@@ -177,6 +179,8 @@ describe('the store page and the URL', () => {
     expect(screen.queryByRole('button', { name: /Только не купленные/ })).toBeNull();
     unmount();
 
+    // The collection is cached per identity — drop it so the second mount refetches.
+    resetCollectionForTests();
     listGrantsMock.mockResolvedValue([{ user_id: 'dev:test', quest_id: 'a' }]);
     await mountStore();
     await waitFor(() => expect(cards()).toHaveLength(3));

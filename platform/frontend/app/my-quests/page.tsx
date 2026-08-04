@@ -5,6 +5,7 @@ import Link from 'next/link';
 import SiteShell from '../components/SiteShell';
 import { toast } from '../components/Toaster';
 import { api, type PublishedQuestWire } from '../../lib/api';
+import { fetchOwned } from '../../lib/collection';
 import { projectState, latestRating } from '../../lib/shared-model';
 import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } from '../../lib/queue';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
@@ -153,14 +154,7 @@ async function loadCollection(): Promise<Collection> {
   } catch {
     return { source: 'error' };
   }
-  let ownedIds = new Set<string>();
-  try {
-    const grants = await api.listGrants();
-    const userId = currentUserId();
-    ownedIds = new Set(grants.filter((g) => g.user_id === userId).map((g) => g.quest_id));
-  } catch {
-    ownedIds = new Set();
-  }
+  const ownedIds = await fetchOwned();
   const owned = quests.filter((q) => ownedIds.has(q.quest_id));
   const rows = await Promise.all(owned.map(composeRow));
   return { source: 'live', rows };

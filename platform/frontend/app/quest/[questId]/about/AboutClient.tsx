@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ProductPageWire } from '../../../../lib/api';
+import { markOwned, useOwns } from '../../../../lib/collection';
 import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
@@ -51,7 +52,7 @@ function Benefits({ p }: { p: ProductPageWire }) {
 export default function AboutClient({ questId }: { questId: string }) {
   const [product, setProduct] = useState<ProductPageWire | null>(null);
   const [failed, setFailed] = useState<'load' | 'notfound' | null>(null);
-  const [owned, setOwned] = useState(false);
+  const owned = useOwns(questId);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
@@ -74,13 +75,6 @@ export default function AboutClient({ questId }: { questId: string }) {
         if (cancelled) return;
         setFailed((e as { status?: number })?.status === 404 ? 'notfound' : 'load');
       });
-    api.listGrants()
-      .then((grants) => {
-        if (cancelled) return;
-        const me = currentUserId();
-        setOwned(grants.some((g) => g.user_id === me && g.quest_id === questId));
-      })
-      .catch(() => { /* owned stays false; purchase still works */ });
     return () => { cancelled = true; };
   }, [questId]);
 
@@ -95,7 +89,7 @@ export default function AboutClient({ questId }: { questId: string }) {
 
   const onPurchased = () => {
     setSheetOpen(false);
-    setOwned(true);
+    markOwned(questId);
     startDownload();
   };
 
@@ -104,7 +98,7 @@ export default function AboutClient({ questId }: { questId: string }) {
     setGrantError(false);
     try {
       await api.checkout({ user_id: currentUserId(), quest_id: questId });
-      setOwned(true);
+      markOwned(questId);
       startDownload();
     } catch {
       setGrantError(true);
@@ -127,7 +121,7 @@ export default function AboutClient({ questId }: { questId: string }) {
       if (cancelled) return;
       setPayOutcome(outcome);
       if (outcome === 'succeeded') {
-        setOwned(true);
+        markOwned(questId);
         startDownload();
       }
     });
