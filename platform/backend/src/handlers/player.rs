@@ -154,7 +154,7 @@ async fn get_state_handler(
 /// not its value — decides who answers, since the constructor always writes it:
 /// present ⇒ the author's word is final; absent ⇒ pre-field snapshot, and the
 /// first step navigator stands in so old publishes keep their button.
-pub(crate) fn snapshot_start_point(snapshot: Option<&serde_json::Value>) -> Option<StartPointWire> {
+fn snapshot_start_point(snapshot: Option<&serde_json::Value>) -> Option<StartPointWire> {
     let snapshot = snapshot?;
     if let Some(explicit) = snapshot.get("start_point") {
         return point_of(explicit);
@@ -176,9 +176,9 @@ fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
 /// Wire shape of the quest start point (see [`snapshot_start_point`]). Bare
 /// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, Debug, PartialEq)]
-pub(crate) struct StartPointWire {
-    pub(crate) lat: f64,
-    pub(crate) lng: f64,
+struct StartPointWire {
+    lat: f64,
+    lng: f64,
 }
 
 #[derive(serde::Deserialize)]
@@ -588,4 +588,84 @@ async fn get_my_stats_handler(
     // Caller-scoped, PK-indexed lookup — never load every player's grants to count one's own.
     let grants_count = state.grants.grants_for_user(&user_id).await?.len();
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    // ---- start point («Место старта») ---------------------------------------
+
+    #[test]
+    fn start_point_is_the_authors_quest_level_field() {
+        let snap = json!({
+            "start_point": { "lat": 44.8176, "lng": 20.4569 },
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(
+            snapshot_start_point(Some(&snap)),
+            Some(StartPointWire {
+                lat: 44.8176,
+                lng: 20.4569,
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_null_start_point_hides_the_button_despite_navigators() {
+        let snap = json!({
+            "start_point": null,
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(snapshot_start_point(Some(&snap)), None);
+        // Same for a present-but-malformed value: honour the intent, guess nothing.
+        let broken = json!({
+            "start_point": { "lat": "45" },
+            "steps": [
+                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
+            ]
+        });
+        assert_eq!(snapshot_start_point(Some(&broken)), None);
+    }
+
+    #[test]
+    fn legacy_snapshot_without_the_field_falls_back_to_the_first_navigator() {
+        let snap = json!({ "steps": [
+            { "template": "start", "supporting": { "is_start": true } },
+            { "template": "task_no", "supporting": { "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Церковь" } } },
+            { "template": "task_answer", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0, "label": "Дальше" } } }
+        ] });
+        assert_eq!(
+            snapshot_start_point(Some(&snap)),
+            Some(StartPointWire {
+                lat: 45.2551,
+                lng: 19.8451,
+            })
+        );
+    }
+
+    #[test]
+    fn start_point_absent_without_coordinates_and_tolerant_of_foreign_shapes() {
+        let no_nav = json!({ "steps": [ { "template": "start" }, { "template": "congrats" } ] });
+        assert_eq!(snapshot_start_point(Some(&no_nav)), None);
+        assert_eq!(snapshot_start_point(None), None);
+        assert_eq!(
+            snapshot_start_point(Some(&json!({ "steps": "мусор" }))),
+            None
+        );
+        // A malformed navigator (missing lat) is skipped, not a crash — and the
+        // NEXT navigator wins.
+        let mixed = json!({ "steps": [
+            { "template": "task_no", "supporting": { "navigator": { "lng": 19.8 } } },
+            { "template": "task_no", "supporting": { "navigator": { "lat": 1.5, "lng": 2.5, "label": "" } } }
+        ] });
+        assert_eq!(
+            snapshot_start_point(Some(&mixed)),
+            Some(StartPointWire { lat: 1.5, lng: 2.5 })
+        );
+    }
 }

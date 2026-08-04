@@ -12,9 +12,9 @@ use axum::{
 
 use crate::authz::{claimed_from_headers, resolve_user};
 use crate::errors::AppError;
-use crate::features::Feature;
+use crate::features::{Feature, feature_available};
 use crate::grants::AccessGrant;
-use crate::{AppState, coupons, feature_available, payments, yookassa};
+use crate::{AppState, coupons, payments, yookassa};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -130,13 +130,7 @@ async fn validate_coupon_handler(
     let Ok(code) = coupons::normalize_code(&req.code) else {
         return Ok(Json(invalid("промокод не найден")));
     };
-    let Some(price) = state
-        .grants
-        .get_published(&req.quest_id)
-        .await?
-        .and_then(|meta| meta.price)
-        .filter(|p| *p > 0)
-    else {
+    let Some(price) = payments::quest_price(&state, &req.quest_id).await? else {
         return Ok(Json(invalid(
             coupons::RedeemReject::NotApplicable.message(),
         )));

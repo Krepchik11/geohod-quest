@@ -150,7 +150,7 @@ async fn require_provider_enabled(
     feature: Feature,
     provider: &str,
 ) -> Result<(), AppError> {
-    if crate::feature_enabled(state, feature).await? {
+    if crate::features::feature_enabled(state, feature).await? {
         Ok(())
     } else {
         Err(AppError::NotImplemented(format!(
@@ -196,7 +196,7 @@ async fn mock_checkout(
 }
 
 /// A quest's positive price; `None` for free (0), unpriced, or unpublished.
-async fn quest_price(state: &AppState, quest_id: &str) -> Result<Option<i64>, AppError> {
+pub(crate) async fn quest_price(state: &AppState, quest_id: &str) -> Result<Option<i64>, AppError> {
     Ok(state
         .grants
         .get_published(quest_id)

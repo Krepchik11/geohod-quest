@@ -13,7 +13,8 @@ use axum::{
 use crate::authz::{claimed_from_headers, resolve_user, session_account};
 use crate::errors::AppError;
 use crate::features::Feature;
-use crate::{AppState, auth, feature_enabled, mailer, media, social, store};
+use crate::features::feature_enabled;
+use crate::{AppState, auth, mailer, media, social, store};
 
 pub fn router() -> Router<AppState> {
     Router::new()

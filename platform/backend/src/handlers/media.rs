@@ -10,7 +10,7 @@ use axum::{
 };
 
 use crate::AppState;
-use crate::authz::require_editor;
+use crate::authz::require_editor_actor;
 use crate::errors::AppError;
 use crate::media::MediaRef;
 
@@ -43,7 +43,7 @@ async fn upload_media_handler(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<MediaRef>, AppError> {
-    require_editor(&state, &headers).await?;
+    require_editor_actor(&state, &headers).await?;
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())

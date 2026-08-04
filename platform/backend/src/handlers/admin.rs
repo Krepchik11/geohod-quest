@@ -15,9 +15,10 @@ use crate::coupons::{self, Coupon, CouponUsage, Discount};
 use crate::errors::AppError;
 use crate::facts::{self, MigrationResult};
 use crate::features::Feature;
+use crate::features::feature_available;
 use crate::settings::Setting;
 use crate::store::PublishedMeta;
-use crate::{AppState, admin_stats, auth, feature_available, store};
+use crate::{AppState, admin_stats, auth, store};
 
 pub fn router() -> Router<AppState> {
     Router::new()

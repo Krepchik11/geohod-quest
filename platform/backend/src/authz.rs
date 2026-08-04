@@ -8,7 +8,7 @@
 //! - `X-Admin-Token` — the shared operator secret (`ADMIN_TOKEN`). It grants
 //!   the admin surface and the editor gate but carries NO identity: it is
 //!   exempt from the admin self-change guard, and in the constructor it never
-//!   gains cross-author reach (see [`acting_author_role`]).
+//!   gains cross-author reach (see [`require_editor_actor`]).
 
 use axum::http::{HeaderMap, header};
 
@@ -161,12 +161,6 @@ impl Actor {
     pub fn can_admin(&self) -> bool {
         self.via_ops_token || self.role.as_deref() == Some(auth::ROLE_ADMIN)
     }
-
-    /// The authoring surface: `editor` or anything [`can_admin`](Self::can_admin)
-    /// grants (admin ⊃ editor).
-    pub fn can_edit(&self) -> bool {
-        self.can_admin() || self.role.as_deref() == Some(auth::ROLE_EDITOR)
-    }
 }
 
 /// The identity authorized to act on the admin user-management surface. `user_id`
@@ -200,61 +194,71 @@ pub async fn require_admin_actor(
     Err(AppError::Forbidden("admin access required".into()))
 }
 
-/// Authorize a quest-authoring request (the constructor / `/quest-editor` surface).
+/// The authorized editor identity for a constructor request: who authored rows
+/// are attributed to, and whether the actor has admin (cross-author) reach.
+pub struct EditorActor {
+    pub author_id: String,
+    pub author_name: String,
+    pub is_admin: bool,
+}
+
+/// Authorize a quest-authoring request (the constructor / `/quest-editor` surface)
+/// and resolve the acting editor — ONE ops-token check, ONE session read.
 ///
-/// Authoring is the `editor` capability: a `Bearer` session whose account role is
+/// The gate is the `editor` capability: a `Bearer` session whose account role is
 /// `editor` or `admin` (admin ⊃ editor), OR the shared `ADMIN_TOKEN` operator
-/// credential. Anonymous devices and plain `player` accounts get an opaque 403.
+/// credential (which needs no session at all). Anonymous devices and plain
+/// `player` accounts get an opaque 403.
+///
+/// The identity prefers the `Bearer` session when one resolves — the real account
+/// (admin iff role == admin) — even when the ops token also rides along. Without
+/// a session, the ops path (no "self") is labeled generically, keyed by the
+/// claimed device id, and is NEVER admin: the constructor keeps that bootstrap
+/// path author-scoped so an operator never gains cross-author reach.
 ///
 /// This is the server-side half of the role model — the `/quest-editor` page hides
 /// itself from non-editors, but publish is a direct API call, so it must be gated
-/// here too (a player could otherwise POST `/api/quests/publish` straight). It does
-/// NOT bind authorship to the editor (any editor may publish any quest); per-author
-/// ownership remains a separate, tracked follow-up.
-pub async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    if Actor::resolve(state, headers).await?.can_edit() {
-        return Ok(());
-    }
-    Err(AppError::Forbidden("editor access required".into()))
-}
-
-/// The acting editor's (id, display label, is_admin) for a constructor request,
-/// resolved from a SINGLE session lookup. A Bearer session resolves to the real
-/// account (admin iff role == admin); the ops-token path (no "self") is labeled
-/// generically, keyed by the claimed device id, and is never admin — the
-/// constructor keeps that bootstrap path author-scoped so an operator never gains
-/// cross-author reach. Callers that also need the admin flag use this directly
-/// instead of a second `session_account` round-trip.
-pub async fn acting_author_role(
+/// here too (a player could otherwise POST `/api/quests/publish` straight).
+pub async fn require_editor_actor(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<(String, String, bool), AppError> {
-    if let Some(account) = session_account(state, headers).await? {
-        let is_admin = account.role == auth::ROLE_ADMIN;
-        let name = account
-            .display_name
-            .filter(|s| !s.trim().is_empty())
-            .or(account.email)
-            .unwrap_or_else(|| account.user_id.clone());
-        return Ok((account.user_id, name, is_admin));
+) -> Result<EditorActor, AppError> {
+    let via_ops_token = ops_token_ok(state, headers);
+    let account = session_account(state, headers).await?;
+    let can_edit = via_ops_token
+        || account
+            .as_ref()
+            .is_some_and(|a| a.role == auth::ROLE_ADMIN || a.role == auth::ROLE_EDITOR);
+    if !can_edit {
+        return Err(AppError::Forbidden("editor access required".into()));
     }
-    let claimed = claimed_from_headers(headers);
-    let id = if claimed.is_empty() {
-        "ops".to_string()
-    } else {
-        claimed
-    };
-    Ok((id, "Оператор".to_string(), false))
-}
-
-/// The acting editor's (id, display label) for author attribution. See
-/// [`acting_author_role`] when the admin flag is also needed.
-pub async fn acting_author(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<(String, String), AppError> {
-    let (id, name, _) = acting_author_role(state, headers).await?;
-    Ok((id, name))
+    Ok(match account {
+        Some(account) => {
+            let is_admin = account.role == auth::ROLE_ADMIN;
+            let author_name = account
+                .display_name
+                .filter(|s| !s.trim().is_empty())
+                .or(account.email)
+                .unwrap_or_else(|| account.user_id.clone());
+            EditorActor {
+                author_id: account.user_id,
+                author_name,
+                is_admin,
+            }
+        }
+        None => {
+            let claimed = claimed_from_headers(headers);
+            EditorActor {
+                author_id: if claimed.is_empty() {
+                    "ops".to_string()
+                } else {
+                    claimed
+                },
+                author_name: "Оператор".to_string(),
+                is_admin: false,
+            }
+        }
+    })
 }
 
 /// Authorize the caller for `quest_id` and return its LIST row (no body, no cover).
@@ -271,7 +275,7 @@ pub async fn acting_author(
 /// [`require_owned_constructor_quest`] — so the owner-or-admin rule exists in
 /// exactly one place and cannot be re-derived (and forgotten) per call site.
 ///
-/// The admin widening comes from [`acting_author_role`]'s session check ONLY:
+/// The admin widening comes from [`require_editor_actor`]'s session check ONLY:
 /// the bare ops token satisfies the editor gate but is never admin here, so it
 /// cannot reach another author's quest.
 ///
@@ -283,13 +287,12 @@ pub async fn require_owned_constructor_summary(
     headers: &HeaderMap,
     quest_id: &str,
 ) -> Result<ConstructorQuestSummary, AppError> {
-    require_editor(state, headers).await?;
-    let (author_id, _, admin) = acting_author_role(state, headers).await?;
+    let actor = require_editor_actor(state, headers).await?;
     state
         .constructor
         .summary_for_quest(quest_id)
         .await?
-        .filter(|q| admin || q.author_id == author_id)
+        .filter(|q| actor.is_admin || q.author_id == actor.author_id)
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
 }
 

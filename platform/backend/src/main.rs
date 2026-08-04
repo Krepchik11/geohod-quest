@@ -48,8 +48,6 @@ mod yookassa;
 use std::sync::{Arc, Mutex};
 
 use config::AppConfig;
-use errors::AppError;
-use features::Feature;
 use media::MediaStores;
 use store::{
     AuthStores, ConstructorStores, CouponStores, FactStores, FlagStores, GrantStores,
@@ -115,12 +113,13 @@ fn build_telegram_verifier(config: &AppConfig) -> Option<Arc<social::OidcVerifie
         .map(|id| Arc::new(social::OidcVerifier::telegram(id.clone())))
 }
 
-fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
+/// Assemble the shared state from a backing [`Storage`] — the ONE place every
+/// field is wired, so the in-memory and Postgres branches cannot drift.
+fn app_state(config: AppConfig, media: MediaStores, storage: Storage) -> AppState {
     let mailer = mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from);
     let google = build_google_verifier(&config);
     let telegram = build_telegram_verifier(&config);
     let yookassa = config.yookassa.clone().map(YookassaGateway::Http);
-    let storage = Storage::in_memory();
     AppState {
         config,
         store: storage.facts,
@@ -138,32 +137,6 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
         google,
         telegram,
-    }
-}
-
-/// The runtime toggle verdict for a feature: the admin override when one is
-/// stored, the code default otherwise. This is only the *toggle* half of the
-/// evaluation — capability ([`feature_available`]) is enforced by the gated
-/// endpoints themselves, so a flag can never enable what the deployment
-/// cannot do.
-pub async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
-    Ok(feature.effective(state.flags.get(feature.key()).await?))
-}
-
-/// The capability half: whether this deployment is configured for the feature
-/// at all (credentials present). Reported to the admin panel so a switched-on
-/// but unconfigured flag is visibly inert.
-pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
-    match feature {
-        Feature::AuthGoogle => state.google.is_some(),
-        Feature::AuthTelegram => state.telegram.is_some(),
-        Feature::PaymentsMock => true,
-        Feature::PaymentsYookassa => state.yookassa.is_some(),
-        // Pure client behavior — nothing to configure server-side.
-        Feature::PlayerBackButton => true,
-        // Client-side matching; the answer value is a runtime setting, so
-        // there is no deployment capability to check.
-        Feature::PlayerUniversalAnswer => true,
     }
 }
 
@@ -312,33 +285,13 @@ async fn main() -> anyhow::Result<()> {
                 max_connections,
                 "storage: PostgreSQL (migrations up to date)"
             );
-            let google = build_google_verifier(&config);
-            let telegram = build_telegram_verifier(&config);
-            let storage = Storage::postgres(pool);
-            AppState {
-                config: config.clone(),
-                store: storage.facts,
-                grants: storage.grants,
-                auth: storage.auth,
-                constructor: storage.constructor,
-                coupons: storage.coupons,
-                media,
-                payment_rows: storage.payments,
-                moderation: storage.moderation,
-                flags: storage.flags,
-                settings: storage.settings,
-                yookassa: config.yookassa.clone().map(YookassaGateway::Http),
-                mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
-                rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
-                google,
-                telegram,
-            }
+            app_state(config.clone(), media, Storage::postgres(pool))
         }
         Err(_) => {
             tracing::warn!(
                 "DATABASE_URL not set — using in-memory storage; ALL DATA IS LOST ON RESTART"
             );
-            in_memory_state(config.clone(), media)
+            app_state(config.clone(), media, Storage::in_memory())
         }
     };
 
@@ -393,7 +346,6 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
     use crate::handlers::auth::MAIL_SEND_LIMIT;
-    use crate::handlers::player::{StartPointWire, snapshot_start_point};
     use crate::store::{ConstructorQuest, PublishedMeta};
     use axum::{
         body::Body,
@@ -462,7 +414,7 @@ mod tests {
                 config.admin_token = None;
             }
             let media = MediaStores::from_config(&config.media).expect("test media store");
-            let mut state = in_memory_state(config, media);
+            let mut state = app_state(config, media, Storage::in_memory());
             if self.seeded_flags {
                 let mut flags = store::InMemoryFlagStore::new();
                 for f in TEST_ENABLED_FLAGS {
@@ -539,81 +491,6 @@ mod tests {
     #[test]
     fn origin_allowed_empty_list_rejects_everything() {
         assert!(!origin_allowed(&[], "https://app.geohod.ru"));
-    }
-
-    // ---- start point («Место старта») ---------------------------------------
-
-    #[test]
-    fn start_point_is_the_authors_quest_level_field() {
-        let snap = json!({
-            "start_point": { "lat": 44.8176, "lng": 20.4569 },
-            "steps": [
-                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
-            ]
-        });
-        assert_eq!(
-            snapshot_start_point(Some(&snap)),
-            Some(StartPointWire {
-                lat: 44.8176,
-                lng: 20.4569,
-            })
-        );
-    }
-
-    #[test]
-    fn explicit_null_start_point_hides_the_button_despite_navigators() {
-        let snap = json!({
-            "start_point": null,
-            "steps": [
-                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
-            ]
-        });
-        assert_eq!(snapshot_start_point(Some(&snap)), None);
-        // Same for a present-but-malformed value: honour the intent, guess nothing.
-        let broken = json!({
-            "start_point": { "lat": "45" },
-            "steps": [
-                { "template": "task_no", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0 } } }
-            ]
-        });
-        assert_eq!(snapshot_start_point(Some(&broken)), None);
-    }
-
-    #[test]
-    fn legacy_snapshot_without_the_field_falls_back_to_the_first_navigator() {
-        let snap = json!({ "steps": [
-            { "template": "start", "supporting": { "is_start": true } },
-            { "template": "task_no", "supporting": { "navigator": { "lat": 45.2551, "lng": 19.8451, "label": "Церковь" } } },
-            { "template": "task_answer", "supporting": { "navigator": { "lat": 1.0, "lng": 2.0, "label": "Дальше" } } }
-        ] });
-        assert_eq!(
-            snapshot_start_point(Some(&snap)),
-            Some(StartPointWire {
-                lat: 45.2551,
-                lng: 19.8451,
-            })
-        );
-    }
-
-    #[test]
-    fn start_point_absent_without_coordinates_and_tolerant_of_foreign_shapes() {
-        let no_nav = json!({ "steps": [ { "template": "start" }, { "template": "congrats" } ] });
-        assert_eq!(snapshot_start_point(Some(&no_nav)), None);
-        assert_eq!(snapshot_start_point(None), None);
-        assert_eq!(
-            snapshot_start_point(Some(&json!({ "steps": "мусор" }))),
-            None
-        );
-        // A malformed navigator (missing lat) is skipped, not a crash — and the
-        // NEXT navigator wins.
-        let mixed = json!({ "steps": [
-            { "template": "task_no", "supporting": { "navigator": { "lng": 19.8 } } },
-            { "template": "task_no", "supporting": { "navigator": { "lat": 1.5, "lng": 2.5, "label": "" } } }
-        ] });
-        assert_eq!(
-            snapshot_start_point(Some(&mixed)),
-            Some(StartPointWire { lat: 1.5, lng: 2.5 })
-        );
     }
 
     // ---- media upload (content-addressed blobs) ----------------------------
@@ -1329,7 +1206,7 @@ mod tests {
 
     /// Publish `body` as an editor (the editor account is derived from `ids.player`).
     /// Replaces bare `post_json(app, "/api/quests/publish", ...)` now that publish is
-    /// role-gated by [`require_editor`].
+    /// role-gated by [`require_editor_actor`].
     async fn publish(app: &Router, ids: &Ids, body: Value) -> (StatusCode, Value) {
         let bearer = editor_bearer(app, &ids.player).await;
         post_json_h(

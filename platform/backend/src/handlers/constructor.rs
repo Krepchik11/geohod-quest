@@ -1,6 +1,6 @@
 //! Constructor dashboard routes — the authoring registry behind /quest-editor,
-//! plus publish. Every endpoint is editor-gated (require_editor: an editor/admin
-//! session or the ops token). Completions ("прохождения") are derived per quest
+//! plus publish. Every endpoint is editor-gated (require_editor_actor: an
+//! editor/admin session or the ops token). Completions ("прохождения") are derived per quest
 //! from the fact log — never stored on the constructor row — so the metric stays
 //! a pure projection.
 
@@ -13,8 +13,7 @@ use axum::{
 };
 
 use crate::authz::{
-    acting_author, acting_author_role, require_editor, require_owned_constructor_quest,
-    require_owned_constructor_summary,
+    require_editor_actor, require_owned_constructor_quest, require_owned_constructor_summary,
 };
 use crate::errors::AppError;
 use crate::store::{self, ConstructorQuest, ConstructorQuestSummary, PublishedMeta};
@@ -139,7 +138,7 @@ async fn publish_quest_handler(
     // authoring lives behind /quest-editor, which only editors/admins can open, but
     // publish is a direct API call so the role is enforced here too. Author binding
     // (which editor owns which quest) remains a tracked follow-up.
-    require_editor(&state, &headers).await?;
+    require_editor_actor(&state, &headers).await?;
     let version = req.snapshot_version.unwrap_or(1);
     let (pages, tasks, paid_hints) = snapshot_chips(req.snapshot.as_ref());
     let snapshot_id = req
@@ -258,18 +257,17 @@ async fn list_constructor_quests_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<ConstructorQuestWire>>, AppError> {
-    require_editor(&state, &headers).await?;
     // Editors get a personal workspace: ONLY their own quests (the reported bug was
     // every editor seeing everyone's). An ADMIN is the superuser and sees every
     // author's quest so it can manage any of them. The id is the same one creation
     // stamps, so a non-admin always sees exactly what they made.
-    let (author_id, _, admin) = acting_author_role(&state, &headers).await?;
-    let summaries = if admin {
+    let actor = require_editor_actor(&state, &headers).await?;
+    let summaries = if actor.is_admin {
         state.constructor.list_all_summaries().await?
     } else {
         state
             .constructor
-            .list_summaries_for_author(&author_id)
+            .list_summaries_for_author(&actor.author_id)
             .await?
     };
     let completions = state.store.completions_by_quest().await?;
@@ -364,17 +362,16 @@ async fn create_constructor_quest_handler(
     headers: HeaderMap,
     Json(req): Json<CreateConstructorQuestRequest>,
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
-    require_editor(&state, &headers).await?;
+    let actor = require_editor_actor(&state, &headers).await?;
     if req.quest_id.trim().is_empty() {
         return Err(AppError::BadRequest("quest_id is required".into()));
     }
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
-    let (author_id, author_name) = acting_author(&state, &headers).await?;
     let now = store::now_secs();
     let quest = ConstructorQuest {
         quest_id: req.quest_id,
-        author_id,
-        author_name,
+        author_id: actor.author_id,
+        author_name: actor.author_name,
         name: req.name,
         status: store::CTOR_STATUS_DRAFT.to_string(),
         cover: req.cover,
