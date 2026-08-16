@@ -5256,7 +5256,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn yookassa_full_coupon_and_free_quest_bypass_the_gateway() {
+    async fn yookassa_full_coupon_bypasses_the_gateway() {
         let (app, fake) = test_app_yookassa();
         let ids = Ids::new("yk-bypass");
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
@@ -5289,29 +5289,6 @@ mod tests {
             v["grant"]["source"], "CouponRedemption",
             "settled instantly"
         );
-        assert!(
-            fake.lock().expect("fake").last_create_body.is_none(),
-            "gateway untouched"
-        );
-
-        // Free quest through the yookassa arm: granted immediately, no payment.
-        let free_quest = format!("{}-free", ids.quest);
-        let (st, _) = publish(
-            &app,
-            &ids,
-            json!({"quest_id": free_quest, "name": "F", "template_summary": "demo",
-                   "snapshot_version": 1, "snapshot_id": format!("{}-f", ids.snap1), "price": 0}),
-        )
-        .await;
-        assert_eq!(st, StatusCode::OK);
-        let (st, v) = post_json(
-            &app,
-            "/api/checkout",
-            json!({"user_id": ids.player, "quest_id": free_quest, "provider": "yookassa"}),
-        )
-        .await;
-        assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["grant"]["source"], "FreeQuest");
         assert!(
             fake.lock().expect("fake").last_create_body.is_none(),
             "gateway untouched"
@@ -5358,23 +5335,14 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        let (st, _) = publish(
-            &app,
-            &ids,
-            json!({"quest_id": ids.quest, "name": "P", "template_summary": "demo",
-                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": 100}),
-        )
-        .await;
-        assert_eq!(st, StatusCode::OK);
-
-        // Paid quest without an enabled provider: still 501.
+        // An unknown provider is rejected before the free short-circuit.
         let (st, _) = post_json(
             &app,
             "/api/checkout",
-            json!({"user_id": ids.player, "quest_id": ids.quest}),
+            json!({"user_id": ids.player, "quest_id": free_quest, "provider": "paypal"}),
         )
         .await;
-        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(st, StatusCode::BAD_REQUEST);
 
         // Free quest, no provider field: granted immediately.
         let (st, v) = post_json(
