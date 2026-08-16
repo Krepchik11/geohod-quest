@@ -26,7 +26,9 @@ function makeCaches() {
       match: async (req: Request | string) => m.get(typeof req === 'string' ? req : req.url),
       put: async (req: Request | string, res: Response) =>
         void m.set(typeof req === 'string' ? req : req.url, res),
-      add: async (url: string) => void m.set(url, new Response('cached:' + url)),
+      // Real cache.add resolves relative urls against the SW scope.
+      add: async (url: string) =>
+        void m.set(new URL(url, ORIGIN).toString(), new Response('cached:' + url)),
     };
   };
   return {
@@ -56,17 +58,19 @@ function loadSw(
     Response,
     console,
     location: { origin: ORIGIN },
-    addEventListener: () => {},
+    addEventListener: (type: string, fn: (e: unknown) => void) => listeners.set(type, fn),
     skipWaiting: async () => {},
     clients: { claim: async () => {} },
   };
+  const listeners = new Map<string, (e: unknown) => void>();
+  ctx.listeners = listeners;
   ctx.self = ctx; // sw.js references `self` as the global
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
-  return ctx as {
+  return ctx as unknown as {
     handleFetch: (r: Request) => Promise<Response>;
     caches: ReturnType<typeof makeCaches>;
-  };
+  } & { listeners: typeof listeners };
 }
 
 const body = (r: Response) => r.text();
@@ -110,30 +114,42 @@ describe('sw.js offline navigation fallback', () => {
   const navigate = (path: string) =>
     // node's Request has no `mode: 'navigate'`; the SW only reads the property.
     Object.defineProperty(new Request(ORIGIN + path), 'mode', { value: 'navigate' });
+  const putShells = async (sw: ReturnType<typeof loadSw>, paths: string[]) => {
+    const shell = await sw.caches.open('shell-v1');
+    for (const path of paths) {
+      await shell.put(ORIGIN + path, new Response(`SHELL:${path}`));
+    }
+  };
 
   it('quest navigation falls back to the cached /quest shell', async () => {
     const sw = loadSw(offline);
-    const shell = await sw.caches.open('shell-v1');
-    await shell.put(`${ORIGIN}/`, new Response('HOME-SHELL'));
-    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    await putShells(sw, ['/', '/quest']);
     const res = await sw.handleFetch(navigate('/quest/abc'));
-    expect(await body(res)).toBe('QUEST-SHELL');
+    expect(await body(res)).toBe('SHELL:/quest');
   });
 
   it('non-quest navigation (installed app cold start) falls back to the cached main page, not the player', async () => {
     const sw = loadSw(offline);
-    const shell = await sw.caches.open('shell-v1');
-    await shell.put(`${ORIGIN}/`, new Response('HOME-SHELL'));
-    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    await putShells(sw, ['/', '/quest']);
     const res = await sw.handleFetch(navigate('/my-quests'));
-    expect(await body(res)).toBe('HOME-SHELL');
+    expect(await body(res)).toBe('SHELL:/');
   });
 
   it('any cached shell beats a browser error page when the preferred one is missing', async () => {
     const sw = loadSw(offline);
-    const shell = await sw.caches.open('shell-v1');
-    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    await putShells(sw, ['/quest']);
     const res = await sw.handleFetch(navigate('/profile'));
-    expect(await body(res)).toBe('QUEST-SHELL');
+    expect(await body(res)).toBe('SHELL:/quest');
+  });
+
+  it('install precaches the main-page shell that guarantees the fallback', async () => {
+    const sw = loadSw(offline);
+    let done: Promise<unknown> = Promise.resolve();
+    (sw as unknown as { listeners: Map<string, (e: unknown) => void> }).listeners.get(
+      'install',
+    )?.({ waitUntil: (p: Promise<unknown>) => (done = p) });
+    await done;
+    const shell = await sw.caches.open('shell-v1');
+    expect(await shell.match(`${ORIGIN}/`)).toBeTruthy();
   });
 });

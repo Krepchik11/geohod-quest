@@ -17,16 +17,26 @@
  *    explicit bundle deletion.
  */
 const SHELL_CACHE = 'shell-v1';
+const HOME_SHELL = '/';
+const PLAYER_SHELL = '/quest';
 
 /** Cache key for a request — /quest collapses its query variants. */
 function cacheKeyFor(request) {
   const url = new URL(request.url);
-  if (url.pathname === '/quest') return new Request(url.origin + url.pathname);
+  if (url.pathname === PLAYER_SHELL) return new Request(url.origin + url.pathname);
   return request;
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    (async () => {
+      // Precache the main page so an installed app's offline cold start has a
+      // guaranteed shell — best-effort, an install must not fail offline.
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.add(HOME_SHELL).catch(() => {});
+      await self.skipWaiting();
+    })()
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -60,11 +70,12 @@ async function staleWhileRevalidate(request) {
   if (fresh) return fresh;
   // Offline navigation with nothing cached for this exact page: fall back to
   // the shell matching the destination — the player for /quest/*, the main
-  // page otherwise — and take any cached shell over a browser error page.
+  // page (precached at install) otherwise — and take any cached shell over a
+  // browser error page.
   if (request.mode === 'navigate') {
-    const prefer = new URL(request.url).pathname.startsWith('/quest') ? '/quest' : '/';
-    for (const path of prefer === '/quest' ? ['/quest', '/'] : ['/', '/quest']) {
-      const shell = await cache.match(new Request(self.location.origin + path));
+    const inPlayer = request.url.startsWith(self.location.origin + PLAYER_SHELL);
+    for (const path of inPlayer ? [PLAYER_SHELL, HOME_SHELL] : [HOME_SHELL, PLAYER_SHELL]) {
+      const shell = await cache.match(self.location.origin + path);
       if (shell) return shell;
     }
   }
