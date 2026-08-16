@@ -23,8 +23,10 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
-    AttemptMeta, AuthIdentity, CatalogListing, ConstructorQuest, ConstructorQuestSummary,
-    PublishedMeta, QuestAttributes, QuestLabel, now_rfc3339, now_secs,
+    AttemptMeta, AuthIdentity, AuthStore, CatalogListing, ConstructorQuest,
+    ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore, GrantStore,
+    KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
+    now_rfc3339, now_secs,
 };
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
@@ -45,12 +47,86 @@ pub struct PgFactStore {
 }
 
 impl PgFactStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    async fn load_facts(&self, attempt_id: &str) -> Result<Vec<Fact>, AppError> {
+        let rows = sqlx::query("SELECT data FROM facts WHERE attempt_id = $1 ORDER BY seq")
+            .bind(attempt_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.into_iter()
+            .map(|r| {
+                let data: serde_json::Value = r.try_get("data").map_err(internal)?;
+                serde_json::from_value(data).map_err(internal)
+            })
+            .collect()
+    }
+
+    /// Loads the logs of all attempts bound to `snap` and delegates to the pure
+    /// stats projector (no SQL aggregation — parity with the in-memory backend).
+    async fn load_snapshot_logs(
+        &self,
+        snap: &str,
+    ) -> Result<
+        (
+            std::collections::HashMap<String, Vec<Fact>>,
+            std::collections::HashMap<String, String>,
+        ),
+        AppError,
+    > {
+        // Every attempt bound to the snapshot — INCLUDING zero-fact ones, which
+        // still count toward attempts_count in the projector. Seeds the maps so a
+        // fact-less attempt keeps an empty log (the JOIN below can't surface it).
+        let attempt_rows = sqlx::query("SELECT attempt_id FROM attempts WHERE snapshot_id = $1")
+            .bind(snap)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        let mut fact_logs: std::collections::HashMap<String, Vec<Fact>> =
+            std::collections::HashMap::with_capacity(attempt_rows.len());
+        let mut attempt_snaps = std::collections::HashMap::with_capacity(attempt_rows.len());
+        for row in &attempt_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            fact_logs.insert(att.clone(), Vec::new());
+            attempt_snaps.insert(att, snap.to_string());
+        }
+        // ONE round-trip for the facts of ALL those attempts (was one query per
+        // attempt — the N+1). `ORDER BY seq` is a global order, but a per-attempt
+        // subsequence of it is still in append order, so grouping stays correct.
+        let fact_rows = sqlx::query(
+            "SELECT f.attempt_id, f.data FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE a.snapshot_id = $1
+             ORDER BY f.seq",
+        )
+        .bind(snap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        for row in fact_rows {
+            let att: String = row.try_get("attempt_id").map_err(internal)?;
+            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
+            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
+            if let Some(log) = fact_logs.get_mut(&att) {
+                log.push(fact);
+            }
+        }
+        Ok((fact_logs, attempt_snaps))
+    }
+}
+
+#[async_trait::async_trait]
+impl FactStore for PgFactStore {
     /// See [`crate::store::InMemoryFactStore::quest_rating_rows`]. Per `(quest,
     /// player)` the latest rated attempt's last `quest_rated` fact — the input to
     /// the public hide-aware fold. `None` scans every quest (admin list);
     /// `Some(&[..])` scopes it (product page + catalog). Unparseable ratings are
     /// dropped, mirroring [`crate::facts::effective_rating`].
-    pub async fn quest_rating_rows(
+    async fn quest_rating_rows(
         &self,
         quests: Option<&[String]>,
     ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
@@ -109,7 +185,7 @@ impl PgFactStore {
 
     /// See [`crate::store::InMemoryFactStore::delete_user_data`] — the
     /// player's attempts + their facts + bonus marks, one transaction.
-    pub async fn delete_user_data(&self, user_id: &str) -> Result<(), AppError> {
+    async fn delete_user_data(&self, user_id: &str) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await.map_err(internal)?;
         sqlx::query(
             "DELETE FROM facts WHERE attempt_id IN (SELECT attempt_id FROM attempts WHERE user_id = $1)",
@@ -132,13 +208,8 @@ impl PgFactStore {
         Ok(())
     }
 
-    /// Wrap an existing pool (migrations are run by the caller at startup).
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
     /// See [`crate::store::InMemoryFactStore::create_attempt`].
-    pub async fn create_attempt(
+    async fn create_attempt(
         &self,
         user_id: &str,
         quest_id: &str,
@@ -169,7 +240,7 @@ impl PgFactStore {
     /// Idempotent batch append in ONE transaction. Returns `None` for unknown
     /// attempts. Accepted = rows the database actually inserted (ON CONFLICT
     /// DO NOTHING), so concurrent duplicates are absorbed by the constraints.
-    pub async fn append_idempotent(
+    async fn append_idempotent(
         &self,
         attempt_id: &str,
         incoming: Vec<Fact>,
@@ -228,22 +299,8 @@ impl PgFactStore {
         Ok(Some(accepted))
     }
 
-    async fn load_facts(&self, attempt_id: &str) -> Result<Vec<Fact>, AppError> {
-        let rows = sqlx::query("SELECT data FROM facts WHERE attempt_id = $1 ORDER BY seq")
-            .bind(attempt_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.into_iter()
-            .map(|r| {
-                let data: serde_json::Value = r.try_get("data").map_err(internal)?;
-                serde_json::from_value(data).map_err(internal)
-            })
-            .collect()
-    }
-
     /// See [`crate::store::InMemoryFactStore::get_projected`].
-    pub async fn get_projected(
+    async fn get_projected(
         &self,
         attempt_id: &str,
     ) -> Result<Option<(ProjectedState, String, usize)>, AppError> {
@@ -260,60 +317,8 @@ impl PgFactStore {
         Ok(Some((project_state(&facts), snapshot_id, facts.len())))
     }
 
-    /// Loads the logs of all attempts bound to `snap` and delegates to the pure
-    /// stats projector (no SQL aggregation — parity with the in-memory backend).
-    async fn load_snapshot_logs(
-        &self,
-        snap: &str,
-    ) -> Result<
-        (
-            std::collections::HashMap<String, Vec<Fact>>,
-            std::collections::HashMap<String, String>,
-        ),
-        AppError,
-    > {
-        // Every attempt bound to the snapshot — INCLUDING zero-fact ones, which
-        // still count toward attempts_count in the projector. Seeds the maps so a
-        // fact-less attempt keeps an empty log (the JOIN below can't surface it).
-        let attempt_rows = sqlx::query("SELECT attempt_id FROM attempts WHERE snapshot_id = $1")
-            .bind(snap)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        let mut fact_logs: std::collections::HashMap<String, Vec<Fact>> =
-            std::collections::HashMap::with_capacity(attempt_rows.len());
-        let mut attempt_snaps = std::collections::HashMap::with_capacity(attempt_rows.len());
-        for row in &attempt_rows {
-            let att: String = row.try_get("attempt_id").map_err(internal)?;
-            fact_logs.insert(att.clone(), Vec::new());
-            attempt_snaps.insert(att, snap.to_string());
-        }
-        // ONE round-trip for the facts of ALL those attempts (was one query per
-        // attempt — the N+1). `ORDER BY seq` is a global order, but a per-attempt
-        // subsequence of it is still in append order, so grouping stays correct.
-        let fact_rows = sqlx::query(
-            "SELECT f.attempt_id, f.data FROM facts f
-             JOIN attempts a ON a.attempt_id = f.attempt_id
-             WHERE a.snapshot_id = $1
-             ORDER BY f.seq",
-        )
-        .bind(snap)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(internal)?;
-        for row in fact_rows {
-            let att: String = row.try_get("attempt_id").map_err(internal)?;
-            let data: serde_json::Value = row.try_get("data").map_err(internal)?;
-            let fact: Fact = serde_json::from_value(data).map_err(internal)?;
-            if let Some(log) = fact_logs.get_mut(&att) {
-                log.push(fact);
-            }
-        }
-        Ok((fact_logs, attempt_snaps))
-    }
-
     /// See [`crate::store::InMemoryFactStore::get_version_stats`].
-    pub async fn get_version_stats(
+    async fn get_version_stats(
         &self,
         snap: &str,
         grants_count: usize,
@@ -328,7 +333,7 @@ impl PgFactStore {
     }
 
     /// See [`crate::store::InMemoryFactStore::list_feedbacks_for_version`].
-    pub async fn list_feedbacks_for_version(&self, snap: &str) -> Result<Vec<Fact>, AppError> {
+    async fn list_feedbacks_for_version(&self, snap: &str) -> Result<Vec<Fact>, AppError> {
         let (fact_logs, attempt_snaps) = self.load_snapshot_logs(snap).await?;
         Ok(list_feedbacks_for_snapshot(
             snap,
@@ -340,9 +345,7 @@ impl PgFactStore {
     /// See [`crate::store::InMemoryFactStore::all_feedback_reports`]. One scan of the
     /// feedback facts joined to their attempt context; `recorded_at` is the server
     /// receive time (the watermark basis). Backed by the `idx_facts_type` index.
-    pub async fn all_feedback_reports(
-        &self,
-    ) -> Result<Vec<crate::facts::FeedbackReportRow>, AppError> {
+    async fn all_feedback_reports(&self) -> Result<Vec<crate::facts::FeedbackReportRow>, AppError> {
         use sqlx::Row;
         let rows = sqlx::query(
             "SELECT a.quest_id, a.snapshot_id, a.user_id,
@@ -371,7 +374,7 @@ impl PgFactStore {
     }
 
     /// See [`crate::store::InMemoryFactStore::attempt_logs_for_user`].
-    pub async fn attempt_logs_for_user(
+    async fn attempt_logs_for_user(
         &self,
         user_id: &str,
     ) -> Result<Vec<(String, Vec<Fact>)>, AppError> {
@@ -421,7 +424,7 @@ impl PgFactStore {
     /// `bonus_awards` rows per quest: each row is one (player, quest) completion
     /// bonus, so `COUNT(*)` is the distinct-finisher count — matching the
     /// in-memory backend, which derives the same from the fact log.
-    pub async fn completions_by_quest(
+    async fn completions_by_quest(
         &self,
     ) -> Result<std::collections::HashMap<String, usize>, AppError> {
         let rows =
@@ -441,7 +444,7 @@ impl PgFactStore {
     /// See [`crate::store::InMemoryFactStore::completions_for_quest`]. Single-quest
     /// count via the `bonus_awards(quest_id)` index — the editor's per-quest pages
     /// use this instead of `completions_by_quest`'s whole-table GROUP BY.
-    pub async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+    async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
         let n: i64 = sqlx::query("SELECT COUNT(*) AS n FROM bonus_awards WHERE quest_id = $1")
             .bind(quest_id)
             .fetch_one(&self.pool)
@@ -453,7 +456,7 @@ impl PgFactStore {
     }
 
     /// See [`crate::store::InMemoryFactStore::stats_start_events`].
-    pub async fn stats_start_events(
+    async fn stats_start_events(
         &self,
         from: i64,
         to_excl: i64,
@@ -485,7 +488,7 @@ impl PgFactStore {
     /// natural key incl. step_position, so an attempt can hold several
     /// `attempt_completed` rows; counting rows would overcount finishes).
     /// `recorded_at` is NOT NULL since migration 0013's total backfill.
-    pub async fn stats_finish_events(
+    async fn stats_finish_events(
         &self,
         from: i64,
         to_excl: i64,
@@ -520,7 +523,7 @@ impl PgFactStore {
     /// shape as [`Self::load_snapshot_logs`]: seed every in-range attempt with
     /// an empty log (zero-fact attempts count in the funnel denominator), then
     /// ONE round-trip for all their facts.
-    pub async fn funnel_logs(
+    async fn funnel_logs(
         &self,
         snapshot_id: &str,
         from: i64,
@@ -566,7 +569,7 @@ impl PgFactStore {
     }
 
     /// See [`crate::store::InMemoryFactStore::run_legacy_migration`].
-    pub async fn run_legacy_migration(
+    async fn run_legacy_migration(
         &self,
         historical_grants: Vec<serde_json::Value>,
         answer_cards: Vec<serde_json::Value>,
@@ -666,9 +669,12 @@ impl PgGrantStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl GrantStore for PgGrantStore {
     /// See [`crate::store::InMemoryGrantStore::create_grant_idemp`].
-    pub async fn create_grant_idemp(
+    async fn create_grant_idemp(
         &self,
         player: &str,
         quest: &str,
@@ -706,7 +712,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::has_grant`].
-    pub async fn has_grant(&self, player: &str, quest: &str) -> Result<bool, AppError> {
+    async fn has_grant(&self, player: &str, quest: &str) -> Result<bool, AppError> {
         let row =
             sqlx::query("SELECT 1 AS x FROM access_grants WHERE user_id = $1 AND quest_id = $2")
                 .bind(player)
@@ -718,7 +724,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::list_published`].
-    pub async fn list_published(&self) -> Result<Vec<PublishedMeta>, AppError> {
+    async fn list_published(&self) -> Result<Vec<PublishedMeta>, AppError> {
         let rows = sqlx::query(&format!(
             "SELECT {PUBLISHED_COLS} FROM published_quests ORDER BY quest_id"
         ))
@@ -729,7 +735,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::get_published`].
-    pub async fn get_published(&self, quest_id: &str) -> Result<Option<PublishedMeta>, AppError> {
+    async fn get_published(&self, quest_id: &str) -> Result<Option<PublishedMeta>, AppError> {
         let row = sqlx::query(&format!(
             "SELECT {PUBLISHED_COLS} FROM published_quests WHERE quest_id = $1"
         ))
@@ -743,7 +749,7 @@ impl PgGrantStore {
     /// Registers/updates published metadata and stores the frozen snapshot JSON.
     /// Snapshot rows are immutable: same id + identical content is an idempotent
     /// no-op; same id + different content is rejected; NULL data may be filled once.
-    pub async fn register_published(
+    async fn register_published(
         &self,
         quest_id: &str,
         meta: PublishedMeta,
@@ -836,7 +842,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::list_all_grants`].
-    pub async fn list_all_grants(&self) -> Result<Vec<AccessGrant>, AppError> {
+    async fn list_all_grants(&self) -> Result<Vec<AccessGrant>, AppError> {
         let rows = sqlx::query(
             "SELECT user_id, quest_id, granted_at, source, source_ref FROM access_grants",
         )
@@ -847,7 +853,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::delete_grants_for_user`].
-    pub async fn delete_grants_for_user(&self, user_id: &str) -> Result<usize, AppError> {
+    async fn delete_grants_for_user(&self, user_id: &str) -> Result<usize, AppError> {
         let res = sqlx::query("DELETE FROM access_grants WHERE user_id = $1")
             .bind(user_id)
             .execute(&self.pool)
@@ -857,9 +863,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::buyers_by_quest`].
-    pub async fn buyers_by_quest(
-        &self,
-    ) -> Result<std::collections::HashMap<String, usize>, AppError> {
+    async fn buyers_by_quest(&self) -> Result<std::collections::HashMap<String, usize>, AppError> {
         let rows = sqlx::query(
             "SELECT quest_id, COUNT(DISTINCT user_id) AS n FROM access_grants GROUP BY quest_id",
         )
@@ -881,7 +885,7 @@ impl PgGrantStore {
     /// See [`crate::store::InMemoryGrantStore::buyers_for_quest`]. Single-quest
     /// buyer count via the `access_grants(quest_id)` index — replaces the editor
     /// endpoints' whole-table `buyers_by_quest` GROUP BY.
-    pub async fn buyers_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
+    async fn buyers_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
         let n: i64 = sqlx::query(
             "SELECT COUNT(DISTINCT user_id) AS n FROM access_grants WHERE quest_id = $1",
         )
@@ -898,7 +902,7 @@ impl PgGrantStore {
     /// `granted_at` is a canonical RFC3339 UTC string, so lexicographic range
     /// compare IS chronological compare; parsing to seconds happens in Rust via
     /// the same helper the in-memory backend uses.
-    pub async fn stats_purchase_events(
+    async fn stats_purchase_events(
         &self,
         from: i64,
         to_excl: i64,
@@ -932,7 +936,7 @@ impl PgGrantStore {
     }
 
     /// See [`crate::store::InMemoryGrantStore::grants_for_user`].
-    pub async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError> {
+    async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError> {
         let rows = sqlx::query(
             "SELECT user_id, quest_id, granted_at, source, source_ref
              FROM access_grants WHERE user_id = $1",
@@ -945,7 +949,7 @@ impl PgGrantStore {
     }
 
     /// Latest published meta + frozen snapshot JSON for the bundle endpoint.
-    pub async fn get_bundle(
+    async fn get_bundle(
         &self,
         quest_id: &str,
     ) -> Result<Option<(PublishedMeta, Option<serde_json::Value>)>, AppError> {
@@ -978,10 +982,7 @@ impl PgGrantStore {
 
     /// Frozen snapshot JSON by id — for callers that already hold the meta
     /// (skips the published-row join `get_bundle` would repeat).
-    pub async fn get_snapshot(
-        &self,
-        snapshot_id: &str,
-    ) -> Result<Option<serde_json::Value>, AppError> {
+    async fn get_snapshot(&self, snapshot_id: &str) -> Result<Option<serde_json::Value>, AppError> {
         let row = sqlx::query("SELECT data FROM snapshots WHERE snapshot_id = $1")
             .bind(snapshot_id)
             .fetch_optional(&self.pool)
@@ -1078,12 +1079,15 @@ impl PgAuthStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl AuthStore for PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::register_user`]. One transaction:
     /// the account row plus its `password` identity — a conflicting account
     /// insert (registered user_id or taken email, both DB constraints) affects
     /// zero rows, maps to 409 and rolls back, so no orphan identity can exist.
-    pub async fn register_user(
+    async fn register_user(
         &self,
         user_id: &str,
         email: &str,
@@ -1118,7 +1122,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::find_by_email`] — the credential
     /// view ([`USER_RECORD_SELECT`]) keyed by email.
-    pub async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
+    async fn find_by_email(&self, email: &str) -> Result<Option<UserRecord>, AppError> {
         let row = sqlx::query(&format!("{USER_RECORD_SELECT} WHERE u.email = $1"))
             .bind(email)
             .fetch_optional(&self.pool)
@@ -1132,7 +1136,7 @@ impl PgAuthStore {
     /// `get_user` — two serial round-trips on the front of every authenticated
     /// request). An anonymous session (no `users` row) yields `None` via the inner
     /// join, exactly like the two-step path.
-    pub async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
+    async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
             "SELECT u.user_id, u.email, u.display_name, u.role, u.created_at, u.email_confirmed_at \
              FROM sessions s JOIN users u ON u.user_id = s.user_id \
@@ -1146,7 +1150,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::get_user`].
-    pub async fn get_user(&self, user_id: &str) -> Result<Option<UserAccount>, AppError> {
+    async fn get_user(&self, user_id: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
             "SELECT user_id, email, display_name, role, created_at, email_confirmed_at \
              FROM users WHERE user_id = $1",
@@ -1161,7 +1165,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::get_users_by_ids`]. Batch author
     /// lookup for the product page's review list — ONE round-trip for all the
     /// displayed reviews' authors, replacing a per-review `get_user` N+1.
-    pub async fn get_users_by_ids(
+    async fn get_users_by_ids(
         &self,
         user_ids: &[String],
     ) -> Result<std::collections::HashMap<String, UserAccount>, AppError> {
@@ -1186,7 +1190,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::set_role`]. An UPDATE touching zero
     /// rows means the id is unregistered → 404 (only accounts have roles).
-    pub async fn set_role(&self, user_id: &str, role: &str) -> Result<UserAccount, AppError> {
+    async fn set_role(&self, user_id: &str, role: &str) -> Result<UserAccount, AppError> {
         let row = sqlx::query(
             "UPDATE users SET role = $2 WHERE user_id = $1 \
              RETURNING user_id, email, display_name, role, created_at, email_confirmed_at",
@@ -1204,7 +1208,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::list_users`]. Newest-first via the
     /// created_at index; ties broken by user_id for a stable order.
-    pub async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
+    async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
         let rows = sqlx::query(
             "SELECT user_id, email, display_name, role, created_at, email_confirmed_at \
              FROM users ORDER BY created_at DESC, user_id ASC",
@@ -1216,7 +1220,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::create_session`].
-    pub async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
+    async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
         sqlx::query("INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, $3)")
             .bind(token)
             .bind(user_id)
@@ -1228,7 +1232,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::set_display_name`].
-    pub async fn set_display_name(
+    async fn set_display_name(
         &self,
         user_id: &str,
         display_name: Option<String>,
@@ -1251,7 +1255,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::set_password`]: upsert the
     /// `password` identity row. An unknown user_id trips the FK → 404 (parity
     /// with the in-memory account check).
-    pub async fn set_password(&self, user_id: &str, password_hash: &str) -> Result<(), AppError> {
+    async fn set_password(&self, user_id: &str, password_hash: &str) -> Result<(), AppError> {
         upsert_password_row(&self.pool, user_id, password_hash)
             .await
             .map_err(|e| match e {
@@ -1264,7 +1268,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::user_record`] — the credential
     /// view ([`USER_RECORD_SELECT`]) keyed by user id.
-    pub async fn user_record(&self, user_id: &str) -> Result<Option<UserRecord>, AppError> {
+    async fn user_record(&self, user_id: &str) -> Result<Option<UserRecord>, AppError> {
         let row = sqlx::query(&format!("{USER_RECORD_SELECT} WHERE u.user_id = $1"))
             .bind(user_id)
             .fetch_optional(&self.pool)
@@ -1274,7 +1278,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::confirm_email`].
-    pub async fn confirm_email(&self, user_id: &str, at: u64) -> Result<UserAccount, AppError> {
+    async fn confirm_email(&self, user_id: &str, at: u64) -> Result<UserAccount, AppError> {
         let row = sqlx::query(
             "UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, $2)
              WHERE user_id = $1
@@ -1294,7 +1298,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::create_auth_token`] — latest
     /// mail wins: issuing deletes prior unused tokens of the same kind in the
     /// same transaction.
-    pub async fn create_auth_token(
+    async fn create_auth_token(
         &self,
         token_hash: &str,
         rec: crate::store::AuthTokenRecord,
@@ -1329,7 +1333,7 @@ impl PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::consume_auth_token`]. The UPDATE
     /// guards validity in one statement, so concurrent consumers race safely —
     /// exactly one wins.
-    pub async fn consume_auth_token(
+    async fn consume_auth_token(
         &self,
         token_hash: &str,
         kind: &str,
@@ -1354,7 +1358,7 @@ impl PgAuthStore {
     /// The attempt is spent atomically (the guarded UPDATE), then a code_hash
     /// match consumes via a second used_at-guarded UPDATE — concurrent correct
     /// codes race safely, exactly one wins.
-    pub async fn consume_auth_token_by_code(
+    async fn consume_auth_token_by_code(
         &self,
         user_id: &str,
         kind: &str,
@@ -1396,7 +1400,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::delete_user`] — user row,
     /// sessions and tokens in one transaction.
-    pub async fn delete_user(&self, user_id: &str) -> Result<bool, AppError> {
+    async fn delete_user(&self, user_id: &str) -> Result<bool, AppError> {
         let mut tx = self.pool.begin().await.map_err(internal)?;
         sqlx::query("DELETE FROM sessions WHERE user_id = $1")
             .bind(user_id)
@@ -1418,7 +1422,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::get_session`].
-    pub async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
+    async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
         let row = sqlx::query("SELECT user_id FROM sessions WHERE token = $1")
             .bind(token)
             .fetch_optional(&self.pool)
@@ -1429,7 +1433,7 @@ impl PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::find_identity`].
-    pub async fn find_identity(
+    async fn find_identity(
         &self,
         method: &str,
         identifier: &str,
@@ -1450,7 +1454,7 @@ impl PgAuthStore {
     /// the `(method, identifier)` PK vs `identities_one_per_method` — and the
     /// store reports it typed instead of forcing the caller to reconstruct
     /// the cause from current state.
-    pub async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
+    async fn create_identity(&self, identity: AuthIdentity) -> Result<(), AppError> {
         crate::auth::validate_provider(&identity.method)?;
         sqlx::query(
             "INSERT INTO identities (method, identifier, user_id, handle, created_at)
@@ -1478,7 +1482,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::set_identity_handle`]. Overwrites only
     /// when a value is present; an absent claim leaves the stored handle untouched.
-    pub async fn set_identity_handle(
+    async fn set_identity_handle(
         &self,
         method: &str,
         identifier: &str,
@@ -1499,10 +1503,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::identities_for_user`]
     /// ([`IDENTITY_SELECT`] — no credentials in list shapes).
-    pub async fn identities_for_user(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<AuthIdentity>, AppError> {
+    async fn identities_for_user(&self, user_id: &str) -> Result<Vec<AuthIdentity>, AppError> {
         let rows = sqlx::query(&format!(
             "{IDENTITY_SELECT} WHERE user_id = $1 ORDER BY method ASC"
         ))
@@ -1515,7 +1516,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::identities_for_users`]. One
     /// `= ANY($1)` scan for the whole batch (admin identity resolution, no N+1).
-    pub async fn identities_for_users(
+    async fn identities_for_users(
         &self,
         user_ids: &[String],
     ) -> Result<std::collections::HashMap<String, Vec<AuthIdentity>>, AppError> {
@@ -1539,7 +1540,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::delete_identity`] (social-only,
     /// enforced here — the password row is never unlinked).
-    pub async fn delete_identity(&self, method: &str, user_id: &str) -> Result<bool, AppError> {
+    async fn delete_identity(&self, method: &str, user_id: &str) -> Result<bool, AppError> {
         crate::auth::validate_provider(method)?;
         let res = sqlx::query("DELETE FROM identities WHERE method = $1 AND user_id = $2")
             .bind(method)
@@ -1552,7 +1553,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::create_social_account`]. No
     /// password row is created; a taken user_id or email is absorbed as 409.
-    pub async fn create_social_account(
+    async fn create_social_account(
         &self,
         user_id: &str,
         email: Option<String>,
@@ -1583,7 +1584,7 @@ impl PgAuthStore {
 
     /// See [`crate::store::InMemoryAuthStore::attach_email`]. Sets the email only
     /// when the account has none; a UNIQUE violation (email taken elsewhere) → 409.
-    pub async fn attach_email(
+    async fn attach_email(
         &self,
         user_id: &str,
         email: &str,
@@ -1658,45 +1659,6 @@ impl PgConstructorStore {
         Self { pool }
     }
 
-    /// See [`crate::store::InMemoryConstructorStore::create`]. A conflicting id
-    /// affects zero rows (ON CONFLICT DO NOTHING) and maps to 409.
-    pub async fn create(
-        &self,
-        quest: ConstructorQuest,
-    ) -> Result<ConstructorQuestSummary, AppError> {
-        let inserted = sqlx::query(
-            "INSERT INTO constructor_quests
-                (quest_id, author_id, author_name, name, status, cover, steps_count,
-                 complexity, age_target, tags, body, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-             ON CONFLICT DO NOTHING
-             RETURNING quest_id",
-        )
-        .bind(&quest.quest_id)
-        .bind(&quest.author_id)
-        .bind(&quest.author_name)
-        .bind(&quest.name)
-        .bind(&quest.status)
-        .bind(&quest.cover)
-        .bind(quest.steps_count as i32)
-        .bind(&quest.attrs.complexity)
-        .bind(&quest.attrs.age_target)
-        .bind(&quest.attrs.tags)
-        .bind(&quest.body)
-        .bind(quest.created_at as i64)
-        .bind(quest.updated_at as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(internal)?;
-        if inserted.is_none() {
-            return Err(AppError::Conflict(format!(
-                "constructor quest '{}' already exists",
-                quest.quest_id
-            )));
-        }
-        Ok(quest.summary())
-    }
-
     /// Summary rows, newest-first (ties by id), optionally scoped to one author.
     /// Shared by the per-author dashboard list and the admin (all-authors) list —
     /// same projection + ordering, only the `WHERE` differs.
@@ -1719,164 +1681,6 @@ impl PgConstructorStore {
         }
         let rows = query.fetch_all(&self.pool).await.map_err(internal)?;
         rows.iter().map(ctor_summary_from_row).collect()
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::list_summaries_for_author`].
-    /// Scoped by `author_id` (the `idx_ctor_quests_author` index serves this) so the
-    /// dashboard can never return another author's quests.
-    pub async fn list_summaries_for_author(
-        &self,
-        author_id: &str,
-    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        self.fetch_summaries(Some(author_id)).await
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::summary_for_quest`]. Selects
-    /// the SAME columns as the list — no `body`, no `cover` — so authorizing or
-    /// identifying one quest never drags a TOASTed authoring body over the wire.
-    pub async fn summary_for_quest(
-        &self,
-        quest_id: &str,
-    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
-        let sql = format!("SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests WHERE quest_id = $1");
-        let row = sqlx::query(&sql)
-            .bind(quest_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(internal)?;
-        row.as_ref().map(ctor_summary_from_row).transpose()
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::get`].
-    pub async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1"
-        );
-        let row = sqlx::query(&sql)
-            .bind(quest_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(internal)?;
-        match row {
-            None => Ok(None),
-            Some(row) => {
-                let s = ctor_summary_from_row(&row)?;
-                let body: serde_json::Value = row.try_get("body").map_err(internal)?;
-                Ok(Some(ConstructorQuest {
-                    quest_id: s.quest_id,
-                    author_id: s.author_id,
-                    author_name: s.author_name,
-                    name: s.name,
-                    status: s.status,
-                    // `cover` is excluded from CTOR_SUMMARY_COLS (list slimming); GET-one
-                    // selects it explicitly above and reads it straight off the row.
-                    cover: row.try_get("cover").map_err(internal)?,
-                    steps_count: s.steps_count,
-                    attrs: s.attrs,
-                    created_at: s.created_at,
-                    updated_at: s.updated_at,
-                    body,
-                }))
-            }
-        }
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::save_body`]. Zero rows updated
-    /// means the id is unknown → 404.
-    #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
-    pub async fn save_body(
-        &self,
-        quest_id: &str,
-        name: &str,
-        cover: Option<String>,
-        steps_count: u32,
-        attrs: QuestAttributes,
-        body: serde_json::Value,
-        updated_at: u64,
-    ) -> Result<ConstructorQuestSummary, AppError> {
-        let sql = format!(
-            "UPDATE constructor_quests \
-             SET name = $2, cover = $3, steps_count = $4, complexity = $5, age_target = $6, \
-                 tags = $7, body = $8, updated_at = $9 \
-             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
-        );
-        let row = sqlx::query(&sql)
-            .bind(quest_id)
-            .bind(name)
-            .bind(&cover)
-            .bind(steps_count as i32)
-            .bind(&attrs.complexity)
-            .bind(&attrs.age_target)
-            .bind(&attrs.tags)
-            .bind(&body)
-            .bind(updated_at as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(internal)?;
-        match row {
-            Some(r) => ctor_summary_from_row(&r),
-            None => Err(AppError::NotFound(format!(
-                "constructor quest '{quest_id}' not found"
-            ))),
-        }
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::set_status`].
-    pub async fn set_status(
-        &self,
-        quest_id: &str,
-        status: &str,
-        updated_at: u64,
-    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
-        let sql = format!(
-            "UPDATE constructor_quests SET status = $2, updated_at = $3 \
-             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
-        );
-        let row = sqlx::query(&sql)
-            .bind(quest_id)
-            .bind(status)
-            .bind(updated_at as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(internal)?;
-        row.as_ref().map(ctor_summary_from_row).transpose()
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::list_all_summaries`]. The admin
-    /// view: NOT scoped by author (every author's quests), newest-first like the
-    /// per-author list.
-    pub async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
-        self.fetch_summaries(None).await
-    }
-
-    /// See [`crate::store::InMemoryConstructorStore::listings_by_quest`]. A single
-    /// lightweight scan (status + attributes) backing the store-catalog filter
-    /// and the store-page attribute filters.
-    pub async fn listings_by_quest(
-        &self,
-    ) -> Result<std::collections::HashMap<String, CatalogListing>, AppError> {
-        let rows = sqlx::query(
-            "SELECT quest_id, status, complexity, age_target, tags FROM constructor_quests",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(internal)?;
-        let mut out = std::collections::HashMap::new();
-        for row in rows {
-            let quest_id: String = row.try_get("quest_id").map_err(internal)?;
-            out.insert(
-                quest_id,
-                CatalogListing {
-                    status: row.try_get("status").map_err(internal)?,
-                    attrs: QuestAttributes {
-                        complexity: row.try_get("complexity").map_err(internal)?,
-                        age_target: row.try_get("age_target").map_err(internal)?,
-                        tags: row.try_get("tags").map_err(internal)?,
-                    },
-                },
-            );
-        }
-        Ok(out)
     }
 
     /// Label rows, optionally narrowed to one quest. Shared by the full scan and
@@ -1920,9 +1724,206 @@ impl PgConstructorStore {
             })
             .collect()
     }
+}
+
+#[async_trait::async_trait]
+impl ConstructorStore for PgConstructorStore {
+    /// See [`crate::store::InMemoryConstructorStore::create`]. A conflicting id
+    /// affects zero rows (ON CONFLICT DO NOTHING) and maps to 409.
+    async fn create(&self, quest: ConstructorQuest) -> Result<ConstructorQuestSummary, AppError> {
+        let inserted = sqlx::query(
+            "INSERT INTO constructor_quests
+                (quest_id, author_id, author_name, name, status, cover, steps_count,
+                 complexity, age_target, tags, body, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             ON CONFLICT DO NOTHING
+             RETURNING quest_id",
+        )
+        .bind(&quest.quest_id)
+        .bind(&quest.author_id)
+        .bind(&quest.author_name)
+        .bind(&quest.name)
+        .bind(&quest.status)
+        .bind(&quest.cover)
+        .bind(quest.steps_count as i32)
+        .bind(&quest.attrs.complexity)
+        .bind(&quest.attrs.age_target)
+        .bind(&quest.attrs.tags)
+        .bind(&quest.body)
+        .bind(quest.created_at as i64)
+        .bind(quest.updated_at as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        if inserted.is_none() {
+            return Err(AppError::Conflict(format!(
+                "constructor quest '{}' already exists",
+                quest.quest_id
+            )));
+        }
+        Ok(quest.summary())
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::list_summaries_for_author`].
+    /// Scoped by `author_id` (the `idx_ctor_quests_author` index serves this) so the
+    /// dashboard can never return another author's quests.
+    async fn list_summaries_for_author(
+        &self,
+        author_id: &str,
+    ) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        self.fetch_summaries(Some(author_id)).await
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::summary_for_quest`]. Selects
+    /// the SAME columns as the list — no `body`, no `cover` — so authorizing or
+    /// identifying one quest never drags a TOASTed authoring body over the wire.
+    async fn summary_for_quest(
+        &self,
+        quest_id: &str,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        let sql = format!("SELECT {CTOR_SUMMARY_COLS} FROM constructor_quests WHERE quest_id = $1");
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::get`].
+    async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
+        let sql = format!(
+            "SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        match row {
+            None => Ok(None),
+            Some(row) => {
+                let s = ctor_summary_from_row(&row)?;
+                let body: serde_json::Value = row.try_get("body").map_err(internal)?;
+                Ok(Some(ConstructorQuest {
+                    quest_id: s.quest_id,
+                    author_id: s.author_id,
+                    author_name: s.author_name,
+                    name: s.name,
+                    status: s.status,
+                    // `cover` is excluded from CTOR_SUMMARY_COLS (list slimming); GET-one
+                    // selects it explicitly above and reads it straight off the row.
+                    cover: row.try_get("cover").map_err(internal)?,
+                    steps_count: s.steps_count,
+                    attrs: s.attrs,
+                    created_at: s.created_at,
+                    updated_at: s.updated_at,
+                    body,
+                }))
+            }
+        }
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::save_body`]. Zero rows updated
+    /// means the id is unknown → 404.
+    #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
+    async fn save_body(
+        &self,
+        quest_id: &str,
+        name: &str,
+        cover: Option<String>,
+        steps_count: u32,
+        attrs: QuestAttributes,
+        body: serde_json::Value,
+        updated_at: u64,
+    ) -> Result<ConstructorQuestSummary, AppError> {
+        let sql = format!(
+            "UPDATE constructor_quests \
+             SET name = $2, cover = $3, steps_count = $4, complexity = $5, age_target = $6, \
+                 tags = $7, body = $8, updated_at = $9 \
+             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .bind(name)
+            .bind(&cover)
+            .bind(steps_count as i32)
+            .bind(&attrs.complexity)
+            .bind(&attrs.age_target)
+            .bind(&attrs.tags)
+            .bind(&body)
+            .bind(updated_at as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        match row {
+            Some(r) => ctor_summary_from_row(&r),
+            None => Err(AppError::NotFound(format!(
+                "constructor quest '{quest_id}' not found"
+            ))),
+        }
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::set_status`].
+    async fn set_status(
+        &self,
+        quest_id: &str,
+        status: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        let sql = format!(
+            "UPDATE constructor_quests SET status = $2, updated_at = $3 \
+             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(quest_id)
+            .bind(status)
+            .bind(updated_at as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::list_all_summaries`]. The admin
+    /// view: NOT scoped by author (every author's quests), newest-first like the
+    /// per-author list.
+    async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
+        self.fetch_summaries(None).await
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::listings_by_quest`]. A single
+    /// lightweight scan (status + attributes) backing the store-catalog filter
+    /// and the store-page attribute filters.
+    async fn listings_by_quest(
+        &self,
+    ) -> Result<std::collections::HashMap<String, CatalogListing>, AppError> {
+        let rows = sqlx::query(
+            "SELECT quest_id, status, complexity, age_target, tags FROM constructor_quests",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let quest_id: String = row.try_get("quest_id").map_err(internal)?;
+            out.insert(
+                quest_id,
+                CatalogListing {
+                    status: row.try_get("status").map_err(internal)?,
+                    attrs: QuestAttributes {
+                        complexity: row.try_get("complexity").map_err(internal)?,
+                        age_target: row.try_get("age_target").map_err(internal)?,
+                        tags: row.try_get("tags").map_err(internal)?,
+                    },
+                },
+            );
+        }
+        Ok(out)
+    }
 
     /// See [`crate::store::InMemoryConstructorStore::labels_by_quest`].
-    pub async fn labels_by_quest(
+    async fn labels_by_quest(
         &self,
     ) -> Result<std::collections::HashMap<String, QuestLabel>, AppError> {
         Ok(self.fetch_labels(None).await?.into_iter().collect())
@@ -1930,7 +1931,7 @@ impl PgConstructorStore {
 
     /// See [`crate::store::InMemoryConstructorStore::label_for_quest`]. Served by
     /// the primary key — never a scan to name one quest.
-    pub async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
+    async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
         Ok(self
             .fetch_labels(Some(quest_id))
             .await?
@@ -1939,7 +1940,7 @@ impl PgConstructorStore {
     }
 
     /// See [`crate::store::InMemoryConstructorStore::delete`].
-    pub async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
+    async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
         let res = sqlx::query("DELETE FROM constructor_quests WHERE quest_id = $1")
             .bind(quest_id)
             .execute(&self.pool)
@@ -2039,9 +2040,12 @@ impl PgCouponStore {
             .bind(coupon.paused)
             .bind(&coupon.created_at)
     }
+}
 
+#[async_trait::async_trait]
+impl CouponStore for PgCouponStore {
     /// See [`crate::store::InMemoryCouponStore::create`].
-    pub async fn create(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+    async fn create(&self, coupon: Coupon) -> Result<Coupon, AppError> {
         let inserted = Self::bind_coupon(
             sqlx::query(&format!(
                 "INSERT INTO coupons ({COUPON_COLS})
@@ -2064,7 +2068,7 @@ impl PgCouponStore {
     }
 
     /// See [`crate::store::InMemoryCouponStore::update`].
-    pub async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
+    async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
         let code_taken =
             sqlx::query("SELECT 1 AS one FROM coupons WHERE code = $1 AND coupon_id <> $2")
                 .bind(&coupon.code)
@@ -2108,7 +2112,7 @@ impl PgCouponStore {
     }
 
     /// See [`crate::store::InMemoryCouponStore::get`].
-    pub async fn get(&self, coupon_id: &str) -> Result<Option<Coupon>, AppError> {
+    async fn get(&self, coupon_id: &str) -> Result<Option<Coupon>, AppError> {
         let row = sqlx::query(&format!(
             "SELECT {COUPON_COLS} FROM coupons WHERE coupon_id = $1"
         ))
@@ -2121,7 +2125,7 @@ impl PgCouponStore {
 
     /// See [`crate::store::InMemoryCouponStore::delete`]. The redemption log
     /// cascades at the schema level (`ON DELETE CASCADE`).
-    pub async fn delete(&self, coupon_id: &str) -> Result<(), AppError> {
+    async fn delete(&self, coupon_id: &str) -> Result<(), AppError> {
         let res = sqlx::query("DELETE FROM coupons WHERE coupon_id = $1")
             .bind(coupon_id)
             .execute(&self.pool)
@@ -2134,7 +2138,7 @@ impl PgCouponStore {
     }
 
     /// See [`crate::store::InMemoryCouponStore::list_with_usage`].
-    pub async fn list_with_usage(&self) -> Result<Vec<(Coupon, CouponUsage)>, AppError> {
+    async fn list_with_usage(&self) -> Result<Vec<(Coupon, CouponUsage)>, AppError> {
         let rows = sqlx::query(&format!(
             "SELECT {COUPON_COLS},
                     COALESCE(u.used, 0)  AS used,
@@ -2157,7 +2161,7 @@ impl PgCouponStore {
     }
 
     /// See [`crate::store::InMemoryCouponStore::get_with_usage`].
-    pub async fn get_with_usage(
+    async fn get_with_usage(
         &self,
         coupon_id: &str,
     ) -> Result<Option<(Coupon, CouponUsage)>, AppError> {
@@ -2183,7 +2187,7 @@ impl PgCouponStore {
     }
 
     /// See [`crate::store::InMemoryCouponStore::preview`].
-    pub async fn preview(
+    async fn preview(
         &self,
         code: &str,
         user_id: &str,
@@ -2217,7 +2221,7 @@ impl PgCouponStore {
     /// locked `FOR UPDATE` for the check-then-insert, so concurrent redemptions
     /// of the same code serialize and the caps cannot be oversubscribed; the
     /// composite PK absorbs a same-(player, quest) retry idempotently.
-    pub async fn redeem(
+    async fn redeem(
         &self,
         code: &str,
         user_id: &str,
@@ -2339,9 +2343,12 @@ impl PgPaymentStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl PaymentStore for PgPaymentStore {
     /// See [`crate::store::InMemoryPaymentStore::insert`].
-    pub async fn insert(&self, p: PendingPayment) -> Result<(), AppError> {
+    async fn insert(&self, p: PendingPayment) -> Result<(), AppError> {
         sqlx::query(&format!(
             "INSERT INTO pending_payments ({PAYMENT_COLS})
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
@@ -2363,7 +2370,7 @@ impl PgPaymentStore {
     }
 
     /// See [`crate::store::InMemoryPaymentStore::get`].
-    pub async fn get(&self, id: &str) -> Result<Option<PendingPayment>, AppError> {
+    async fn get(&self, id: &str) -> Result<Option<PendingPayment>, AppError> {
         sqlx::query(&format!(
             "SELECT {PAYMENT_COLS} FROM pending_payments WHERE id = $1"
         ))
@@ -2377,7 +2384,7 @@ impl PgPaymentStore {
     }
 
     /// See [`crate::store::InMemoryPaymentStore::find_by_provider_id`].
-    pub async fn find_by_provider_id(
+    async fn find_by_provider_id(
         &self,
         provider_payment_id: &str,
     ) -> Result<Option<PendingPayment>, AppError> {
@@ -2394,7 +2401,7 @@ impl PgPaymentStore {
     }
 
     /// See [`crate::store::InMemoryPaymentStore::find_pending_for`].
-    pub async fn find_pending_for(
+    async fn find_pending_for(
         &self,
         user_id: &str,
         quest_id: &str,
@@ -2416,7 +2423,7 @@ impl PgPaymentStore {
 
     /// See [`crate::store::InMemoryPaymentStore::settle_succeeded`]. The CAS is
     /// the WHERE clause: one row updated == this call won the transition.
-    pub async fn settle_succeeded(&self, id: &str) -> Result<bool, AppError> {
+    async fn settle_succeeded(&self, id: &str) -> Result<bool, AppError> {
         let res = sqlx::query(
             "UPDATE pending_payments SET status = 'succeeded'
              WHERE id = $1 AND status = 'pending'",
@@ -2429,7 +2436,7 @@ impl PgPaymentStore {
     }
 
     /// See [`crate::store::InMemoryPaymentStore::mark_canceled`].
-    pub async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
+    async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
         sqlx::query(
             "UPDATE pending_payments SET status = 'canceled'
              WHERE id = $1 AND status = 'pending'",
@@ -2453,9 +2460,12 @@ impl PgFlagStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl KvStore<bool> for PgFlagStore {
     /// See [`crate::store::InMemoryFlagStore::get`].
-    pub async fn get(&self, key: &str) -> Result<Option<bool>, AppError> {
+    async fn get(&self, key: &str) -> Result<Option<bool>, AppError> {
         let row = sqlx::query("SELECT enabled FROM feature_overrides WHERE key = $1")
             .bind(key)
             .fetch_optional(&self.pool)
@@ -2465,24 +2475,8 @@ impl PgFlagStore {
             .transpose()
     }
 
-    /// See [`crate::store::InMemoryFlagStore::all`] — one SELECT, whole table.
-    pub async fn all(&self) -> Result<std::collections::HashMap<String, bool>, AppError> {
-        let rows = sqlx::query("SELECT key, enabled FROM feature_overrides")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(internal)?;
-        rows.iter()
-            .map(|r| {
-                Ok((
-                    r.try_get("key").map_err(internal)?,
-                    r.try_get("enabled").map_err(internal)?,
-                ))
-            })
-            .collect()
-    }
-
     /// See [`crate::store::InMemoryFlagStore::set`].
-    pub async fn set(&self, key: &str, enabled: bool) -> Result<(), AppError> {
+    async fn set(&self, key: &str, enabled: bool) -> Result<(), AppError> {
         sqlx::query(
             "INSERT INTO feature_overrides (key, enabled, updated_at)
              VALUES ($1, $2, $3)
@@ -2499,13 +2493,32 @@ impl PgFlagStore {
     }
 
     /// See [`crate::store::InMemoryFlagStore::clear`].
-    pub async fn clear(&self, key: &str) -> Result<(), AppError> {
+    async fn clear(&self, key: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM feature_overrides WHERE key = $1")
             .bind(key)
             .execute(&self.pool)
             .await
             .map_err(internal)?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl FlagStore for PgFlagStore {
+    /// See [`crate::store::InMemoryFlagStore::all`] — one SELECT, whole table.
+    async fn all(&self) -> Result<std::collections::HashMap<String, bool>, AppError> {
+        let rows = sqlx::query("SELECT key, enabled FROM feature_overrides")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok((
+                    r.try_get("key").map_err(internal)?,
+                    r.try_get("enabled").map_err(internal)?,
+                ))
+            })
+            .collect()
     }
 }
 
@@ -2520,9 +2533,12 @@ impl PgSettingsStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl KvStore<String> for PgSettingsStore {
     /// See [`crate::store::InMemorySettingsStore::get`].
-    pub async fn get(&self, key: &str) -> Result<Option<String>, AppError> {
+    async fn get(&self, key: &str) -> Result<Option<String>, AppError> {
         sqlx::query_scalar("SELECT value FROM app_settings WHERE key = $1")
             .bind(key)
             .fetch_optional(&self.pool)
@@ -2531,7 +2547,7 @@ impl PgSettingsStore {
     }
 
     /// See [`crate::store::InMemorySettingsStore::set`].
-    pub async fn set(&self, key: &str, value: &str) -> Result<(), AppError> {
+    async fn set(&self, key: &str, value: String) -> Result<(), AppError> {
         sqlx::query(
             "INSERT INTO app_settings (key, value, updated_at)
              VALUES ($1, $2, $3)
@@ -2548,7 +2564,7 @@ impl PgSettingsStore {
     }
 
     /// See [`crate::store::InMemorySettingsStore::clear`].
-    pub async fn clear(&self, key: &str) -> Result<(), AppError> {
+    async fn clear(&self, key: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM app_settings WHERE key = $1")
             .bind(key)
             .execute(&self.pool)
@@ -2571,9 +2587,12 @@ impl PgModerationStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
 
+#[async_trait::async_trait]
+impl ModerationStore for PgModerationStore {
     /// See [`crate::store::InMemoryModerationStore::hide_review`] — idempotent.
-    pub async fn hide_review(
+    async fn hide_review(
         &self,
         player: &str,
         quest: &str,
@@ -2596,7 +2615,7 @@ impl PgModerationStore {
     }
 
     /// See [`crate::store::InMemoryModerationStore::unhide_review`] — idempotent.
-    pub async fn unhide_review(&self, player: &str, quest: &str) -> Result<(), AppError> {
+    async fn unhide_review(&self, player: &str, quest: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM hidden_reviews WHERE user_id = $1 AND quest_id = $2")
             .bind(player)
             .bind(quest)
@@ -2607,7 +2626,7 @@ impl PgModerationStore {
     }
 
     /// See [`crate::store::InMemoryModerationStore::hidden_review_keys`].
-    pub async fn hidden_review_keys(
+    async fn hidden_review_keys(
         &self,
     ) -> Result<std::collections::HashSet<(String, String)>, AppError> {
         let rows = sqlx::query("SELECT user_id, quest_id FROM hidden_reviews")
@@ -2625,7 +2644,7 @@ impl PgModerationStore {
     }
 
     /// See [`crate::store::InMemoryModerationStore::resolve_feedback`] — upsert.
-    pub async fn resolve_feedback(
+    async fn resolve_feedback(
         &self,
         quest: &str,
         snap: &str,
@@ -2652,12 +2671,7 @@ impl PgModerationStore {
     }
 
     /// See [`crate::store::InMemoryModerationStore::reopen_feedback`] — idempotent.
-    pub async fn reopen_feedback(
-        &self,
-        quest: &str,
-        snap: &str,
-        step: i32,
-    ) -> Result<(), AppError> {
+    async fn reopen_feedback(&self, quest: &str, snap: &str, step: i32) -> Result<(), AppError> {
         sqlx::query(
             "DELETE FROM resolved_feedback
              WHERE quest_id = $1 AND snapshot_id = $2 AND step_position = $3",
@@ -2672,7 +2686,7 @@ impl PgModerationStore {
     }
 
     /// See [`crate::store::InMemoryModerationStore::feedback_resolutions`].
-    pub async fn feedback_resolutions(
+    async fn feedback_resolutions(
         &self,
     ) -> Result<std::collections::HashMap<(String, String, i32), u64>, AppError> {
         let rows = sqlx::query(

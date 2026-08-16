@@ -59,10 +59,8 @@ use payments::{PendingPayment, PendingStatus};
 use settings::Setting;
 use store::{
     AttemptMeta, AuthStores, ConstructorQuest, ConstructorQuestSummary, ConstructorStores,
-    CouponStores, FactStores, FlagStores, GrantStores, InMemoryAuthStore, InMemoryConstructorStore,
-    InMemoryCouponStore, InMemoryFactStore, InMemoryFlagStore, InMemoryGrantStore,
-    InMemoryModerationStore, InMemoryPaymentStore, InMemorySettingsStore, ModerationStores,
-    PaymentStores, PublishedMeta, SettingsStores,
+    CouponStores, FactStores, FlagStores, GrantStores, ModerationStores, PaymentStores,
+    PublishedMeta, SettingsStores, Storage,
 };
 use yookassa::YookassaGateway;
 
@@ -129,22 +127,19 @@ fn in_memory_state(config: AppConfig, media: MediaStores) -> AppState {
     let google = build_google_verifier(&config);
     let telegram = build_telegram_verifier(&config);
     let yookassa = config.yookassa.clone().map(YookassaGateway::Http);
+    let storage = Storage::in_memory();
     AppState {
         config,
-        store: FactStores::InMemory(Arc::new(Mutex::new(InMemoryFactStore::new()))),
-        grants: GrantStores::InMemory(Arc::new(Mutex::new(InMemoryGrantStore::new()))),
-        auth: AuthStores::InMemory(Arc::new(Mutex::new(InMemoryAuthStore::new()))),
-        constructor: ConstructorStores::InMemory(Arc::new(Mutex::new(
-            InMemoryConstructorStore::new(),
-        ))),
-        coupons: CouponStores::InMemory(Arc::new(Mutex::new(InMemoryCouponStore::new()))),
+        store: storage.facts,
+        grants: storage.grants,
+        auth: storage.auth,
+        constructor: storage.constructor,
+        coupons: storage.coupons,
         media,
-        payment_rows: PaymentStores::InMemory(Arc::new(Mutex::new(InMemoryPaymentStore::new()))),
-        flags: FlagStores::InMemory(Arc::new(Mutex::new(InMemoryFlagStore::new()))),
-        settings: SettingsStores::InMemory(Arc::new(Mutex::new(InMemorySettingsStore::new()))),
-        moderation: ModerationStores::InMemory(Arc::new(
-            Mutex::new(InMemoryModerationStore::new()),
-        )),
+        payment_rows: storage.payments,
+        flags: storage.flags,
+        settings: storage.settings,
+        moderation: storage.moderation,
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -327,7 +322,7 @@ async fn require_editor(state: &AppState, headers: &HeaderMap) -> Result<(), App
 /// endpoints themselves, so a flag can never enable what the deployment
 /// cannot do.
 async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
-    Ok(feature.effective(state.flags.override_for(feature.key()).await?))
+    Ok(feature.effective(state.flags.get(feature.key()).await?))
 }
 
 /// The capability half: whether this deployment is configured for the feature
@@ -1114,7 +1109,7 @@ async fn yookassa_webhook_handler(
 async fn payment_providers_handler(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let on =
         |f: Feature| feature_available(&state, f) && f.effective(overrides.get(f.key()).copied());
     let mut providers = Vec::new();
@@ -2857,7 +2852,7 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
 async fn auth_providers_handler(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let on = |f: Feature| f.effective(overrides.get(f.key()).copied());
     Ok(Json(serde_json::json!({
         "google_client_id": on(Feature::AuthGoogle)
@@ -3526,7 +3521,7 @@ async fn list_features_handler(
     headers: HeaderMap,
 ) -> Result<Json<Vec<FeatureWire>>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    let overrides = state.flags.all_overrides().await?;
+    let overrides = state.flags.all().await?;
     let rows = Feature::ALL
         .into_iter()
         .map(|f| feature_wire(&state, f, overrides.get(f.key()).copied()))
@@ -3556,8 +3551,8 @@ async fn public_features_handler(
     // unconditionally (and discarded when its flag is off) rather than
     // serializing a second round-trip behind the overrides read.
     let (overrides, stored_answer) = tokio::try_join!(
-        state.flags.all_overrides(),
-        state.settings.value_for(Setting::UniversalAnswer.key())
+        state.flags.all(),
+        state.settings.get(Setting::UniversalAnswer.key())
     )?;
     let flags: std::collections::HashMap<&'static str, bool> = Feature::ALL
         .into_iter()
@@ -3594,8 +3589,8 @@ async fn set_feature_handler(
     let feature = Feature::parse(&key)
         .ok_or_else(|| AppError::NotFound(format!("unknown feature: {key}")))?;
     match req.enabled {
-        Some(enabled) => state.flags.set_override(feature.key(), enabled).await?,
-        None => state.flags.clear_override(feature.key()).await?,
+        Some(enabled) => state.flags.set(feature.key(), enabled).await?,
+        None => state.flags.clear(feature.key()).await?,
     }
     Ok(Json(feature_wire(&state, feature, req.enabled)))
 }
@@ -3618,7 +3613,7 @@ async fn get_setting_handler(
     require_admin_actor(&state, &headers).await?;
     let setting = Setting::parse(&key)
         .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
-    let value = state.settings.value_for(setting.key()).await?;
+    let value = state.settings.get(setting.key()).await?;
     Ok(Json(SettingWire {
         key: setting.key(),
         value,
@@ -3646,8 +3641,8 @@ async fn set_setting_handler(
         .ok_or_else(|| AppError::NotFound(format!("unknown setting: {key}")))?;
     let value = Setting::normalize(req.value.as_deref());
     match &value {
-        Some(v) => state.settings.set_value(setting.key(), v).await?,
-        None => state.settings.clear_value(setting.key()).await?,
+        Some(v) => state.settings.set(setting.key(), v.clone()).await?,
+        None => state.settings.clear(setting.key()).await?,
     }
     Ok(Json(SettingWire {
         key: setting.key(),
@@ -4032,22 +4027,19 @@ async fn main() -> anyhow::Result<()> {
             );
             let google = build_google_verifier(&config);
             let telegram = build_telegram_verifier(&config);
+            let storage = Storage::postgres(pool);
             AppState {
                 config: config.clone(),
-                store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
-                grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-                auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-                constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
-                    pool.clone(),
-                )),
-                coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
+                store: storage.facts,
+                grants: storage.grants,
+                auth: storage.auth,
+                constructor: storage.constructor,
+                coupons: storage.coupons,
                 media,
-                payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
-                moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(
-                    pool.clone(),
-                )),
-                flags: FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone())),
-                settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
+                payment_rows: storage.payments,
+                moderation: storage.moderation,
+                flags: storage.flags,
+                settings: storage.settings,
                 yookassa: config.yookassa.clone().map(YookassaGateway::Http),
                 mailer: mailer::Mailer::from_config(config.smtp_url.as_deref(), &config.mail_from),
                 rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -4150,16 +4142,12 @@ mod tests {
     /// comes up with [`TEST_ENABLED_FLAGS`] on; use [`pristine_state`] to observe
     /// a deployment that has never been configured.
     fn test_state(config: AppConfig) -> AppState {
-        let state = pristine_state(config);
-        let FlagStores::InMemory(flags) = &state.flags else {
-            panic!("in-memory tests build an in-memory flag store");
-        };
-        {
-            let mut flags = flags.lock().expect("flags lock");
-            for f in TEST_ENABLED_FLAGS {
-                flags.set(f.key(), true);
-            }
+        let mut state = pristine_state(config);
+        let mut flags = store::InMemoryFlagStore::new();
+        for f in TEST_ENABLED_FLAGS {
+            flags.set(f.key(), true);
         }
+        state.flags = Arc::new(Mutex::new(flags));
         state
     }
 
@@ -5082,7 +5070,8 @@ mod tests {
     }
 
     // === Shared scenarios: executed against the in-memory backend below and the
-    // === Postgres backend in pg_full_suite (same behavior on both — persistence spec).
+    // === Postgres backend via the `scenarios!` list (same behavior on both —
+    // === persistence spec). One row there registers a scenario for BOTH backends.
 
     async fn scenario_attempt_gating(app: &Router, ids: &Ids) {
         let (st, body) = post_json(
@@ -6087,7 +6076,7 @@ mod tests {
     /// Admin user management (admin-users spec): the dual authorizer (shared secret
     /// vs session-admin), listing without secret leakage, role assignment, and the
     /// anti-lockout + validation guards. Uses `.find` rather than length/index so it
-    /// tolerates the shared, pre-populated Postgres database in `pg_full_suite`.
+    /// tolerates the shared, pre-populated Postgres database in `pg_scenarios`.
     async fn scenario_admin_users(app: &Router, ids: &Ids) {
         let admin_hdr = [("x-admin-token", TEST_ADMIN_TOKEN)];
 
@@ -6413,81 +6402,6 @@ mod tests {
         assert_eq!(body["version"], "test-0.0.0");
     }
 
-    #[tokio::test]
-    async fn attempt_requires_grant_and_published_quest() {
-        scenario_attempt_gating(&test_app(), &Ids::new("gate")).await;
-    }
-
-    #[tokio::test]
-    async fn unknown_attempt_rejected_on_append_and_state() {
-        scenario_unknown_attempt(&test_app()).await;
-    }
-
-    #[tokio::test]
-    async fn happy_chain_grant_attempt_facts_idempotent_reconnect() {
-        scenario_happy_chain(&test_app(), &Ids::new("happy")).await;
-    }
-
-    #[tokio::test]
-    async fn multi_device_overdraft_stays_negative() {
-        scenario_multi_device_overdraft(&test_app(), &Ids::new("od")).await;
-    }
-
-    #[tokio::test]
-    async fn cross_device_duplicate_award_absorbed() {
-        scenario_cross_device_duplicate(&test_app(), &Ids::new("dup")).await;
-    }
-
-    #[tokio::test]
-    async fn concurrent_duplicate_batch_collapses_to_one() {
-        scenario_concurrent_duplicate_batch(&test_app(), &Ids::new("race")).await;
-    }
-
-    #[tokio::test]
-    async fn completion_bonus_idempotent_across_attempts() {
-        scenario_completion_bonus_once(&test_app(), &Ids::new("bonus")).await;
-    }
-
-    #[tokio::test]
-    async fn version_freeze_new_publish_does_not_rebind() {
-        scenario_version_freeze(&test_app(), &Ids::new("freeze")).await;
-    }
-
-    #[tokio::test]
-    async fn checkout_idempotent_coupon100_and_publish_list() {
-        scenario_checkout_and_publish_list(&test_app(), &Ids::new("shop")).await;
-    }
-
-    #[tokio::test]
-    async fn store_lists_only_published_quests() {
-        scenario_store_lists_only_published(&test_app(), &Ids::new("vis")).await;
-    }
-
-    #[tokio::test]
-    async fn bundle_endpoint_gated_by_grant() {
-        scenario_bundle_gated_by_grant(&test_app(), &Ids::new("bundle")).await;
-    }
-
-    #[tokio::test]
-    async fn publish_rejects_frozen_snapshot_rewrite() {
-        scenario_snapshot_immutability(&test_app(), &Ids::new("frozen")).await;
-    }
-
-    #[tokio::test]
-    async fn admin_stats_and_feedbacks_per_version() {
-        scenario_admin_stats(&test_app(), &Ids::new("admin")).await;
-    }
-
-    #[tokio::test]
-    async fn admin_user_management_list_and_roles() {
-        scenario_admin_users(&test_app(), &Ids::new("users")).await;
-    }
-
-    #[tokio::test]
-    async fn admin_surfaces_name_quests_from_the_authoring_registry() {
-        scenario_admin_quest_labels(&test_app(), &Ids::new("labels")).await;
-    }
-
     /// Admin coupon CRUD: create → list → get → save → delete, with the
     /// derived status and validation/conflict/gating guards along the way.
     /// Codes derive from the run-unique quest id (shared-Postgres safe).
@@ -6607,11 +6521,6 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn admin_coupons_crud_validation_and_gating() {
-        scenario_admin_coupons(&test_app(), &Ids::new("cpn-crud")).await;
-    }
-
     /// The purchase-sheet preview: always 200, verdict in the body; the priced
     /// discount matches what checkout will actually apply.
     async fn scenario_coupon_validate(app: &Router, ids: &Ids) {
@@ -6703,11 +6612,6 @@ mod tests {
         .await;
         assert_eq!(v["valid"], false);
         assert_eq!(v["message"], "Вы уже использовали этот промокод");
-    }
-
-    #[tokio::test]
-    async fn coupon_validate_previews_without_consuming() {
-        scenario_coupon_validate(&test_app(), &Ids::new("cpn-preview")).await;
     }
 
     /// Checkout + coupons end to end: caps enforced atomically, usage recorded
@@ -6831,11 +6735,6 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
         assert_eq!(body["error"], "промокод не найден");
-    }
-
-    #[tokio::test]
-    async fn checkout_redeems_coupons_with_limits_and_stats() {
-        scenario_coupon_redeem(&test_app(), &Ids::new("cpn-redeem")).await;
     }
 
     /// v2 spec §9.1/§12.6 — the owner reports the dashboard status control fails
@@ -7370,27 +7269,6 @@ mod tests {
         assert_eq!(v["exists"], false, "email is free again");
     }
 
-    #[tokio::test]
-    async fn publish_requires_editor_role() {
-        scenario_publish_authz(&test_app(), &Ids::new("pubauthz")).await;
-    }
-
-    #[tokio::test]
-    async fn ctor_status_lifecycle_editor_session() {
-        scenario_ctor_status_lifecycle(&test_app(), &Ids::new("ctorstatus")).await;
-    }
-
-    #[tokio::test]
-    async fn product_page_payload() {
-        scenario_product_page(&test_app(), &Ids::new("product")).await;
-    }
-
-    #[tokio::test]
-    async fn auth_v2_full_flow() {
-        let (app, mails) = test_app_with_mail();
-        scenario_auth_v2(&app, &mails, &Ids::new("authv2")).await;
-    }
-
     /// §10.2/§12.10 — admin users pagination: ?page= opts in (25/page, newest
     /// first), no param keeps the legacy array shape.
     #[tokio::test]
@@ -7433,21 +7311,6 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             "11th probe in the window"
         );
-    }
-
-    #[tokio::test]
-    async fn bad_payload_rejected_with_4xx() {
-        scenario_bad_payload(&test_app(), &Ids::new("bad")).await;
-    }
-
-    #[tokio::test]
-    async fn auth_register_login_preserves_identity() {
-        scenario_auth_register_login(&test_app(), &Ids::new("auth")).await;
-    }
-
-    #[tokio::test]
-    async fn auth_enforcement_two_tier() {
-        scenario_auth_enforcement(&test_app(), &Ids::new("enforce")).await;
     }
 
     /// The mail-sending endpoints must be rate-limited server-side (per email):
@@ -7586,26 +7449,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reset_by_code_alongside_link() {
-        let (app, mails) = test_app_with_mail();
-        scenario_reset_by_code(&app, &mails, &Ids::new("resetcode")).await;
-    }
-
-    #[tokio::test]
-    async fn player_stats_cross_attempt_fold() {
-        scenario_player_stats(&test_app(), &Ids::new("stats")).await;
-    }
-
-    #[tokio::test]
-    async fn payment_ref_audited_on_grants() {
-        scenario_payment_ref_audit(&test_app(), &Ids::new("pay")).await;
-    }
-
-    #[tokio::test]
-    async fn migration_idempotent_and_measure_rates() {
-        let app = test_app();
-        scenario_migration_idempotent(&app, "legacy:inmem").await;
-        let (st, rates) = get_json(&app, "/api/measure/rates").await;
+    async fn measure_rates_endpoint() {
+        let (st, rates) = get_json(&test_app(), "/api/measure/rates").await;
         assert_eq!(st, StatusCode::OK);
         assert!(
             rates["note"]
@@ -8382,10 +8227,11 @@ mod tests {
         // Same baseline as the in-memory harness: nothing seeds overrides any
         // more, so a harness must switch on the features it exercises. Idempotent
         // upserts — the pg suites share one database and run concurrently.
-        let flag_store = FlagStores::Postgres(pg_store::PgFlagStore::new(pool.clone()));
+        let storage = Storage::postgres(pool);
         for f in TEST_ENABLED_FLAGS {
-            flag_store
-                .set_override(f.key(), true)
+            storage
+                .flags
+                .set(f.key(), true)
                 .await
                 .expect("enable baseline flag");
         }
@@ -8403,18 +8249,16 @@ mod tests {
                 telegram_client_id: None,
                 yookassa: None,
             },
-            store: FactStores::Postgres(pg_store::PgFactStore::new(pool.clone())),
-            grants: GrantStores::Postgres(pg_store::PgGrantStore::new(pool.clone())),
-            auth: AuthStores::Postgres(pg_store::PgAuthStore::new(pool.clone())),
-            constructor: ConstructorStores::Postgres(pg_store::PgConstructorStore::new(
-                pool.clone(),
-            )),
-            coupons: CouponStores::Postgres(pg_store::PgCouponStore::new(pool.clone())),
+            store: storage.facts,
+            grants: storage.grants,
+            auth: storage.auth,
+            constructor: storage.constructor,
+            coupons: storage.coupons,
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
-            payment_rows: PaymentStores::Postgres(pg_store::PgPaymentStore::new(pool.clone())),
-            moderation: ModerationStores::Postgres(pg_store::PgModerationStore::new(pool.clone())),
-            flags: flag_store,
-            settings: SettingsStores::Postgres(pg_store::PgSettingsStore::new(pool)),
+            payment_rows: storage.payments,
+            moderation: storage.moderation,
+            flags: storage.flags,
+            settings: storage.settings,
             yookassa: None,
             mailer: m,
             rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -8426,28 +8270,16 @@ mod tests {
 
     /// Exercises the REAL PgConstructorStore SQL end to end (create/list/get/save/
     /// status/delete + publish flipping status). Self-skips without DATABASE_URL,
-    /// like pg_full_suite. Run-unique ids tolerate a shared DB and never collide
+    /// like the pg_scenarios tests. Run-unique ids tolerate a shared DB and never collide
     /// with the fixed seed ids the 0006 cleanup targets.
     #[tokio::test]
     async fn pg_constructor_lifecycle() {
-        dotenv().ok();
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_constructor_lifecycle: skipped (DATABASE_URL not set)");
+        let Some(h) = pg_harness("pg_constructor_lifecycle").await else {
             return;
         };
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&url)
-            .await
-            .expect("connect to DATABASE_URL");
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("run migrations");
-        let (app, _mails) = pg_app(pool).await;
+        let app = h.app;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
-        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
-        let qid = format!("q-citest-{run}");
+        let qid = format!("q-citest-{}", h.run);
 
         // create
         let (st, created) = post_json_h(
@@ -8476,12 +8308,12 @@ mod tests {
         // A second author (ops token + a distinct device id) is invisible to the
         // first: the foreign quest never appears in the "ops" list, and the foreign
         // author cannot fetch the "ops" author's quest (404 — existence hidden).
-        let dev_id = format!("dev-citest-{run}");
+        let dev_id = format!("dev-citest-{}", h.run);
         let dev: [(&str, &str); 2] = [
             ("x-admin-token", TEST_ADMIN_TOKEN),
             ("x-user-id", dev_id.as_str()),
         ];
-        let other_qid = format!("q-citest-other-{run}");
+        let other_qid = format!("q-citest-other-{}", h.run);
         let (st, _) = post_json_h(
             &app,
             "/api/constructor/quests",
@@ -8609,15 +8441,26 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn pg_full_suite() {
+    /// Everything a per-scenario Postgres test needs: the router over a real
+    /// pool (migrations applied) and a run-unique tag so scenarios tolerate a
+    /// shared, pre-populated database. `None` means "skip: no DATABASE_URL".
+    struct PgHarness {
+        app: Router,
+        mails: std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>,
+        run: u64,
+    }
+
+    async fn pg_harness(test: &str) -> Option<PgHarness> {
         dotenv().ok();
         let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_full_suite: skipped (DATABASE_URL not set)");
-            return;
+            eprintln!("{test}: skipped (DATABASE_URL not set)");
+            return None;
         };
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
+            // Pg tests run CONCURRENTLY (one per scenario): ~32 pools must fit
+            // under Postgres's default max_connections=100, and each scenario's
+            // requests are sequential — 2 connections suffice.
+            .max_connections(2)
             .connect(&url)
             .await
             .expect("connect to DATABASE_URL");
@@ -8625,51 +8468,120 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let (app, pg_mails) = pg_app(pool.clone()).await;
-
-        // Run-unique tag: scenarios tolerate a shared, pre-populated database.
+        let (app, mails) = pg_app(pool).await;
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        Some(PgHarness { app, mails, run })
+    }
 
-        scenario_attempt_gating(&app, &Ids::new(&format!("gate-{run}"))).await;
-        scenario_unknown_attempt(&app).await;
-        let happy_ids = Ids::new(&format!("happy-{run}"));
-        let happy_attempt = scenario_happy_chain(&app, &happy_ids).await;
-        scenario_multi_device_overdraft(&app, &Ids::new(&format!("od-{run}"))).await;
-        scenario_cross_device_duplicate(&app, &Ids::new(&format!("dup-{run}"))).await;
-        scenario_concurrent_duplicate_batch(&app, &Ids::new(&format!("race-{run}"))).await;
-        scenario_completion_bonus_once(&app, &Ids::new(&format!("bonus-{run}"))).await;
-        scenario_version_freeze(&app, &Ids::new(&format!("freeze-{run}"))).await;
-        scenario_checkout_and_publish_list(&app, &Ids::new(&format!("shop-{run}"))).await;
-        scenario_store_lists_only_published(&app, &Ids::new(&format!("vis-{run}"))).await;
-        scenario_bundle_gated_by_grant(&app, &Ids::new(&format!("bundle-{run}"))).await;
-        scenario_snapshot_immutability(&app, &Ids::new(&format!("frozen-{run}"))).await;
-        scenario_admin_stats(&app, &Ids::new(&format!("admin-{run}"))).await;
-        scenario_admin_users(&app, &Ids::new(&format!("users-{run}"))).await;
-        scenario_admin_quest_labels(&app, &Ids::new(&format!("labels-{run}"))).await;
-        scenario_admin_coupons(&app, &Ids::new(&format!("cpncrud-{run}"))).await;
-        scenario_coupon_validate(&app, &Ids::new(&format!("cpnprev-{run}"))).await;
-        scenario_coupon_redeem(&app, &Ids::new(&format!("cpnrdm-{run}"))).await;
-        scenario_publish_authz(&app, &Ids::new(&format!("pubauthz-{run}"))).await;
-        scenario_ctor_status_lifecycle(&app, &Ids::new(&format!("ctorstatus-{run}"))).await;
-        scenario_product_page(&app, &Ids::new(&format!("product-{run}"))).await;
-        scenario_auth_v2(&app, &pg_mails, &Ids::new(&format!("authv2-{run}"))).await;
-        scenario_reset_by_code(&app, &pg_mails, &Ids::new(&format!("resetcode-{run}"))).await;
-        scenario_bad_payload(&app, &Ids::new(&format!("bad-{run}"))).await;
-        scenario_migration_idempotent(&app, &format!("legacy:{run}")).await;
-        scenario_auth_register_login(&app, &Ids::new(&format!("auth-{run}"))).await;
-        let enforce_ids = Ids::new(&format!("enforce-{run}"));
-        scenario_auth_enforcement(&app, &enforce_ids).await;
-        scenario_player_stats(&app, &Ids::new(&format!("stats-{run}"))).await;
-        scenario_payment_ref_audit(&app, &Ids::new(&format!("pay-{run}"))).await;
+    /// ONE scenario list, BOTH backends. Each row expands to an in-memory
+    /// `#[tokio::test]` (fresh `test_app`) and a `pg_scenarios::*` twin that
+    /// self-skips without DATABASE_URL. A scenario cannot be registered for one
+    /// backend and silently missed on the other — the row is the registration.
+    ///
+    /// Row shapes: `ids` — `scenario(&app, &Ids)`; `plain` — `scenario(&app)`;
+    /// `mails` — `scenario(&app, &outbox, &Ids)`; `key` — `scenario(&app, &str)`.
+    macro_rules! scenarios {
+        (@mem ids $scenario:ident, $slug:literal) => {
+            $scenario(&test_app(), &Ids::new($slug)).await;
+        };
+        (@mem plain $scenario:ident, $slug:literal) => {
+            $scenario(&test_app()).await;
+        };
+        (@mem mails $scenario:ident, $slug:literal) => {
+            let (app, mails) = test_app_with_mail();
+            $scenario(&app, &mails, &Ids::new($slug)).await;
+        };
+        (@mem key $scenario:ident, $slug:literal) => {
+            $scenario(&test_app(), concat!("legacy:", $slug)).await;
+        };
+        (@pg ids $scenario:ident, $h:ident, $tag:ident) => {
+            $scenario(&$h.app, &Ids::new(&$tag)).await;
+        };
+        (@pg plain $scenario:ident, $h:ident, $tag:ident) => {
+            $scenario(&$h.app).await;
+        };
+        (@pg mails $scenario:ident, $h:ident, $tag:ident) => {
+            $scenario(&$h.app, &$h.mails, &Ids::new(&$tag)).await;
+        };
+        (@pg key $scenario:ident, $h:ident, $tag:ident) => {
+            $scenario(&$h.app, &format!("legacy:{}", $tag)).await;
+        };
+        ($($name:ident = $kind:ident $scenario:ident / $slug:literal;)*) => {
+            $(
+                #[tokio::test]
+                async fn $name() {
+                    scenarios!(@mem $kind $scenario, $slug);
+                }
+            )*
 
-        // Restart survival: a brand-new pool + router (process restart equivalent)
-        // sees the pre-restart state, and bonus idempotency survives.
-        let pool2 = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&url)
+            mod pg_scenarios {
+                use super::*;
+                $(
+                    #[tokio::test]
+                    async fn $name() {
+                        let Some(h) =
+                            pg_harness(concat!("pg_scenarios::", stringify!($name))).await
+                        else {
+                            return;
+                        };
+                        let _tag = format!("{}-{}", $slug, h.run);
+                        scenarios!(@pg $kind $scenario, h, _tag);
+                    }
+                )*
+            }
+        };
+    }
+
+    scenarios! {
+        attempt_requires_grant_and_published_quest = ids scenario_attempt_gating / "gate";
+        unknown_attempt_rejected_on_append_and_state = plain scenario_unknown_attempt / "na";
+        happy_chain_grant_attempt_facts_idempotent_reconnect = ids scenario_happy_chain / "happy";
+        multi_device_overdraft_stays_negative = ids scenario_multi_device_overdraft / "od";
+        cross_device_duplicate_award_absorbed = ids scenario_cross_device_duplicate / "dup";
+        concurrent_duplicate_batch_collapses_to_one = ids scenario_concurrent_duplicate_batch / "race";
+        completion_bonus_idempotent_across_attempts = ids scenario_completion_bonus_once / "bonus";
+        version_freeze_new_publish_does_not_rebind = ids scenario_version_freeze / "freeze";
+        checkout_idempotent_coupon100_and_publish_list = ids scenario_checkout_and_publish_list / "shop";
+        store_lists_only_published_quests = ids scenario_store_lists_only_published / "vis";
+        bundle_endpoint_gated_by_grant = ids scenario_bundle_gated_by_grant / "bundle";
+        publish_rejects_frozen_snapshot_rewrite = ids scenario_snapshot_immutability / "frozen";
+        admin_stats_and_feedbacks_per_version = ids scenario_admin_stats / "admin";
+        admin_user_management_list_and_roles = ids scenario_admin_users / "users";
+        admin_surfaces_name_quests_from_the_authoring_registry = ids scenario_admin_quest_labels / "labels";
+        admin_coupons_crud_validation_and_gating = ids scenario_admin_coupons / "cpncrud";
+        coupon_validate_previews_without_consuming = ids scenario_coupon_validate / "cpnprev";
+        checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
+        publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
+        ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
+        product_page_payload = ids scenario_product_page / "product";
+        auth_v2_full_flow = mails scenario_auth_v2 / "authv2";
+        reset_by_code_alongside_link = mails scenario_reset_by_code / "resetcode";
+        bad_payload_rejected_with_4xx = ids scenario_bad_payload / "bad";
+        migration_idempotent = key scenario_migration_idempotent / "mig";
+        auth_register_login_preserves_identity = ids scenario_auth_register_login / "auth";
+        auth_enforcement_two_tier = ids scenario_auth_enforcement / "enforce";
+        player_stats_cross_attempt_fold = ids scenario_player_stats / "stats";
+        payment_ref_audited_on_grants = ids scenario_payment_ref_audit / "pay";
+    }
+
+    /// Restart survival: a brand-new pool + router (process restart equivalent)
+    /// sees the pre-restart state, and bonus/auth idempotency survives. Runs its
+    /// own setup scenarios so it is independent of the per-scenario pg tests.
+    #[tokio::test]
+    async fn pg_restart_survival() {
+        let Some(h) = pg_harness("pg_restart_survival").await else {
+            return;
+        };
+        let run = h.run;
+        let happy_ids = Ids::new(&format!("happyre-{run}"));
+        let happy_attempt = scenario_happy_chain(&h.app, &happy_ids).await;
+        let enforce_ids = Ids::new(&format!("enforcere-{run}"));
+        scenario_auth_enforcement(&h.app, &enforce_ids).await;
+
+        let h2 = pg_harness("pg_restart_survival (restart)")
             .await
-            .expect("reconnect");
-        let (app2, _mails2) = pg_app(pool2).await;
+            .expect("DATABASE_URL checked by the first harness");
+        let app2 = h2.app;
         let (st, gv) = get_json(&app2, &format!("/api/attempts/{happy_attempt}/state")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(gv["projected"]["balance"], 5, "projection survives restart");
@@ -9411,26 +9323,15 @@ mod tests {
     /// restores the default by clearing the override it set.
     #[tokio::test]
     async fn pg_feature_override_round_trip() {
-        dotenv().ok();
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_feature_override_round_trip: skipped (DATABASE_URL not set)");
+        let Some(h) = pg_harness("pg_feature_override_round_trip").await else {
             return;
         };
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&url)
-            .await
-            .expect("connect to DATABASE_URL");
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("run migrations");
-        let (app, _mails) = pg_app(pool).await;
+        let app = h.app;
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
 
         // The pg suites share ONE database and run concurrently, so this test
         // must not disable a feature another suite's behavior depends on —
-        // toggling `payments_mock` here used to 501 pg_full_suite's checkouts
+        // toggling `payments_mock` here used to 501 the pg scenario checkouts
         // mid-run. `payments_yookassa` is behavior-inert on the pg app (no
         // gateway configured → the yookassa path is 501 regardless), while the
         // override rows still round-trip through the same store code.
