@@ -1,5 +1,6 @@
 //! The ONE owning module for reading a published quest snapshot (issue #64):
-//! product-page chips and the start point, derived from the frozen JSON.
+//! product-page chips, the start point and the quest colours, derived from the
+//! frozen JSON.
 //!
 //! The frontend mirror is `lib/snapshot.ts`; the shared fixtures in
 //! `../goldens/snapshot/` are executed by both suites, so any one-sided drift
@@ -60,6 +61,36 @@ fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
     })
 }
 
+/// The quest's own colours, frozen at publish. Read out of the snapshot for the
+/// per-quest PWA manifest: an installed quest must open on its OWN background,
+/// not flash the default palette before the player paints. Any shape but three
+/// `#rrggbb`-ish strings is no theme at all — the frontend's `parseTheme` makes
+/// the same call, and both sides fall back to the default palette.
+pub fn snapshot_theme(snapshot: Option<&serde_json::Value>) -> Option<ThemeWire> {
+    let theme = snapshot?.get("theme")?;
+    let hex = |key: &str| {
+        let raw = theme.get(key)?.as_str()?.trim();
+        let body = raw.strip_prefix('#')?;
+        (matches!(body.len(), 3 | 6) && body.chars().all(|c| c.is_ascii_hexdigit()))
+            .then(|| raw.to_string())
+    };
+    Some(ThemeWire {
+        bg: hex("bg")?,
+        ink: hex("ink")?,
+        btn: hex("btn")?,
+    })
+}
+
+/// Wire shape of the quest colours (see [`snapshot_theme`]).
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ThemeWire"))]
+pub struct ThemeWire {
+    pub bg: String,
+    pub ink: String,
+    pub btn: String,
+}
+
 /// Wire shape of the quest start point (see [`snapshot_start_point`]). Bare
 /// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -74,6 +105,31 @@ pub struct StartPointWire {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn theme_is_three_readable_colours_or_nothing() {
+        let theme = |v: serde_json::Value| snapshot_theme(Some(&json!({ "theme": v })));
+        assert_eq!(
+            theme(json!({ "bg": "#101014", "ink": "#F2F2F5", "btn": "#fff" })),
+            Some(ThemeWire {
+                bg: "#101014".into(),
+                ink: "#F2F2F5".into(),
+                btn: "#fff".into(),
+            })
+        );
+        // Anything the player would not paint with is no theme at all.
+        assert_eq!(theme(json!({ "bg": "#101014", "ink": "#F2F2F5" })), None);
+        assert_eq!(
+            theme(json!({ "bg": "red", "ink": "#F2F2F5", "btn": "#fff" })),
+            None
+        );
+        assert_eq!(theme(json!({ "bg": 1, "ink": 2, "btn": 3 })), None);
+        assert_eq!(theme(json!(null)), None);
+        assert_eq!(theme(json!("#fff")), None);
+        // Pre-field snapshots simply have no colours.
+        assert_eq!(snapshot_theme(Some(&json!({ "steps": [] }))), None);
+        assert_eq!(snapshot_theme(None), None);
+    }
 
     #[test]
     fn start_point_is_the_authors_quest_level_field() {
@@ -165,6 +221,7 @@ mod tests {
             tasks: u32,
             paid_hints: bool,
             start_point: Option<StartPointWire>,
+            theme: Option<ThemeWire>,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -200,6 +257,12 @@ mod tests {
                 snapshot_start_point(Some(&fx.snapshot)),
                 fx.expected.start_point,
                 "{}: start_point",
+                fx.name
+            );
+            assert_eq!(
+                snapshot_theme(Some(&fx.snapshot)),
+                fx.expected.theme,
+                "{}: theme",
                 fx.name
             );
             count += 1;

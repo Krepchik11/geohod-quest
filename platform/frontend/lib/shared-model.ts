@@ -7,6 +7,7 @@
  * fixtures in platform/goldens/parity/ are executed by both this suite and the
  * backend's. All coin amounts are frozen in the snapshot at publish time.
  */
+import type { QuestTheme } from './quest-theme';
 
 export interface RichContent {
   title: string;
@@ -117,6 +118,10 @@ export interface QuestSnapshot {
    *  шага. Тип общий для чтения и записи, поэтому поле опционально: старые
    *  снапшоты его действительно не содержат. */
   start_point?: { lat: number; lng: number } | null;
+  /** Цвета квеста (фон, текст, кнопка), замороженные при публикации — см.
+   *  `lib/quest-theme`. Отсутствуют (или не разбираются) — плеер играет квест в
+   *  бумажной палитре, как все квесты до появления поля. */
+  theme?: QuestTheme | null;
 }
 
 /**

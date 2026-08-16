@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BAD_THEME_CONTRAST_TEXT,
   CTOR_TEMPLATES,
   GIFT_COINS,
   computeGates,
@@ -133,6 +134,18 @@ describe('computeGates', () => {
     expect(g.warnings.map((w) => w.text)).toContain(
       'Нет обложки — карточка в магазине и «Первый экран» будут пустыми',
     );
+  });
+
+  it('warns — but does not block — when the chosen colours make the text unreadable', () => {
+    const q = quest();
+    q.meta.theme = { bg: '#101014', ink: '#14141a', btn: '#C9A227' };
+    const bad = computeGates(q);
+    expect(bad.errors).toEqual([]);
+    expect(bad.warnings.map((w) => w.text)).toContain(BAD_THEME_CONTRAST_TEXT);
+    expect(bad.warnings.find((w) => w.text === BAD_THEME_CONTRAST_TEXT)?.field).toBe('theme');
+
+    q.meta.theme = { bg: '#101014', ink: '#F2F2F5', btn: '#C9A227' };
+    expect(computeGates(q).warnings.map((w) => w.text)).not.toContain(BAD_THEME_CONTRAST_TEXT);
   });
 
   it('errors when the first page is not «Первый экран»', () => {
@@ -483,6 +496,13 @@ describe('serializeDraft', () => {
     expect(snap.golden_id).toBe('q-x');
     expect(snap.snapshot_version).toBe(3);
     expect(snap.steps.map((s) => s.position)).toEqual([0, 1]);
+  });
+
+  it('freezes the quest colours in, and writes null when the author set none', () => {
+    expect(serializeDraft(quest()).theme).toBeNull();
+    const themed = quest();
+    themed.meta.theme = { bg: '#101014', ink: '#F2F2F5', btn: '#C9A227' };
+    expect(serializeDraft(themed).theme).toEqual(themed.meta.theme);
   });
 
   it('deep-freezes: mutating the draft after serialize does not affect the snapshot', () => {

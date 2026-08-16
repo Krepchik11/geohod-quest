@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { API_BASE } from '../../../../lib/api';
+import { API_BASE, type ProductPageWire } from '../../../../lib/api';
 import { questManifest } from '../../../../lib/pwa';
 
 /**
@@ -20,12 +20,7 @@ export async function GET(
   if (!res || !res.ok) {
     return NextResponse.json({ error: 'quest not found' }, { status: 404 });
   }
-  const product = (await res.json()) as {
-    quest_id: string;
-    name: string;
-    snapshot_version: number;
-    primary_comic: string | null;
-  };
+  const product = (await res.json()) as ProductPageWire;
   return NextResponse.json(questManifest(product, API_BASE), {
     headers: { 'Content-Type': 'application/manifest+json' },
   });

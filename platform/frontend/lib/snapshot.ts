@@ -4,13 +4,14 @@
  * Every consumer that walks the frozen snapshot — offline media precache,
  * publish-time size estimate, the player's step access, the store's chips and
  * start point — derives from here, so a new media role or snapshot field is
- * added in exactly one place. `chips` and `startPoint` MUST mirror the backend
+ * added in exactly one place. `chips`, `startPoint` and `theme` MUST mirror the backend
  * `snapshot` module; the shared goldens in platform/goldens/snapshot/ pin the
  * parity from both suites.
  *
  * Pure and total: no IO, no view/draft types — only the snapshot wire types.
  */
 import type { GameStep, QuestSnapshot } from './shared-model';
+import { parseTheme, type QuestTheme } from './quest-theme';
 
 export interface SnapshotChips {
   pages: number;
@@ -123,6 +124,15 @@ export function startPoint(snapshot: QuestSnapshot): StartPoint | null {
     if (p) return p;
   }
   return null;
+}
+
+/**
+ * The quest's own colours, frozen at publish. Absent, null or malformed all mean
+ * the same thing: the quest plays in the default palette. Mirrors the backend
+ * `snapshot::snapshot_theme` (shared goldens enforce).
+ */
+export function theme(snapshot: QuestSnapshot): QuestTheme | null {
+  return parseTheme(snapshot.theme);
 }
 
 /** The step at `idx`, index clamped to [0, steps.length - 1]. */

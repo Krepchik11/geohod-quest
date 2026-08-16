@@ -388,6 +388,7 @@ mod tests {
             handlers::constructor::ConstructorQuestWire,
             handlers::constructor::ConstructorQuestFullWire,
             handlers::constructor::ConstructorAuthorWire,
+            snapshot::ThemeWire,
             handlers::player::BundleWire,
             handlers::player::CatalogQuest,
             handlers::player::ProductPageWire,
@@ -3559,7 +3560,7 @@ mod tests {
                 "duration": "2–3 часа",
                 "price": 890,
                 "description": "Прогулка по кварталам, которых нет на открытках.",
-                "snapshot": { "steps": [
+                "snapshot": { "theme": { "bg": "#101014", "ink": "#F2F2F5", "btn": "#C9A227" }, "steps": [
                     { "template": "start", "supporting": { "is_start": true } },
                     { "template": "task_answer", "supporting": {
                         "hint": { "cost_coins": 5, "reveal_text": "x" },
@@ -3589,6 +3590,11 @@ mod tests {
             v["start_point"],
             json!({ "lat": 44.8176, "lng": 20.4569 }),
             "«Место старта» falls back to the first navigator on legacy snapshots"
+        );
+        assert_eq!(
+            v["theme"],
+            json!({ "bg": "#101014", "ink": "#F2F2F5", "btn": "#C9A227" }),
+            "the quest's colours ride out of the frozen snapshot for the PWA manifest"
         );
         assert_eq!(v["rating_count"], 0);
         assert!(

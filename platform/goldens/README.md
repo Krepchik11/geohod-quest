@@ -56,9 +56,10 @@ Shared boundary rules (issue #66), run by both suites:
 
 Pin the snapshot readers on both sides (issue #64):
 
-- Rust: `backend/src/snapshot.rs` asserts `snapshot_chips` / `snapshot_start_point`
-  against `expected` (fixture structs use `deny_unknown_fields`).
-- TypeScript: `frontend/lib/snapshot.ts` asserts `mediaRefs` / `chips` / `startPoint`.
+- Rust: `backend/src/snapshot.rs` asserts `snapshot_chips` / `snapshot_start_point` /
+  `snapshot_theme` against `expected` (fixture structs use `deny_unknown_fields`).
+- TypeScript: `frontend/lib/snapshot.ts` asserts `mediaRefs` / `chips` / `startPoint` /
+  `theme`.
 
 ```json
 {
@@ -66,7 +67,7 @@ Pin the snapshot readers on both sides (issue #64):
   "description": "human-readable intent",
   "snapshot": { "...": "full frozen QuestSnapshot" },
   "expected": { "media_refs": [], "pages": 0, "tasks": 0,
-                "paid_hints": false, "start_point": null }
+                "paid_hints": false, "start_point": null, "theme": null }
 }
 ```
 
@@ -78,7 +79,11 @@ Rules pinned by these fixtures:
 - `pages` = step count; `tasks` = `task_no`/`task_answer` steps; `paid_hints` =
   any step with a non-null `supporting.hint`;
 - `start_point`: PRESENCE of the snapshot key decides — present (even null)
-  is the author's word; absent = legacy snapshot, first valid step navigator.
+  is the author's word; absent = legacy snapshot, first valid step navigator;
+- `theme`: the quest's three colours (`bg`/`ink`/`btn`), each a `#`-prefixed hex.
+  Absent, null or malformed all mean the same — the quest plays in the default
+  palette. Both sides require the leading `#`, so the player and the installed
+  app's splash can never disagree about whether a quest has colours.
 
 ## UTC-day fixtures (`utc-day/*.json`)
 

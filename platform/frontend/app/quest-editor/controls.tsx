@@ -84,11 +84,17 @@ export function useGateHighlight(highlight: { field?: GateField } | null | undef
   }, [highlight]);
 }
 
-/** Красная строка «публикация будет заблокирована» под проблемным контролом. */
-export function GateNote({ children }: { children: React.ReactNode }) {
+/**
+ * Строка о проблеме под самим контролом. Тон — тот же, что у гейта в чек-листе
+ * публикации: ошибка блокирует публикацию и говорит об этом, предупреждение
+ * только предупреждает. Одна разметка на оба, иначе следующее предупреждение
+ * скопирует её ещё раз и разойдётся в цвете и размере.
+ */
+export function GateNote({ kind = 'err', children }: { kind?: 'err' | 'warn'; children: React.ReactNode }) {
+  const err = kind === 'err';
   return (
-    <p style={{ margin: 0, fontSize: 12.5, color: 'var(--red)', fontWeight: 600 }}>
-      ✗ {children} — публикация будет заблокирована.
+    <p style={{ margin: 0, fontSize: 12.5, color: err ? 'var(--red)' : 'var(--amber)', fontWeight: 600 }}>
+      {err ? '✗' : '⚠'} {children}{err ? ' — публикация будет заблокирована.' : ''}
     </p>
   );
 }

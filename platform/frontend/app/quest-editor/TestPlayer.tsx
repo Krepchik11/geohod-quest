@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
+import type { QuestTheme } from '../../lib/quest-theme';
+import { theme as snapshotTheme } from '../../lib/snapshot';
 import { projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
   COMPLETION_BONUS,
@@ -50,6 +52,8 @@ interface TestQuest {
    *  ответ в тесте черновика сознательно не участвует — он рантайм-настройка
    *  админа, а не часть квеста. */
   universalAnswer: QuestSnapshot['universal_answer'];
+  /** Цвета квеста — тест показывает их так же, как их увидит игрок. */
+  theme: QuestTheme | null;
 }
 
 /** Меты теста («на паузе», «окончен») — состояния самого прогона, а не квеста,
@@ -195,7 +199,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   };
 
   return (
-    <PlayerFrame tw={{ anims: false }} screenLabel={'Тест: ' + (display.title || display.template)}>
+    <PlayerFrame tw={{ anims: false }} screenLabel={'Тест: ' + (display.title || display.template)} theme={quest.theme}>
       {step.template !== 'start' ? (
         <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} onBack={pos > 0 ? back : undefined} />
       ) : null}
@@ -297,6 +301,7 @@ export function TestOverlay({ quest, startPos, onClose }: {
       steps: snap.steps,
       display: snap.steps.map(toDesignStep),
       universalAnswer: snap.universal_answer,
+      theme: snapshotTheme(snap),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

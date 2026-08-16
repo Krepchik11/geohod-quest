@@ -39,3 +39,4 @@ export type { ReviewHideBody } from './ReviewHideBody';
 export type { ReviewWire } from './ReviewWire';
 export type { ReviewsPageWire } from './ReviewsPageWire';
 export type { StartPointWire } from './StartPointWire';
+export type { ThemeWire } from './ThemeWire';
