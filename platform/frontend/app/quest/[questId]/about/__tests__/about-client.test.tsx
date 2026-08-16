@@ -7,7 +7,7 @@ import React from 'react';
 /**
  * §3 product page flows: model-data rendering, not-owned → sheet → owned in
  * place (no redirect), free instant grant, delisted quest 404 state, chips
- * hidden when unknown, reviews aggregate until §11.
+ * hidden when unknown, §11 reviews list + «Показать ещё» paging.
  */
 const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock, reviewsMock } =
   vi.hoisted(() => ({

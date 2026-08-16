@@ -155,6 +155,15 @@ export default function AboutClient({ questId }: { questId: string }) {
 
   const p = product;
   const free = p.price === 0;
+  const allReviews = p.reviews.concat(moreReviews);
+  const loadMoreReviews = () => {
+    setLoadingMore(true);
+    api
+      .getQuestReviews(questId, allReviews.length)
+      .then((page) => setMoreReviews((cur) => cur.concat(page.reviews)))
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  };
 
   const orderCard = owned ? (
     <div className="qp-order card">
@@ -284,10 +293,10 @@ export default function AboutClient({ questId }: { questId: string }) {
             {p.rating_count > 0 && (
               <p className="qp-reviews__agg">★ {fmtRating(p.rating_avg)} · {p.rating_count} {ratingPlural(p.rating_count)}</p>
             )}
-            {p.reviews.length > 0 ? (
+            {allReviews.length > 0 ? (
               <div className="qp-reviews__list">
-                {p.reviews.concat(moreReviews).map((r, i) => (
-                  <div className="qp-review" key={i}>
+                {allReviews.map((r) => (
+                  <div className="qp-review" key={`${r.author}-${r.created_at}-${r.text}`}>
                     <div className="qp-review__head">
                       <b>{r.author}</b>
                       <span className="qp-review__stars" aria-label={`Оценка ${r.rating} из 5`}>
@@ -298,20 +307,8 @@ export default function AboutClient({ questId }: { questId: string }) {
                     <p>{r.text}</p>
                   </div>
                 ))}
-                {p.reviews.length + moreReviews.length < p.reviews_total && (
-                  <button
-                    className="btn btn--secondary"
-                    type="button"
-                    disabled={loadingMore}
-                    onClick={() => {
-                      setLoadingMore(true);
-                      api
-                        .getQuestReviews(questId, p.reviews.length + moreReviews.length)
-                        .then((page) => setMoreReviews((cur) => cur.concat(page.reviews)))
-                        .catch(() => {})
-                        .finally(() => setLoadingMore(false));
-                    }}
-                  >
+                {allReviews.length < p.reviews_total && (
+                  <button className="btn btn--secondary" type="button" disabled={loadingMore} onClick={loadMoreReviews}>
                     Показать ещё
                   </button>
                 )}

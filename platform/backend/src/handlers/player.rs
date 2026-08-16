@@ -336,7 +336,8 @@ pub(crate) struct ProductPageWire {
     author_name: Option<String>,
     /// How many of this author's quests are currently on sale.
     author_published_count: u32,
-    /// §11 reviews v1: newest-first, first page of 10.
+    /// §11 reviews: newest-written first — the first page; the rest comes from
+    /// GET /api/quests/{id}/reviews.
     reviews: Vec<ReviewWire>,
     /// Total ratings that carry text («{M} с отзывом»).
     #[cfg_attr(test, ts(type = "number"))]
@@ -365,7 +366,7 @@ const REVIEWS_PAGE: usize = 10;
 const REVIEWS_PAGE_MAX: usize = 50;
 
 /// §11 pagination: one page of a quest's reviews («Показать ещё» past the
-/// product page's first [`REVIEWS_PAGE`]).
+/// first ten on the product page).
 #[derive(serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(rename = "ReviewsPageWire"))]
@@ -399,13 +400,12 @@ async fn get_quest_reviews_handler(
             .quest_rating_rows(Some(std::slice::from_ref(&quest_id))),
         state.moderation.hidden_review_keys(),
     );
-    let all = facts::quest_reviews(&rating_rows?, &hidden?);
-    let total = all.len();
-    let page: Vec<facts::PlayerReview> = all
-        .into_iter()
-        .skip(q.offset.unwrap_or(0))
-        .take(q.limit.unwrap_or(REVIEWS_PAGE).min(REVIEWS_PAGE_MAX))
-        .collect();
+    let (page, total) = facts::quest_reviews(
+        &rating_rows?,
+        &hidden?,
+        q.offset.unwrap_or(0),
+        q.limit.unwrap_or(REVIEWS_PAGE).min(REVIEWS_PAGE_MAX),
+    );
     let reviews = review_wires(&state, page).await?;
     Ok(Json(ReviewsPageWire { reviews, total }))
 }
@@ -499,9 +499,7 @@ async fn get_quest_product_handler(
     let rating_rows = rating_rows?;
     let hidden = hidden?;
     let (rating_avg, rating_count) = facts::fold_rating_rows(&rating_rows, &hidden);
-    let all = facts::quest_reviews(&rating_rows, &hidden);
-    let reviews_total = all.len();
-    let page: Vec<facts::PlayerReview> = all.into_iter().take(REVIEWS_PAGE).collect();
+    let (page, reviews_total) = facts::quest_reviews(&rating_rows, &hidden, 0, REVIEWS_PAGE);
     let reviews = review_wires(&state, page).await?;
     // Public players counter: real distinct completions + marketing bonus, same
     // basis as the store card so the two never disagree.

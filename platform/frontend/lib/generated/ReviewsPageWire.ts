@@ -3,6 +3,6 @@ import type { ReviewWire } from "./ReviewWire";
 
 /**
  * §11 pagination: one page of a quest's reviews («Показать ещё» past the
- * product page's first [`REVIEWS_PAGE`]).
+ * first ten on the product page).
  */
 export type ReviewsPageWire = { reviews: Array<ReviewWire>, total: number, };

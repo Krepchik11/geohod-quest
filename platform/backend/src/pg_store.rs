@@ -121,88 +121,84 @@ impl PgFactStore {
 
 #[async_trait::async_trait]
 impl FactStore for PgFactStore {
-    /// See [`crate::store::InMemoryFactStore::quest_rating_rows`]. Per `(quest,
-    /// player)` the latest rated attempt's last `quest_rated` fact — the input to
-    /// the public hide-aware fold. `None` scans every quest (admin list);
-    /// `Some(&[..])` scopes it (product page + catalog). Unparseable ratings are
-    /// dropped, mirroring the in-memory fold.
+    /// See [`crate::store::InMemoryFactStore::quest_rating_rows`] — one row per
+    /// `(quest, player)`, stars and text decoupled as the row type documents.
+    /// `None` scans every quest (admin list); `Some(&[..])` scopes it (product
+    /// page + reviews endpoint). Unparseable ratings are dropped, mirroring the
+    /// in-memory fold.
     async fn quest_rating_rows(
         &self,
         quests: Option<&[String]>,
     ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
         use sqlx::Row;
         // Stars and text are decoupled (see PlayerRatingRow): per (quest,
-        // player), `s` keeps the newest quest_rated fact (its stars win), `t`
-        // the newest one whose note is non-blank (its text survives a later
-        // star-only re-rate). "Newest" = (recorded_at, seq), the same order the
-        // in-memory fold derives from fact_times.
-        const SELECT: &str = "SELECT s.quest_id, s.user_id, s.data, s.rated_at,
-                    btrim(t.data->>'note') AS text, t.text_at, t.text_seq
-             FROM ( SELECT DISTINCT ON (a.quest_id, a.user_id)
-                           a.quest_id, a.user_id, f.data, f.recorded_at AS rated_at
-                    FROM facts f
-                    JOIN attempts a ON a.attempt_id = f.attempt_id
-                    WHERE f.data->>'type' = 'quest_rated' {SCOPE}
-                    ORDER BY a.quest_id, a.user_id, f.recorded_at DESC, f.seq DESC ) AS s
-             LEFT JOIN ( SELECT DISTINCT ON (a.quest_id, a.user_id)
-                           a.quest_id, a.user_id, f.data, f.recorded_at AS text_at,
-                           f.seq AS text_seq
-                    FROM facts f
-                    JOIN attempts a ON a.attempt_id = f.attempt_id
-                    WHERE f.data->>'type' = 'quest_rated'
-                      AND btrim(coalesce(f.data->>'note', '')) <> '' {SCOPE}
-                    ORDER BY a.quest_id, a.user_id, f.recorded_at DESC, f.seq DESC ) AS t
-               ON t.quest_id = s.quest_id AND t.user_id = s.user_id";
-        let rows = match quests {
-            Some([]) => return Ok(Vec::new()),
-            Some(qs) => {
-                let sql = SELECT.replace("{SCOPE}", "AND a.quest_id = ANY($1)");
-                sqlx::query(&sql)
-                    .bind(qs)
-                    .fetch_all(&self.pool)
-                    .await
-                    .map_err(internal)?
-            }
-            None => {
-                let sql = SELECT.replace("{SCOPE}", "");
-                sqlx::query(&sql)
-                    .fetch_all(&self.pool)
-                    .await
-                    .map_err(internal)?
-            }
-        };
+        // player), the newest quest_rated fact supplies the stars, the newest
+        // one with a non-blank note supplies the text — one scan, both picked
+        // by ordered aggregates over the same `(recorded_at DESC, seq DESC)`
+        // order the in-memory fold uses. The btrim FILTER restates
+        // `facts::review_text` (whitespace set included) purely so blank notes
+        // never cross the wire; the Rust helper stays the definition and the
+        // scenario twin tests pin the two together.
+        const NOTE_PRESENT: &str = "btrim(coalesce(f.data->>'note', ''), E' \\t\\n\\r') <> ''";
+        let sql = format!(
+            "SELECT a.quest_id, a.user_id,
+                    (array_agg(f.data->>'submitted_value'
+                        ORDER BY f.recorded_at DESC, f.seq DESC))[1] AS stars,
+                    (array_agg(f.recorded_at
+                        ORDER BY f.recorded_at DESC, f.seq DESC))[1] AS rated_at,
+                    (array_agg(f.data->>'note'
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text,
+                    (array_agg(f.recorded_at
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text_at,
+                    (array_agg(f.seq
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text_ord
+             FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE f.data->>'type' = 'quest_rated'
+               AND ($1::text[] IS NULL OR a.quest_id = ANY($1))
+             GROUP BY a.quest_id, a.user_id"
+        );
+        if let Some([]) = quests {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(&sql)
+            .bind(quests)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
-            let data: serde_json::Value = r.try_get("data").map_err(internal)?;
-            let Some(rating) = data
-                .get("submitted_value")
-                .and_then(|v| v.as_str())
-                .and_then(|v| v.trim().parse::<i64>().ok())
-            else {
+            let stars: Option<String> = r.try_get("stars").map_err(internal)?;
+            let Some(rating) = stars.as_deref().and_then(crate::facts::parse_rating_value) else {
                 continue; // unparseable newest rating → excluded (mirrors in-memory)
             };
             let rated_at: i64 = r.try_get("rated_at").map_err(internal)?;
+            // The FILTER makes text/text_at/text_ord NULL together; the Rust
+            // trim re-applies review_text's rule (Unicode whitespace, wider
+            // than btrim's set), and a note that only it blanks drops whole.
             let text: Option<String> = r.try_get("text").map_err(internal)?;
-            let text = text.filter(|t| !t.is_empty());
-            let text_at: Option<i64> = r.try_get("text_at").map_err(internal)?;
-            let text_seq: Option<i64> = r.try_get("text_seq").map_err(internal)?;
-            let has_text = text.is_some();
+            let text = text.as_deref().map(str::trim).filter(|t| !t.is_empty());
+            let (text_at, text_ord) = if text.is_some() {
+                let at: Option<i64> = r.try_get("text_at").map_err(internal)?;
+                let ord: Option<i64> = r.try_get("text_ord").map_err(internal)?;
+                (
+                    at.unwrap_or(0).max(0) as u64,
+                    ord.unwrap_or(0).max(0) as u64,
+                )
+            } else {
+                (0, 0)
+            };
             out.push(crate::facts::PlayerRatingRow {
                 user_id: r.try_get("user_id").map_err(internal)?,
                 quest_id: r.try_get("quest_id").map_err(internal)?,
                 rating,
                 rated_at: rated_at.max(0) as u64,
-                text_at: if has_text {
-                    text_at.unwrap_or(0).max(0) as u64
-                } else {
-                    0
-                },
-                text_seq: if has_text {
-                    text_seq.unwrap_or(0).max(0) as u64
-                } else {
-                    0
-                },
-                text,
+                text_at,
+                text_ord,
+                text: text.map(str::to_string),
             });
         }
         Ok(out)

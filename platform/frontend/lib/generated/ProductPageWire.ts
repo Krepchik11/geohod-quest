@@ -23,7 +23,8 @@ author_name: string | null,
  */
 author_published_count: number, 
 /**
- * §11 reviews v1: newest-first, first page of 10.
+ * §11 reviews: newest-written first — the first page; the rest comes from
+ * GET /api/quests/{id}/reviews.
  */
 reviews: Array<ReviewWire>, 
 /**

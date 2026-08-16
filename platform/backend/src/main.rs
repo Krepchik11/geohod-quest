@@ -3092,7 +3092,9 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         let attempt2 = att["attempt_id"].as_str().expect("attempt id").to_string();
-        rate(attempt2, "3", None).await;
+        // A whitespace-only note IS a star-only rating (pins the blank rule
+        // in both stores' text selection).
+        rate(attempt2, "3", Some("   ")).await;
 
         let (st, v) = get_json(app, &format!("/api/quests/{quest}")).await;
         assert_eq!(st, StatusCode::OK);

@@ -227,11 +227,27 @@ pub struct PerVersionStats {
     pub rating_avg: f64,
 }
 
+/// Parse a rating's 1–5 score from a raw `submitted_value` string. THE Rust
+/// definition shared by both stores (the Postgres path reads the value out of
+/// jsonb and hands it here).
+pub(crate) fn parse_rating_value(v: &str) -> Option<i64> {
+    v.trim().parse().ok()
+}
+
 /// Parse a `quest_rated` fact's 1–5 score from its `submitted_value`.
 pub(crate) fn parse_rating(f: &Fact) -> Option<i64> {
-    f.submitted_value
+    f.submitted_value.as_deref().and_then(parse_rating_value)
+}
+
+/// A `quest_rated` fact's review text: the note, trimmed, non-empty. THE Rust
+/// definition of "this rating carries a review" — the Postgres twin restates
+/// it as a `btrim` FILTER purely so blank notes never cross the wire.
+pub(crate) fn review_text(f: &Fact) -> Option<String> {
+    f.note
         .as_deref()
-        .and_then(|s| s.trim().parse().ok())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
 }
 
 /// Aggregate ONE rating per attempt — the last `quest_rated` fact wins, matching
@@ -288,9 +304,9 @@ pub struct PlayerRatingRow {
     /// Server instant `text` was written (drives newest-first review order);
     /// 0 when `text` is `None`.
     pub text_at: u64,
-    /// Append-order tiebreaker for `text_at` (receive times have seconds
-    /// granularity): the storage sequence of the text's fact; 0 without text.
-    pub text_seq: u64,
+    /// Opaque append-order tiebreaker for `text_at` (receive times have
+    /// seconds granularity, so a total order needs one); 0 without text.
+    pub text_ord: u64,
 }
 
 /// True when this row's `(user_id, quest_id)` is in the hidden overlay set.
@@ -333,22 +349,26 @@ pub struct PlayerReview {
     pub text: String,
 }
 
-/// Every non-hidden rating that carries text, newest-written first; each text
-/// is clamped to 500 chars. Star-only and hidden rows are excluded. Callers
-/// page the result (`take`/`skip`) — the per-quest row count is per-player, so
-/// materializing the full sorted list is cheap.
+/// One page of the non-hidden ratings that carry text, newest-written first,
+/// plus the full count («{M} с отзывом»); each text is clamped to 500 chars.
+/// The sort runs over references and only the requested page is materialized.
 pub fn quest_reviews(
     rows: &[PlayerRatingRow],
     hidden: &std::collections::HashSet<(String, String)>,
-) -> Vec<PlayerReview> {
+    offset: usize,
+    limit: usize,
+) -> (Vec<PlayerReview>, usize) {
     let mut with_text: Vec<&PlayerRatingRow> = rows
         .iter()
         .filter(|r| !row_hidden(r, hidden))
-        .filter(|r| r.text.as_deref().is_some_and(|t| !t.trim().is_empty()))
+        .filter(|r| r.text.is_some())
         .collect();
-    with_text.sort_by_key(|r| std::cmp::Reverse((r.text_at, r.text_seq)));
-    with_text
+    with_text.sort_by_key(|r| std::cmp::Reverse((r.text_at, r.text_ord)));
+    let total = with_text.len();
+    let page = with_text
         .into_iter()
+        .skip(offset)
+        .take(limit)
         .map(|r| PlayerReview {
             user_id: r.user_id.clone(),
             created_at: r.text_at,
@@ -361,7 +381,8 @@ pub fn quest_reviews(
                 .take(500)
                 .collect(),
         })
-        .collect()
+        .collect();
+    (page, total)
 }
 
 /// One `feedback_reported` fact with its resolved attempt context — the input to
@@ -655,7 +676,7 @@ mod tests {
             rated_at: at,
             text: text.map(str::to_string),
             text_at: if text.is_some() { at } else { 0 },
-            text_seq: if text.is_some() { at } else { 0 },
+            text_ord: 0,
         }
     }
 
@@ -701,14 +722,19 @@ mod tests {
             rrow("p2", "q1", 4, None, 20), // star-only → not a text review
             rrow("p3", "q1", 2, Some("oldest"), 10),
         ];
-        let reviews = quest_reviews(&rows, &hidden_of(&[]));
+        let (reviews, total) = quest_reviews(&rows, &hidden_of(&[]), 0, 10);
+        assert_eq!(total, 2);
         assert_eq!(reviews.len(), 2);
         assert_eq!(reviews[0].text, "newest", "newest-written first");
         assert_eq!(reviews[1].text, "oldest");
-        // Hiding a text review drops it from the list (its len IS the total).
+        // Paging: offset walks the same order, total stays the full count.
+        let (page, total) = quest_reviews(&rows, &hidden_of(&[]), 1, 10);
+        assert_eq!((page.len(), total), (1, 2));
+        assert_eq!(page[0].text, "oldest");
+        // Hiding a text review drops it from both the page and the total.
         let hidden = hidden_of(&[("p1", "q1")]);
-        let reviews = quest_reviews(&rows, &hidden);
-        assert_eq!(reviews.len(), 1);
+        let (reviews, total) = quest_reviews(&rows, &hidden, 0, 10);
+        assert_eq!((reviews.len(), total), (1, 1));
         assert_eq!(reviews[0].text, "oldest");
     }
 
@@ -723,10 +749,10 @@ mod tests {
             rated_at: 100,
             text: Some("старый отзыв".into()),
             text_at: 10,
-            text_seq: 1,
+            text_ord: 1,
         };
         let newer = rrow("p2", "q1", 5, Some("свежий"), 50);
-        let reviews = quest_reviews(&[old_review, newer], &hidden_of(&[]));
+        let (reviews, _) = quest_reviews(&[old_review, newer], &hidden_of(&[]), 0, 10);
         assert_eq!(reviews[0].text, "свежий");
         assert_eq!(reviews[1].text, "старый отзыв");
         assert_eq!(
