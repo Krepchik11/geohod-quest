@@ -94,7 +94,7 @@ export default function BundleGate({ questId }: { questId: string }) {
 /** Terminal gate states in the player's paper language (frame, flourish, outline button). */
 function GateScreen({ title, text, cta }: { title: string; text: string; cta?: { href: string; label: string } }) {
   return (
-    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel="player-gate">
+    <PlayerFrame tw={{ anims: false }} screenLabel="player-gate">
       <div className="p-stepbody" style={{ justifyContent: 'center', textAlign: 'center' }}>
         <h1 className="p-title">{title}</h1>
         <Flourish />

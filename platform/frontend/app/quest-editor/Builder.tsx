@@ -83,7 +83,7 @@ function MiniTemplatePreview({ template }: { template: CtorTemplate }) {
   const { step, pos, total } = useMemo(() => previewStepFor(template), [template]);
   return (
     <div className="mini">
-      <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }}>
+      <PlayerFrame tw={{ anims: false }}>
         {template !== 'start' ? <TopBar pos={pos} total={total} coins={0} /> : null}
         <StepView step={step} quest={{ city: PREVIEW_META.city, duration: PREVIEW_META.duration }} copy={PLAYER_COPY} st={{}} on={PREVIEW_HANDLERS} />
       </PlayerFrame>
@@ -310,7 +310,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
   return (
     <>
       <div className="wsp-phone">
-        <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }}>
+        <PlayerFrame tw={{ anims: false }}>
           {designStep.template !== 'start' ? <TopBar pos={pos + 1} total={total} coins={0} /> : null}
           <StepView
             step={designStep}

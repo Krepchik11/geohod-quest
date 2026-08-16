@@ -117,8 +117,6 @@ export function PArrow() {
 /* Design-shape contracts (lifted from design/player/components.jsx class contracts) */
 
 export interface FrameTweaks {
-  art?: 'paper';
-  layout?: 'image' | 'text';
   anims?: boolean;
 }
 
@@ -319,9 +317,9 @@ function PrimaryAction({ on, label }: { on?: () => void; label: string }) {
 }
 
 /* Frame */
-export function PlayerFrame({ children, screenLabel, tw = { art: "paper", layout: "image", anims: false } }: { children: React.ReactNode; screenLabel?: string; tw?: FrameTweaks }) {
+export function PlayerFrame({ children, screenLabel, tw = { anims: false } }: { children: React.ReactNode; screenLabel?: string; tw?: FrameTweaks }) {
   return (
-    <div className="pframe" data-art={tw.art} data-layout={tw.layout} data-anims={tw.anims ? "on" : "off"} data-screen-label={screenLabel}>
+    <div className="pframe" data-anims={tw.anims ? "on" : "off"} data-screen-label={screenLabel}>
       {children}
     </div>
   );
