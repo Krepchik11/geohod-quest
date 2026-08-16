@@ -410,8 +410,11 @@ export const api = {
       headers: adminHeaders(),
       body: JSON.stringify(body),
     }),
+  // `cover` echoes back what the server actually stored: a `data:` blob in a
+  // legacy body is externalized to a media URL, and the editor adopts it so the
+  // next autosave no longer ships megabytes of base64.
   saveConstructorQuest: (id: string, body: ConstructorQuestUpsert) =>
-    apiFetch<{ status: string; quest_id: string; updated_at: number }>(
+    apiFetch<{ status: string; quest_id: string; updated_at: number; cover: string | null }>(
       `/api/constructor/quests/${encodeURIComponent(id)}/save`,
       { method: 'POST', headers: adminHeaders(), body: JSON.stringify(body) },
     ),

@@ -12,7 +12,7 @@ use axum::{
 use crate::AppState;
 use crate::authz::require_editor_actor;
 use crate::errors::AppError;
-use crate::media::MediaRef;
+use crate::media::{MediaRef, normalized_media_type};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -27,12 +27,6 @@ pub fn router() -> Router<AppState> {
 /// ≤2.5 MB before upload; 10 MiB is a generous ceiling that still rejects abuse.
 const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
 
-/// Image content-types accepted for upload (what the editor produces and the
-/// import tool emits). Anything else is rejected before it reaches storage.
-fn is_allowed_media_type(ct: &str) -> bool {
-    matches!(ct, "image/jpeg" | "image/png" | "image/webp" | "image/gif")
-}
-
 /// POST /api/media — upload a quest image (editor-gated). The body is the raw
 /// image bytes and `Content-Type` names the format. The SERVER hashes the bytes
 /// (sha256) and stores them content-addressed in R2 (or the in-process store),
@@ -44,18 +38,15 @@ async fn upload_media_handler(
     body: axum::body::Bytes,
 ) -> Result<Json<MediaRef>, AppError> {
     require_editor_actor(&state, &headers).await?;
-    let content_type = headers
+    let raw_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        // drop any "; charset=…" parameter the client may append (split always
-        // yields ≥1 element, so the unwrap fallback is never taken)
-        .map(|s| s.split(';').next().unwrap_or("").trim().to_string())
         .unwrap_or_default();
-    if !is_allowed_media_type(&content_type) {
-        return Err(AppError::BadRequest(format!(
-            "unsupported media type '{content_type}' (allowed: jpeg, png, webp, gif)"
-        )));
-    }
+    let content_type = normalized_media_type(raw_type).ok_or_else(|| {
+        AppError::BadRequest(format!(
+            "unsupported media type '{raw_type}' (allowed: jpeg, png, webp, gif)"
+        ))
+    })?;
     if body.is_empty() {
         return Err(AppError::BadRequest("empty media upload".into()));
     }

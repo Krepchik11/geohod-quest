@@ -19,6 +19,17 @@ export function coverSrc(primaryComic?: string | null): string | null {
   return v.startsWith('/') || v.startsWith('data:') || v.startsWith('http') ? v : null;
 }
 
+/**
+ * First visible character of the title, uppercased — what a cover tile draws
+ * when there is no usable image. Lives beside {@link coverSrc} because it is the
+ * other half of one rule: every surface that resolves a cover also needs the
+ * same fallback mark. Codepoint-aware and trimmed, so «  Квест» is «К» and an
+ * emoji title is one whole glyph, not a blank tile or half a surrogate pair.
+ */
+export function monogram(name: string): string {
+  return ([...(name || '').trim()][0] || '?').toUpperCase();
+}
+
 /** A `url('…')` value for CSS `background-image`, falling back to the card placeholder. */
 export function coverCss(primaryComic?: string | null): string {
   return `url('${coverSrc(primaryComic) ?? CARD_PLACEHOLDER}')`;

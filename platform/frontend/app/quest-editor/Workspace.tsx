@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  adoptCover,
   computeGates,
   duplicateQuest,
   duplicateStep as modelDuplicate,
@@ -112,10 +113,15 @@ export default function Workspace() {
     const t = setTimeout(() => {
       void api
         .saveConstructorQuest(quest.id, questUpsert(quest))
-        .then(() => {
+        .then((res) => {
           setSaveOk(true);
           setSaveFresh(true);
           setSavedAt(Date.now());
+          // The server externalizes an inline cover; adopt the stored URL so the
+          // next autosave carries a reference instead of the bytes again.
+          setActive((q) =>
+            q && q.id === quest.id ? adoptCover(q, quest.meta.cover, res.cover) : q,
+          );
         })
         .catch(() => setSaveOk(false));
     }, AUTOSAVE_DEBOUNCE_MS);

@@ -16,7 +16,7 @@ use std::io::Write;
 use serde_json::Value;
 
 use crate::errors::AppError;
-use crate::media::{MediaStores, media_hash_in_ref};
+use crate::media::{MediaStores, extension_for, media_hash_in_ref};
 use crate::store::ConstructorQuest;
 
 pub const FORMAT_VERSION: u32 = 1;
@@ -52,16 +52,6 @@ fn rewrite_media_urls(value: &mut Value, hash_to_path: &BTreeMap<String, String>
             .values_mut()
             .for_each(|v| rewrite_media_urls(v, hash_to_path)),
         _ => {}
-    }
-}
-
-fn extension_for(content_type: &str) -> &'static str {
-    match content_type {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/webp" => "webp",
-        "image/gif" => "gif",
-        _ => "bin",
     }
 }
 
