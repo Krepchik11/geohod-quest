@@ -732,10 +732,14 @@ pub struct AuthTokenRecord {
     /// Code-verify attempts so far; the code stops verifying at
     /// [`MAX_CODE_ATTEMPTS`] (low-entropy codes must not be brute-forceable).
     pub attempts: u32,
+    /// Kind-specific data the consumer needs atomically with the consume —
+    /// the pending NEW address for [`TOKEN_KIND_EMAIL_CHANGE`]; `None` else.
+    pub payload: Option<String>,
 }
 
 pub const TOKEN_KIND_RESET: &str = "reset";
 pub const TOKEN_KIND_CONFIRM: &str = "confirm";
+pub const TOKEN_KIND_EMAIL_CHANGE: &str = "email_change";
 
 /// One authenticator (`identities` row): a `(method, identifier)` pair that
 /// resolves to an account `user_id`. Every way to sign in is one row — the
@@ -999,14 +1003,20 @@ impl InMemoryAuthStore {
     }
 
     /// Consume a token: valid kind + not expired + unused → marks used and
-    /// returns the player id; anything else is None (one opaque failure).
-    pub fn consume_auth_token(&mut self, token_hash: &str, kind: &str, now: u64) -> Option<String> {
+    /// returns `(player id, payload)`; anything else is None (one opaque
+    /// failure).
+    pub fn consume_auth_token(
+        &mut self,
+        token_hash: &str,
+        kind: &str,
+        now: u64,
+    ) -> Option<(String, Option<String>)> {
         let rec = self.auth_tokens.get_mut(token_hash)?;
         if rec.kind != kind || rec.used_at.is_some() || rec.expires_at < now {
             return None;
         }
         rec.used_at = Some(now);
-        Some(rec.user_id.clone())
+        Some((rec.user_id.clone(), rec.payload.clone()))
     }
 
     /// Consume by emailed code (§6.2 R2): the player's active (unused,
@@ -1169,6 +1179,37 @@ impl InMemoryAuthStore {
         if let Some(e) = email {
             self.email_index.insert(e, user_id.to_string());
         }
+        Ok(account)
+    }
+
+    /// §6.4 change email: set a CONFIRMED new address on an existing account,
+    /// releasing the old one (also how a social-only account gains its first
+    /// address). Rejects an address owned by another account (409). Only ever
+    /// called after the new address proved reachable (the mailed link), which
+    /// is why it lands confirmed.
+    pub fn replace_email(
+        &mut self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        if let Some(owner) = self.email_index.get(email)
+            && owner != user_id
+        {
+            return Err(AppError::Conflict("email is already taken".into()));
+        }
+        let account = self
+            .users
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        let old = account.email.replace(email.to_string());
+        account.email_confirmed_at = Some(confirmed_at);
+        let account = account.clone();
+        if let Some(old) = old {
+            self.email_index.remove(&old);
+        }
+        self.email_index
+            .insert(email.to_string(), user_id.to_string());
         Ok(account)
     }
 
@@ -1479,7 +1520,7 @@ pub trait AuthStore: Send + Sync {
         token_hash: &str,
         kind: &str,
         now: u64,
-    ) -> Result<Option<String>, AppError>;
+    ) -> Result<Option<(String, Option<String>)>, AppError>;
 
     /// See [`InMemoryAuthStore::consume_auth_token_by_code`].
     async fn consume_auth_token_by_code(
@@ -1540,6 +1581,14 @@ pub trait AuthStore: Send + Sync {
 
     /// See [`InMemoryAuthStore::attach_email`].
     async fn attach_email(
+        &self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError>;
+
+    /// See [`InMemoryAuthStore::replace_email`].
+    async fn replace_email(
         &self,
         user_id: &str,
         email: &str,
@@ -1624,7 +1673,7 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         token_hash: &str,
         kind: &str,
         now: u64,
-    ) -> Result<Option<String>, AppError> {
+    ) -> Result<Option<(String, Option<String>)>, AppError> {
         Ok(lock(self, "auth")?.consume_auth_token(token_hash, kind, now))
     }
 
@@ -1704,6 +1753,15 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
         lock(self, "auth")?.attach_email(user_id, email, confirmed_at)
+    }
+
+    async fn replace_email(
+        &self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        lock(self, "auth")?.replace_email(user_id, email, confirmed_at)
     }
 }
 

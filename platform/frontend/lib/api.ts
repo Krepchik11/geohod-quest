@@ -509,6 +509,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ token }),
     }),
+  authChangeEmail: (new_email: string) =>
+    apiFetch<{ status: 'sent' }>('/api/auth/email', {
+      method: 'POST',
+      body: JSON.stringify({ new_email }),
+    }),
   authResendConfirm: () =>
     apiFetch<{ status: 'sent' | 'already-confirmed' }>('/api/auth/confirm/resend', {
       method: 'POST',

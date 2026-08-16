@@ -1331,8 +1331,8 @@ impl AuthStore for PgAuthStore {
             .await
             .map_err(internal)?;
         sqlx::query(
-            "INSERT INTO auth_tokens (token_hash, user_id, kind, code_hash, expires_at, used_at, attempts)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO auth_tokens (token_hash, user_id, kind, code_hash, expires_at, used_at, attempts, payload)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(token_hash)
         .bind(&rec.user_id)
@@ -1341,6 +1341,7 @@ impl AuthStore for PgAuthStore {
         .bind(rec.expires_at as i64)
         .bind(rec.used_at.map(|v| v as i64))
         .bind(rec.attempts as i64)
+        .bind(&rec.payload)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;
@@ -1356,11 +1357,11 @@ impl AuthStore for PgAuthStore {
         token_hash: &str,
         kind: &str,
         now: u64,
-    ) -> Result<Option<String>, AppError> {
+    ) -> Result<Option<(String, Option<String>)>, AppError> {
         let row = sqlx::query(
             "UPDATE auth_tokens SET used_at = $3
              WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at >= $3
-             RETURNING user_id",
+             RETURNING user_id, payload",
         )
         .bind(token_hash)
         .bind(kind)
@@ -1368,8 +1369,14 @@ impl AuthStore for PgAuthStore {
         .fetch_optional(&self.pool)
         .await
         .map_err(internal)?;
-        row.map(|r| r.try_get::<String, _>("user_id").map_err(internal))
-            .transpose()
+        row.map(|r| {
+            Ok((
+                r.try_get::<String, _>("user_id").map_err(internal)?,
+                r.try_get::<Option<String>, _>("payload")
+                    .map_err(internal)?,
+            ))
+        })
+        .transpose()
     }
 
     /// See [`crate::store::InMemoryAuthStore::consume_auth_token_by_code`].
@@ -1632,6 +1639,35 @@ impl AuthStore for PgAuthStore {
                 .await?
                 .ok_or_else(|| crate::store::no_account(user_id)),
         }
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::replace_email`] — the unique
+    /// index on `users.email` is the taken-address gate.
+    async fn replace_email(
+        &self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        let updated = sqlx::query(
+            "UPDATE users SET email = $2, email_confirmed_at = $3 \
+             WHERE user_id = $1 \
+             RETURNING user_id, email, display_name, role, created_at, email_confirmed_at",
+        )
+        .bind(user_id)
+        .bind(email)
+        .bind(confirmed_at as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(db) if db.is_unique_violation() => {
+                AppError::Conflict("email is already taken".into())
+            }
+            other => internal(other),
+        })?;
+        updated
+            .ok_or_else(|| crate::store::no_account(user_id))
+            .and_then(|row| account_from_row(&row))
     }
 }
 
