@@ -408,8 +408,7 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     // (и с испорченным значением) нормализуем к null — зона предложит выбрать
     // файл заново вместо того, чтобы кадрировать несуществующий исходник.
     s.imageOrigin = sanitizeImageOrigin(step.imageOrigin);
-    // Тела до появления настраиваемой кнопки «Продолжить» поля не имеют —
-    // нормализуем к пустой строке (= стандартная надпись).
+    // Тела до настраиваемой кнопки: пусто = стандартная надпись.
     if (typeof s.buttonLabel !== 'string') s.buttonLabel = '';
     s.hint = {
       on: legacy.hint?.on ?? true,

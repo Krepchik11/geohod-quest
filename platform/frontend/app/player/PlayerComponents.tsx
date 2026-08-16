@@ -437,7 +437,7 @@ export function StepView({ step, quest, copy, st, on }: {
             {quest?.duration && <span><PClock />{quest.duration}</span>}
           </div>
         )}
-        <PrimaryAction on={h.next} label={copy?.start || "начать квест"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.start || "начать квест"} />
       </div>
     );
   }
@@ -450,7 +450,7 @@ export function StepView({ step, quest, copy, st, on }: {
         <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
         <PrimaryAction
           on={h.next}
-          label={step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}
+          label={step.button || (step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить"))}
         />
       </div>
     );
