@@ -210,8 +210,10 @@ export default function Dashboard({
               const published = q.status === 'published';
               return (
                 <div className="qcd-row" key={q.quest_id}>
-                  <div className="qcd-thumb" style={{ background: thumbBg(q.name) }}>
-                    <span>{(q.name[0] || '?').toUpperCase()}</span>
+                  <div className="qcd-thumb" style={q.cover ? undefined : { background: thumbBg(q.name) }}>
+                    {q.cover
+                      ? <img src={q.cover} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <span>{(q.name[0] || '?').toUpperCase()}</span>}
                   </div>
                   <div className="qcd-row__body">
                     <div className="qcd-row__name">{q.name}</div>

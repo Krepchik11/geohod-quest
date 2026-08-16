@@ -21,4 +21,9 @@ buyers: number,
  * Live published snapshot version, if any. None ⇒ the coherence guard will
  * reject `test`/`published`, so the UI routes into the publish panel.
  */
-published_version: number | null, complexity: string, age_target: string, tags: Array<string>, created_at: number, updated_at: number, };
+published_version: number | null, complexity: string, age_target: string, tags: Array<string>, 
+/**
+ * List-safe cover ([`crate::store::list_cover`]): a URL, never a `data:`
+ * blob — those bloated the list by megabytes and stay on the GET-one wire.
+ */
+cover: string | null, created_at: number, updated_at: number, };

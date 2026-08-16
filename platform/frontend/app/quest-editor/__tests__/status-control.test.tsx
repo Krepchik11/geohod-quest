@@ -28,6 +28,7 @@ function quest(over: Partial<ConstructorQuestWire>): ConstructorQuestWire {
     complexity: 'medium',
     age_target: 'everyone',
     tags: [],
+    cover: null,
     created_at: 1,
     updated_at: 1,
     ...over,

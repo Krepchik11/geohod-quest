@@ -1630,6 +1630,11 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
         author_name: row.try_get("author_name").map_err(internal)?,
         name: row.try_get("name").map_err(internal)?,
         status: row.try_get("status").map_err(internal)?,
+        cover: crate::store::list_cover(
+            row.try_get::<Option<String>, _>("cover")
+                .map_err(internal)?
+                .as_deref(),
+        ),
         steps_count: steps_count.max(0) as u32,
         attrs: QuestAttributes {
             complexity: row.try_get("complexity").map_err(internal)?,
@@ -1642,11 +1647,13 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
 }
 
 /// Columns selected for a summary row (kept in one place so list/save/status
-/// agree). Deliberately EXCLUDES the heavy `cover` (base64 image) and `body`:
-/// the dashboard list never renders them, so reading the TOASTed cover for every
-/// row was the cause of the multi-second list load. GET-one adds `cover`/`body`
-/// back explicitly because the builder needs the full entity.
-const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, steps_count, \
+/// agree). Deliberately EXCLUDES the heavy `body`, and reduces `cover` in SQL
+/// so a TOASTed base64 blob (the old multi-second list load) never crosses the
+/// database wire — the CASE mirrors [`store::list_cover`], which stays the
+/// definition and re-applies in [`ctor_summary_from_row`]. GET-one adds
+/// `cover`/`body` back explicitly because the builder needs the full entity.
+const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, \
+     CASE WHEN cover LIKE 'data:%' THEN NULL ELSE cover END AS cover, steps_count, \
      complexity, age_target, tags, created_at, updated_at";
 
 impl PgConstructorStore {

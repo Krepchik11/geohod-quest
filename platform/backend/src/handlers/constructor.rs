@@ -178,9 +178,9 @@ pub(crate) struct ConstructorQuestWire {
     complexity: String,
     age_target: String,
     tags: Vec<String>,
-    // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
-    // cover image, so the base64 cover was dead weight that bloated the list
-    // (megabytes for media-heavy quests). It stays on the GET-one full wire.
+    /// List-safe cover ([`crate::store::list_cover`]): a URL, never a `data:`
+    /// blob — those bloated the list by megabytes and stay on the GET-one wire.
+    cover: Option<String>,
     #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
     #[cfg_attr(test, ts(type = "number"))]
@@ -232,6 +232,7 @@ fn ctor_wire(
         complexity: s.attrs.complexity,
         age_target: s.attrs.age_target,
         tags: s.attrs.tags,
+        cover: s.cover,
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
