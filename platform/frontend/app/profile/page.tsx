@@ -126,7 +126,8 @@ export default function ProfilePage() {
   const registered = ready ? (ready.me ? ready.me.registered : !!session) : false;
   const nameLabel = ready?.me?.display_name ?? session?.display_name ?? null;
   const emailLabel = ready?.me?.email ?? session?.email ?? null;
-  const unconfirmed = registered && !!ready?.me && ready.me.email_confirmed_at == null;
+  // §6.3 — the banner verdict is the server's (like can_unlink), never re-derived here.
+  const unconfirmed = !!ready?.me?.needs_email_confirmation;
 
   const errorNote =
     ready?.error === 'auth'
@@ -137,6 +138,20 @@ export default function ProfilePage() {
 
   const logout = () => {
     void logoutAndReset().finally(() => { window.location.href = '/'; });
+  };
+
+  const resendConfirm = () => {
+    void api.authResendConfirm().then(
+      (r) => {
+        if (r.status === 'sent') {
+          toast('Письмо отправлено ещё раз');
+        } else {
+          toast('Почта уже подтверждена');
+          setBanner(false);
+        }
+      },
+      () => toast('Не удалось отправить письмо — попробуйте позже'),
+    );
   };
 
   return (
@@ -150,13 +165,7 @@ export default function ProfilePage() {
           <div className="pf-confirm-banner">
             <span>Подтвердите почту — отправили письмо{emailLabel ? ` на ${emailLabel}` : ''}</span>
             <span className="pf-confirm-banner__actions">
-              <button
-                type="button"
-                onClick={() => void api.authResendConfirm().then(
-                  () => toast('Письмо отправлено ещё раз'),
-                  () => toast('Не удалось отправить письмо — попробуйте позже'),
-                )}
-              >
+              <button type="button" onClick={resendConfirm}>
                 Ещё раз
               </button>
               <button type="button" aria-label="Скрыть" onClick={() => setBanner(false)}>✕</button>

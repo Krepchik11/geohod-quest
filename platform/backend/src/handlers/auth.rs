@@ -760,13 +760,10 @@ async fn resend_confirm_handler(
         .await?
         .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
     // A social-only account (Telegram / Google-without-email) has no address to
-    // confirm — treat as already-confirmed (nothing to send).
-    let Some(email) = account.email.clone() else {
+    // confirm, a confirmed one has nothing left — both: nothing to send.
+    let Some(email) = account.unconfirmed_email().map(str::to_string) else {
         return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
     };
-    if account.email_confirmed_at.is_some() {
-        return Ok(Json(serde_json::json!({ "status": "already-confirmed" })));
-    }
     fixed_window_allow(
         &state,
         format!("confirm:{email}"),
@@ -895,6 +892,9 @@ pub(crate) struct Me {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional, type = "number | null"))]
     email_confirmed_at: Option<Option<u64>>,
+    /// §6.3 — the server's banner verdict (like `can_unlink`): true only while
+    /// the account has an email that is still unconfirmed.
+    needs_email_confirmation: bool,
     methods: Vec<String>,
     can_unlink: bool,
 }
@@ -919,6 +919,7 @@ async fn get_me_handler(
                 .collect();
             let can_unlink = auth::reachable_ways(&a, &identities) > 1;
             Me {
+                needs_email_confirmation: a.unconfirmed_email().is_some(),
                 user_id: a.user_id,
                 registered: true,
                 email: a.email,
@@ -936,6 +937,7 @@ async fn get_me_handler(
             display_name: None,
             role: None,
             email_confirmed_at: None,
+            needs_email_confirmation: false,
             methods: vec![],
             can_unlink: false,
         },
