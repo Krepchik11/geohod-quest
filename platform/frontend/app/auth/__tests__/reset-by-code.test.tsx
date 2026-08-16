@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ApiError } from '../../../lib/api';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
@@ -19,7 +20,7 @@ const { apiMock, sessionRef, setSessionMock } = vi.hoisted(() => ({
   sessionRef: { current: null as unknown },
   setSessionMock: vi.fn(),
 }));
-vi.mock('../../../lib/api', () => ({ api: apiMock, ApiError: class extends Error { status = 0; }, hasAdminToken: () => false }));
+vi.mock('../../../lib/api', async (importOriginal) => ({ ...(await importOriginal<object>()), api: apiMock, hasAdminToken: () => false }));
 vi.mock('../../../lib/identity', () => ({
   anonymousUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
@@ -86,7 +87,7 @@ describe('AuthPage — reset by code on the sent card (§6.2 R2)', () => {
 
   it('wrong/expired code (400) → explains, session untouched', async () => {
     await openSentState();
-    apiMock.authResetPassword.mockRejectedValue(Object.assign(new Error('400'), { status: 400 }));
+    apiMock.authResetPassword.mockRejectedValue(new ApiError(400, '/api/auth', ''));
     fireEvent.change(screen.getByLabelText('Код из письма'), { target: { value: '654321' } });
     fireEvent.change(screen.getByLabelText('Новый пароль'), { target: { value: 'password-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сменить пароль и войти' }));

@@ -7,7 +7,7 @@ import SiteShell from '../components/SiteShell';
 import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
-import { api, ApiError, type Me } from '../../lib/api';
+import { api, classify, isAuthFailure, type Me } from '../../lib/api';
 import { passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
@@ -99,8 +99,7 @@ export default function ProfilePage() {
       server = { balance: statsRes.balance, completed_quest_ids: statsRes.completed_quest_ids };
       purchases = statsRes.grants_count;
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : null;
-      error = status === 401 || status === 403 ? 'auth' : 'network';
+      error = isAuthFailure(err) ? 'auth' : 'network';
     }
     let titles: Record<string, string> = {};
     try {
@@ -319,9 +318,9 @@ function LoginMethods({
       toast('Способ входа отвязан');
       onChanged();
     } catch (e) {
-      const status = (e as { status?: number })?.status;
+      const f = classify(e);
       toast(
-        status === 409
+        f.kind === 'rejected' && f.status === 409
           ? 'Нельзя отвязать единственный способ входа'
           : 'Не удалось отвязать — попробуйте позже',
       );
@@ -421,8 +420,7 @@ function PasswordSheet({ email, onClose }: { email: string | null; onClose: () =
       toast('Пароль изменён');
       onClose();
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      setError(status === 401 ? 'Неверный текущий пароль' : 'Сервер недоступен — попробуйте позже');
+      setError(classify(e).kind === 'unauthorized' ? 'Неверный текущий пароль' : 'Сервер недоступен — попробуйте позже');
       setBusy(false);
     }
   };
@@ -466,11 +464,11 @@ function DeleteSheet({ purchases, balance, onClose, onDeleted }: {
       await api.authDeleteAccount();
       onDeleted();
     } catch (e) {
-      const err = e as { status?: number; message?: string };
-      if (err.status === 409) {
-        // The server blocks authors with quests still on sale; its message
+      const f = classify(e);
+      if (f.kind === 'rejected' && f.status === 409) {
+        // The server blocks authors with quests still on sale; its reason
         // carries the honest count («published quests block deletion: N»).
-        const m = /(\d+)/.exec(err.message ?? '');
+        const m = /(\d+)/.exec(f.error ?? '');
         const n = m ? Number(m[1]) : 0;
         setBlocked(
           n > 0

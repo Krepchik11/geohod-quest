@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError } from '../../lib/api';
+import { api, classify, isAuthFailure } from '../../lib/api';
 import { AdminConfirmSheet, AdminPageHead, AdminToast } from './ui';
 import {
   contactsOf,
@@ -40,8 +40,7 @@ type ListError = 'none' | 'auth' | 'network';
 type Toast = { text: string; error?: boolean };
 
 function errorKind(err: unknown): 'auth' | 'network' {
-  const status = err instanceof ApiError ? err.status : null;
-  return status === 401 || status === 403 ? 'auth' : 'network';
+  return isAuthFailure(err) ? 'auth' : 'network';
 }
 
 export default function AdminUsersPage() {
@@ -135,9 +134,9 @@ export default function AdminUsersPage() {
       showToast('Роль обновлена');
     } catch (err) {
       setConfirmOpen(false);
-      const status = err instanceof ApiError ? err.status : null;
-      if (status === 409) showToast('Нельзя изменить свою роль', true);
-      else if (status === 404) showToast('Пользователь не найден', true);
+      const f = classify(err);
+      if (f.kind === 'rejected' && f.status === 409) showToast('Нельзя изменить свою роль', true);
+      else if (f.kind === 'not-found') showToast('Пользователь не найден', true);
       else showToast('Не удалось обновить роль', true);
     } finally {
       setSaving(false);

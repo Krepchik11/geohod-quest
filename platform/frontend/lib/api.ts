@@ -115,11 +115,9 @@ export interface ConstructorQuestUpsert {
 }
 
 /**
- * Error thrown for every non-2xx API response. Carries the numeric HTTP `status`
- * so callers can tell an auth failure (401/403) apart from a real outage instead
- * of mislabeling a 401 as "сервер недоступен". The message preserves the legacy
- * `API <status> <path>: <body>` format so existing substring/regex consumers
- * (e.g. BundleGate's httpStatus) keep working unchanged.
+ * Error thrown for every non-2xx API response. Screens never read `status` or
+ * the message text directly — they branch on `classify(err)`; the message is
+ * for logs only.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -134,18 +132,55 @@ export class ApiError extends Error {
   }
 }
 
+/** The backend's `{"error": msg}` reason out of an error body, `null` otherwise. */
+function serverReason(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { error?: string };
+    return parsed.error || null;
+  } catch {
+    return null;
+  }
+}
+
 /** The backend's `{"error": msg}` body when present, else the fallback — for
  *  surfacing the server's human (Russian) message instead of a generic one. */
 export function apiErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(err.body) as { error?: string };
-      if (parsed.error) return parsed.error;
-    } catch {
-      /* non-JSON body — fall through */
-    }
-  }
-  return fallback;
+  return (err instanceof ApiError && serverReason(err.body)) || fallback;
+}
+
+/**
+ * The ONE decoder of API failures (issue #67). Every screen branches on this
+ * closed union instead of re-reading statuses or parsing error text; the seven
+ * verdicts cover every situation a screen must present differently.
+ * `rejected` (endpoint-local 4xx like «почта занята») carries the status and
+ * the server's human reason for the screen to branch further.
+ */
+export type ApiFailure =
+  | { kind: 'unauthorized' }
+  | { kind: 'forbidden' }
+  | { kind: 'not-found' }
+  | { kind: 'rate-limited' }
+  | { kind: 'rejected'; status: number; error: string | null }
+  | { kind: 'server-broken' }
+  | { kind: 'offline' };
+
+export function classify(err: unknown): ApiFailure {
+  // Not an API response at all — fetch failed before the server answered
+  // (network down) or something else threw; either way there is no verdict
+  // from the server to decode.
+  if (!(err instanceof ApiError)) return { kind: 'offline' };
+  if (err.status === 401) return { kind: 'unauthorized' };
+  if (err.status === 403) return { kind: 'forbidden' };
+  if (err.status === 404) return { kind: 'not-found' };
+  if (err.status === 429) return { kind: 'rate-limited' };
+  if (err.status >= 500) return { kind: 'server-broken' };
+  return { kind: 'rejected', status: err.status, error: serverReason(err.body) };
+}
+
+/** «Не вошли или нет прав» — the shared login-gate branch of the screens. */
+export function isAuthFailure(err: unknown): boolean {
+  const kind = classify(err).kind;
+  return kind === 'unauthorized' || kind === 'forbidden';
 }
 
 export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {

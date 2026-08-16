@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { api } from '../../../lib/api';
+import { api, classify } from '../../../lib/api';
 import { PASSWORD_ERROR, passwordValid } from '../../../lib/credentials';
 import { setSession } from '../../../lib/identity';
 import { PasswordField } from '../page';
@@ -30,9 +30,9 @@ function ResetInner() {
       setSession(await api.authResetPassword({ token, password }));
       router.push('/profile');
     } catch (e) {
-      const status = (e as { status?: number })?.status;
+      const f = classify(e);
       setError(
-        status === 400
+        f.kind === 'rejected' && f.status === 400
           ? 'Ссылка недействительна или устарела — запросите новую на странице входа.'
           : 'Сервер недоступен — попробуйте позже.',
       );

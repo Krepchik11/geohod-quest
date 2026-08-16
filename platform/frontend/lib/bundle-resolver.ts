@@ -14,6 +14,7 @@
  * Network is injected (`ResolverDeps`) so the whole matrix is unit-testable; the
  * IndexedDB queue is used directly.
  */
+import { classify } from './api';
 import type { QuestSnapshot } from './shared-model';
 import { loadQuestSnapshot } from './shared-model';
 import {
@@ -41,22 +42,16 @@ export interface FetchedBundle {
 export interface ResolverDeps {
   userId: string;
   online: boolean;
-  /** Latest published bundle for the quest (grant-gated; 401/403 encoded in the error). */
+  /** Latest published bundle for the quest (grant-gated; rejects with ApiError). */
   getBundle: (questId: string, userId: string) => Promise<FetchedBundle>;
   /** Persist + precache a freshly fetched bundle. Best-effort; must resolve even on failure. */
   persist: (wire: FetchedBundle) => Promise<void>;
 }
 
-/** Extract the numeric status out of an `API <code> …` error, or null. */
-function httpStatus(err: unknown): number | null {
-  const m = err instanceof Error ? /^API (\d{3}) /.exec(err.message) : null;
-  return m ? Number(m[1]) : null;
-}
-
 function classifyError(err: unknown, online: boolean): GateResolution {
-  const status = httpStatus(err);
-  if (status === 403) return { kind: 'denied' };
-  if (status === 401) return { kind: 'login-required' };
+  const failure = classify(err);
+  if (failure.kind === 'forbidden') return { kind: 'denied' };
+  if (failure.kind === 'unauthorized') return { kind: 'login-required' };
   return { kind: 'unavailable', offline: !online };
 }
 

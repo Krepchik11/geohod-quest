@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'r
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import SocialAuthButtons from '../components/SocialAuthButtons';
-import { api } from '../../lib/api';
+import { api, classify } from '../../lib/api';
 import { PASSWORD_ERROR, emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import {
   anonymousUserId,
@@ -138,8 +138,7 @@ export default function AuthPage() {
       const res = await api.authIdentify(v);
       setStep(res.exists ? { name: 'login', email: v, confirmed: res.confirmed } : { name: 'register', email: v });
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      setError(status === 429 ? 'Слишком много попыток — подождите минуту.' : 'Сервер недоступен — попробуйте позже.');
+      setError(classify(e).kind === 'rate-limited' ? 'Слишком много попыток — подождите минуту.' : 'Сервер недоступен — попробуйте позже.');
     } finally {
       setLoading(false);
     }
@@ -151,8 +150,7 @@ export default function AuthPage() {
     try {
       applySession(await api.authLogin({ email: s.email, password }));
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      if (status === 401) {
+      if (classify(e).kind === 'unauthorized') {
         setFieldError(
           <>Неверный пароль.{' '}
             <button className="af-inline-link" type="button" onClick={() => setStep({ name: 'recover', email: s.email, confirmed: s.confirmed })}>
@@ -183,9 +181,9 @@ export default function AuthPage() {
     try {
       applySession(await api.authRegister({ user_id: anonymousUserId(), email: s.email, password }));
     } catch (e) {
-      const status = (e as { status?: number })?.status;
+      const f = classify(e);
       // §6.1.6: this class should be unreachable now — defensive message only.
-      if (status === 409) setError('Эта почта уже занята — вернитесь назад и войдите.');
+      if (f.kind === 'rejected' && f.status === 409) setError('Эта почта уже занята — вернитесь назад и войдите.');
       else setError('Сервер недоступен — попробуйте позже.');
     } finally {
       setLoading(false);
@@ -199,8 +197,7 @@ export default function AuthPage() {
       const res = await api.authRecover(s.email);
       setStep({ name: 'recover-sent', email: s.email, masked: res.masked, confirmed: s.confirmed });
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      setError(status === 429 ? 'Слишком много писем — подождите и попробуйте позже.' : 'Сервер недоступен — попробуйте позже.');
+      setError(classify(e).kind === 'rate-limited' ? 'Слишком много писем — подождите и попробуйте позже.' : 'Сервер недоступен — попробуйте позже.');
     } finally {
       setLoading(false);
     }
@@ -362,8 +359,7 @@ function RecoverSent({
     setError(null);
     restart();
     onResend().catch((e) => {
-      const status = (e as { status?: number })?.status;
-      setError(status === 429 ? 'Слишком много писем — подождите и попробуйте позже.' : 'Не получилось отправить — попробуйте позже.');
+      setError(classify(e).kind === 'rate-limited' ? 'Слишком много писем — подождите и попробуйте позже.' : 'Не получилось отправить — попробуйте позже.');
     });
   };
   const submitCode = async () => {
@@ -380,8 +376,8 @@ function RecoverSent({
     try {
       await onCode(code, newPassword);
     } catch (e) {
-      const status = (e as { status?: number })?.status;
-      setError(status === 400
+      const f = classify(e);
+      setError(f.kind === 'rejected' && f.status === 400
         ? 'Код не подошёл или устарел — проверьте цифры или запросите новое письмо.'
         : 'Сервер недоступен — попробуйте позже.');
     } finally {
