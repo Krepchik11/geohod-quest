@@ -178,9 +178,10 @@ export default function QuestPlayerClient({
   // It is shown identically in the top bar, the quest menu and the profile, so the
   // number never disagrees with itself. `priorLogs` holds every OTHER attempt; the
   // active attempt's LIVE facts are folded on top so the wallet moves as the player
-  // earns and spends. foldLocalPlayerStats dedups the completion bonus once-per-quest
-  // exactly as the server does, so replaying a quest never re-credits the bonus and
-  // the wallet never "jumps" or needs a correction popup.
+  // earns and spends. foldLocalPlayerStats dedups every once-ever bonus
+  // (completion, rating, comment) once-per-quest exactly as the server does, so
+  // replaying a quest never re-credits them and the wallet never "jumps" or
+  // needs a correction popup.
   const [priorLogs, setPriorLogs] = useState<AttemptLog[]>([]);
 
   // Guards the mount hydration to exactly one execution. Hydration is a
@@ -608,8 +609,9 @@ export default function QuestPlayerClient({
         buyHint: handleBuyHint,
         navigator: handleNavigator,
         play: () => { /* inline video playback lands with real media refs */ },
-        // Tapping a star only updates local state + shows the inline thanks; the
-        // single quest_rated fact is committed with the final value on «что дальше».
+        // Tapping a star only updates local state + shows the inline thanks;
+        // quest_rated (and its §11 bonuses) commit with the final value on the
+        // exit action — submit or skip, both run openCatalog.
         rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
         reviewText: (v: string) => setUi((u) => ({ ...u, reviewText: v })),
         onward: openCatalog,

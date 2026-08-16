@@ -12,15 +12,16 @@
  *
  * The fold MUST match the backend's semantics so the two agree once synced:
  *  - balance is the signed sum of coins_delta across ALL of a player's attempts;
- *  - the completion bonus is counted at most ONCE per quest, because the server
- *    dedups it once-per-(player, quest) at append time — locally each replayed
- *    attempt still carries its own bonus fact, so we collapse them here;
+ *  - the once-ever bonuses (completion, rating, comment — ONCE_PER_QUEST_TYPES)
+ *    are counted at most ONCE per quest, because the server dedups them
+ *    once-per-(player, quest) at append time — locally each replayed attempt
+ *    still carries its own bonus facts, so we collapse them here;
  *  - gifts re-earned on a replay DO count per attempt (so they are summed, not
  *    deduped) — again matching the server, which keeps one gift_claimed per
  *    attempt;
  *  - a quest counts as completed when ANY of its attempts holds attempt_completed.
  */
-import type { Fact } from './shared-model';
+import { ONCE_PER_QUEST_TYPES, type Fact } from './shared-model';
 import { getFacts, listAttempts } from './queue';
 
 /** One attempt's fact log tagged with its quest — the fold's input unit. */
@@ -60,11 +61,11 @@ export function foldLocalPlayerStats(logs: AttemptLog[]): PlayerStatsFold {
   let balance = 0;
   const completed: string[] = [];
   for (const [quest_id, facts] of factsByQuest) {
-    let bonusCounted = false;
+    const counted = new Set<Fact['type']>();
     for (const f of facts) {
-      if (f.type === 'completion_bonus') {
-        if (bonusCounted) continue; // once-per-quest, matching the server
-        bonusCounted = true;
+      if (ONCE_PER_QUEST_TYPES.has(f.type)) {
+        if (counted.has(f.type)) continue; // once-per-quest, matching the server
+        counted.add(f.type);
       }
       balance += f.coins_delta || 0;
     }

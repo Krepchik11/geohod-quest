@@ -163,11 +163,12 @@ export interface StepCopy {
   onward?: string;
   submit?: string;
   wrong1?: string;
-  /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
+  /* Финал (§11): «ОТПРАВИТЬ ОЦЕНКУ» активна при звёздах + отзыве; выход без
+     отзыва — вторая кнопка (её ярлык зависит от того, выбраны ли звёзды). */
   final?: string;
-  whatNext?: string;
-  /** Финал «пройти заново» — перезапуск этого же квеста с нуля. */
+  submitRating?: string;
   skipRating?: string;
+  skipRated?: string;
   rateLead?: string;
   rateThanks?: string;
   /* Пост-финальный каталог «Продолжите путешествие». */
@@ -554,13 +555,15 @@ export function RateStars({ value, onRate }: { value?: number; onRate?: (n: numb
 }
 
 /* ============================================================
-   FINAL — «Квест пройден!»
-   Rating is OPTIONAL and never blocks: tapping a star records it and shows an
-   inline thank-you; the forward action («что дальше») is always available and
-   leads into the post-finale catalog. Replaces the old inline congrats branch —
-   the single final-screen implementation, shared by the player, the constructor
-   test-player and editor previews. Stats are coins + time only (resolved design
-   decision; the «шагов» tile was dropped).
+   FINAL — «ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ» (§11).
+   The finale is the review funnel: «ОТПРАВИТЬ ОЦЕНКУ» unlocks only when the
+   stars AND a review text are in; the second button is the exit for everyone
+   else. BOTH actions commit-and-leave (openCatalog) — a chosen star rating
+   still commits and still pays its bonus on the exit path, which is why that
+   button's label flips to «Отправить без отзыва» once stars are tapped.
+   The single final-screen implementation, shared by the player, the
+   constructor test-player and editor previews. Stats are coins + time only
+   (resolved design decision; the «шагов» tile was dropped).
    ============================================================ */
 export function FinalScreen({ quest, copy, st, on }: {
   quest?: QuestMeta;
@@ -572,10 +575,6 @@ export function FinalScreen({ quest, copy, st, on }: {
   const h = on || {};
   const coins = s.coinsEarned != null ? s.coinsEarned : (quest?.completionBonus || 5);
   const rated = (s.rating || 0) > 0;
-  // §11: both actions commit-and-leave (openCatalog). «ОТПРАВИТЬ ОЦЕНКУ»
-  // unlocks only when stars AND a review are in — that pair earns the coin
-  // rewards; «Пропустить оценку» is the exit for everyone else (a chosen
-  // star rating still commits and still pays its bonus).
   const onward = h.onward;
   const canSubmit = rated && !!s.reviewText?.trim();
 
@@ -585,7 +584,7 @@ export function FinalScreen({ quest, copy, st, on }: {
           "reread the last step" reachable here too. Previews pass no handler. */}
       {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
       <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
-      <h2 className="p-title">{copy?.final || "Квест пройден!"}</h2>
+      <h2 className="p-title">{copy?.final || "ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ"}</h2>
       <Flourish />
       <div className="p-final-coins"><PCoin size={30} /><PCoin size={38} /><PCoin size={30} /></div>
       <div className="p-final-stats">
@@ -616,11 +615,15 @@ export function FinalScreen({ quest, copy, st, on }: {
       <div className="p-actions">
         {onward && (
           <button className="p-btn p-btn--solid" type="button" disabled={!canSubmit} onClick={onward}>
-            {copy?.whatNext || "ОТПРАВИТЬ ОЦЕНКУ"} <PArrow />
+            {copy?.submitRating || "ОТПРАВИТЬ ОЦЕНКУ"} <PArrow />
           </button>
         )}
         {onward && !canSubmit && (
-          <button className="p-btn p-btn--ghost" type="button" onClick={onward}>{copy?.skipRating || "Пропустить оценку"}</button>
+          <button className="p-btn p-btn--ghost" type="button" onClick={onward}>
+            {rated
+              ? (copy?.skipRated || "Отправить без отзыва")
+              : (copy?.skipRating || "Пропустить оценку")}
+          </button>
         )}
       </div>
     </div>

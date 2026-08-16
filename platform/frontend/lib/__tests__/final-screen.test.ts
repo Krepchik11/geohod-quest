@@ -35,18 +35,20 @@ describe('FinalScreen', () => {
   });
 
   it('«ОТПРАВИТЬ ОЦЕНКУ» unlocks only when stars AND a comment are in', () => {
-    expect(render({ coinsEarned: 5 })).toMatch(/ОТПРАВИТЬ ОЦЕНКУ[^>]*/);
-    expect(render({ coinsEarned: 5 })).toContain('disabled');
-    expect(render({ coinsEarned: 5, rating: 5 })).toContain('disabled');
-    expect(render({ coinsEarned: 5, rating: 5, reviewText: '   ' })).toContain('disabled');
-    expect(render({ coinsEarned: 5, rating: 5, reviewText: 'Отлично!' })).not.toContain('disabled');
+    const submit = /<button[^>]*disabled[^>]*>ОТПРАВИТЬ ОЦЕНКУ/;
+    expect(render({ coinsEarned: 5 })).toMatch(submit);
+    expect(render({ coinsEarned: 5, rating: 5 })).toMatch(submit);
+    expect(render({ coinsEarned: 5, rating: 5, reviewText: '   ' })).toMatch(submit);
+    expect(render({ coinsEarned: 5, rating: 5, reviewText: 'Отлично!' })).not.toMatch(submit);
   });
 
-  it('«Пропустить оценку» is a BUTTON and stays while the submit is locked', () => {
-    const locked = render({ coinsEarned: 5, rating: 5 });
-    expect(locked).toMatch(/<button[^>]*>Пропустить оценку<\/button>/);
+  it('the exit is a BUTTON, honest about what it sends, gone once submit unlocks', () => {
+    expect(render({ coinsEarned: 5 })).toMatch(/<button[^>]*>Пропустить оценку<\/button>/);
+    // Stars tapped: the exit still commits them, so its label says so.
+    expect(render({ coinsEarned: 5, rating: 5 })).toMatch(/<button[^>]*>Отправить без отзыва<\/button>/);
     const unlocked = render({ coinsEarned: 5, rating: 5, reviewText: 'Отлично!' });
     expect(unlocked).not.toContain('Пропустить оценку');
+    expect(unlocked).not.toContain('Отправить без отзыва');
   });
 
   it('never renders a replay affordance', () => {

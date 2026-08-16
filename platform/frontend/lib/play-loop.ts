@@ -131,18 +131,36 @@ function completeAttempt(b: Builder): void {
     coins_delta: 0,
     note: step.rich_content.button_text || 'Квест пройден',
   });
-  if (!b.state.facts.some((f) => f.type === 'completion_bonus')) {
-    append(b, {
-      type: 'completion_bonus',
-      step_position: pos,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: COMPLETION_BONUS,
-      note: 'Бонус за прохождение',
-    });
+  if (awardOnce(b, 'completion_bonus', COMPLETION_BONUS, 'Бонус за прохождение')) {
     b.effects = { ...b.effects, toast: { amount: COMPLETION_BONUS, narrative: 'Бонус за прохождение' } };
   }
   claimGiftIfNeeded(b, pos);
+}
+
+/**
+ * Append a once-ever bonus fact unless this log already carries one; true when
+ * awarded. The per-log guard is only the optimistic local filter — the server
+ * holds the once-per-(player, quest) line across attempts and devices, and the
+ * cross-attempt local fold collapses replays (ONCE_PER_QUEST_TYPES). Bonus
+ * facts never carry free text beyond a fixed label: the note is part of the
+ * natural key, so variable text would mint a fresh fact on every change.
+ */
+function awardOnce(
+  b: Builder,
+  type: 'completion_bonus' | 'rating_bonus' | 'comment_bonus',
+  coins: number,
+  note: string | null,
+): boolean {
+  if (b.state.facts.some((f) => f.type === type)) return false;
+  append(b, {
+    type,
+    step_position: b.state.stepIdx,
+    submitted_value: null,
+    local_is_correct: true,
+    coins_delta: coins,
+    note,
+  });
+  return true;
 }
 
 /** Gift is claimed when its step COMPLETES (confirm / correct answer / terminal),
@@ -306,36 +324,18 @@ export function transition(
         coins_delta: 0,
         note: text,
       });
-      // §11 rewards, at most once per log (the server holds the once-EVER
-      // line across attempts and devices). The bonus facts never carry the
-      // review text — the note is part of the natural key, so a comment edit
-      // must not mint a fresh bonus.
-      const bonus = (type: 'rating_bonus' | 'comment_bonus', coins: number) =>
-        append(b, {
-          type,
-          step_position: state.stepIdx,
-          submitted_value: null,
-          local_is_correct: true,
-          coins_delta: coins,
-          note: null,
-        });
-      let earned = 0;
-      if (!b.state.facts.some((f) => f.type === 'rating_bonus')) {
-        bonus('rating_bonus', RATING_BONUS);
-        earned += RATING_BONUS;
-      }
-      if (text && !b.state.facts.some((f) => f.type === 'comment_bonus')) {
-        bonus('comment_bonus', COMMENT_BONUS);
-        earned += COMMENT_BONUS;
-      }
-      if (earned > 0) {
-        const narrative =
-          earned === RATING_BONUS + COMMENT_BONUS
-            ? 'За оценку и отзыв'
-            : text && earned === COMMENT_BONUS
-              ? 'За отзыв'
-              : 'За оценку';
-        b.effects = { ...b.effects, toast: { amount: earned, narrative } };
+      // §11 rewards (see awardOnce for the once-ever contract).
+      const gotRating = awardOnce(b, 'rating_bonus', RATING_BONUS, null);
+      const gotComment = !!text && awardOnce(b, 'comment_bonus', COMMENT_BONUS, null);
+      if (gotRating || gotComment) {
+        b.effects = {
+          ...b.effects,
+          toast: {
+            amount: (gotRating ? RATING_BONUS : 0) + (gotComment ? COMMENT_BONUS : 0),
+            narrative:
+              gotRating && gotComment ? 'За оценку и отзыв' : gotComment ? 'За отзыв' : 'За оценку',
+          },
+        };
       }
       break;
     }

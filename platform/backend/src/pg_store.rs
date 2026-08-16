@@ -283,15 +283,13 @@ impl FactStore for PgFactStore {
         let mut accepted = Vec::new();
         for f in incoming {
             if crate::facts::once_per_quest(f.kind) {
-                // The kind's wire tag (snake_case serde name) keys the award row.
-                let kind = serde_json::to_value(f.kind).map_err(internal)?;
                 let res = sqlx::query(
                     "INSERT INTO bonus_awards (user_id, quest_id, kind) VALUES ($1, $2, $3)
                      ON CONFLICT DO NOTHING",
                 )
                 .bind(&user_id)
                 .bind(&quest_id)
-                .bind(kind.as_str().unwrap_or_default())
+                .bind(f.kind.wire_tag())
                 .execute(&mut *tx)
                 .await
                 .map_err(internal)?;

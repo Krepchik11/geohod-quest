@@ -44,6 +44,27 @@ pub enum FactKind {
     CommentBonus,
 }
 
+impl FactKind {
+    /// The serde wire tag (snake_case), as a static string — keys the
+    /// `bonus_awards` rows (and must stay what migration 0005 defaults old
+    /// rows to for CompletionBonus). Pinned against serde by a test.
+    pub fn wire_tag(self) -> &'static str {
+        match self {
+            Self::PhysicalConfirmed => "physical_confirmed",
+            Self::AnswerSubmitted => "answer_submitted",
+            Self::GiftClaimed => "gift_claimed",
+            Self::HintPurchased => "hint_purchased",
+            Self::CompletionBonus => "completion_bonus",
+            Self::AttemptCompleted => "attempt_completed",
+            Self::FeedbackReported => "feedback_reported",
+            Self::NavigatorUsed => "navigator_used",
+            Self::QuestRated => "quest_rated",
+            Self::RatingBonus => "rating_bonus",
+            Self::CommentBonus => "comment_bonus",
+        }
+    }
+}
+
 /// Fact kinds awarded at most once EVER per `(player, quest)` — enforced at
 /// append time by both stores (the client's per-log guard is only an
 /// optimistic duplicate filter; replays and other devices land here).
@@ -702,6 +723,29 @@ mod tests {
             .iter()
             .map(|(p, q)| ((*p).to_string(), (*q).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn wire_tag_matches_serde_for_every_kind() {
+        for kind in [
+            FactKind::PhysicalConfirmed,
+            FactKind::AnswerSubmitted,
+            FactKind::GiftClaimed,
+            FactKind::HintPurchased,
+            FactKind::CompletionBonus,
+            FactKind::AttemptCompleted,
+            FactKind::FeedbackReported,
+            FactKind::NavigatorUsed,
+            FactKind::QuestRated,
+            FactKind::RatingBonus,
+            FactKind::CommentBonus,
+        ] {
+            assert_eq!(
+                serde_json::to_value(kind).expect("serialize"),
+                kind.wire_tag(),
+                "wire_tag drifted from the serde tag"
+            );
+        }
     }
 
     #[test]
