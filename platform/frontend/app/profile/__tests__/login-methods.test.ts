@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { loginMethodModel } from '../../../lib/login-methods';
+import { loginMethodModel, needsEmailConfirmation } from '../../../lib/login-methods';
+
+describe('needsEmailConfirmation', () => {
+  it('unconfirmed email account: banner shows', () => {
+    expect(needsEmailConfirmation({ email: 'u@example.com', email_confirmed_at: null })).toBe(true);
+  });
+
+  it('confirmed email account: no banner', () => {
+    expect(needsEmailConfirmation({ email: 'u@example.com', email_confirmed_at: 1700000000 })).toBe(
+      false,
+    );
+  });
+
+  it('telegram-only account (no email at all): nothing to confirm, no banner', () => {
+    expect(needsEmailConfirmation({ email: null, email_confirmed_at: null })).toBe(false);
+  });
+
+  it('anonymous (no me row): no banner', () => {
+    expect(needsEmailConfirmation(null)).toBe(false);
+  });
+});
 
 describe('loginMethodModel', () => {
   it('registered email account: one email row, password set', () => {

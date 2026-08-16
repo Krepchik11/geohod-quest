@@ -9,7 +9,7 @@ import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, classify, isAuthFailure, type Me } from '../../lib/api';
 import { passwordValid } from '../../lib/credentials';
-import { loginMethodModel } from '../../lib/login-methods';
+import { loginMethodModel, needsEmailConfirmation } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
 import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
 import { logoutAndReset } from '../../lib/session-actions';
@@ -126,7 +126,7 @@ export default function ProfilePage() {
   const registered = ready ? (ready.me ? ready.me.registered : !!session) : false;
   const nameLabel = ready?.me?.display_name ?? session?.display_name ?? null;
   const emailLabel = ready?.me?.email ?? session?.email ?? null;
-  const unconfirmed = registered && !!ready?.me && ready.me.email_confirmed_at == null;
+  const unconfirmed = registered && needsEmailConfirmation(ready?.me ?? null);
 
   const errorNote =
     ready?.error === 'auth'
@@ -153,7 +153,14 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={() => void api.authResendConfirm().then(
-                  () => toast('Письмо отправлено ещё раз'),
+                  (r) => {
+                    if (r.status === 'sent') {
+                      toast('Письмо отправлено ещё раз');
+                    } else {
+                      toast('Почта уже подтверждена');
+                      setBanner(false);
+                    }
+                  },
                   () => toast('Не удалось отправить письмо — попробуйте позже'),
                 )}
               >
