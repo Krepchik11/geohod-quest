@@ -1535,6 +1535,65 @@ mod tests {
         assert_eq!(gv["fact_count"], 1);
     }
 
+    /// §11 rating rewards: 5 coins for the stars, 5 for the comment — each at
+    /// most once EVER per (player, quest), enforced at append time like the
+    /// completion bonus, so a replayed quest can't farm them.
+    async fn scenario_rating_rewards(app: &Router, ids: &Ids) {
+        let attempt1 = grant_publish_attempt(app, ids).await;
+        let rate_facts = |stars: &str, note: Option<&str>| {
+            json!({ "facts": [
+                { "type": "quest_rated", "step_position": 0, "submitted_value": stars,
+                  "local_is_correct": true, "coins_delta": 0, "note": note, "device_id": "d1" },
+                { "type": "rating_bonus", "step_position": 0, "submitted_value": null,
+                  "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "d1" },
+                { "type": "comment_bonus", "step_position": 0, "submitted_value": null,
+                  "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "d1" }
+            ]})
+        };
+        let (st, v) = post_json(
+            app,
+            &format!("/api/attempts/{attempt1}/facts"),
+            rate_facts("5", Some("Класс!")),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "bonuses accepted: {v}");
+        assert_eq!(v["accepted"].as_array().expect("accepted").len(), 3);
+        assert_eq!(v["projected"]["balance"], 10);
+
+        // Replay: the same bonuses on a fresh attempt are absorbed server-side.
+        let (st, att) = post_json(
+            app,
+            "/api/attempts",
+            json!({ "user_id": ids.player, "quest_id": ids.quest }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let attempt2 = att["attempt_id"].as_str().expect("attempt id").to_string();
+        let (st, v) = post_json(
+            app,
+            &format!("/api/attempts/{attempt2}/facts"),
+            rate_facts("4", None),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            v["accepted"].as_array().expect("accepted").len(),
+            1,
+            "only the re-rate lands, the bonuses are once-ever: {v}"
+        );
+        assert_eq!(v["projected"]["balance"], 0, "no coins on the replay");
+
+        // The cross-attempt fold pays each bonus exactly once.
+        let (st, s) = get_json_h(
+            app,
+            "/api/users/me/stats",
+            &[("x-user-id", ids.player.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(s["balance"], 10);
+    }
+
     async fn scenario_completion_bonus_once(app: &Router, ids: &Ids) {
         let first = grant_publish_attempt(app, ids).await;
 
@@ -5131,6 +5190,7 @@ mod tests {
         cross_device_duplicate_award_absorbed = ids scenario_cross_device_duplicate / "dup";
         concurrent_duplicate_batch_collapses_to_one = ids scenario_concurrent_duplicate_batch / "race";
         completion_bonus_idempotent_across_attempts = ids scenario_completion_bonus_once / "bonus";
+        rating_and_comment_bonuses_once_ever = ids scenario_rating_rewards / "raterew";
         version_freeze_new_publish_does_not_rebind = ids scenario_version_freeze / "freeze";
         checkout_idempotent_coupon100_and_publish_list = ids scenario_checkout_and_publish_list / "shop";
         store_lists_only_published_quests = ids scenario_store_lists_only_published / "vis";

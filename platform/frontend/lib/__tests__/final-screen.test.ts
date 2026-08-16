@@ -1,11 +1,12 @@
 /**
- * FinalScreen («Квест пройден!») render contract. The finale must, on every
- * surface, expose a forward CTA and show coins + time; in the real player it
- * additionally offers «пройти заново» (gated on a wired `replay` handler so the
- * constructor test-player / editor previews — which pass none — stay clean).
+ * FinalScreen («ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ») render contract (§11):
+ * - «ОТПРАВИТЬ ОЦЕНКУ» is the one forward CTA and unlocks only when BOTH the
+ *   stars and a review text are in;
+ * - «Пропустить оценку» is a real button and stays as the exit while the
+ *   submit is locked;
+ * - there is no replay affordance on the finale.
  *
- * Rendered with react-dom/server (no DOM env needed) — markup assertions only;
- * the replay handler's data behaviour is covered by the queue/restart tests.
+ * Rendered with react-dom/server (no DOM env needed) — markup assertions only.
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -18,31 +19,37 @@ import {
 } from '../../app/player/PlayerComponents';
 import { PLAYER_COPY } from '../player-copy';
 
-/** A fully-wired finale; individual tests override to probe a missing handler. */
 function render(st: StepState, on: StepHandlers = PREVIEW_HANDLERS): string {
   return renderToStaticMarkup(createElement(FinalScreen, { copy: PLAYER_COPY, st, on }));
 }
 
 describe('FinalScreen', () => {
-  it('always exposes the forward «что дальше» CTA and the coins + time stats', () => {
+  it('congratulates, invites the rating with the coins pitch, shows coins + time', () => {
     const html = render({ coinsEarned: 12, time: '1:24' });
-    expect(html).toContain('что дальше');
+    expect(html).toContain('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
+    expect(html).toContain('Оцените квест, оставьте отзыв и получите дополнительные коины');
     expect(html).toContain('12');
     expect(html).toContain('1:24');
     expect(html).toContain('монет собрано');
     expect(html).toContain('в пути');
   });
 
-  it('renders «пройти заново» only when a replay handler is wired', () => {
-    expect(render({ coinsEarned: 5 }, { ...PREVIEW_HANDLERS, replay: () => {} })).toContain('пройти заново');
-    // Editor previews / constructor test-player pass no replay handler — no dead button.
-    expect(render({ coinsEarned: 5 })).not.toContain('пройти заново');
+  it('«ОТПРАВИТЬ ОЦЕНКУ» unlocks only when stars AND a comment are in', () => {
+    expect(render({ coinsEarned: 5 })).toMatch(/ОТПРАВИТЬ ОЦЕНКУ[^>]*/);
+    expect(render({ coinsEarned: 5 })).toContain('disabled');
+    expect(render({ coinsEarned: 5, rating: 5 })).toContain('disabled');
+    expect(render({ coinsEarned: 5, rating: 5, reviewText: '   ' })).toContain('disabled');
+    expect(render({ coinsEarned: 5, rating: 5, reviewText: 'Отлично!' })).not.toContain('disabled');
   });
 
-  it('offers «Пропустить оценку» only while unrated', () => {
-    expect(render({ coinsEarned: 5 })).toContain('Пропустить оценку');
-    const rated = render({ coinsEarned: 5, rating: 5 });
-    expect(rated).not.toContain('Пропустить оценку');
-    expect(rated).toContain('Спасибо за оценку');
+  it('«Пропустить оценку» is a BUTTON and stays while the submit is locked', () => {
+    const locked = render({ coinsEarned: 5, rating: 5 });
+    expect(locked).toMatch(/<button[^>]*>Пропустить оценку<\/button>/);
+    const unlocked = render({ coinsEarned: 5, rating: 5, reviewText: 'Отлично!' });
+    expect(unlocked).not.toContain('Пропустить оценку');
+  });
+
+  it('never renders a replay affordance', () => {
+    expect(render({ coinsEarned: 5 })).not.toContain('пройти заново');
   });
 });

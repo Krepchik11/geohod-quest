@@ -615,14 +615,8 @@ export default function QuestPlayerClient({
         onward: openCatalog,
         // Chromeless finale: the floating back button lets the player reread
         // the last steps (view-only rewind; completion facts stay guarded).
+        // No replay affordance here (§11) — restarting lives in the menu.
         back: stepIdx > 0 ? doBack : undefined,
-        // «пройти заново» restarts from step 0. The tapped rating is intentionally
-        // NOT committed here: a quest_rated fact is delivered only via the forward
-        // «что дальше» path (openCatalog), because the queue flushes only the
-        // ACTIVE attempt — committing on replay would strand the fact on the
-        // just-superseded attempt, never reaching the author. Restart is a fresh
-        // start; «отправим автору» belongs to the forward action.
-        replay: handleReplay,
       }}
     />
   );

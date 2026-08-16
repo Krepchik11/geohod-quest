@@ -8,7 +8,9 @@
 import { describe, expect, it } from 'vitest';
 import type { GameStep } from '../shared-model';
 import {
+  COMMENT_BONUS,
   COMPLETION_BONUS,
+  RATING_BONUS,
   initialPlayState,
   transition,
   type PlayCtx,
@@ -176,6 +178,48 @@ describe('gifts and completion', () => {
     };
     const r = transition(s, { type: 'enter_terminal' }, c);
     expect(r.effects.appended.map((f) => f.type)).toEqual(['attempt_completed']);
+  });
+});
+
+describe('§11 rating rewards', () => {
+  const finale = () => ctx([terminalStep({ position: 0 })]);
+
+  it('stars pay +5 once, a comment pays +5 more, with one coin toast', () => {
+    const c = finale();
+    const done = transition(initialPlayState(), { type: 'enter_terminal' }, c).state;
+    const r = transition(done, { type: 'rate', value: 5, text: 'Класс!' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual([
+      'quest_rated',
+      'rating_bonus',
+      'comment_bonus',
+    ]);
+    expect(r.effects.appended[1].coins_delta).toBe(RATING_BONUS);
+    expect(r.effects.appended[2].coins_delta).toBe(COMMENT_BONUS);
+    expect(r.effects.appended[2].note).toBeNull(); // the text rides quest_rated only
+    expect(r.effects.toast).toEqual({
+      amount: RATING_BONUS + COMMENT_BONUS,
+      narrative: 'За оценку и отзыв',
+    });
+  });
+
+  it('star-only rating pays only the rating bonus; the comment pays later', () => {
+    const c = finale();
+    const done = transition(initialPlayState(), { type: 'enter_terminal' }, c).state;
+    const starOnly = transition(done, { type: 'rate', value: 4, text: null }, c);
+    expect(starOnly.effects.appended.map((f) => f.type)).toEqual(['quest_rated', 'rating_bonus']);
+    expect(starOnly.effects.toast).toEqual({ amount: RATING_BONUS, narrative: 'За оценку' });
+    const withText = transition(starOnly.state, { type: 'rate', value: 4, text: 'Дописал' }, c);
+    expect(withText.effects.appended.map((f) => f.type)).toEqual(['quest_rated', 'comment_bonus']);
+    expect(withText.effects.toast).toEqual({ amount: COMMENT_BONUS, narrative: 'За отзыв' });
+  });
+
+  it('re-rating never doubles a bonus already in the log', () => {
+    const c = finale();
+    const done = transition(initialPlayState(), { type: 'enter_terminal' }, c).state;
+    const first = transition(done, { type: 'rate', value: 5, text: 'Класс!' }, c);
+    const again = transition(first.state, { type: 'rate', value: 3, text: 'Передумал' }, c);
+    expect(again.effects.appended.map((f) => f.type)).toEqual(['quest_rated']);
+    expect(again.effects.toast).toBeNull();
   });
 });
 

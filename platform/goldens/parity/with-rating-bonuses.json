@@ -1,0 +1,12 @@
+{
+  "name": "with-rating-bonuses",
+  "description": "§11 rating rewards: rating_bonus and comment_bonus are plain +5 coin facts (once ever per player+quest, enforced at append time — the fold stays a blind sum). The review text rides quest_rated.note, never the bonus facts, so a comment edit cannot mint a second bonus. Both the cargo and vitest suites fold this.",
+  "facts": [
+    { "type": "attempt_completed", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": "Completed the quest", "device_id": "device-a" },
+    { "type": "completion_bonus", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": "Completion bonus", "device_id": "device-a" },
+    { "type": "quest_rated", "step_position": 3, "submitted_value": "5", "local_is_correct": true, "coins_delta": 0, "note": "Прошли вдвоём за вечер!", "device_id": "device-a" },
+    { "type": "rating_bonus", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "device-a" },
+    { "type": "comment_bonus", "step_position": 3, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "device-a" }
+  ],
+  "expected": { "balance": 15, "completed_steps": [3], "revealed_hints": [] }
+}

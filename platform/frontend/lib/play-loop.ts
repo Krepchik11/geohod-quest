@@ -17,6 +17,11 @@ import {
 
 /** The canonical once-per-quest completion bonus (SPEC). */
 export const COMPLETION_BONUS = 5;
+/** §11: once-ever rewards for the finale — stars and a written review. The
+ *  server enforces once-per-(player, quest) at append time; the per-log
+ *  guards below are only the optimistic local filter. */
+export const RATING_BONUS = 5;
+export const COMMENT_BONUS = 5;
 
 /** The ONE terminal predicate — both players and the engine share it. */
 export function isTerminalStep(step: GameStep): boolean {
@@ -301,6 +306,37 @@ export function transition(
         coins_delta: 0,
         note: text,
       });
+      // §11 rewards, at most once per log (the server holds the once-EVER
+      // line across attempts and devices). The bonus facts never carry the
+      // review text — the note is part of the natural key, so a comment edit
+      // must not mint a fresh bonus.
+      const bonus = (type: 'rating_bonus' | 'comment_bonus', coins: number) =>
+        append(b, {
+          type,
+          step_position: state.stepIdx,
+          submitted_value: null,
+          local_is_correct: true,
+          coins_delta: coins,
+          note: null,
+        });
+      let earned = 0;
+      if (!b.state.facts.some((f) => f.type === 'rating_bonus')) {
+        bonus('rating_bonus', RATING_BONUS);
+        earned += RATING_BONUS;
+      }
+      if (text && !b.state.facts.some((f) => f.type === 'comment_bonus')) {
+        bonus('comment_bonus', COMMENT_BONUS);
+        earned += COMMENT_BONUS;
+      }
+      if (earned > 0) {
+        const narrative =
+          earned === RATING_BONUS + COMMENT_BONUS
+            ? 'За оценку и отзыв'
+            : text && earned === COMMENT_BONUS
+              ? 'За отзыв'
+              : 'За оценку';
+        b.effects = { ...b.effects, toast: { amount: earned, narrative } };
+      }
       break;
     }
 

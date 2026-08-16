@@ -120,7 +120,7 @@ export interface QuestSnapshot {
 }
 
 export interface Fact {
-  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated';
+  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated' | 'rating_bonus' | 'comment_bonus';
   step_position: number;
   submitted_value?: string | null;
   local_is_correct: boolean;

@@ -35,6 +35,23 @@ pub enum FactKind {
     /// Optional finale rating (1–5) in `submitted_value`; routed to the author.
     /// coins_delta is always 0 — a projection no-op for balance/state.
     QuestRated,
+    /// §11 +5 for leaving a star rating, first time ever per (player, quest).
+    RatingBonus,
+    /// §11 +5 for writing a review, first time ever per (player, quest). The
+    /// text itself rides `quest_rated.note`, NEVER this fact — the note is
+    /// part of the natural key, so carrying it here would mint a fresh bonus
+    /// on every comment edit.
+    CommentBonus,
+}
+
+/// Fact kinds awarded at most once EVER per `(player, quest)` — enforced at
+/// append time by both stores (the client's per-log guard is only an
+/// optimistic duplicate filter; replays and other devices land here).
+pub fn once_per_quest(kind: FactKind) -> bool {
+    matches!(
+        kind,
+        FactKind::CompletionBonus | FactKind::RatingBonus | FactKind::CommentBonus
+    )
 }
 
 /// One immutable player event. All kinds share the same shape (the discriminator

@@ -161,8 +161,8 @@ impl InMemoryFactStore {
                 .fact_logs
                 .get(attempt_id)
                 .is_some_and(|log| log.iter().any(|e| semantically_same(e, &f)));
-            let duplicate_bonus = f.kind == FactKind::CompletionBonus
-                && self.bonus_already_awarded(&meta.user_id, &meta.quest_id);
+            let duplicate_bonus = crate::facts::once_per_quest(f.kind)
+                && self.bonus_already_awarded(&meta.user_id, &meta.quest_id, f.kind);
             if duplicate_in_log || duplicate_bonus {
                 continue;
             }
@@ -270,13 +270,13 @@ impl InMemoryFactStore {
     }
 
     /// True if any attempt of (player, quest) already holds a completion bonus.
-    fn bonus_already_awarded(&self, user_id: &str, quest_id: &str) -> bool {
+    fn bonus_already_awarded(&self, user_id: &str, quest_id: &str, kind: FactKind) -> bool {
         self.attempts
             .values()
             .filter(|m| m.user_id == user_id && m.quest_id == quest_id)
             .filter_map(|m| self.fact_logs.get(&m.attempt_id))
             .flatten()
-            .any(|f| f.kind == FactKind::CompletionBonus)
+            .any(|f| f.kind == kind)
     }
 
     /// Authoritative projected state + bound snapshot + fact count for a known
