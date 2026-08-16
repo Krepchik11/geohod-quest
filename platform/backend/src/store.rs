@@ -1962,12 +1962,10 @@ pub struct ConstructorQuest {
     pub body: serde_json::Value,
 }
 
-/// Dashboard list row — everything in [`ConstructorQuest`] except the two HEAVY
-/// columns: the `body` and the `cover`. The dashboard renders a name-derived
-/// thumbnail, never the stored cover image, so shipping each quest's base64
-/// `cover` in the list was pure dead weight — for media-heavy (e.g. imported)
-/// quests that meant megabytes per page load. The cover stays on the full
-/// [`ConstructorQuest`] (GET-one); the list omits it.
+/// Dashboard list row — everything in [`ConstructorQuest`] except the heavy
+/// `body`, with the cover reduced by [`list_cover`]: URL covers ride along so
+/// the dashboard can show the real image, `data:` blobs (legacy imports,
+/// megabytes per row) stay on the full [`ConstructorQuest`] (GET-one) only.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConstructorQuestSummary {
     pub quest_id: String,
@@ -1975,11 +1973,25 @@ pub struct ConstructorQuestSummary {
     pub author_name: String,
     pub name: String,
     pub status: String,
+    /// List-safe cover per [`list_cover`].
+    pub cover: Option<String>,
     pub steps_count: u32,
     /// Complexity / audience / tags — the dashboard's filterable columns.
     pub attrs: QuestAttributes,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+/// Legacy-row compensator for covers on list wires: a media-URL cover passes,
+/// a `data:` blob (rows that predate media externalization — see
+/// [`crate::media`]) does not, because base64 covers are megabytes per row and
+/// belong to the GET-one entity only. The Postgres list query mirrors this as
+/// a CASE purely to keep the blob from crossing the database wire; this
+/// function stays the definition. Delete both once no `data:` cover remains.
+pub fn list_cover(cover: Option<&str>) -> Option<String> {
+    cover
+        .filter(|c| !c.starts_with("data:"))
+        .map(str::to_string)
 }
 
 /// A quest's human label for internal surfaces (moderation lists, statistics):
@@ -2088,6 +2100,7 @@ impl ConstructorQuest {
             author_name: self.author_name.clone(),
             name: self.name.clone(),
             status: self.status.clone(),
+            cover: list_cover(self.cover.as_deref()),
             steps_count: self.steps_count,
             attrs: self.attrs.clone(),
             created_at: self.created_at,
@@ -2146,7 +2159,7 @@ impl InMemoryConstructorStore {
         self.quests.get(quest_id).cloned()
     }
 
-    /// One quest's list row — the same body-free, cover-free projection the
+    /// One quest's list row — the same body-free, blob-free projection the
     /// dashboard list uses. The per-quest counterpart of
     /// [`Self::list_all_summaries`], so a caller that only needs the status or
     /// the author never pays for the body.
@@ -3619,7 +3632,7 @@ mod constructor_tests {
         // Attributes are list columns: the dashboard filters on the summary row.
         assert_eq!(updated.attrs, attrs);
         let full = s.get("q1").expect("present");
-        // The cover lives on the full entity, not the (slimmed) list summary.
+        // The full entity keeps the raw cover (the summary reduces it via list_cover).
         assert_eq!(full.cover.as_deref(), Some("cover.png"));
         assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
 
@@ -3697,9 +3710,11 @@ mod constructor_tests {
         s.create(q).expect("create");
 
         let summary = s.summary_for_quest("q1").expect("present");
-        // Same row the list view returns — a type that CANNOT carry the body or
-        // the cover, so an authorize-only caller cannot accidentally load them.
+        // Same row the list view returns — a type that CANNOT carry the body,
+        // and whose cover is reduced by list_cover (this data: blob drops out),
+        // so an authorize-only caller cannot accidentally load them.
         assert_eq!(summary, s.get("q1").expect("present").summary());
+        assert_eq!(summary.cover, None, "data: blob reduced away");
         assert_eq!(summary.name, "Имя");
         assert_eq!(summary.author_id, "seed:a");
         assert_eq!(summary.status, CTOR_STATUS_DRAFT);

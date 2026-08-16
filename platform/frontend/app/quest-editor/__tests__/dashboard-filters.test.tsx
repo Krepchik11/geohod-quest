@@ -26,6 +26,7 @@ function quest(over: Partial<ConstructorQuestWire>): ConstructorQuestWire {
     complexity: 'medium',
     age_target: 'everyone',
     tags: [],
+    cover: null,
     created_at: 1,
     updated_at: 1,
     ...over,
@@ -58,6 +59,19 @@ function setup(quests: ConstructorQuestWire[] = QUESTS) {
     />,
   );
 }
+
+describe('Dashboard thumbnails', () => {
+  it('renders the quest cover when the list carries one, letter tile otherwise', () => {
+    setup([
+      quest({ quest_id: 'q1', name: 'С обложкой', cover: '/api/media/coverhash' }),
+      quest({ quest_id: 'q2', name: 'Без обложки' }),
+    ]);
+    const img = document.querySelector('.qcd-thumb img');
+    expect(img?.getAttribute('src')).toBe('/api/media/coverhash');
+    expect(document.querySelectorAll('.qcd-thumb img')).toHaveLength(1);
+    expect(document.querySelectorAll('.qcd-thumb span')[0]?.textContent).toBe('Б');
+  });
+});
 
 describe('Dashboard attribute filters', () => {
   it('filters by complexity', () => {

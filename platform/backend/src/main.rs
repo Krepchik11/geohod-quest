@@ -3062,6 +3062,58 @@ mod tests {
     /// the ops token that constructor_full_lifecycle uses — and until now the
     /// Postgres store never ran ANY constructor scenario. This walks the real
     /// user path over the full transition matrix on both stores.
+    /// The dashboard list shows the quest cover, but never a `data:` blob —
+    /// base64 covers (legacy imports) are megabytes per row and stay on the
+    /// GET-one wire only.
+    async fn scenario_ctor_list_covers(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        let h = [("authorization", bearer.as_str())];
+        let make = |id: &str, cover: serde_json::Value| {
+            json!({
+                "quest_id": id,
+                "name": "Обложечный квест",
+                "cover": cover,
+                "steps_count": 1,
+                "body": { "id": id, "meta": { "title": "К" }, "steps": [1], "versions": [] }
+            })
+        };
+        let url_quest = format!("{}-url", ids.quest);
+        let blob_quest = format!("{}-blob", ids.quest);
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            make(&url_quest, json!("/api/media/coverhash")),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            make(&blob_quest, json!("data:image/png;base64,AAAA")),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let (st, list) = get_json_h(app, "/api/constructor/quests", &h).await;
+        assert_eq!(st, StatusCode::OK);
+        let cover_of = |id: &str| {
+            list.as_array()
+                .expect("list")
+                .iter()
+                .find(|q| q["quest_id"] == id)
+                .expect("row")["cover"]
+                .clone()
+        };
+        assert_eq!(cover_of(&url_quest), json!("/api/media/coverhash"));
+        assert_eq!(
+            cover_of(&blob_quest),
+            Value::Null,
+            "data: blob stays off the list"
+        );
+    }
+
     async fn scenario_ctor_status_lifecycle(app: &Router, ids: &Ids) {
         let bearer = editor_bearer(app, &ids.player).await;
         let h = [("authorization", bearer.as_str())];
@@ -4917,6 +4969,7 @@ mod tests {
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
+        ctor_list_carries_url_covers_only = ids scenario_ctor_list_covers / "ctorcover";
         product_page_payload = ids scenario_product_page / "product";
         auth_v2_full_flow = mails scenario_auth_v2 / "authv2";
         reset_by_code_alongside_link = mails scenario_reset_by_code / "resetcode";

@@ -10,6 +10,7 @@ import {
 } from '../../lib/constructor-model';
 import QuestFilters, { type QuestFiltersValue } from './QuestFilters';
 import { matchesAttrs, singleValueFacets } from '../../lib/quest-filters';
+import { coverSrc } from '../../lib/cover';
 import SpaceHeader from '../components/SpaceHeader';
 import StatusControl from './StatusControl';
 
@@ -208,10 +209,13 @@ export default function Dashboard({
           <div className="qcd-listcard">
             {filtered.map((q) => {
               const published = q.status === 'published';
+              const cover = coverSrc(q.cover);
               return (
                 <div className="qcd-row" key={q.quest_id}>
                   <div className="qcd-thumb" style={{ background: thumbBg(q.name) }}>
-                    <span>{(q.name[0] || '?').toUpperCase()}</span>
+                    {cover
+                      ? <img src={cover} alt="" loading="lazy" decoding="async" />
+                      : <span>{(q.name[0] || '?').toUpperCase()}</span>}
                   </div>
                   <div className="qcd-row__body">
                     <div className="qcd-row__name">{q.name}</div>
