@@ -2,8 +2,9 @@
 //! a purchase, [`settle`] is THE ONLY place a redirect payment can mint a
 //! grant. Providers: the always-approving mock (dev/test, selectable at
 //! checkout) and YooKassa redirect payments (`yookassa.rs`). Checkout
-//! dispatches per request on `CheckoutRequest.provider`; coupon-100% and free
-//! paths bypass every provider — there is nothing to charge.
+//! dispatches per request on `CheckoutRequest.provider`; a published free
+//! quest settles before dispatch, a coupon-100% inside it — in both cases
+//! there is nothing to charge and no provider is reached.
 
 use crate::AppState;
 use crate::auth;
@@ -110,6 +111,10 @@ pub struct RedirectPayment {
 /// Checkout, dispatched per request on `provider`: the mock settles instantly,
 /// YooKassa opens a redirect flow settled later by [`settle`].
 ///
+/// The published meta is read once here: a free (or unpriced) published quest
+/// settles as a FreeQuest grant before any provider or feature flag is
+/// consulted; a paid quest hands its positive price to the provider arm.
+///
 /// With a coupon code the registry is consulted: the redemption is recorded
 /// atomically against the coupon's caps, and a discount that zeroes the price
 /// grants as CouponRedemption bypassing every provider; a partial discount
@@ -130,18 +135,37 @@ pub async fn checkout(
         return Ok(CheckoutResponse::Settled { grant, created });
     }
     let provider = req.provider.as_deref().unwrap_or("mock");
+    let feature = match provider {
+        "mock" => Feature::PaymentsMock,
+        "yookassa" => Feature::PaymentsYookassa,
+        other => {
+            return Err(AppError::BadRequest(format!(
+                "unknown payment provider: {other}"
+            )));
+        }
+    };
+    // `None` = unpublished (the mock still sells it, YooKassa refuses);
+    // a published quest either settles free right here or carries a
+    // positive price into the provider arm.
+    let priced = match state.grants.get_published(&req.quest_id).await? {
+        Some(meta) => {
+            let Some(price) = meta.price.filter(|p| *p > 0) else {
+                // Published free quest: nothing to charge — grant immediately,
+                // independent of providers and their feature flags.
+                let (grant, created) = state
+                    .grants
+                    .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
+                    .await?;
+                return Ok(CheckoutResponse::Settled { grant, created });
+            };
+            Some((meta, price))
+        }
+        None => None,
+    };
+    require_provider_enabled(state, feature, provider).await?;
     match provider {
-        "mock" => {
-            require_provider_enabled(state, Feature::PaymentsMock, provider).await?;
-            mock_checkout(state, user_id, req).await
-        }
-        "yookassa" => {
-            require_provider_enabled(state, Feature::PaymentsYookassa, provider).await?;
-            yookassa_checkout(state, user_id, req).await
-        }
-        other => Err(AppError::BadRequest(format!(
-            "unknown payment provider: {other}"
-        ))),
+        "yookassa" => yookassa_checkout(state, user_id, req, priced).await,
+        _ => mock_checkout(state, user_id, req, priced.map(|(_, price)| price)).await,
     }
 }
 
@@ -163,16 +187,19 @@ async fn require_provider_enabled(
 }
 
 /// The historical synchronous path: the mock settles instantly, so the coupon
-/// is redeemed and the grant created in the same request.
+/// is redeemed and the grant created in the same request. `price` is the
+/// caller-resolved positive price; `None` = unpublished (a coupon has nothing
+/// to discount then).
 async fn mock_checkout(
     state: &AppState,
     user_id: &str,
     req: &CheckoutRequest,
+    price: Option<i64>,
 ) -> Result<CheckoutResponse, AppError> {
     let (source, source_ref) = match &req.coupon_code {
         Some(raw) => {
             let code = coupons::normalize_code(raw)?;
-            let price = quest_price(state, &req.quest_id).await?.ok_or_else(|| {
+            let price = price.ok_or_else(|| {
                 AppError::Conflict(coupons::RedeemReject::NotApplicable.message().into())
             })?;
             let redemption = state
@@ -245,12 +272,15 @@ fn yookassa_gateway(state: &AppState) -> Result<&YookassaGateway, AppError> {
 
 /// The redirect path: create a YooKassa payment and answer with its payer page.
 /// NOTHING settles here — the grant (and any coupon redemption) waits for a
-/// verified `succeeded` in [`settle`]. Free and coupon-100% orders
-/// never reach the gateway (nothing to charge).
+/// verified `succeeded` in [`settle`]. `priced` is the caller-resolved
+/// published meta with its positive price ([`checkout`] settles free quests
+/// before dispatching); `None` = unpublished. Coupon-100% orders never reach
+/// the gateway (nothing to charge).
 async fn yookassa_checkout(
     state: &AppState,
     user_id: &str,
     req: &CheckoutRequest,
+    priced: Option<(store::PublishedMeta, i64)>,
 ) -> Result<CheckoutResponse, AppError> {
     let gateway = yookassa_gateway(state)?;
     // An open payment for this order is replayed instead of double-creating at
@@ -267,19 +297,8 @@ async fn yookassa_checkout(
             },
         });
     }
-    let meta = state
-        .grants
-        .get_published(&req.quest_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
-    let Some(price) = meta.price.filter(|p| *p > 0) else {
-        // Free quest: nothing to charge — grant immediately, provider bypassed.
-        let (grant, created) = state
-            .grants
-            .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
-            .await?;
-        return Ok(CheckoutResponse::Settled { grant, created });
-    };
+    let (meta, price) =
+        priced.ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
     // A coupon prices the charge now but is redeemed only at settlement — an
     // abandoned payment must not burn the code. Coupon-100% has nothing to
     // charge, so it settles instantly through the synchronous path (redeem +
@@ -291,7 +310,7 @@ async fn yookassa_checkout(
                 .await?
                 .map_err(|reason| AppError::Conflict(reason.into()))?;
             if discount >= price {
-                return mock_checkout(state, user_id, req).await;
+                return mock_checkout(state, user_id, req, Some(price)).await;
             }
             (Some(code), price - discount)
         }

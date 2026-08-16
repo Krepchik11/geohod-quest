@@ -5256,7 +5256,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn yookassa_full_coupon_and_free_quest_bypass_the_gateway() {
+    async fn yookassa_full_coupon_bypasses_the_gateway() {
         let (app, fake) = test_app_yookassa();
         let ids = Ids::new("yk-bypass");
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
@@ -5293,29 +5293,6 @@ mod tests {
             fake.lock().expect("fake").last_create_body.is_none(),
             "gateway untouched"
         );
-
-        // Free quest through the yookassa arm: granted immediately, no payment.
-        let free_quest = format!("{}-free", ids.quest);
-        let (st, _) = publish(
-            &app,
-            &ids,
-            json!({"quest_id": free_quest, "name": "F", "template_summary": "demo",
-                   "snapshot_version": 1, "snapshot_id": format!("{}-f", ids.snap1), "price": 0}),
-        )
-        .await;
-        assert_eq!(st, StatusCode::OK);
-        let (st, v) = post_json(
-            &app,
-            "/api/checkout",
-            json!({"user_id": ids.player, "quest_id": free_quest, "provider": "yookassa"}),
-        )
-        .await;
-        assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["grant"]["source"], "FreeQuest");
-        assert!(
-            fake.lock().expect("fake").last_create_body.is_none(),
-            "gateway untouched"
-        );
     }
 
     #[tokio::test]
@@ -5336,6 +5313,57 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn free_quest_checkout_bypasses_providers_and_flags() {
+        // A deployment that never enabled any payment provider: paid checkout
+        // fails closed, but a published free quest grants without a provider.
+        let app = TestApp {
+            seeded_flags: false,
+            ..TestApp::default()
+        }
+        .build()
+        .0;
+        let ids = Ids::new("free-noflags");
+        let free_quest = format!("{}-free", ids.quest);
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": free_quest, "name": "F", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-f", ids.snap1), "price": 0}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        // An unknown provider is rejected before the free short-circuit.
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": free_quest, "provider": "paypal"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // Free quest, no provider field: granted immediately.
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": free_quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["grant"]["source"], "FreeQuest");
+        assert_eq!(v["created"], json!(true));
+
+        // Idempotent re-checkout returns the stored grant.
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": free_quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["created"], json!(false));
     }
 
     #[tokio::test]
