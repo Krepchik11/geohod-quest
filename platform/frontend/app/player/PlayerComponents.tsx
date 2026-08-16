@@ -143,7 +143,7 @@ export interface DesignStep {
   action?: { desc?: string; confirmLabel?: string };
   nav?: { lat: number; lng: number; label?: string };
   gift?: { coins: number; narrative_text?: string };
-  hint?: { cost?: number; text?: string; image?: string | null } | string;
+  hint?: { cost?: number; text?: string; image?: string | null };
   completion?: { acceptable?: string[] | null };
 }
 
@@ -485,8 +485,8 @@ export function StepView({ step, quest, copy, st, on }: {
             <PCoin size={16} />
             <div>
               <b>Подсказка</b>
-              {typeof step.hint === 'string' ? step.hint : step.hint?.text}
-              {typeof step.hint === 'object' && step.hint?.image ? (
+              {step.hint?.text}
+              {step.hint?.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img className="p-hintbox__img" src={step.hint.image} alt="Изображение-подсказка" />
               ) : null}
@@ -498,7 +498,7 @@ export function StepView({ step, quest, copy, st, on }: {
             a paper chip above the answer form (the post-2nd-wrong popup stays as
             the proactive offer). Cost comes from the step data, never hardcoded.
             Disappears after purchase — the hint then renders inline above. */}
-        {h.buyHint && step.hint && typeof step.hint !== 'string' && step.hint.cost != null && !stateIn.hintRevealed ? (
+        {h.buyHint && step.hint && step.hint.cost != null && !stateIn.hintRevealed ? (
           <div className="p-hintchip-row">
             <button className="p-hintchip" type="button" onClick={h.buyHint}>
               <PCoin size={15} />

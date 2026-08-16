@@ -3,7 +3,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { toDesignStep } from '../../lib/design-step';
-import { isAnswerAccepted, offersHintAfterWrongs, type QuestSnapshot } from '../../lib/shared-model';
+import { projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
+import {
+  COMPLETION_BONUS,
+  hydratedPlayState,
+  isTerminalStep,
+  transition,
+  type PlayCtx,
+  type PlayEvent,
+  type PlayState,
+} from '../../lib/play-loop';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import {
   CoinToast,
@@ -21,12 +30,11 @@ import { useEscape } from './controls';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и
- * тем же isAnswerAccepted (список шага + универсальный ответ квеста).
+ * тем же движком (lib/play-loop): список шага + универсальный ответ квеста.
  * Снапшот берётся на момент запуска, прогресс
  * эфемерный — dry-run будущей версии (design/ctor2/test-player.jsx).
  */
 
-const COMPLETION_BONUS = 5;
 const TOAST_MS = 1900;
 const NAV_TOAST_MS = 2600;
 
@@ -34,7 +42,10 @@ interface TestQuest {
   title: string;
   city: string;
   duration: string;
-  steps: DesignStep[];
+  /** Канонические GameStep из stepToGameStep — вход движка (lib/play-loop). */
+  steps: GameStep[];
+  /** Те же шаги в форме отображения StepView. */
+  display: DesignStep[];
   /** Универсальный ответ квеста из настроек. Платформенный универсальный
    *  ответ в тесте черновика сознательно не участвует — он рантайм-настройка
    *  админа, а не часть квеста. */
@@ -64,13 +75,18 @@ function TestPopup({ title, text, primary, ghost }: {
 function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: number; onNav: (msg: string) => void }) {
   const total = quest.steps.length;
   const clamp = (n: number) => Math.max(0, Math.min(n, total - 1));
-  // Старт прямо с «Поздравления» сразу даёт терминальный бонус (как в дизайне).
-  const startsAtFinal = quest.steps[clamp(startPos)].template === 'congrats';
-  const [pos, setPos] = useState(() => clamp(startPos));
-  const [coins, setCoins] = useState(() => (startsAtFinal ? COMPLETION_BONUS : 0));
-  const [awarded, setAwarded] = useState<string[]>(() => (startsAtFinal ? ['__terminal'] : []));
-  const [hints, setHints] = useState<number[]>([]);
-  const [wrongs, setWrongs] = useState<Record<number, number>>({});
+  const ctx: PlayCtx = { steps: quest.steps, deviceId: 'test-player', universalAnswers: [quest.universalAnswer] };
+
+  // ONE rule state — the same engine the real player runs (lib/play-loop).
+  // Старт прямо с «Поздравления» сразу даёт терминальный бонус (как в дизайне):
+  // transition чистая, поэтому вход в терминал складывается прямо в старт.
+  const initialRun = (): PlayState => {
+    const base = hydratedPlayState([], clamp(startPos));
+    return isTerminalStep(quest.steps[base.stepIdx])
+      ? transition(base, { type: 'enter_terminal' }, ctx).state
+      : base;
+  };
+  const [play, setPlay] = useState<PlayState>(initialRun);
   const [sound, setSound] = useState(true);
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
@@ -80,41 +96,27 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const [feedbackText, setFeedbackText] = useState('');
   const [wrongFlash, setWrongFlash] = useState(false);
   const [toast, setToast] = useState<{ amount: number; narrative?: string } | null>(null);
-  const [overlay, setOverlay] = useState<'hint' | 'hintReveal' | 'menu' | 'feedback' | 'paused' | 'over' | null>(null);
-  const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  useEffect(() => {
-    const pending = timers.current;
-    return () => pending.forEach(clearTimeout);
-  }, []);
-  const after = (ms: number, fn: () => void) => timers.current.push(setTimeout(fn, ms));
+  const [overlay, setOverlay] = useState<'menu' | 'feedback' | 'paused' | 'over' | null>(null);
 
+  const pos = play.stepIdx;
   const step = quest.steps[pos];
+  const display = quest.display[pos];
+  // Прогон эфемерный — факты живут только в play.facts и умирают с оверлеем.
+  const proj = projectState(play.facts);
+  const coins = proj.balance;
 
   // One shared dismiss timer (mirrors the real player): a new toast restarts the
   // clock, so a step gift's pending clear can't wipe a hint spend toast shown on
   // the very next step before its own 1.9s elapses.
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
   const showToast = (amount: number, narrative?: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ amount, narrative });
     if (sound) (amount < 0 ? spendChime : coinChime)();
     toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
-    timers.current.push(toastTimer.current);
-  };
-
-  // Тост стартового бонуса — асинхронно после маунта (сам бонус уже в стейте).
-  useEffect(() => {
-    if (startsAtFinal) after(450, () => showToast(COMPLETION_BONUS, 'Бонус за прохождение'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const awardKey = (i: number) => `step-${i}`;
-  const award = (s: DesignStep, i: number) => {
-    if (!s.gift || awarded.includes(awardKey(i))) return false;
-    setAwarded((a) => [...a, awardKey(i)]);
-    setCoins((c) => c + s.gift!.coins);
-    showToast(s.gift.coins, s.gift.narrative_text);
-    return true;
   };
 
   const elapsed = () => {
@@ -122,30 +124,36 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
   };
 
-  /** Бонус за прохождение — один раз, при входе в терминальный шаг (событие, не эффект). */
-  const goTo = (n: number) => {
-    const target = clamp(n);
+  /** Единственный путь правил: transition движка → стейт + слив эффектов.
+   *  Приземление на терминал движок завершает сам (бонус один раз —
+   *  идемпотентно по логу), поэтому эффектов-на-стейт нет. */
+  const runEvent = (event: PlayEvent) => {
+    const result = transition(play, event, ctx);
+    setPlay(result.state);
+    if (result.effects.appended.some((f) => f.type === 'attempt_completed')) setFinalTime(elapsed());
+    if (result.effects.toast) showToast(result.effects.toast.amount, result.effects.toast.narrative);
+    if (result.effects.advanced) {
+      setAnswer('');
+      setWrongFlash(false);
+    }
+    if (result.effects.openMaps) {
+      onNav(`→ Системные карты: ${result.effects.openMaps.label || 'точка'} · ${result.effects.openMaps.lat}, ${result.effects.openMaps.lng}`);
+    }
+    if (result.effects.answered && !result.effects.answered.correct) setWrongFlash(true);
+    return result;
+  };
+
+  const next = () => runEvent({ type: 'advance_to', to: pos + 1 });
+  // View rewind, mirroring the real player: authors test the same "go back and
+  // reread" affordance. The engine's log guards stay idempotent.
+  const back = () => {
     setAnswer('');
     setWrongFlash(false);
-    setPos(target);
-    if (quest.steps[target].template === 'congrats' && !awarded.includes('__terminal')) {
-      setAwarded((a) => [...a, '__terminal']);
-      setCoins((c) => c + COMPLETION_BONUS);
-      setFinalTime(elapsed());
-      after(450, () => showToast(COMPLETION_BONUS, 'Бонус за прохождение'));
-    }
+    runEvent({ type: 'back' });
   };
-  const next = () => { if (pos < total - 1) goTo(pos + 1); };
-  // View rewind, mirroring the real player: authors test the same "go back and
-  // reread" affordance. goTo's guards (awarded, '__terminal') stay idempotent.
-  const back = () => { if (pos > 0) goTo(pos - 1); };
 
   const reset = () => {
-    setPos(clamp(startPos));
-    setCoins(startsAtFinal ? COMPLETION_BONUS : 0);
-    setAwarded(startsAtFinal ? ['__terminal'] : []);
-    setHints([]);
-    setWrongs({});
+    setPlay(initialRun());
     setRating(0);
     setReviewText('');
     setOverlay(null);
@@ -155,51 +163,19 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     setFinalTime('0:01');
   };
 
-  const hintCost = typeof step.hint === 'object' && step.hint ? step.hint.cost || 0 : 0;
-  const hintContent = typeof step.hint === 'object' && step.hint
-    ? { text: step.hint.text, image: step.hint.image }
-    : { text: typeof step.hint === 'string' ? step.hint : undefined, image: null };
-
-  /** Единственный путь покупки — и для чипа на странице, и для попапа после
-   *  2-й ошибки (в плеере это тоже один handleBuyHint). */
-  const buyHint = () => {
-    if (hints.includes(pos)) return;
-    setCoins((c) => c - hintCost);
-    setHints((h) => [...h, pos]);
-    setOverlay('hintReveal');
-    showToast(-hintCost, 'подсказка');
-  };
+  const offeredHint = play.hintOfferPos != null ? quest.steps[play.hintOfferPos].supporting?.hint : null;
+  const revealedHint = play.hintRevealPos != null ? quest.display[play.hintRevealPos].hint : null;
 
   const handlers = {
     next,
     play: () => {},
-    navigator: () => {
-      if (step.nav) onNav(`→ Системные карты: ${step.nav.label || 'точка'} · ${step.nav.lat}, ${step.nav.lng}`);
-    },
+    navigator: () => runEvent({ type: 'navigator' }),
     answer: (value: string) => { setAnswer(value); setWrongFlash(false); },
-    buyHint,
-    confirm: () => {
-      const gifted = award(step, pos);
-      if (gifted) after(950, next);
-      else next();
-    },
-    submit: (value: string) => {
-      if (!value.trim()) return;
-      if (isAnswerAccepted(value, step.acceptable || [], [quest.universalAnswer])) {
-        const gifted = award(step, pos);
-        if (gifted) after(950, next);
-        else next();
-      } else {
-        const n = (wrongs[pos] || 0) + 1;
-        setWrongs((w) => ({ ...w, [pos]: n }));
-        // Инлайн-ошибка показывается ВСЕГДА (как в плеере); попап — сверху неё,
-        // по общему правилу порога.
-        setWrongFlash(true);
-        if (offersHintAfterWrongs({ wrongs: n, hasHint: !!step.hint, purchased: hints.includes(pos) })) {
-          setOverlay('hint');
-        }
-      }
-    },
+    /** Единственный путь покупки — и для чипа на странице, и для попапа после
+     *  2-й ошибки (в плеере это тот же buy_hint). */
+    buyHint: () => runEvent({ type: 'buy_hint' }),
+    confirm: () => runEvent({ type: 'physical_confirm' }),
+    submit: (value: string) => runEvent({ type: 'answer', value }),
     rate: (n: number) => setRating(n),
     reviewText: setReviewText,
     // «что дальше» в настоящем плеере открывает каталог других квестов; черновик
@@ -210,7 +186,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const stepState = {
     answer,
     wrong: wrongFlash,
-    hintRevealed: hints.includes(pos),
+    hintRevealed: proj.revealedHints.includes(pos),
     coinsEarned: coins,
     time: finalTime,
     steps: `${total} / ${total}`,
@@ -219,13 +195,13 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   };
 
   return (
-    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel={'Тест: ' + (step.title || step.template)}>
+    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel={'Тест: ' + (display.title || display.template)}>
       {step.template !== 'start' ? (
         <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} onBack={pos > 0 ? back : undefined} />
       ) : null}
 
       <StepView
-        step={step}
+        step={display}
         quest={{ title: quest.title, city: quest.city, duration: quest.duration, completionBonus: COMPLETION_BONUS }}
         copy={PLAYER_COPY}
         st={stepState}
@@ -234,16 +210,20 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
 
       {toast ? <CoinToast amount={toast.amount} narrative={toast.narrative} copy={PLAYER_COPY} /> : null}
 
-      {overlay === 'hint' ? (
+      {offeredHint ? (
         <HintPopup
-          step={{ hint: { cost: hintCost } }}
+          step={{ hint: { cost: offeredHint.cost_coins } }}
           copy={PLAYER_COPY}
-          on={{ dismiss: () => setOverlay(null), buy: buyHint }}
+          on={{ dismiss: () => runEvent({ type: 'dismiss_hint_offer' }), buy: () => runEvent({ type: 'buy_hint' }) }}
         />
       ) : null}
 
-      {overlay === 'hintReveal' ? (
-        <HintRevealPopup hint={hintContent} copy={PLAYER_COPY} on={{ dismiss: () => setOverlay(null) }} />
+      {revealedHint ? (
+        <HintRevealPopup
+          hint={{ text: revealedHint.text, image: revealedHint.image }}
+          copy={PLAYER_COPY}
+          on={{ dismiss: () => runEvent({ type: 'dismiss_hint_reveal' }) }}
+        />
       ) : null}
 
       {overlay === 'menu' ? (
@@ -264,11 +244,15 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
         <FeedbackSheet
           quest={{ title: quest.title }}
           copy={PLAYER_COPY}
-          st={{ pos: pos + 1, stepName: step.title || step.template, text: feedbackText }}
+          st={{ pos: pos + 1, stepName: display.title || display.template, text: feedbackText }}
           on={{
             dismiss: () => setOverlay('menu'),
             text: (e) => setFeedbackText(e.target.value),
-            send: () => { setFeedbackText(''); setOverlay(null); },
+            send: () => {
+              runEvent({ type: 'feedback', note: feedbackText || 'Сообщение об ошибке' });
+              setFeedbackText('');
+              setOverlay(null);
+            },
           }}
         />
       ) : null}
@@ -306,7 +290,8 @@ export function TestOverlay({ quest, startPos, onClose }: {
       title: quest.meta.title,
       city: quest.meta.city || '—',
       duration: quest.meta.duration || '—',
-      steps: snap.steps.map(toDesignStep),
+      steps: snap.steps,
+      display: snap.steps.map(toDesignStep),
       universalAnswer: snap.universal_answer,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -326,7 +311,6 @@ export function TestOverlay({ quest, startPos, onClose }: {
     const onResize = () => setScale(calcScale());
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const navToast = (msg: string) => {

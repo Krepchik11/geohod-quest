@@ -3,12 +3,18 @@
 import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
+import { projectState, latestRating } from '../../lib/shared-model';
 import {
-  isAnswerAccepted,
-  projectState,
-  shouldOfferHint,
-  latestRating,
-} from '../../lib/shared-model';
+  COMPLETION_BONUS,
+  hydratedPlayState,
+  initialPlayState,
+  isTerminalStep,
+  transition,
+  type PlayCtx,
+  type PlayEvent,
+  type PlayState,
+} from '../../lib/play-loop';
+import { queueFactSink } from '../../lib/fact-sink';
 import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
 import { toDesignStep } from '../../lib/design-step';
 import { stepAt } from '../../lib/snapshot';
@@ -21,7 +27,6 @@ import {
   setLastStepIdx,
   openAttempt,
   migrateLegacyLocalStorage,
-  appendFact as queueAppendFact,
 } from '../../lib/queue';
 import { flushPending } from '../../lib/sync';
 import { currentUserId, getDeviceId } from '../../lib/identity';
@@ -71,19 +76,16 @@ function formatElapsed(createdAt: string | null): string {
 }
 
 interface PlayerState {
-  facts: Fact[];
-  /** The step the player is on, as an ARRAY INDEX — the single step identity in
-   *  this component. Every fact is written with `step_position: stepIdx`, and the
-   *  backend reads `step_position` back as an index (`steps.get(i)` in admin stats
-   *  / moderation). The snapshot's own `position` field is descriptive metadata a
-   *  hand-authored or legacy snapshot may number any way it likes; deriving display
-   *  state from it would silently decouple the rendered step from its own facts (a
-   *  purchased hint stops showing, progress mis-counts). */
-  stepIdx: number;
-  /** Furthest step ever reached this attempt. The resume position persists THIS
-   *  (not stepIdx), so a back-navigation reread never regresses where the
-   *  player resumes after a restart. */
-  maxStepIdx: number;
+  /** The game-rule state — owned by the engine (lib/play-loop). `stepIdx` is an
+   *  ARRAY INDEX, the single step identity in this component: every fact is
+   *  written with `step_position: stepIdx`, and the backend reads it back as an
+   *  index (`steps.get(i)` in admin stats / moderation). The snapshot's own
+   *  `position` field is descriptive metadata a hand-authored or legacy snapshot
+   *  may number any way it likes; deriving display state from it would silently
+   *  decouple the rendered step from its own facts. `maxStepIdx` is the resume
+   *  anchor — persisted instead of stepIdx so a back-navigation reread never
+   *  regresses where the player resumes. */
+  play: PlayState;
   /* Local attempt identity from the IndexedDB queue (server id lives there too). */
   attemptKey: string | null;
   attemptCreatedAt: string | null;
@@ -92,17 +94,12 @@ interface PlayerState {
   queueStatus: Record<string, 'pending' | 'sent'>;
   /* Start gate (SPEC): shown when an in-progress attempt was hydrated. */
   showStartGate: boolean;
-  /** Step whose hint popup is open (SPEC: from the 2nd wrong answer only). */
-  hintOfferPos: number | null;
-  /** Step whose just-purchased hint content popup (text/image) is open. */
-  hintRevealPos: number | null;
   /** Designed coin toast: positive = gift/bonus, negative = spend. */
   toast: { amount: number; narrative?: string } | null;
 }
 
 type PlayerAction =
-  | { type: 'append'; fact: Fact }
-  | { type: 'advance'; to: number }
+  | { type: 'apply'; play: PlayState; appended: Fact[] }
   | {
       type: 'hydrate';
       facts: Fact[];
@@ -114,42 +111,32 @@ type PlayerAction =
     }
   | { type: 'dismissStartGate' }
   | { type: 'setQueueStatus'; status: Record<string, 'pending' | 'sent'> }
-  | { type: 'offerHint'; pos: number | null }
-  | { type: 'revealHint'; pos: number | null }
   | { type: 'setToast'; toast: PlayerState['toast'] };
 
 const initialState: PlayerState = {
-  facts: [],
-  stepIdx: 0,
-  maxStepIdx: 0,
+  play: initialPlayState(),
   attemptKey: null,
   attemptCreatedAt: null,
   queueStatus: {},
   showStartGate: false,
-  hintOfferPos: null,
-  hintRevealPos: null,
   toast: null,
 };
 
 function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
   switch (action.type) {
-    case 'append':
-      return {
-        ...state,
-        facts: [...state.facts, action.fact],
-        // write-through is async; mirror optimistically (sent rows are never demoted in the queue)
-        queueStatus: state.queueStatus[factNaturalKey(action.fact)]
-          ? state.queueStatus
-          : { ...state.queueStatus, [factNaturalKey(action.fact)]: 'pending' },
-      };
-    case 'advance':
-      return { ...state, stepIdx: action.to, maxStepIdx: Math.max(state.maxStepIdx, action.to) };
+    case 'apply': {
+      // write-through is async; mirror optimistically (sent rows are never demoted in the queue)
+      let queueStatus = state.queueStatus;
+      for (const fact of action.appended) {
+        const key = factNaturalKey(fact);
+        if (!queueStatus[key]) queueStatus = { ...queueStatus, [key]: 'pending' };
+      }
+      return { ...state, play: action.play, queueStatus };
+    }
     case 'hydrate':
       return {
         ...state,
-        facts: action.facts,
-        stepIdx: action.stepIdx,
-        maxStepIdx: action.stepIdx,
+        play: hydratedPlayState(action.facts, action.stepIdx),
         attemptKey: action.attemptKey,
         attemptCreatedAt: action.attemptCreatedAt,
         queueStatus: action.queueStatus,
@@ -159,10 +146,6 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
       return { ...state, showStartGate: false };
     case 'setQueueStatus':
       return { ...state, queueStatus: action.status };
-    case 'offerHint':
-      return { ...state, hintOfferPos: action.pos };
-    case 'revealHint':
-      return { ...state, hintRevealPos: action.pos };
     case 'setToast':
       return { ...state, toast: action.toast };
     default:
@@ -187,10 +170,8 @@ export default function QuestPlayerClient({
   useKeyboardInset();
   const steps: GameStep[] = snapshot.steps;
   const [state, dispatch] = useReducer(playerReducer, initialState);
-  const {
-    facts, stepIdx, maxStepIdx, attemptKey, attemptCreatedAt,
-    queueStatus, showStartGate, hintOfferPos, hintRevealPos, toast,
-  } = state;
+  const { play, attemptKey, attemptCreatedAt, queueStatus, showStartGate, toast } = state;
+  const { facts, stepIdx, maxStepIdx, hintOfferPos, hintRevealPos } = play;
 
   // Coins: there is exactly ONE balance — the player's
   // global, cross-quest coin wallet (the fold of every CoinFact on this device).
@@ -272,47 +253,13 @@ export default function QuestPlayerClient({
     toastTimer.current = setTimeout(() => dispatch({ type: 'setToast', toast: null }), TOAST_MS);
   }, []);
 
-  /** Append to the reducer + write-through to the durable queue; returns the built fact. */
-  const appendFact = useCallback(
-    (partial: Omit<Fact, 'device_id'>): Fact => {
-      const fact: Fact = { ...partial, device_id: getDeviceId() };
-      dispatch({ type: 'append', fact });
-      // Storage failure degrades to in-memory play (offline never blocks play),
-      // never to a blocked action.
-      void (async () => {
-        try {
-          const key = attemptKey
-            ?? (await ensureActiveAttempt(questId, snapshotId)).attempt_key;
-          await queueAppendFact(key, fact);
-        } catch (err) {
-          console.warn('fact write-through failed (in-memory only)', err);
-        }
-      })();
-      return fact;
-    },
-    [attemptKey, questId, snapshotId]
-  );
-
-  // Gifts are claimed when their step is COMPLETED (physical confirm, correct
-  // answer, terminal entry) — design/player/prototype.jsx semantics, never on reach.
-  const claimGiftIfNeeded = useCallback(
-    (pos: number) => {
-      const step = steps[pos];
-      const gift = step?.supporting?.gift;
-      if (!gift) return;
-      const alreadyClaimed = facts.some((f) => f.type === 'gift_claimed' && f.step_position === pos);
-      if (alreadyClaimed) return;
-      appendFact({
-        type: 'gift_claimed',
-        step_position: pos,
-        submitted_value: null,
-        local_is_correct: true,
-        coins_delta: gift.coins,
-        note: gift.narrative_text || null,
-      });
-      showToast(gift.coins, gift.narrative_text, ui.soundOn);
-    },
-    [steps, facts, appendFact, showToast, ui.soundOn]
+  // Ordered write-through to the durable queue (lib/fact-sink): appends reach
+  // storage in append order; a failure degrades that fact to in-memory play.
+  // ensureActiveAttempt returns the same active attempt openAttempt hydrated,
+  // so the sink needs no attemptKey mirror.
+  const sink = useMemo(
+    () => queueFactSink(async () => (await ensureActiveAttempt(questId, snapshotId)).attempt_key),
+    [questId, snapshotId]
   );
 
   // player_back_button (feature flag, off by default): every advance pushes a
@@ -325,27 +272,59 @@ export default function QuestPlayerClient({
   // Platform-wide universal answer (null while loading / flag off / unset) —
   // merged into every answer check next to the snapshot's quest-wide one.
   const globalUniversalAnswer = useUniversalAnswer();
+  // Rule inputs for the engine. Built per event (not per render): getDeviceId
+  // touches localStorage, which must stay out of the render path.
+  const buildCtx = useCallback(
+    (): PlayCtx => ({
+      steps,
+      deviceId: getDeviceId(),
+      // The quest-wide universal answer frozen in the snapshot and the
+      // platform-wide one (admin flag+value).
+      universalAnswers: [snapshot.universal_answer, globalUniversalAnswer],
+    }),
+    [steps, snapshot.universal_answer, globalUniversalAnswer]
+  );
+
   const stepHistory = useStepHistory(historyBackOn, {
     stepIdx,
     // View follows the traversed entry, clamped: entries can outlive the
     // attempt that made them (replay reloads the page but keeps history), and
     // maxStepIdx caps a stale redo at the furthest step actually reached.
+    // Applied as a bare transition — a traversal must never push history.
     onGoToStep: (idx) => {
       const to = Math.max(0, Math.min(idx, maxStepIdx, steps.length - 1));
       setUi((u) => ({ ...u, wrong: false, answer: '' }));
-      dispatch({ type: 'advance', to });
+      const result = transition(play, { type: 'advance_to', to }, buildCtx());
+      dispatch({ type: 'apply', play: result.state, appended: [] });
     },
     isOverlayOpen: () => ui.menuOpen || ui.showCatalog,
     onCloseOverlay: () =>
       setUi((u) => (u.menuOpen ? { ...u, menuOpen: false } : { ...u, showCatalog: false })),
   });
 
+  /** The ONE rule path: engine transition → reducer + sink + designed effects. */
+  const runEvent = useCallback(
+    (event: PlayEvent) => {
+      const result = transition(play, event, buildCtx());
+      dispatch({ type: 'apply', play: result.state, appended: result.effects.appended });
+      result.effects.appended.forEach((f) => sink.append(f));
+      if (result.effects.toast) {
+        showToast(result.effects.toast.amount, result.effects.toast.narrative, ui.soundOn);
+      }
+      if (result.effects.advanced) {
+        stepHistory.advance(play.stepIdx, result.state.stepIdx);
+      }
+      if (result.effects.openMaps) {
+        window.open(mapsSearchUrl(result.effects.openMaps.lat, result.effects.openMaps.lng), '_blank');
+      }
+      return result;
+    },
+    [play, buildCtx, sink, showToast, ui.soundOn, stepHistory]
+  );
+
   const doAdvance = useCallback(() => {
-    const to = Math.min(stepIdx + 1, steps.length - 1);
-    if (to === stepIdx) return;
-    stepHistory.advance(stepIdx, to);
-    dispatch({ type: 'advance', to });
-  }, [stepIdx, steps.length, stepHistory]);
+    runEvent({ type: 'advance_to', to: stepIdx + 1 });
+  }, [runEvent, stepIdx]);
 
   // Back is a VIEW rewind only: the fact log is append-only and every completion
   // side effect (gift, bonus, attempt_completed) is idempotency-guarded, so
@@ -355,132 +334,51 @@ export default function QuestPlayerClient({
   const doBack = useCallback(() => {
     if (stepIdx === 0) return;
     setUi((u) => ({ ...u, wrong: false, answer: '' }));
-    dispatch({ type: 'advance', to: stepIdx - 1 });
-  }, [stepIdx, setUi]);
+    runEvent({ type: 'back' });
+  }, [stepIdx, setUi, runEvent]);
 
   const handlePhysicalConfirm = useCallback(() => {
-    appendFact({
-      type: 'physical_confirmed',
-      step_position: stepIdx,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: 0,
-      note: null,
-    });
-    claimGiftIfNeeded(stepIdx);
-    doAdvance();
-  }, [stepIdx, appendFact, claimGiftIfNeeded, doAdvance]);
+    runEvent({ type: 'physical_confirm' });
+  }, [runEvent]);
 
   const handleAnswerSubmit = useCallback(
     (value: string) => {
-      if (!value.trim()) return;
-      const step = currentStep;
-      // The step's own list plus the universal answers in effect: the quest-wide
-      // one frozen in the snapshot and the platform-wide one (admin flag+value).
-      const correct = isAnswerAccepted(value, step.completion.acceptable, [
-        snapshot.universal_answer,
-        globalUniversalAnswer,
-      ]);
-      const fact = appendFact({
-        type: 'answer_submitted',
-        step_position: stepIdx,
-        submitted_value: value,
-        local_is_correct: correct,
-        coins_delta: 0,
-        note: null,
-      });
-      if (!correct) {
-        setUi((u) => ({ ...u, wrong: true, answer: value }));
-        // SPEC Wrong-Answer flow: inline error on the 1st wrong; popup only
-        // from the 2nd wrong on this step while its hint is unbought.
-        if (shouldOfferHint([...facts, fact], stepIdx, step)) {
-          dispatch({ type: 'offerHint', pos: stepIdx });
-        }
-        return;
-      }
-      setUi((u) => ({ ...u, wrong: false, answer: '' }));
-      claimGiftIfNeeded(stepIdx);
-      doAdvance();
+      const result = runEvent({ type: 'answer', value });
+      // SPEC Wrong-Answer flow: the inline error flash derives from the verdict
+      // the engine recorded; the popup state (2nd wrong) lives in PlayState.
+      const answered = result.effects.answered;
+      if (!answered) return;
+      setUi((u) =>
+        answered.correct
+          ? { ...u, wrong: false, answer: '' }
+          : { ...u, wrong: true, answer: value }
+      );
     },
-    [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, doAdvance, setUi, snapshot.universal_answer, globalUniversalAnswer]
+    [runEvent, setUi]
   );
 
   const handleBuyHint = useCallback(() => {
-    const pos = hintOfferPos ?? stepIdx;
-    const hint = steps[pos]?.supporting?.hint;
-    // Never blocked by balance — overdraft is a legal state (SPEC).
-    appendFact({
-      type: 'hint_purchased',
-      step_position: pos,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: -(hint?.cost_coins ?? 0),
-      note: hint?.reveal_text || null,
-    });
-    dispatch({ type: 'offerHint', pos: null });
-    // The purchased content (text and/or image) opens as a popup; the inline
-    // hint box then keeps it for the rest of the step.
-    dispatch({ type: 'revealHint', pos });
-    if (hint?.cost_coins) showToast(-hint.cost_coins, 'подсказка', ui.soundOn);
-  }, [hintOfferPos, stepIdx, steps, appendFact, showToast, ui.soundOn]);
+    runEvent({ type: 'buy_hint' });
+  }, [runEvent]);
 
   const handleFeedback = useCallback(
     (note: string) => {
-      appendFact({
-        type: 'feedback_reported',
-        step_position: stepIdx,
-        submitted_value: null,
-        local_is_correct: true,
-        coins_delta: 0,
-        note: note || null,
-      });
+      runEvent({ type: 'feedback', note });
     },
-    [stepIdx, appendFact]
+    [runEvent]
   );
 
   const handleNavigator = useCallback(() => {
-    const nav = currentStep.supporting?.navigator;
-    if (!nav) return;
-    appendFact({
-      type: 'navigator_used',
-      step_position: stepIdx,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: 0,
-      note: nav.label || null,
-    });
-    window.open(mapsSearchUrl(nav.lat, nav.lng), '_blank');
-  }, [stepIdx, currentStep, appendFact]);
+    runEvent({ type: 'navigator' });
+  }, [runEvent]);
 
-  // Emit attempt_completed + completion bonus once on entering the terminal step.
-  // Local guard for this attempt; the server enforces once-per-(player, quest) ever.
-  const isTerminalStep = !!currentStep?.supporting?.terminal || currentStep?.template === 'congrats';
-  const hasCompleted = facts.some((f) => f.type === 'attempt_completed');
-  const handleTerminal = useCallback(() => {
-    appendFact({
-      type: 'attempt_completed',
-      step_position: stepIdx,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: 0,
-      note: currentStep.rich_content.button_text || 'Квест пройден',
-    });
-    if (!facts.some((f) => f.type === 'completion_bonus')) {
-      appendFact({
-        type: 'completion_bonus',
-        step_position: stepIdx,
-        submitted_value: null,
-        local_is_correct: true,
-        coins_delta: 5,
-        note: 'Бонус за прохождение',
-      });
-      showToast(5, 'Бонус за прохождение', ui.soundOn);
-    }
-    claimGiftIfNeeded(stepIdx);
-  }, [stepIdx, currentStep, facts, appendFact, claimGiftIfNeeded, showToast, ui.soundOn]);
+  // The engine completes the attempt when an advance lands on the finale; this
+  // effect covers ONLY hydrate/start ON the finale (no advance happens then).
+  // The engine's own log guard makes a repeat enter_terminal a no-op.
+  const onFinale = isTerminalStep(currentStep);
   useEffect(() => {
-    if (isTerminalStep && !hasCompleted) handleTerminal();
-  }, [isTerminalStep, hasCompleted, handleTerminal]);
+    if (onFinale) runEvent({ type: 'enter_terminal' });
+  }, [onFinale, runEvent]);
 
   // «Начать заново»: re-enter the gate with the restart intent so the fresh run
   // adopts the LATEST published version — resolution + version freeze live in one
@@ -500,21 +398,9 @@ export default function QuestPlayerClient({
   // new fact, the same score never re-appends (mirrors latestRating).
   const recordRating = useCallback(
     (value: number, reviewText?: string) => {
-      const text = reviewText?.trim().slice(0, 500) || null;
-      // Re-append when the score OR the text is new (natural-key dedup absorbs
-      // byte-identical repeats server-side).
-      if (value <= 0 || (latestRating(facts) === value && !text)) return;
-      appendFact({
-        type: 'quest_rated',
-        step_position: stepIdx,
-        submitted_value: String(value),
-        local_is_correct: true,
-        coins_delta: 0,
-        // §11: the optional review rides the same fact as the rating.
-        note: text,
-      });
+      runEvent({ type: 'rate', value, text: reviewText ?? null });
     },
-    [facts, stepIdx, appendFact]
+    [runEvent]
   );
 
   // Fetch the catalog list once (guarded). Used as a prefetch on reaching the
@@ -536,7 +422,7 @@ export default function QuestPlayerClient({
     recordRating(ui.rating, ui.reviewText);
     setUi((u) => ({ ...u, showCatalog: true }));
     loadCatalog();
-  }, [recordRating, ui.rating, loadCatalog, setUi]);
+  }, [recordRating, ui.rating, ui.reviewText, loadCatalog, setUi]);
 
   // Share the finished quest: native share sheet when available, else copy the
   // link and confirm with the «Ссылка скопирована» toast.
@@ -562,8 +448,8 @@ export default function QuestPlayerClient({
   // Prefetch the catalog when the player reaches the finale, so «что дальше»
   // reveals the next quests without a loading flash.
   useEffect(() => {
-    if (isTerminalStep) loadCatalog();
-  }, [isTerminalStep, loadCatalog]);
+    if (onFinale) loadCatalog();
+  }, [onFinale, loadCatalog]);
 
   // Re-mirror per-fact queue status into state (chips + pending counts).
   const refreshQueueStatus = useCallback(async (key: string) => {
@@ -688,12 +574,12 @@ export default function QuestPlayerClient({
   // City/duration are the author's real values frozen into the snapshot at publish
   // (undefined for snapshots published before the field existed — the player then
   // simply omits them rather than showing a hardcoded place). completionBonus is the
-  // canonical +5 (SPEC), not quest-specific data.
+  // canonical bonus (SPEC), not quest-specific data.
   const questMeta = {
     title: snapshot.name,
     city: snapshot.city,
     duration: snapshot.duration,
-    completionBonus: 5,
+    completionBonus: COMPLETION_BONUS,
   };
   const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
 
@@ -757,7 +643,7 @@ export default function QuestPlayerClient({
   ) : stepBody;
 
   // The final and catalog screens are chromeless (no top bar) — matching the design.
-  const showTop = !isTerminalStep && !ui.showCatalog;
+  const showTop = !onFinale && !ui.showCatalog;
 
   return (
     <PlayerFrame
@@ -789,7 +675,7 @@ export default function QuestPlayerClient({
         <HintPopup
           step={{ hint: { cost: hintStep.supporting.hint.cost_coins } }}
           copy={COPY}
-          on={{ buy: handleBuyHint, dismiss: () => dispatch({ type: 'offerHint', pos: null }) }}
+          on={{ buy: handleBuyHint, dismiss: () => runEvent({ type: 'dismiss_hint_offer' }) }}
         />
       )}
       {hintRevealPos != null && steps[hintRevealPos]?.supporting?.hint && (
@@ -799,7 +685,7 @@ export default function QuestPlayerClient({
             image: steps[hintRevealPos].media?.hint,
           }}
           copy={COPY}
-          on={{ dismiss: () => dispatch({ type: 'revealHint', pos: null }) }}
+          on={{ dismiss: () => runEvent({ type: 'dismiss_hint_reveal' }) }}
         />
       )}
       {ui.menuOpen && (
