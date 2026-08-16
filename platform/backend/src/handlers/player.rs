@@ -344,6 +344,9 @@ pub(crate) struct ProductPageWire {
     reviews_total: usize,
     /// «Место старта» — see [`snapshot_start_point`]; None hides the button.
     start_point: Option<snapshot::StartPointWire>,
+    /// The quest's own colours — see [`snapshot_theme`]. Read by the per-quest
+    /// PWA manifest so an installed quest opens on its own background.
+    theme: Option<snapshot::ThemeWire>,
 }
 
 /// §11: one public review — author FIRST NAME only (display name's first word;
@@ -506,7 +509,10 @@ async fn get_quest_product_handler(
     let players = completions? as i64 + meta.players_bonus;
     // «Место старта»: derived from the frozen snapshot on read (kept out of
     // PublishedMeta so no storage migration is needed for old publishes).
-    let start_point = snapshot::snapshot_start_point(snapshot?.as_ref());
+    // Same rule for the colours: derived from the frozen snapshot on read.
+    let snapshot = snapshot?;
+    let start_point = snapshot::snapshot_start_point(snapshot.as_ref());
+    let theme = snapshot::snapshot_theme(snapshot.as_ref());
     Ok(Json(ProductPageWire {
         meta,
         rating_avg,
@@ -517,6 +523,7 @@ async fn get_quest_product_handler(
         reviews,
         reviews_total,
         start_point,
+        theme,
     }))
 }
 

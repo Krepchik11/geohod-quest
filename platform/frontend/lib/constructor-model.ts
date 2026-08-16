@@ -13,6 +13,7 @@
 import type { CropRect } from './image-crop';
 import type { GameStep, QuestSnapshot, Supporting } from './shared-model';
 import { mediaStats } from './snapshot';
+import { MIN_TEXT_CONTRAST, contrastRatio, parseTheme, type QuestTheme } from './quest-theme';
 
 /**
  * Исходник кадрированного изображения: URL несрезанной картинки плюс выбранная
@@ -156,6 +157,8 @@ export interface CtorQuestMeta {
   /** Точка старта квеста одной строкой (формат Google Maps, как у адреса шага):
    *  координаты кнопки «Место старта» в магазине. Пустая строка = точки нет. */
   startCoords: string;
+  /** Цвета квеста: фон, текст, кнопка. null — играется в бумажной палитре. */
+  theme: QuestTheme | null;
 }
 
 export interface CtorVersion {
@@ -188,7 +191,7 @@ export interface GateMessage {
 }
 
 /** Controls a gate failure can point at inside the page editor / settings. */
-export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover' | 'start';
+export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover' | 'start' | 'theme';
 
 export interface Gates {
   errors: GateMessage[];
@@ -244,6 +247,14 @@ export function badStartCoords(meta: CtorQuestMeta): boolean {
 }
 
 export const BAD_START_COORDS_TEXT = 'Точка старта: координаты не распознаны (формат «45.2651, 19.8656»)';
+
+/** Цвета выбраны так, что текст на фоне не прочитать (порог WCAG AA). */
+export function badThemeContrast(theme: QuestTheme | null): boolean {
+  return !!theme && contrastRatio(theme.ink, theme.bg) < MIN_TEXT_CONTRAST;
+}
+
+export const BAD_THEME_CONTRAST_TEXT =
+  'Цвета: текст сливается с фоном — на телефоне под солнцем его не прочитать';
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -308,6 +319,7 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       tags: meta.tags || [],
       universalAnswer: meta.universalAnswer || '',
       startCoords: meta.startCoords || '',
+      theme: parseTheme(meta.theme),
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
@@ -536,6 +548,13 @@ export function computeGates(quest: CtorQuest): Gates {
     add(null, 'err', BAD_START_COORDS_TEXT, 'start');
   }
 
+  // Цвета — предупреждение, не ошибка: читаемость субъективна, а решение об
+  // оформлении остаётся за автором. Молчать о ней нельзя: увидит он это уже
+  // на улице, в игре.
+  if (badThemeContrast(quest.meta.theme)) {
+    add(null, 'warn', BAD_THEME_CONTRAST_TEXT, 'theme');
+  }
+
   // Size/counters honestly derive from the PUBLISHED snapshot (issue #64): the
   // draft is serialized through the same adapter publish uses, so what weighs
   // here is exactly what ships — off-hint images drop out, videos/atmosphere/
@@ -668,6 +687,9 @@ export function serializeDraft(quest: CtorQuest): QuestSnapshot {
     snapshot_version: nextVersionNumber(quest),
     steps: JSON.parse(JSON.stringify(steps)) as GameStep[],
     start_point: parseCoords(quest.meta.startCoords),
+    // Ключ пишется всегда, как start_point: null — «автор цветов не задал», и
+    // плеер играет квест в бумажной палитре.
+    theme: quest.meta.theme,
     ...(city ? { city } : {}),
     ...(duration ? { duration } : {}),
     ...(universalAnswer ? { universal_answer: universalAnswer } : {}),

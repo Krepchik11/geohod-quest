@@ -40,6 +40,9 @@ app/
 lib/
   shared-model.ts     wire types + pure projectors (projectState/projectBalance) — MUST match the Rust fold
   constructor-model.ts editor model + publish gates
+  snapshot.ts         the ONE reader of a published snapshot (chips, start point, colours)
+  quest-theme.ts      the quest's three author-set colours → the player's full palette
+  cover.ts            cover ref → renderable URL, and the letter shown when there is none
   storefront.ts       product-page/marketplace presentation model
   pwa.ts              per-quest install/manifest logic
   install.ts          install-affordance state machine (installable/ios/hidden)
@@ -60,6 +63,14 @@ lib/
   immediately (write-through); `sync.flush*` drains pending facts to the server when
   online, single-flight per attempt. The reducer in `QuestPlayerClient` is the UI
   source of truth; the queue is durable persistence.
+- **Quest colours** (`lib/quest-theme.ts`): an author picks three — background, text,
+  button — and `themeVars` derives the player's whole `--p-*` palette from them,
+  including the tones that must stay readable on a background the author chose. The
+  paper defaults in `app/styles/player-paper.css` are a transcript of
+  `themeVars(PAPER_THEME)`, held to it by test, so there is one derivation and a
+  quest with no colours renders exactly like one whose colours are the paper palette.
+  The colours freeze into the snapshot at publish, so a started attempt never
+  repaints, and the page shell is themed server-side so nothing flashes.
 - **Parity**: the projectors in `lib/shared-model.ts` mirror the Rust backend fold
   exactly. The shared fixtures in `../goldens/parity/` are executed by both this
   suite (`lib/__tests__/parity.test.ts`) and the backend's — one-sided drift fails a

@@ -1,5 +1,7 @@
 import type { Viewport } from 'next';
 import BundleGate from '../BundleGate';
+import { API_BASE, type ProductPageWire } from '../../../lib/api';
+import { parseTheme, themeVars, type QuestTheme } from '../../../lib/quest-theme';
 
 // Scoped to the player route. The frame fills the dynamic viewport, so ask the
 // browser to RESIZE the layout (not just the visual viewport) when the on-screen
@@ -29,11 +31,26 @@ export default async function QuestPage({
   params: Promise<{ questId: string }>;
 }) {
   const { questId } = await params;
-  // Full-bleed paper shell — centers the player on desktop, full viewport on
-  // phones. Responsive rules live in styles/player-paper.css (.player-shell).
+  // Full-bleed shell — centers the player on desktop, full viewport on phones.
+  // Responsive rules live in styles/player-paper.css (.player-shell).
+  //
+  // The quest's colours are put on the SHELL, server-side: everything inside it
+  // inherits them, so the loading and access gates, the letterbox around the
+  // frame and the overscroll area are already the quest's own background in the
+  // first HTML — no flash of the default palette before the bundle resolves.
   return (
-    <main className="player-shell">
+    <main className="player-shell" style={themeVars(await questTheme(questId))}>
       <BundleGate questId={questId} />
     </main>
   );
+}
+
+/** The published quest's colours, or null (unpublished, offline, no colours). */
+async function questTheme(questId: string): Promise<QuestTheme | null> {
+  const res = await fetch(`${API_BASE}/api/quests/${encodeURIComponent(questId)}`, {
+    // Colours change only on publish, so the same short TTL the manifest uses.
+    next: { revalidate: 300 },
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return parseTheme(((await res.json()) as ProductPageWire).theme);
 }

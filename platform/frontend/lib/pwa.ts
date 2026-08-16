@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { PAPER_THEME, type QuestTheme } from './quest-theme';
 
 /**
  * §5 per-quest PWA manifest — each OWNED quest installs as its own home-screen
@@ -14,6 +15,8 @@ export interface QuestManifestSource {
   name: string;
   snapshot_version: number;
   primary_comic: string | null;
+  /** Цвета квеста из замороженного снапшота, если автор их задал. */
+  theme?: QuestTheme | null;
 }
 
 /** short_name ≤ 14 chars keeps Android launchers from mid-word clipping. */
@@ -57,9 +60,11 @@ export function questManifest(q: QuestManifestSource, apiBase: string): Metadata
     start_url: path,
     scope: path,
     display: 'standalone',
-    // The paper player's palette — the installed app opens straight into it.
-    background_color: '#FBF1E5',
-    theme_color: '#3E2C2C',
+    // The palette the player will actually paint: the quest's own colours when
+    // the author set them, the paper default otherwise. A mismatch here shows as
+    // a splash screen in one palette jumping to a quest in another.
+    background_color: (q.theme ?? PAPER_THEME).bg,
+    theme_color: (q.theme ?? PAPER_THEME).ink,
     icons,
   };
 }

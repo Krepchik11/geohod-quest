@@ -24,6 +24,15 @@ describe('questManifest', () => {
     expect(m.name).toBe('Тайны старого Белграда');
   });
 
+  it('opens the installed quest on ITS OWN colours when the author set them', () => {
+    const m = questManifest(
+      { ...base, theme: { bg: '#101014', ink: '#F2F2F5', btn: '#F2F2F5' } },
+      'https://api.example',
+    );
+    expect(m.background_color).toBe('#101014');
+    expect(m.theme_color).toBe('#F2F2F5');
+  });
+
   it('icons come from the cover endpoint, cache-keyed by version', () => {
     const m = questManifest(base, 'https://api.example');
     expect(m.icons).toEqual([

@@ -3,7 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { QuestSettings, type AuthorTransfer } from '../Builder';
-import { BAD_START_COORDS_TEXT, newQuest } from '../../../lib/constructor-model';
+import { BAD_START_COORDS_TEXT, BAD_THEME_CONTRAST_TEXT, newQuest } from '../../../lib/constructor-model';
+import { PAPER_THEME } from '../../../lib/quest-theme';
 
 /**
  * Настройки квеста — attribute editing. Rules under test:
@@ -175,5 +176,46 @@ describe('QuestSettings author transfer', () => {
     fireEvent.change(screen.getByLabelText('Автор квеста'), { target: { value: 'u-2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Передать квест' }));
     expect(await screen.findByText(/Сервер недоступен/)).toBeTruthy();
+  });
+});
+
+/**
+ * Цвета квеста (#101). Блок есть всегда — это часть квеста, а не право доступа;
+ * пока тумблер выключен, квест играется в стандартной палитре.
+ */
+describe('QuestSettings colours', () => {
+  const themed = () => {
+    const quest = newQuest({ title: 'X' });
+    const onMeta = vi.fn();
+    render(<QuestSettings quest={quest} onMeta={onMeta} />);
+    return { quest, onMeta };
+  };
+
+  it('starts off — no colour inputs until the author asks for their own', () => {
+    themed();
+    expect(screen.queryByLabelText(/Фон/)).toBeNull();
+    expect(screen.getByText('Свои цвета')).toBeTruthy();
+  });
+
+  it('turning it on seeds the paper palette so nothing jumps', () => {
+    const { onMeta } = themed();
+    fireEvent.click(screen.getByText('Свои цвета'));
+    expect(onMeta).toHaveBeenCalledWith(expect.objectContaining({ theme: PAPER_THEME }));
+  });
+
+  it('edits one colour and leaves the other two alone', () => {
+    const quest = newQuest({ title: 'X', theme: PAPER_THEME });
+    const onMeta = vi.fn();
+    render(<QuestSettings quest={quest} onMeta={onMeta} />);
+    fireEvent.change(screen.getByLabelText(/Фон/), { target: { value: '#101014' } });
+    expect(onMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: { ...PAPER_THEME, bg: '#101014' } }),
+    );
+  });
+
+  it('says so when the chosen colours make the text unreadable', () => {
+    const quest = newQuest({ title: 'X', theme: { bg: '#101014', ink: '#14141a', btn: '#C9A227' } });
+    render(<QuestSettings quest={quest} onMeta={vi.fn()} />);
+    expect(screen.getByText(new RegExp(BAD_THEME_CONTRAST_TEXT))).toBeTruthy();
   });
 });

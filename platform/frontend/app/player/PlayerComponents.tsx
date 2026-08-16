@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { plural } from '../../lib/ru';
+import { themeVars, type QuestTheme } from '../../lib/quest-theme';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.
@@ -315,9 +316,20 @@ function PrimaryAction({ on, label }: { on?: () => void; label: string }) {
 }
 
 /* Frame */
-export function PlayerFrame({ children, screenLabel, tw = { anims: false } }: { children: React.ReactNode; screenLabel?: string; tw?: FrameTweaks }) {
+export function PlayerFrame({ children, screenLabel, tw = { anims: false }, theme }: {
+  children: React.ReactNode;
+  screenLabel?: string;
+  tw?: FrameTweaks;
+  /** Цвета квеста. Нет темы — плеер играется в бумажной палитре из CSS. */
+  theme?: QuestTheme | null;
+}) {
   return (
-    <div className="pframe" data-anims={tw.anims ? "on" : "off"} data-screen-label={screenLabel}>
+    <div
+      className="pframe"
+      data-anims={tw.anims ? "on" : "off"}
+      data-screen-label={screenLabel}
+      style={themeVars(theme)}
+    >
       {children}
     </div>
   );

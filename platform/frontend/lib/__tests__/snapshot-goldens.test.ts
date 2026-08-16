@@ -1,7 +1,7 @@
 /**
  * Shared snapshot goldens: every fixture in platform/goldens/snapshot/ is read
- * by BOTH suites — this one asserts mediaRefs/chips/startPoint, the backend
- * snapshot module asserts chips/start_point on the SAME files. One-sided drift
+ * by BOTH suites — this one asserts mediaRefs/chips/startPoint/theme, the backend
+ * snapshot module asserts chips/start_point/theme on the SAME files. One-sided drift
  * in the snapshot readers breaks one of the two suites (issue #64).
  */
 import { readdirSync, readFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { QuestSnapshot } from '../shared-model';
-import { chips, mediaRefs, startPoint } from '../snapshot';
+import { chips, mediaRefs, startPoint, theme } from '../snapshot';
 
 interface SnapshotFixture {
   name: string;
@@ -21,6 +21,7 @@ interface SnapshotFixture {
     tasks: number;
     paid_hints: boolean;
     start_point: { lat: number; lng: number } | null;
+    theme: { bg: string; ink: string; btn: string } | null;
   };
 }
 
@@ -41,5 +42,6 @@ describe('snapshot goldens (shared with cargo test)', () => {
     expect(c.tasks).toBe(fixture.expected.tasks);
     expect(c.paidHints).toBe(fixture.expected.paid_hints);
     expect(startPoint(fixture.snapshot)).toEqual(fixture.expected.start_point);
+    expect(theme(fixture.snapshot)).toEqual(fixture.expected.theme);
   });
 });

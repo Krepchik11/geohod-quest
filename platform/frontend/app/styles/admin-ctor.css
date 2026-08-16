@@ -31,6 +31,8 @@
 /* ---------- Редактор страницы ---------- */
 .ed-cols { display: grid; grid-template-columns: 1fr 320px; gap: 32px; align-items: start; margin-top: 20px; }
 .ed-form { display: flex; flex-direction: column; gap: 26px; }
+/* Три равные колонки внутри блока настроек (город/длительность/цена, цвета). */
+.ed-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 .ed-block { background: #fff; border-radius: 20px; padding: 22px 26px; display: flex; flex-direction: column; gap: 14px; }
 .ed-block > h4 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
 .ed-block > h4 .chip { font: 600 11px/1 'Inter', sans-serif; color: var(--blue); background: rgba(59,113,254,.1); border-radius: 10px; padding: 5px 10px; }

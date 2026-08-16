@@ -4,6 +4,7 @@ import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } 
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
 import { projectState, latestRating } from '../../lib/shared-model';
+
 import {
   COMPLETION_BONUS,
   hydratedPlayState,
@@ -17,7 +18,7 @@ import {
 import { queueFactSink } from '../../lib/fact-sink';
 import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
 import { toDesignStep } from '../../lib/design-step';
-import { stepAt } from '../../lib/snapshot';
+import { stepAt, theme as snapshotTheme } from '../../lib/snapshot';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { nextQuestsForCatalog } from '../../lib/catalog';
 import {
@@ -169,6 +170,9 @@ export default function QuestPlayerClient({
   // stays above the on-screen keyboard on iOS (Part B).
   useKeyboardInset();
   const steps: GameStep[] = snapshot.steps;
+  // Цвета берутся из ЗАМОРОЖЕННОГО снапшота, поэтому начатое прохождение не
+  // перекрашивается новой публикацией — как и всё остальное его содержимое.
+  const theme = useMemo(() => snapshotTheme(snapshot), [snapshot]);
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const { play, attemptKey, attemptCreatedAt, queueStatus, showStartGate, toast } = state;
   const { facts, stepIdx, maxStepIdx, hintOfferPos, hintRevealPos } = play;
@@ -558,7 +562,7 @@ export default function QuestPlayerClient({
   if (showStartGate) {
     // §8.2: the gate lives INSIDE the paper frame — no site chrome around it.
     return (
-      <PlayerFrame tw={{ anims: true }} screenLabel="player-start-gate">
+      <PlayerFrame tw={{ anims: true }} screenLabel="player-start-gate" theme={theme}>
         <StartGate
           title={snapshot.name}
           createdAt={attemptCreatedAt}
@@ -645,6 +649,7 @@ export default function QuestPlayerClient({
     <PlayerFrame
       tw={{ anims: true }}
       screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${stepIdx}`}
+      theme={theme}
     >
       {showTop && (
         <>

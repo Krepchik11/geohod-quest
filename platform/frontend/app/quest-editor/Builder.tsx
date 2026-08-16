@@ -4,6 +4,8 @@ import React, { useMemo, useState } from 'react';
 import {
   AGE_TARGET_OPTIONS,
   BAD_START_COORDS_TEXT,
+  BAD_THEME_CONTRAST_TEXT,
+  badThemeContrast,
   COMPLEXITY_OPTIONS,
   CTOR_TEMPLATES,
   SUGGESTED_TAGS,
@@ -25,6 +27,7 @@ import {
   type Gates,
   type GateField,
 } from '../../lib/constructor-model';
+import { PAPER_THEME, type QuestTheme } from '../../lib/quest-theme';
 import { ROLE_LABELS } from '../../lib/admin-users';
 import type { ConstructorAuthorWire } from '../../lib/api';
 import { plural } from '../../lib/ru';
@@ -111,6 +114,58 @@ function TemplatePickerModal({ onClose, onPick }: { onClose: () => void; onPick:
         </div>
       </div>
     </div>
+  );
+}
+
+/* ---------- Цвета квеста ---------- */
+
+const THEME_FIELDS: Array<{ key: keyof QuestTheme; label: string; hint: string }> = [
+  { key: 'bg', label: 'Фон', hint: 'цвет страницы' },
+  { key: 'ink', label: 'Текст', hint: 'цвет букв' },
+  { key: 'btn', label: 'Кнопка', hint: 'главная кнопка' },
+];
+
+/**
+ * Три цвета квеста плюс тумблер «свои цвета». Всё остальное — линии, рамки,
+ * заливка при наведении, цвет надписи на кнопке — считается от них в
+ * lib/quest-theme, поэтому автору нечего рассинхронизировать.
+ */
+function ThemeBlock({ meta, onMeta }: { meta: CtorQuestMeta; onMeta: (meta: CtorQuestMeta) => void }) {
+  const theme = meta.theme;
+  const set = (patch: Partial<QuestTheme>) =>
+    onMeta({ ...meta, theme: { ...(theme ?? PAPER_THEME), ...patch } });
+  return (
+    <WspBlock title="Цвета квеста" aside="как выглядит квест у игрока" gateField="theme">
+      <div>
+        <WspToggle
+          on={!!theme}
+          onClick={() => onMeta({ ...meta, theme: theme ? null : PAPER_THEME })}
+          label="Свои цвета"
+        />
+        {theme ? (
+          <div className="ed-row3" style={{ marginTop: 12 }}>
+            {THEME_FIELDS.map((f) => (
+              <div key={f.key}>
+                <label className="adm-label" htmlFor={`qs-color-${f.key}`}>
+                  {f.label}<small>{f.hint}</small>
+                </label>
+                <input
+                  id={`qs-color-${f.key}`}
+                  className="input"
+                  type="color"
+                  value={theme[f.key]}
+                  onChange={(e) => set({ [f.key]: e.target.value })}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {badThemeContrast(theme) ? <GateNote kind="warn">{BAD_THEME_CONTRAST_TEXT}</GateNote> : null}
+        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: '8px 0 0' }}>
+          Выключено — квест играется в стандартной «бумажной» палитре. Цвета замораживаются при публикации: уже начатое прохождение их не меняет.
+        </p>
+      </div>
+    </WspBlock>
   );
 }
 
@@ -218,7 +273,7 @@ export function QuestSettings({ quest, onMeta, highlight, transfer }: {
           <span className="adm-label">Обложка<small>первый экран и карточка магазина</small></span>
           <QuestCoverZone meta={m} onMeta={onMeta} width={240} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div className="ed-row3">
           <div>
             <label className="adm-label" htmlFor="qs-city">Город</label>
             <input id="qs-city" className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
@@ -345,6 +400,7 @@ export function QuestSettings({ quest, onMeta, highlight, transfer }: {
           </p>
         </div>
       </WspBlock>
+      <ThemeBlock meta={m} onMeta={onMeta} />
       {/* Ключ по владельцу: после передачи блок пересоздаётся, и выбор в поле
           не остаётся от прошлого владельца. */}
       {transfer ? <AuthorBlock key={transfer.current.id} transfer={transfer} /> : null}
@@ -382,7 +438,7 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
   return (
     <>
       <div className="wsp-phone">
-        <PlayerFrame tw={{ anims: false }}>
+        <PlayerFrame tw={{ anims: false }} theme={quest.meta.theme}>
           {designStep.template !== 'start' ? <TopBar pos={pos + 1} total={total} coins={0} /> : null}
           <StepView
             step={designStep}
