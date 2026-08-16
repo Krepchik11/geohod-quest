@@ -80,6 +80,21 @@ export async function fileToOriginImage(file: File): Promise<{ blob: Blob; decod
   return { blob, decoded: await decodeBlob(blob) };
 }
 
+/** JPEG has no alpha — flatten transparent sources onto white, not black. */
+function flattenWhite(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+/** `canvas.toBlob` as a promise, JPEG at `quality`. */
+async function encodeJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', quality),
+  );
+  if (!blob) throw new Error('Не удалось сжать изображение');
+  return blob;
+}
+
 /** Re-encode at `scale` (≤1) as JPEG — the source upload, no crop applied. */
 async function downscale(decoded: DecodedImage, scale: number): Promise<Blob> {
   const canvas = document.createElement('canvas');
@@ -87,12 +102,9 @@ async function downscale(decoded: DecodedImage, scale: number): Promise<Blob> {
   canvas.height = Math.max(1, Math.round(decoded.height * scale));
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Обрезка недоступна в этом браузере (нет canvas)');
+  flattenWhite(ctx);
   ctx.drawImage(decoded.img, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY),
-  );
-  if (!blob) throw new Error('Не удалось сжать изображение');
-  return blob;
+  return encodeJpeg(canvas, JPEG_QUALITY);
 }
 
 /** Longest edge of the encoded 4:3 image — plenty for a phone screen. */
@@ -117,15 +129,10 @@ export async function cropToQuestImage(
   for (;;) {
     canvas.width = width;
     canvas.height = Math.round(width / QUEST_IMAGE_ASPECT);
-    // JPEG has no alpha — flatten transparent PNGs onto white, not black.
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    flattenWhite(ctx);
     ctx.drawImage(img, rect.x, rect.y, rect.width, rect.height, 0, 0, canvas.width, canvas.height);
     for (const quality of [JPEG_QUALITY, 0.72, 0.62, 0.52]) {
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', quality),
-      );
-      if (!blob) throw new Error('Не удалось сжать изображение');
+      const blob = await encodeJpeg(canvas, quality);
       if (blob.size <= maxBytes) return blob;
     }
     if (width <= QUEST_IMAGE_MIN_WIDTH) {
