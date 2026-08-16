@@ -42,13 +42,15 @@ function makeCaches() {
 }
 
 /** Load sw.js into a fresh VM; returns the global (self) exposing handleFetch. */
-function loadSw() {
+function loadSw(
+  fetchImpl: (req: Request | string) => Promise<Response> = async (req) =>
+    new Response('network:' + (typeof req === 'string' ? req : req.url)),
+) {
   const src = readFileSync(resolve(HERE, '../../public/sw.js'), 'utf8');
   const caches = makeCaches();
   const ctx: Record<string, unknown> = {
     caches,
-    fetch: async (req: Request | string) =>
-      new Response('network:' + (typeof req === 'string' ? req : req.url)),
+    fetch: fetchImpl,
     URL,
     Request,
     Response,
@@ -98,5 +100,40 @@ describe('sw.js handleFetch routing', () => {
     await shell.put(assetUrl, new Response('CACHED-CHUNK'));
     const res = await sw.handleFetch(new Request(assetUrl));
     expect(await body(res)).toBe('CACHED-CHUNK'); // SWR returns the cached shell asset
+  });
+});
+
+describe('sw.js offline navigation fallback', () => {
+  const offline = async () => {
+    throw new Error('offline');
+  };
+  const navigate = (path: string) =>
+    // node's Request has no `mode: 'navigate'`; the SW only reads the property.
+    Object.defineProperty(new Request(ORIGIN + path), 'mode', { value: 'navigate' });
+
+  it('quest navigation falls back to the cached /quest shell', async () => {
+    const sw = loadSw(offline);
+    const shell = await sw.caches.open('shell-v1');
+    await shell.put(`${ORIGIN}/`, new Response('HOME-SHELL'));
+    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    const res = await sw.handleFetch(navigate('/quest/abc'));
+    expect(await body(res)).toBe('QUEST-SHELL');
+  });
+
+  it('non-quest navigation (installed app cold start) falls back to the cached main page, not the player', async () => {
+    const sw = loadSw(offline);
+    const shell = await sw.caches.open('shell-v1');
+    await shell.put(`${ORIGIN}/`, new Response('HOME-SHELL'));
+    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    const res = await sw.handleFetch(navigate('/my-quests'));
+    expect(await body(res)).toBe('HOME-SHELL');
+  });
+
+  it('any cached shell beats a browser error page when the preferred one is missing', async () => {
+    const sw = loadSw(offline);
+    const shell = await sw.caches.open('shell-v1');
+    await shell.put(`${ORIGIN}/quest`, new Response('QUEST-SHELL'));
+    const res = await sw.handleFetch(navigate('/profile'));
+    expect(await body(res)).toBe('QUEST-SHELL');
   });
 });

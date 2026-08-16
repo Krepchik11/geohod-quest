@@ -9,7 +9,10 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'GEOHOD QUEST',
     short_name: 'GEOHOD',
     description: 'Городские квесты — играйте офлайн, монеты и прогресс синхронизируются сами.',
-    start_url: '/my-quests',
+    // The stable app identity: without it, changing start_url would mint a NEW
+    // installed app instead of updating the existing one.
+    id: '/',
+    start_url: '/',
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#3B71FE',

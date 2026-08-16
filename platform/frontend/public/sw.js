@@ -58,11 +58,15 @@ async function staleWhileRevalidate(request) {
   }
   const fresh = await refresh;
   if (fresh) return fresh;
-  // Offline navigation with nothing cached for this exact page: any cached
-  // /quest shell is better than a browser error page.
+  // Offline navigation with nothing cached for this exact page: fall back to
+  // the shell matching the destination — the player for /quest/*, the main
+  // page otherwise — and take any cached shell over a browser error page.
   if (request.mode === 'navigate') {
-    const questShell = await cache.match(new Request(self.location.origin + '/quest'));
-    if (questShell) return questShell;
+    const prefer = new URL(request.url).pathname.startsWith('/quest') ? '/quest' : '/';
+    for (const path of prefer === '/quest' ? ['/quest', '/'] : ['/', '/quest']) {
+      const shell = await cache.match(new Request(self.location.origin + path));
+      if (shell) return shell;
+    }
   }
   return Response.error();
 }
