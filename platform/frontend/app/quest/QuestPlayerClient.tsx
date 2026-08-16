@@ -557,7 +557,7 @@ export default function QuestPlayerClient({
   if (showStartGate) {
     // §8.2: the gate lives INSIDE the paper frame — no site chrome around it.
     return (
-      <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: true }} screenLabel="player-start-gate">
+      <PlayerFrame tw={{ anims: true }} screenLabel="player-start-gate">
         <StartGate
           title={snapshot.name}
           createdAt={attemptCreatedAt}
@@ -647,7 +647,7 @@ export default function QuestPlayerClient({
 
   return (
     <PlayerFrame
-      tw={{ art: 'paper', layout: 'image', anims: true }}
+      tw={{ anims: true }}
       screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${stepIdx}`}
     >
       {showTop && (

@@ -2,8 +2,7 @@
    GEOHOD QUEST — player frame, paper («Бумага») art direction.
    Ported from design/player/theme.css (paper + shared rules only;
    comic/modern art directions are cut from v1 per CONCEPT).
-   Layout via [data-layout]: image | text. Animations via
-   [data-anims]: on | off; end-state is always the base style.
+   Animations via [data-anims]: on | off; end-state is always the base style.
    ============================================================ */
 
 /* Full-bleed page wrapper for the player route. Centers the frame on large
@@ -160,10 +159,8 @@
 /* ---------- Контент шага ---------- */
 .p-scroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .p-stepbody {
-  /* Grow to fill a short screen (so .p-actions floats to the bottom), but NEVER
-     shrink below the content: a tall step overflows .p-scroll and scrolls
-     instead of squeezing the image (flex:1 with min-height:0 pinned the body to
-     the scrollport and crushed .p-media to its floor). */
+  /* Grows on a short screen so .p-actions floats to the bottom; never shrinks,
+     so a tall step scrolls instead of squeezing the image. */
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;
@@ -172,8 +169,10 @@
      bar can pin flush to the scroll viewport's bottom edge. */
   padding: var(--p-pad-top) var(--p-pad-x) 0;
 }
-.pframe[data-layout="text"] .p-stepbody .p-media { order: 5; }
-.pframe[data-layout="text"] .p-stepbody { gap: 12px; }
+/* A step rendered DIRECTLY in the frame (Builder previews, BundleGate) becomes
+   its own scrollport: .pframe clips overflow, so forgetting the .p-scroll
+   wrapper must degrade to "scrolls", never to "unreachable content". */
+.pframe > .p-stepbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
 /* Медиа: картинка-комикс / видео / плейсхолдер.
    Full-bleed: the image spans the frame edge-to-edge (negative margins swallow
@@ -181,7 +180,9 @@
    old 1px ring. */
 .p-media {
   position: relative;
-  /* Fixed height: the image is never squeezed by tall text — the step scrolls. */
+  /* Fixed height — tall text scrolls, the image never shrinks. flex:none is
+     load-bearing in the self-scrolling fallback above, where the step body IS
+     the scrollport and its children feel shrink pressure again. */
   flex: none;
   height: 252px;
   margin: 0 calc(-1 * var(--p-pad-x));
@@ -191,7 +192,6 @@
   border-top: 1px solid var(--p-line);
   border-bottom: 1px solid var(--p-line);
 }
-.pframe[data-layout="text"] .p-media { height: 196px; }
 /* Изображение первым элементом шага прижимается к линии верхней панели:
    съедает верхний отступ .p-stepbody, а свой верхний волосок отдаёт линии
    выше (иначе они удваиваются). */
@@ -662,13 +662,22 @@
     max-height: 100dvh;
   }
   /* Installed/standalone: keep the chrome clear of the phone's status bar and
-     home indicator (the player route sets viewport-fit=cover). */
-  .player-shell .p-top {
-    height: calc(52px + env(safe-area-inset-top, 0px));
+     home indicator (the player route sets viewport-fit=cover). Frame padding
+     protects every IN-FLOW child (top bar, step, finale, actions); absolutely
+     positioned surfaces span the padding box, so each carries its own inset. */
+  .player-shell .pframe {
     padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .player-shell .p-backfab { top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .player-shell .p-actions { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .player-shell .p-menu {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+  .player-shell .p-overlay {
+    padding-top: calc(24px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 

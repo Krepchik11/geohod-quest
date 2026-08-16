@@ -195,7 +195,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   };
 
   return (
-    <PlayerFrame tw={{ art: 'paper', layout: 'image', anims: false }} screenLabel={'Тест: ' + (display.title || display.template)}>
+    <PlayerFrame tw={{ anims: false }} screenLabel={'Тест: ' + (display.title || display.template)}>
       {step.template !== 'start' ? (
         <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} onBack={pos > 0 ? back : undefined} />
       ) : null}
