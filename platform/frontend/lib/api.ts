@@ -507,7 +507,10 @@ export const api = {
       body: JSON.stringify({ token }),
     }),
   authResendConfirm: () =>
-    apiFetch<{ status: string }>('/api/auth/confirm/resend', { method: 'POST', body: '{}' }),
+    apiFetch<{ status: 'sent' | 'already-confirmed' }>('/api/auth/confirm/resend', {
+      method: 'POST',
+      body: '{}',
+    }),
   authChangePassword: (body: { current_password: string; new_password: string }) =>
     apiFetch<{ status: string }>('/api/auth/change-password', {
       method: 'POST',

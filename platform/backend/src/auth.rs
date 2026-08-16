@@ -103,6 +103,18 @@ pub struct UserAccount {
     pub email_confirmed_at: Option<u64>,
 }
 
+impl UserAccount {
+    /// §6.3 — the address still awaiting confirmation, if any. THE one rule
+    /// behind the profile banner and the resend endpoint: an account with no
+    /// email has nothing to confirm.
+    pub fn unconfirmed_email(&self) -> Option<&str> {
+        match self.email_confirmed_at {
+            None => self.email.as_deref(),
+            Some(_) => None,
+        }
+    }
+}
+
 /// Credential view for the password flows (login, change-password): the public
 /// account joined with its `password` identity's secret. `password_hash` is
 /// `None` when no password row exists (social-only account, or a

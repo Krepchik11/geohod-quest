@@ -861,6 +861,31 @@ mod tests {
         assert!(me["email"].is_null());
         let methods: Vec<String> = serde_json::from_value(me["methods"].clone()).expect("methods");
         assert_eq!(methods, vec!["telegram".to_string()]);
+        assert_eq!(
+            me["needs_email_confirmation"], false,
+            "no email — nothing to confirm, no banner"
+        );
+    }
+
+    /// §6.3 — the confirm-email banner verdict is the SERVER's, like can_unlink:
+    /// pending only while an email exists and is unconfirmed.
+    #[tokio::test]
+    async fn me_reports_needs_email_confirmation() {
+        let (state, _) = TestApp::default().state_with(test_config());
+        let app = build_router(state.clone());
+        let (_, token) = register(&app, "dev:nec").await;
+        let bearer = format!("Bearer {token}");
+        let (_, me) = get_json_h(&app, "/api/users/me", &[("authorization", &bearer)]).await;
+        assert_eq!(me["needs_email_confirmation"], true, "email unconfirmed");
+        state
+            .auth
+            .confirm_email("dev:nec", 42)
+            .await
+            .expect("confirm");
+        let (_, me) = get_json_h(&app, "/api/users/me", &[("authorization", &bearer)]).await;
+        assert_eq!(me["needs_email_confirmation"], false, "confirmed");
+        let (_, me) = get_json_h(&app, "/api/users/me", &[("x-user-id", "dev:anon-nec")]).await;
+        assert_eq!(me["needs_email_confirmation"], false, "anonymous");
     }
 
     /// A Google-created account carries a verified email but NO password: the

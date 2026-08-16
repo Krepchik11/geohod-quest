@@ -9,4 +9,9 @@ export type Me = { user_id: string, registered: boolean, email: string | null, d
  * §6.3: absent for an anonymous profile, `null`-able for an account —
  * the double Option keeps «absent» and «null» distinct on the wire.
  */
-email_confirmed_at?: number | null, methods: Array<string>, can_unlink: boolean, };
+email_confirmed_at?: number | null, 
+/**
+ * §6.3 — the server's banner verdict (like `can_unlink`): true only while
+ * the account has an email that is still unconfirmed.
+ */
+needs_email_confirmation: boolean, methods: Array<string>, can_unlink: boolean, };

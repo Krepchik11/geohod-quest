@@ -16,17 +16,6 @@ export interface LoginMethodRow {
   passwordless?: boolean;
 }
 
-/**
- * The soft confirm-email banner: only an account that HAS an email can be
- * asked to confirm one. A Telegram-only account carries no address — nothing
- * was mailed, nothing to confirm.
- */
-export function needsEmailConfirmation(
-  me: { email: string | null; email_confirmed_at?: number | null } | null,
-): boolean {
-  return !!me?.email && me.email_confirmed_at == null;
-}
-
 export function loginMethodModel(
   methods: string[],
   email: string | null,
