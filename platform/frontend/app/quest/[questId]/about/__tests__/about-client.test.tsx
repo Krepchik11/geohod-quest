@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resetCollectionForTests } from '../../../../../lib/collection';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
@@ -48,6 +49,7 @@ const PRODUCT = {
 };
 
 beforeEach(() => {
+  resetCollectionForTests();
   getProductMock.mockReset().mockResolvedValue(PRODUCT);
   listGrantsMock.mockReset().mockResolvedValue([]);
   checkoutMock.mockReset();

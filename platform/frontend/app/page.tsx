@@ -5,7 +5,7 @@ import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import { api, type PublishedQuestWire } from '../lib/api';
-import { currentUserId } from '../lib/identity';
+import { useOwned } from '../lib/collection';
 import { catalogFacts, factsLine } from '../lib/storefront';
 import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
 import { sortQuests } from '../lib/store-query';
@@ -38,7 +38,7 @@ export default function GeoQuestHome() {
   // the error message.
   const [market, setMarket] = useState<PublishedQuestWire[] | null>(null);
   const [marketLoading, setMarketLoading] = useState(true);
-  const [owned, setOwned] = useState<Record<string, boolean>>({});
+  const { owned } = useOwned();
 
   // Facet options are the values the catalog actually has; they also tell the
   // URL state which values of the open sets (city, tag) are still real.
@@ -60,29 +60,20 @@ export default function GeoQuestHome() {
   /** ONE predicate for the grid and for the toolbar's live «Показать N». */
   const matching = useCallback(
     (f: FacetFilters) =>
-      market ? market.filter((q) => matchesAttrs(f, q, !!owned[q.quest_id])) : [],
+      market ? market.filter((q) => matchesAttrs(f, q, owned.has(q.quest_id))) : [],
     [market, owned],
   );
 
   const visible = useMemo(() => sortQuests(matching(query.filters), query.sort), [matching, query]);
 
-  // Catalog and grants load INDEPENDENTLY: the catalog is public and
-  // identity-free; a grants failure merely leaves the owned-set empty.
+  // The catalog is public and identity-free; the owned set comes from the
+  // shared identity-keyed collection (lib/collection).
   useEffect(() => {
     let cancelled = false;
     api.listQuests()
       .then((quests) => { if (!cancelled) setMarket(quests); })
       .catch(() => { if (!cancelled) setMarket(null); })
       .finally(() => { if (!cancelled) setMarketLoading(false); });
-    api.listGrants()
-      .then((grants) => {
-        if (cancelled) return;
-        const userId = currentUserId();
-        setOwned(Object.fromEntries(
-          grants.filter((g) => g.user_id === userId).map((g) => [g.quest_id, true])
-        ));
-      })
-      .catch(() => { if (!cancelled) setOwned({}); });
     return () => { cancelled = true; };
   }, []);
 
@@ -159,7 +150,7 @@ export default function GeoQuestHome() {
               /* Offered to a viewer who owns something — and always kept
                  reachable while it is ON, so a link carrying it (or a failed
                  grants load) never leaves an unswitchable filter behind. */
-              showOwnedToggle={Object.keys(owned).length > 0 || query.filters.hideOwned}
+              showOwnedToggle={owned.size > 0 || query.filters.hideOwned}
               countFor={(f) => matching(f).length}
             />
             {visible.length === 0 ? (
@@ -175,7 +166,7 @@ export default function GeoQuestHome() {
               </p>
             ) : (
               visible.map((q) => (
-                <QuestCard key={q.quest_id} quest={q} owned={!!owned[q.quest_id]} />
+                <QuestCard key={q.quest_id} quest={q} owned={owned.has(q.quest_id)} />
               ))
             )}
           </div>
