@@ -200,13 +200,17 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
         <TopBar pos={pos + 1} total={total} coins={coins} onMenu={() => setOverlay('menu')} onBack={pos > 0 ? back : undefined} />
       ) : null}
 
-      <StepView
-        step={display}
-        quest={{ title: quest.title, city: quest.city, duration: quest.duration, completionBonus: COMPLETION_BONUS }}
-        copy={PLAYER_COPY}
-        st={stepState}
-        on={handlers}
-      />
+      {/* The same scroll container the real player uses (QuestPlayerClient):
+          .pframe clips overflow, so without it a tall draft step is unscrollable. */}
+      <div className="p-scroll">
+        <StepView
+          step={display}
+          quest={{ title: quest.title, city: quest.city, duration: quest.duration, completionBonus: COMPLETION_BONUS }}
+          copy={PLAYER_COPY}
+          st={stepState}
+          on={handlers}
+        />
+      </div>
 
       {toast ? <CoinToast amount={toast.amount} narrative={toast.narrative} copy={PLAYER_COPY} /> : null}
 

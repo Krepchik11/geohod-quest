@@ -16,6 +16,9 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   interactiveWidget: 'resizes-content',
+  // Standalone installs draw under the status bar; safe-area env() insets in
+  // player-paper.css only take effect with viewport-fit=cover.
+  viewportFit: 'cover',
 };
 
 // RSC shell: full-bleed paper page, no site chrome — the player IS the page.

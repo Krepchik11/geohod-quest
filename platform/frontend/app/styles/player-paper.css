@@ -160,14 +160,17 @@
 /* ---------- Контент шага ---------- */
 .p-scroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .p-stepbody {
-  flex: 1;
+  /* Grow to fill a short screen (so .p-actions floats to the bottom), but NEVER
+     shrink below the content: a tall step overflows .p-scroll and scrolls
+     instead of squeezing the image (flex:1 with min-height:0 pinned the body to
+     the scrollport and crushed .p-media to its floor). */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
   /* Bottom breathing room lives on the sticky .p-actions instead, so the action
      bar can pin flush to the scroll viewport's bottom edge. */
   padding: var(--p-pad-top) var(--p-pad-x) 0;
-  min-height: 0;
 }
 .pframe[data-layout="text"] .p-stepbody .p-media { order: 5; }
 .pframe[data-layout="text"] .p-stepbody { gap: 12px; }
@@ -178,9 +181,9 @@
    old 1px ring. */
 .p-media {
   position: relative;
-  flex: 0 1 auto;
+  /* Fixed height: the image is never squeezed by tall text — the step scrolls. */
+  flex: none;
   height: 252px;
-  min-height: 132px;
   margin: 0 calc(-1 * var(--p-pad-x));
   border-radius: 0;
   overflow: hidden;
@@ -658,6 +661,14 @@
     max-height: 100vh;
     max-height: 100dvh;
   }
+  /* Installed/standalone: keep the chrome clear of the phone's status bar and
+     home indicator (the player route sets viewport-fit=cover). */
+  .player-shell .p-top {
+    height: calc(52px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .player-shell .p-backfab { top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .player-shell .p-actions { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 }
 
 

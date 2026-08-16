@@ -32,6 +32,15 @@ function openTestPlayer() {
   return userEvent.setup();
 }
 
+describe('конструкторский тест-игрок: каркас', () => {
+  it('шаг живёт в .p-scroll — как в настоящем плеере, иначе длинный контент не прокрутить', () => {
+    openTestPlayer();
+    const scroll = document.querySelector('.pframe .p-scroll');
+    expect(scroll).toBeTruthy();
+    expect(scroll?.querySelector('.p-stepbody')).toBeTruthy();
+  });
+});
+
 describe('конструкторский тест-игрок: подсказка', () => {
   it('чип «подсказка» покупает подсказку и показывает её', async () => {
     const user = openTestPlayer();
