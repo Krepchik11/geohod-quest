@@ -268,8 +268,14 @@ async fn admin_list_reviews_handler(
                 quest_city: label.city,
                 quest_id: r.quest_id,
                 rating: r.rating,
+                // A texted row shows when the review was WRITTEN (what the
+                // moderator reads); a star-only row when it was rated.
+                created_at: if r.text.is_some() {
+                    r.text_at
+                } else {
+                    r.rated_at
+                },
                 text: r.text,
-                created_at: r.created_at,
                 hidden: is_hidden,
                 identity,
             }

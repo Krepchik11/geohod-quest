@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, classify, type ProductPageWire } from '../../../../lib/api';
+import { api, classify, type ProductPageWire, type ReviewWire } from '../../../../lib/api';
 import { markOwned, useOwns } from '../../../../lib/collection';
 import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
@@ -58,6 +58,9 @@ export default function AboutClient({ questId }: { questId: string }) {
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
   const [dl, setDl] = useState<DownloadStage | null>(null);
+  // §11 pagination: pages loaded past the product page's first ten reviews.
+  const [moreReviews, setMoreReviews] = useState<ReviewWire[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   // A ЮKassa return lands here with ?payment={id}; captured once at mount.
   // (Lazy init is hydration-safe: the order card — the only consumer — renders
   // after the client-side product fetch anyway.)
@@ -283,7 +286,7 @@ export default function AboutClient({ questId }: { questId: string }) {
             )}
             {p.reviews.length > 0 ? (
               <div className="qp-reviews__list">
-                {p.reviews.map((r, i) => (
+                {p.reviews.concat(moreReviews).map((r, i) => (
                   <div className="qp-review" key={i}>
                     <div className="qp-review__head">
                       <b>{r.author}</b>
@@ -295,6 +298,23 @@ export default function AboutClient({ questId }: { questId: string }) {
                     <p>{r.text}</p>
                   </div>
                 ))}
+                {p.reviews.length + moreReviews.length < p.reviews_total && (
+                  <button
+                    className="btn btn--secondary"
+                    type="button"
+                    disabled={loadingMore}
+                    onClick={() => {
+                      setLoadingMore(true);
+                      api
+                        .getQuestReviews(questId, p.reviews.length + moreReviews.length)
+                        .then((page) => setMoreReviews((cur) => cur.concat(page.reviews)))
+                        .catch(() => {})
+                        .finally(() => setLoadingMore(false));
+                    }}
+                  >
+                    Показать ещё
+                  </button>
+                )}
               </div>
             ) : (
               p.rating_count === 0 && <p className="qp-reviews__empty">Пока без отзывов — станьте первым</p>

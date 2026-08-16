@@ -228,7 +228,7 @@ pub struct PerVersionStats {
 }
 
 /// Parse a `quest_rated` fact's 1–5 score from its `submitted_value`.
-fn parse_rating(f: &Fact) -> Option<i64> {
+pub(crate) fn parse_rating(f: &Fact) -> Option<i64> {
     f.submitted_value
         .as_deref()
         .and_then(|s| s.trim().parse().ok())
@@ -269,34 +269,28 @@ where
 
 /// One player's effective rating for one quest — the input to the public,
 /// hide-aware rating fold (content-moderation). There is exactly one row per
-/// `(user_id, quest_id)`: the player's LATEST rated attempt, taken across every
-/// version. Grain: per player (a replaying player counts once), all versions (a
-/// rating survives a new publish), hide-aware (dropped by the fold below).
+/// `(user_id, quest_id)`, taken across every attempt and version. Stars and
+/// text are decoupled on purpose: the stars are the player's LATEST rating
+/// anywhere, the text is their LATEST non-empty review anywhere — so replaying
+/// a quest and re-rating star-only updates the stars without erasing the
+/// player's written review. Grain: per player (a replaying player counts
+/// once), all versions (a rating survives a new publish), hide-aware (dropped
+/// by the fold below).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerRatingRow {
     pub user_id: String,
     pub quest_id: String,
     pub rating: i64,
-    /// Trimmed review text; `None` for a star-only rating.
+    /// Server instant the effective stars were recorded.
+    pub rated_at: u64,
+    /// Trimmed review text; `None` when the player never wrote one.
     pub text: Option<String>,
-    /// The rating attempt's creation instant (drives newest-first review order).
-    pub created_at: u64,
-}
-
-/// A quest's effective rating from one attempt log: the LAST `quest_rated` fact
-/// (re-rating within an attempt lets the newer value win, matching the client
-/// `latestRating`), as `(stars, text)`. `None` when the log carries no parseable
-/// rating; a star-only rating returns `text = None`.
-pub fn effective_rating(log: &[Fact]) -> Option<(i64, Option<String>)> {
-    let f = log.iter().rev().find(|f| f.kind == FactKind::QuestRated)?;
-    let rating = parse_rating(f)?;
-    let text = f
-        .note
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(str::to_string);
-    Some((rating, text))
+    /// Server instant `text` was written (drives newest-first review order);
+    /// 0 when `text` is `None`.
+    pub text_at: u64,
+    /// Append-order tiebreaker for `text_at` (receive times have seconds
+    /// granularity): the storage sequence of the text's fact; 0 without text.
+    pub text_seq: u64,
 }
 
 /// True when this row's `(user_id, quest_id)` is in the hidden overlay set.
@@ -339,25 +333,25 @@ pub struct PlayerReview {
     pub text: String,
 }
 
-/// The non-hidden ratings that carry text, newest first, capped at `limit`; each
-/// text is clamped to 500 chars. Star-only and hidden rows are excluded.
+/// Every non-hidden rating that carries text, newest-written first; each text
+/// is clamped to 500 chars. Star-only and hidden rows are excluded. Callers
+/// page the result (`take`/`skip`) — the per-quest row count is per-player, so
+/// materializing the full sorted list is cheap.
 pub fn quest_reviews(
     rows: &[PlayerRatingRow],
     hidden: &std::collections::HashSet<(String, String)>,
-    limit: usize,
 ) -> Vec<PlayerReview> {
     let mut with_text: Vec<&PlayerRatingRow> = rows
         .iter()
         .filter(|r| !row_hidden(r, hidden))
         .filter(|r| r.text.as_deref().is_some_and(|t| !t.trim().is_empty()))
         .collect();
-    with_text.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    with_text.sort_by_key(|r| std::cmp::Reverse((r.text_at, r.text_seq)));
     with_text
         .into_iter()
-        .take(limit)
         .map(|r| PlayerReview {
             user_id: r.user_id.clone(),
-            created_at: r.created_at,
+            created_at: r.text_at,
             rating: r.rating,
             text: r
                 .text
@@ -368,17 +362,6 @@ pub fn quest_reviews(
                 .collect(),
         })
         .collect()
-}
-
-/// Count of non-hidden ratings that carry text — the «{M} с отзывом» total.
-pub fn quest_reviews_total(
-    rows: &[PlayerRatingRow],
-    hidden: &std::collections::HashSet<(String, String)>,
-) -> usize {
-    rows.iter()
-        .filter(|r| !row_hidden(r, hidden))
-        .filter(|r| r.text.as_deref().is_some_and(|t| !t.trim().is_empty()))
-        .count()
 }
 
 /// One `feedback_reported` fact with its resolved attempt context — the input to
@@ -669,8 +652,10 @@ mod tests {
             user_id: player.into(),
             quest_id: quest.into(),
             rating,
+            rated_at: at,
             text: text.map(str::to_string),
-            created_at: at,
+            text_at: if text.is_some() { at } else { 0 },
+            text_seq: if text.is_some() { at } else { 0 },
         }
     }
 
@@ -682,16 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn effective_rating_takes_last_and_reads_text() {
-        assert_eq!(effective_rating(&[]), None, "no rating in log");
-        // Re-rated within an attempt: the newer value wins.
-        let log = vec![rated("3", Some("meh")), rated("5", Some("great"))];
-        assert_eq!(effective_rating(&log), Some((5, Some("great".to_string()))));
-        // Star-only: blank/None note trims to None.
-        assert_eq!(effective_rating(&[rated("4", Some("  "))]), Some((4, None)));
-        assert_eq!(effective_rating(&[rated("2", None)]), Some((2, None)));
-        // Unparseable stars → excluded.
-        assert_eq!(effective_rating(&[rated("", None)]), None);
+    fn parse_rating_reads_trimmed_integers_only() {
+        assert_eq!(parse_rating(&rated("5", None)), Some(5));
+        assert_eq!(parse_rating(&rated(" 4 ", Some("текст"))), Some(4));
+        assert_eq!(parse_rating(&rated("", None)), None);
+        assert_eq!(parse_rating(&fact(FactKind::QuestRated, 0, 0)), None);
     }
 
     #[test]
@@ -721,22 +701,39 @@ mod tests {
             rrow("p2", "q1", 4, None, 20), // star-only → not a text review
             rrow("p3", "q1", 2, Some("oldest"), 10),
         ];
-        let reviews = quest_reviews(&rows, &hidden_of(&[]), 10);
+        let reviews = quest_reviews(&rows, &hidden_of(&[]));
         assert_eq!(reviews.len(), 2);
-        assert_eq!(reviews[0].text, "newest", "newest first");
+        assert_eq!(reviews[0].text, "newest", "newest-written first");
         assert_eq!(reviews[1].text, "oldest");
-        assert_eq!(quest_reviews_total(&rows, &hidden_of(&[])), 2);
-        assert_eq!(
-            quest_reviews(&rows, &hidden_of(&[]), 1).len(),
-            1,
-            "limit honored"
-        );
-        // Hiding a text review drops it from both the list and the total.
+        // Hiding a text review drops it from the list (its len IS the total).
         let hidden = hidden_of(&[("p1", "q1")]);
-        let reviews = quest_reviews(&rows, &hidden, 10);
+        let reviews = quest_reviews(&rows, &hidden);
         assert_eq!(reviews.len(), 1);
         assert_eq!(reviews[0].text, "oldest");
-        assert_eq!(quest_reviews_total(&rows, &hidden), 1);
+    }
+
+    #[test]
+    fn quest_reviews_order_and_date_follow_the_text_not_the_stars() {
+        // p1 wrote a review long ago, then re-rated star-only recently: the
+        // review keeps its written instant for ordering and display.
+        let old_review = PlayerRatingRow {
+            user_id: "p1".into(),
+            quest_id: "q1".into(),
+            rating: 3,
+            rated_at: 100,
+            text: Some("старый отзыв".into()),
+            text_at: 10,
+            text_seq: 1,
+        };
+        let newer = rrow("p2", "q1", 5, Some("свежий"), 50);
+        let reviews = quest_reviews(&[old_review, newer], &hidden_of(&[]));
+        assert_eq!(reviews[0].text, "свежий");
+        assert_eq!(reviews[1].text, "старый отзыв");
+        assert_eq!(
+            reviews[1].created_at, 10,
+            "written instant, not the re-rate"
+        );
+        assert_eq!(reviews[1].rating, 3, "stars stay the effective ones");
     }
 
     fn freport(

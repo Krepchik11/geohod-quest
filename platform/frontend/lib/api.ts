@@ -36,6 +36,7 @@ import type {
   PublicFeatures,
   PublishedQuestWire,
   ReviewHideBody,
+  ReviewsPageWire,
 } from './generated';
 
 /**
@@ -389,6 +390,8 @@ export const api = {
   listQuests: () => apiFetch<PublishedQuestWire[]>('/api/quests'),
   getQuestProduct: (id: string) =>
     apiFetch<ProductPageWire>(`/api/quests/${encodeURIComponent(id)}`),
+  getQuestReviews: (id: string, offset: number) =>
+    apiFetch<ReviewsPageWire>(`/api/quests/${encodeURIComponent(id)}/reviews?offset=${offset}`),
   listGrants: () => apiFetch<GrantWire[]>('/api/grants'),
 
   // Constructor dashboard (editor-gated, like publish). adminHeaders() forwards the

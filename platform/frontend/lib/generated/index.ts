@@ -36,4 +36,5 @@ export type { PublishedQuestWire } from './PublishedQuestWire';
 export type { RedirectPayment } from './RedirectPayment';
 export type { ReviewHideBody } from './ReviewHideBody';
 export type { ReviewWire } from './ReviewWire';
+export type { ReviewsPageWire } from './ReviewsPageWire';
 export type { StartPointWire } from './StartPointWire';

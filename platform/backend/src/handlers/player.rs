@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
         .route("/api/quests/{quest_id}", get(get_quest_product_handler))
         .route(
+            "/api/quests/{quest_id}/reviews",
+            get(get_quest_reviews_handler),
+        )
+        .route(
             "/api/quests/{quest_id}/icons/{icon}",
             get(get_quest_icon_handler),
         )
@@ -355,6 +359,80 @@ pub(crate) struct ReviewWire {
     created_at: u64,
 }
 
+/// Default (and product-page) review page size; `limit` on the reviews
+/// endpoint is capped at [`REVIEWS_PAGE_MAX`].
+const REVIEWS_PAGE: usize = 10;
+const REVIEWS_PAGE_MAX: usize = 50;
+
+/// §11 pagination: one page of a quest's reviews («Показать ещё» past the
+/// product page's first [`REVIEWS_PAGE`]).
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewsPageWire"))]
+pub(crate) struct ReviewsPageWire {
+    reviews: Vec<ReviewWire>,
+    #[cfg_attr(test, ts(type = "number"))]
+    total: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct ReviewsQuery {
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// GET /api/quests/{id}/reviews?offset=&limit= — visibility matches the
+/// product page (published only).
+async fn get_quest_reviews_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(quest_id): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ReviewsQuery>,
+) -> Result<Json<ReviewsPageWire>, AppError> {
+    state
+        .grants
+        .get_published(&quest_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
+    let (rating_rows, hidden) = tokio::join!(
+        state
+            .store
+            .quest_rating_rows(Some(std::slice::from_ref(&quest_id))),
+        state.moderation.hidden_review_keys(),
+    );
+    let all = facts::quest_reviews(&rating_rows?, &hidden?);
+    let total = all.len();
+    let page: Vec<facts::PlayerReview> = all
+        .into_iter()
+        .skip(q.offset.unwrap_or(0))
+        .take(q.limit.unwrap_or(REVIEWS_PAGE).min(REVIEWS_PAGE_MAX))
+        .collect();
+    let reviews = review_wires(&state, page).await?;
+    Ok(Json(ReviewsPageWire { reviews, total }))
+}
+
+/// Author display names in ONE round-trip (one get_user per review would be an
+/// N+1), shaped into the public wire rows.
+async fn review_wires(
+    state: &AppState,
+    page: Vec<facts::PlayerReview>,
+) -> Result<Vec<ReviewWire>, AppError> {
+    let author_ids: Vec<String> = page.iter().map(|r| r.user_id.clone()).collect();
+    let authors = state.auth.get_users_by_ids(&author_ids).await?;
+    Ok(page
+        .into_iter()
+        .map(|r| ReviewWire {
+            author: review_author_label(
+                authors
+                    .get(&r.user_id)
+                    .and_then(|a| a.display_name.as_deref()),
+            ),
+            rating: r.rating,
+            text: r.text,
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
 /// First word of the display name; accounts without one (and anonymous
 /// players) are «Игрок». Emails never leak into reviews.
 fn review_author_label(display_name: Option<&str>) -> String {
@@ -421,24 +499,10 @@ async fn get_quest_product_handler(
     let rating_rows = rating_rows?;
     let hidden = hidden?;
     let (rating_avg, rating_count) = facts::fold_rating_rows(&rating_rows, &hidden);
-    let reviews_total = facts::quest_reviews_total(&rating_rows, &hidden);
-    let page = facts::quest_reviews(&rating_rows, &hidden, 10);
-    // Author display names in ONE round-trip (was one get_user per review — an N+1).
-    let author_ids: Vec<String> = page.iter().map(|r| r.user_id.clone()).collect();
-    let authors = state.auth.get_users_by_ids(&author_ids).await?;
-    let reviews: Vec<ReviewWire> = page
-        .into_iter()
-        .map(|r| ReviewWire {
-            author: review_author_label(
-                authors
-                    .get(&r.user_id)
-                    .and_then(|a| a.display_name.as_deref()),
-            ),
-            rating: r.rating,
-            text: r.text,
-            created_at: r.created_at,
-        })
-        .collect();
+    let all = facts::quest_reviews(&rating_rows, &hidden);
+    let reviews_total = all.len();
+    let page: Vec<facts::PlayerReview> = all.into_iter().take(REVIEWS_PAGE).collect();
+    let reviews = review_wires(&state, page).await?;
     // Public players counter: real distinct completions + marketing bonus, same
     // basis as the store card so the two never disagree.
     let players = completions? as i64 + meta.players_bonus;

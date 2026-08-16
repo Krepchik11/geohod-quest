@@ -125,34 +125,51 @@ impl FactStore for PgFactStore {
     /// player)` the latest rated attempt's last `quest_rated` fact — the input to
     /// the public hide-aware fold. `None` scans every quest (admin list);
     /// `Some(&[..])` scopes it (product page + catalog). Unparseable ratings are
-    /// dropped, mirroring [`crate::facts::effective_rating`].
+    /// dropped, mirroring the in-memory fold.
     async fn quest_rating_rows(
         &self,
         quests: Option<&[String]>,
     ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
         use sqlx::Row;
-        // Inner DISTINCT ON keeps the last quest_rated per attempt (a newer
-        // re-rating wins); outer DISTINCT ON keeps, per (quest, player), the newest
-        // rated attempt (ties by attempt_id, matching the in-memory tuple order).
-        const SELECT: &str = "SELECT DISTINCT ON (a.quest_id, a.user_id)
-                    a.quest_id, a.user_id, a.created_at, last_rated.data
-             FROM ( SELECT DISTINCT ON (f.attempt_id) f.attempt_id, f.data
+        // Stars and text are decoupled (see PlayerRatingRow): per (quest,
+        // player), `s` keeps the newest quest_rated fact (its stars win), `t`
+        // the newest one whose note is non-blank (its text survives a later
+        // star-only re-rate). "Newest" = (recorded_at, seq), the same order the
+        // in-memory fold derives from fact_times.
+        const SELECT: &str = "SELECT s.quest_id, s.user_id, s.data, s.rated_at,
+                    btrim(t.data->>'note') AS text, t.text_at, t.text_seq
+             FROM ( SELECT DISTINCT ON (a.quest_id, a.user_id)
+                           a.quest_id, a.user_id, f.data, f.recorded_at AS rated_at
                     FROM facts f
+                    JOIN attempts a ON a.attempt_id = f.attempt_id
+                    WHERE f.data->>'type' = 'quest_rated' {SCOPE}
+                    ORDER BY a.quest_id, a.user_id, f.recorded_at DESC, f.seq DESC ) AS s
+             LEFT JOIN ( SELECT DISTINCT ON (a.quest_id, a.user_id)
+                           a.quest_id, a.user_id, f.data, f.recorded_at AS text_at,
+                           f.seq AS text_seq
+                    FROM facts f
+                    JOIN attempts a ON a.attempt_id = f.attempt_id
                     WHERE f.data->>'type' = 'quest_rated'
-                    ORDER BY f.attempt_id, f.seq DESC ) AS last_rated
-             JOIN attempts a ON a.attempt_id = last_rated.attempt_id";
-        const ORDER: &str = " ORDER BY a.quest_id, a.user_id, a.created_at DESC, a.attempt_id DESC";
+                      AND btrim(coalesce(f.data->>'note', '')) <> '' {SCOPE}
+                    ORDER BY a.quest_id, a.user_id, f.recorded_at DESC, f.seq DESC ) AS t
+               ON t.quest_id = s.quest_id AND t.user_id = s.user_id";
         let rows = match quests {
             Some([]) => return Ok(Vec::new()),
-            Some(qs) => sqlx::query(&format!("{SELECT} WHERE a.quest_id = ANY($1){ORDER}"))
-                .bind(qs)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(internal)?,
-            None => sqlx::query(&format!("{SELECT}{ORDER}"))
-                .fetch_all(&self.pool)
-                .await
-                .map_err(internal)?,
+            Some(qs) => {
+                let sql = SELECT.replace("{SCOPE}", "AND a.quest_id = ANY($1)");
+                sqlx::query(&sql)
+                    .bind(qs)
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(internal)?
+            }
+            None => {
+                let sql = SELECT.replace("{SCOPE}", "");
+                sqlx::query(&sql)
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(internal)?
+            }
         };
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
@@ -162,21 +179,30 @@ impl FactStore for PgFactStore {
                 .and_then(|v| v.as_str())
                 .and_then(|v| v.trim().parse::<i64>().ok())
             else {
-                continue; // unparseable rating → excluded (mirrors effective_rating)
+                continue; // unparseable newest rating → excluded (mirrors in-memory)
             };
-            let text = data
-                .get("note")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(str::to_string);
-            let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+            let rated_at: i64 = r.try_get("rated_at").map_err(internal)?;
+            let text: Option<String> = r.try_get("text").map_err(internal)?;
+            let text = text.filter(|t| !t.is_empty());
+            let text_at: Option<i64> = r.try_get("text_at").map_err(internal)?;
+            let text_seq: Option<i64> = r.try_get("text_seq").map_err(internal)?;
+            let has_text = text.is_some();
             out.push(crate::facts::PlayerRatingRow {
                 user_id: r.try_get("user_id").map_err(internal)?,
                 quest_id: r.try_get("quest_id").map_err(internal)?,
                 rating,
+                rated_at: rated_at.max(0) as u64,
+                text_at: if has_text {
+                    text_at.unwrap_or(0).max(0) as u64
+                } else {
+                    0
+                },
+                text_seq: if has_text {
+                    text_seq.unwrap_or(0).max(0) as u64
+                } else {
+                    0
+                },
                 text,
-                created_at: created_at as u64,
             });
         }
         Ok(out)
