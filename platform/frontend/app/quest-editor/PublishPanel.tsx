@@ -5,7 +5,6 @@ import {
   nextVersionNumber,
   parseCoords,
   plural,
-  serializeDraft,
   type CtorQuest,
   type GateField,
   type Gates,
@@ -37,12 +36,8 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   }
   gates.errors.forEach((e) => rows.push({ st: 'err', text: e.text, pageId: e.pageId, field: e.field }));
   gates.warnings.forEach((w) => rows.push({ st: 'warn', text: w.text, pageId: w.pageId, field: w.field }));
-  try {
-    serializeDraft(quest);
-    rows.push({ st: 'ok', text: 'Dry-run сериализации: снапшот собирается без ошибок' });
-  } catch (e) {
-    rows.push({ st: 'err', text: `Dry-run сериализации упал: ${(e as Error).message}` });
-  }
+  // A draft the adapter cannot serialize already surfaced as a gate error
+  // (computeGates runs the same serializeDraft the publish path uses).
   return rows;
 }
 

@@ -11,6 +11,7 @@ import {
 } from '../../lib/shared-model';
 import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
 import { toDesignStep } from '../../lib/design-step';
+import { stepAt } from '../../lib/snapshot';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { nextQuestsForCatalog } from '../../lib/catalog';
 import {
@@ -206,7 +207,7 @@ export default function QuestPlayerClient({
   // would race. A single run also means a stable dispatch — no `cancelled` flag.
   const didHydrateRef = useRef(false);
 
-  const currentStep: GameStep = steps[Math.min(stepIdx, steps.length - 1)];
+  const currentStep: GameStep = stepAt(snapshot, stepIdx);
   const proj = projectState(facts);
 
   // The global coin wallet: prior attempts (all quests) + this attempt's live facts,
@@ -225,8 +226,7 @@ export default function QuestPlayerClient({
   /** Pending (unsynced) fact count — internal only: gates the debounced silent flush. */
   const pendingCount = Object.values(queueStatus).filter((s) => s === 'pending').length;
 
-  const displaySteps = useMemo(() => steps.map(toDesignStep), [steps]);
-  const currentDisplayStep = displaySteps[Math.min(stepIdx, displaySteps.length - 1)];
+  const currentDisplayStep = useMemo(() => toDesignStep(currentStep), [currentStep]);
 
   // Ephemeral per-step UI state. Facts/reducer remain the sole durable source.
   // Client-only component (gated by BundleGate), so the sound preference can be
@@ -675,8 +675,8 @@ export default function QuestPlayerClient({
         <StartGate
           title={snapshot.name}
           createdAt={attemptCreatedAt}
-          pos={Math.min(stepIdx + 1, displaySteps.length)}
-          total={displaySteps.length}
+          pos={Math.min(stepIdx + 1, steps.length)}
+          total={steps.length}
           coins={runEarned}
           onContinue={() => dispatch({ type: 'dismissStartGate' })}
           onRestart={handleReplay}
@@ -768,14 +768,14 @@ export default function QuestPlayerClient({
         <>
           <TopBar
             pos={stepIdx + 1}
-            total={displaySteps.length}
+            total={steps.length}
             coins={walletBalance}
             onMenu={() => setUi((u) => ({ ...u, menuOpen: true }))}
             onBack={stepIdx > 0 ? doBack : undefined}
           />
           {/* §8.3: 2px ink progress — completed/total, visible outside the menu */}
           <div className="p-progress" aria-hidden>
-            <span style={{ width: `${(proj.completedSteps.length / Math.max(displaySteps.length, 1)) * 100}%` }} />
+            <span style={{ width: `${(proj.completedSteps.length / Math.max(steps.length, 1)) * 100}%` }} />
           </div>
         </>
       )}
@@ -806,7 +806,7 @@ export default function QuestPlayerClient({
         <MenuOverlay
           quest={questMeta}
           copy={COPY}
-          st={{ pos: stepIdx + 1, total: displaySteps.length, coins: walletBalance, sound: ui.soundOn }}
+          st={{ pos: stepIdx + 1, total: steps.length, coins: walletBalance, sound: ui.soundOn }}
           on={{
             close: closeMenu,
             feedback: () => setUi((u) => ({ ...u, menuOpen: false, feedbackOpen: true })),

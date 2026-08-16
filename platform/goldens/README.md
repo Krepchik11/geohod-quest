@@ -52,6 +52,34 @@ Shared boundary rules (issue #66), run by both suites:
   client-visible slice. Rust: `features.rs`; TS: `FEATURE_KEYS`
   (admin-features) and `CLIENT_FEATURE_KEYS` (client-features).
 
+## Snapshot fixtures (`snapshot/*.json`)
+
+Pin the snapshot readers on both sides (issue #64):
+
+- Rust: `backend/src/snapshot.rs` asserts `snapshot_chips` / `snapshot_start_point`
+  against `expected` (fixture structs use `deny_unknown_fields`).
+- TypeScript: `frontend/lib/snapshot.ts` asserts `mediaRefs` / `chips` / `startPoint`.
+
+```json
+{
+  "name": "scenario-slug",
+  "description": "human-readable intent",
+  "snapshot": { "...": "full frozen QuestSnapshot" },
+  "expected": { "media_refs": [], "pages": 0, "tasks": 0,
+                "paid_hints": false, "start_point": null }
+}
+```
+
+Rules pinned by these fixtures:
+
+- `media_refs` = every media-bearing field (image roles, `media.video.ref`,
+  `supporting.media_video`, bonus animation asset + voice), deduped preserving
+  order — frontend-only (backend media retention walks the authoring body);
+- `pages` = step count; `tasks` = `task_no`/`task_answer` steps; `paid_hints` =
+  any step with a non-null `supporting.hint`;
+- `start_point`: PRESENCE of the snapshot key decides — present (even null)
+  is the author's word; absent = legacy snapshot, first valid step navigator.
+
 ## Quest goldens
 
 - `golden-mystery-fortress-v1.json` — quest snapshot derived from a real export.

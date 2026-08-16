@@ -17,7 +17,7 @@ use crate::authz::{
 };
 use crate::errors::AppError;
 use crate::store::{self, ConstructorQuest, ConstructorQuestSummary, PublishedMeta};
-use crate::{AppState, export};
+use crate::{AppState, export, snapshot};
 
 pub fn router() -> Router<AppState> {
     // All mutations are POST — the router/CORS surface is GET+POST only by
@@ -99,36 +99,6 @@ struct PublishRequest {
     players_bonus: Option<i64>,
 }
 
-/// Content chips for the product page, derived from the frozen snapshot at
-/// publish time: page count, task count (task_no/task_answer templates) and
-/// whether any step sells a paid hint. Tolerates foreign snapshot shapes by
-/// returning None — the UI hides chips it cannot honestly claim.
-fn snapshot_chips(
-    snapshot: Option<&serde_json::Value>,
-) -> (Option<u32>, Option<u32>, Option<bool>) {
-    let Some(steps) = snapshot
-        .and_then(|v| v.get("steps"))
-        .and_then(|v| v.as_array())
-    else {
-        return (None, None, None);
-    };
-    let pages = steps.len() as u32;
-    let tasks = steps
-        .iter()
-        .filter(|st| {
-            st.get("template")
-                .and_then(|t| t.as_str())
-                .is_some_and(|t| t == "task_no" || t == "task_answer")
-        })
-        .count() as u32;
-    let paid_hints = steps.iter().any(|st| {
-        st.get("supporting")
-            .and_then(|sup| sup.get("hint"))
-            .is_some_and(|h| !h.is_null())
-    });
-    (Some(pages), Some(tasks), Some(paid_hints))
-}
-
 async fn publish_quest_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -140,7 +110,7 @@ async fn publish_quest_handler(
     // (which editor owns which quest) remains a tracked follow-up.
     require_editor_actor(&state, &headers).await?;
     let version = req.snapshot_version.unwrap_or(1);
-    let (pages, tasks, paid_hints) = snapshot_chips(req.snapshot.as_ref());
+    let (pages, tasks, paid_hints) = snapshot::snapshot_chips(req.snapshot.as_ref());
     let snapshot_id = req
         .snapshot_id
         .unwrap_or_else(|| format!("{}-v{}", req.quest_id, version));

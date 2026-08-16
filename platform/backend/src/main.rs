@@ -41,6 +41,7 @@ mod media;
 mod payments;
 mod pg_store;
 mod settings;
+mod snapshot;
 mod social;
 mod store;
 mod yookassa;
@@ -383,7 +384,7 @@ mod tests {
             payments::CheckoutResponse,
             handlers::payments::PaymentStatusResponse,
             handlers::payments::CouponVerdict,
-            handlers::player::StartPointWire,
+            snapshot::StartPointWire,
             handlers::constructor::ConstructorQuestWire,
             handlers::constructor::ConstructorQuestFullWire,
             handlers::player::BundleWire,
