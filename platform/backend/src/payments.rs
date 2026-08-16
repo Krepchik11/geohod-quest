@@ -129,6 +129,17 @@ pub async fn checkout(
             .await?;
         return Ok(CheckoutResponse::Settled { grant, created });
     }
+    if let Some(meta) = state.grants.get_published(&req.quest_id).await?
+        && meta.price.is_none_or(|p| p <= 0)
+    {
+        // Published free quest: nothing to charge — grant immediately,
+        // independent of providers and their feature flags.
+        let (grant, created) = state
+            .grants
+            .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
+            .await?;
+        return Ok(CheckoutResponse::Settled { grant, created });
+    }
     let provider = req.provider.as_deref().unwrap_or("mock");
     match provider {
         "mock" => {
@@ -272,14 +283,13 @@ async fn yookassa_checkout(
         .get_published(&req.quest_id)
         .await?
         .ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
-    let Some(price) = meta.price.filter(|p| *p > 0) else {
-        // Free quest: nothing to charge — grant immediately, provider bypassed.
-        let (grant, created) = state
-            .grants
-            .create_grant_idemp(user_id, &req.quest_id, GrantSource::FreeQuest, None)
-            .await?;
-        return Ok(CheckoutResponse::Settled { grant, created });
-    };
+    // [`checkout`] settles free quests before dispatching to a provider.
+    let price = meta.price.filter(|p| *p > 0).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "free quest {} reached the payment gateway",
+            req.quest_id
+        ))
+    })?;
     // A coupon prices the charge now but is redeemed only at settlement — an
     // abandoned payment must not burn the code. Coupon-100% has nothing to
     // charge, so it settles instantly through the synchronous path (redeem +

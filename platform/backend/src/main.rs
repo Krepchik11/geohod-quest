@@ -5339,6 +5339,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn free_quest_checkout_bypasses_providers_and_flags() {
+        // A deployment that never enabled any payment provider: paid checkout
+        // fails closed, but a published free quest grants without a provider.
+        let app = TestApp {
+            seeded_flags: false,
+            ..TestApp::default()
+        }
+        .build()
+        .0;
+        let ids = Ids::new("free-noflags");
+        let free_quest = format!("{}-free", ids.quest);
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": free_quest, "name": "F", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": format!("{}-f", ids.snap1), "price": 0}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "P", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": 100}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        // Paid quest without an enabled provider: still 501.
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED);
+
+        // Free quest, no provider field: granted immediately.
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": free_quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["grant"]["source"], "FreeQuest");
+        assert_eq!(v["created"], json!(true));
+
+        // Idempotent re-checkout returns the stored grant.
+        let (st, v) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": free_quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["created"], json!(false));
+    }
+
+    #[tokio::test]
     async fn payment_providers_reflect_deployment_config() {
         let (st, v) = get_json(&test_app(), "/api/payments/providers").await;
         assert_eq!(st, StatusCode::OK);
