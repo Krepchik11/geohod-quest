@@ -8,7 +8,7 @@ import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, classify, isAuthFailure, type Me } from '../../lib/api';
-import { passwordValid } from '../../lib/credentials';
+import { emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
 import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
@@ -71,7 +71,7 @@ function Stars({ n }: { n: number }) {
 export default function ProfilePage() {
   const [data, setData] = useState<ProfileData>({ source: 'loading' });
   const [banner, setBanner] = useState(true);
-  const [sheet, setSheet] = useState<'name' | 'password' | 'delete' | null>(null);
+  const [sheet, setSheet] = useState<'name' | 'email' | 'password' | 'delete' | null>(null);
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const router = useRouter();
 
@@ -248,6 +248,11 @@ export default function ProfilePage() {
                 <button className="pf-account__row" type="button" onClick={() => setSheet('name')}>
                   Изменить имя <span aria-hidden>›</span>
                 </button>
+                {/* §6.4: works for a social-only account too — this is how it
+                    gains its first address (confirmed by the mailed link). */}
+                <button className="pf-account__row" type="button" onClick={() => setSheet('email')}>
+                  {emailLabel ? 'Изменить почту' : 'Привязать почту'} <span aria-hidden>›</span>
+                </button>
                 {/* Password change only applies to an email/password account. A
                     social-only account (email == null) has no password to change. */}
                 {emailLabel && (
@@ -277,6 +282,13 @@ export default function ProfilePage() {
 
       {sheet === 'name' && (
         <NameSheet current={nameLabel} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} />
+      )}
+      {sheet === 'email' && (
+        <EmailSheet
+          current={emailLabel}
+          hasPassword={!!ready?.me?.methods.includes('email')}
+          onClose={() => setSheet(null)}
+        />
       )}
       {sheet === 'password' && <PasswordSheet email={emailLabel} onClose={() => setSheet(null)} />}
       {sheet === 'delete' && (
@@ -405,6 +417,81 @@ function NameSheet({ current, onClose, onSaved }: { current: string | null; onCl
         <b className="pf-sheet__title">Изменить имя</b>
         <input className="input" aria-label="Имя" placeholder="Как вас называть?" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn btn--block btn--md" type="button" disabled={busy} onClick={() => void save()}>Сохранить</button>
+        <button className="psheet__cancel" type="button" onClick={onClose}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+function EmailSheet({ current, hasPassword, onClose }: {
+  current: string | null;
+  hasPassword: boolean;
+  onClose: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const normalized = normalizeEmail(email);
+    if (!emailValid(normalized)) {
+      setError(emailError(normalized));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.authChangeEmail(normalized, hasPassword ? password : null);
+      toast('Письмо отправлено — подтвердите новый адрес по ссылке');
+      onClose();
+    } catch (e) {
+      const f = classify(e);
+      setError(
+        f.kind === 'unauthorized'
+          ? 'Неверный текущий пароль'
+          : f.kind === 'rejected' && f.status === 409
+            ? 'Эта почта уже занята другим аккаунтом'
+            : f.kind === 'rejected'
+              ? f.error || 'Введите корректную почту'
+              : 'Сервер недоступен — попробуйте позже',
+      );
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="sheet__ovl" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-label="Изменить почту" onClick={(e) => e.stopPropagation()}>
+        <span className="sheet__grip" aria-hidden />
+        <b className="pf-sheet__title">{current ? 'Изменить почту' : 'Привязать почту'}</b>
+        {current && <p className="pf-note">Сейчас: {current}. Адрес сменится только после подтверждения по письму.</p>}
+        <input
+          className="input"
+          type="email"
+          aria-label="Новая почта"
+          placeholder="новый адрес почты"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        {hasPassword && (
+          <input
+            className="input"
+            type="password"
+            aria-label="Текущий пароль"
+            placeholder="текущий пароль"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        )}
+        {error && <p className="af-error">{error}</p>}
+        <button
+          className="btn btn--block btn--md"
+          type="button"
+          disabled={busy || !email.trim() || (hasPassword && !password)}
+          onClick={() => void save()}
+        >
+          Отправить подтверждение
+        </button>
         <button className="psheet__cancel" type="button" onClick={onClose}>Отмена</button>
       </div>
     </div>

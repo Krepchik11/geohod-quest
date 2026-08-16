@@ -3526,6 +3526,99 @@ mod tests {
     /// §6/§12.1–5 — auth v2 end to end: identify → register (+confirm mail) →
     /// confirm → recover → reset (signs in) → change password → delete account
     /// (with the editor-published block).
+    /// §6.4 change email: session-authed request mails a confirmation to the
+    /// NEW address; the email changes only after that link is opened, arrives
+    /// confirmed, and a taken address is rejected up front.
+    async fn scenario_change_email(
+        app: &Router,
+        mails: &Mutex<Vec<mailer::OutgoingMail>>,
+        ids: &Ids,
+    ) {
+        let player = ids.player.as_str();
+        let old_email = format!("{player}@example.com");
+        let new_email = format!("new-{player}@example.com");
+        let (_, token) = register(app, player).await;
+        let bearer = format!("Bearer {token}");
+        let h = [("authorization", bearer.as_str())];
+
+        // No session → 401; garbage address → 400; a password account must
+        // re-prove its password (a stolen session alone must not move the
+        // mailbox that owns the reset path).
+        let (st, _) = post_json(app, "/api/auth/email", json!({ "new_email": new_email })).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/email",
+            json!({ "new_email": "не почта" }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/email",
+            json!({ "new_email": new_email, "current_password": "wrong-password" }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "wrong password rejected");
+
+        // Request the change: the mail goes to the NEW address, nothing
+        // changes yet, and the OLD address is notified.
+        let (st, v) = post_json_h(
+            app,
+            "/api/auth/email",
+            json!({ "new_email": new_email, "current_password": "hunter2hunter2" }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "change requested: {v}");
+        assert_eq!(v["status"], "sent");
+        assert!(
+            mails
+                .lock()
+                .expect("lock")
+                .iter()
+                .any(|m| m.to == old_email && m.subject.contains("смена почты")),
+            "displaced mailbox is warned"
+        );
+        let (_, me) = get_json_h(app, "/api/users/me", &[("authorization", &bearer)]).await;
+        assert_eq!(me["email"], old_email, "unchanged until confirmed");
+
+        // The mailed link confirms the change; the address arrives CONFIRMED.
+        let change_token = mailed_token(mails, &new_email);
+        let (st, v) = post_json(app, "/api/auth/confirm", json!({ "token": change_token })).await;
+        assert_eq!(st, StatusCode::OK, "confirm: {v}");
+        assert_eq!(v["email"], new_email);
+        assert_eq!(v["changed"], true, "the landing can name what happened");
+        let (_, me) = get_json_h(app, "/api/users/me", &[("authorization", &bearer)]).await;
+        assert_eq!(me["email"], new_email);
+        assert_eq!(me["needs_email_confirmation"], false, "arrives confirmed");
+
+        // The old address is free again, the new one is taken by this account.
+        let (st, v) = post_json(app, "/api/auth/identify", json!({ "email": old_email })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["exists"], false, "old address released");
+
+        // A second account cannot take the new address.
+        let other = format!("other-{player}");
+        let (_, other_token) = register(app, &other).await;
+        let other_bearer = format!("Bearer {other_token}");
+        let oh = [("authorization", other_bearer.as_str())];
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/email",
+            json!({ "new_email": new_email, "current_password": "hunter2hunter2" }),
+            &oh,
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "taken address rejected up front");
+
+        // A consumed token cannot be replayed.
+        let (st, _) = post_json(app, "/api/auth/confirm", json!({ "token": change_token })).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "single-use");
+    }
+
     async fn scenario_auth_v2(app: &Router, mails: &Mutex<Vec<mailer::OutgoingMail>>, ids: &Ids) {
         let player = ids.player.as_str();
         let email = format!("{player}@example.com");
@@ -5056,6 +5149,7 @@ mod tests {
         product_page_payload = ids scenario_product_page / "product";
         auth_v2_full_flow = mails scenario_auth_v2 / "authv2";
         reset_by_code_alongside_link = mails scenario_reset_by_code / "resetcode";
+        change_email_confirms_on_the_new_address = mails scenario_change_email / "chmail";
         bad_payload_rejected_with_4xx = ids scenario_bad_payload / "bad";
         migration_idempotent = key scenario_migration_idempotent / "mig";
         auth_register_login_preserves_identity = ids scenario_auth_register_login / "auth";

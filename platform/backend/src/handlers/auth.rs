@@ -1,6 +1,7 @@
 //! Account routes: register/login, social auth (Google/Telegram), identify/
-//! recover/reset/confirm/resend (§6), account management (display name,
-//! password, unlink, delete), linked-provider listing, and the profile read.
+//! recover/reset/confirm/resend/change-email (§6), account management
+//! (display name, password, unlink, delete), linked-provider listing, and the
+//! profile read.
 
 use axum::{
     Router,
@@ -24,6 +25,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/reset", post(reset_password_handler))
         .route("/api/auth/confirm", post(confirm_email_handler))
         .route("/api/auth/confirm/resend", post(resend_confirm_handler))
+        .route("/api/auth/email", post(change_email_handler))
         .route("/api/auth/change-password", post(change_password_handler))
         .route("/api/auth/display-name", post(set_display_name_handler))
         .route("/api/auth/delete-account", post(delete_account_handler))
@@ -501,6 +503,53 @@ async fn issue_auth_token(
 ) -> Result<(String, String), AppError> {
     let token = auth::generate_token();
     let code = auth::generate_reset_code();
+    create_token_record(
+        state,
+        &token,
+        user_id,
+        kind,
+        ttl_secs,
+        media::sha256_hex(code.as_bytes()),
+        None,
+    )
+    .await?;
+    Ok((token, code))
+}
+
+/// Link-only variant: no typable code is minted, so no stored second
+/// credential exists for kinds nothing verifies by code (confirm, email
+/// change). `payload` rides the token for kind-specific data.
+async fn issue_link_token(
+    state: &AppState,
+    user_id: &str,
+    kind: &str,
+    ttl_secs: u64,
+    payload: Option<String>,
+) -> Result<String, AppError> {
+    let token = auth::generate_token();
+    // Empty code_hash: no sha256 hex ever matches it (the store's sentinel).
+    create_token_record(
+        state,
+        &token,
+        user_id,
+        kind,
+        ttl_secs,
+        String::new(),
+        payload,
+    )
+    .await?;
+    Ok(token)
+}
+
+async fn create_token_record(
+    state: &AppState,
+    token: &str,
+    user_id: &str,
+    kind: &str,
+    ttl_secs: u64,
+    code_hash: String,
+    payload: Option<String>,
+) -> Result<(), AppError> {
     state
         .auth
         .create_auth_token(
@@ -508,14 +557,14 @@ async fn issue_auth_token(
             store::AuthTokenRecord {
                 user_id: user_id.to_string(),
                 kind: kind.to_string(),
-                code_hash: media::sha256_hex(code.as_bytes()),
+                code_hash,
                 expires_at: store::now_secs() + ttl_secs,
                 used_at: None,
                 attempts: 0,
+                payload,
             },
         )
-        .await?;
-    Ok((token, code))
+        .await
 }
 
 /// Best-effort transactional mail — a down SMTP must not fail the parent flow.
@@ -525,17 +574,22 @@ async fn send_mail_best_effort(state: &AppState, to: &str, subject: &str, body: 
     }
 }
 
+/// The one place the /auth/confirm landing URL is built.
+fn confirm_link(state: &AppState, token: &str) -> String {
+    format!("{}/auth/confirm?token={token}", state.config.frontend_base)
+}
+
 async fn send_confirm_email(state: &AppState, user_id: &str, email: &str) -> Result<(), AppError> {
-    // Confirmation is link-only (§6.3 is soft, nobody types codes for it) —
-    // the minted code is simply never mailed, so it is unusable.
-    let (token, _code) = issue_auth_token(
+    // Confirmation is link-only (§6.3 is soft, nobody types codes for it).
+    let token = issue_link_token(
         state,
         user_id,
         store::TOKEN_KIND_CONFIRM,
         CONFIRM_TOKEN_TTL_SECS,
+        None,
     )
     .await?;
-    let link = format!("{}/auth/confirm?token={token}", state.config.frontend_base);
+    let link = confirm_link(state, &token);
     send_mail_best_effort(
         state,
         email,
@@ -670,16 +724,15 @@ async fn reset_password_handler(
     }
     let now = store::now_secs();
     let user_id = match req {
-        ResetPasswordRequest::ByToken { token, .. } => {
-            state
-                .auth
-                .consume_auth_token(
-                    &media::sha256_hex(token.as_bytes()),
-                    store::TOKEN_KIND_RESET,
-                    now,
-                )
-                .await?
-        }
+        ResetPasswordRequest::ByToken { token, .. } => state
+            .auth
+            .consume_auth_token(
+                &media::sha256_hex(token.as_bytes()),
+                &[store::TOKEN_KIND_RESET],
+                now,
+            )
+            .await?
+            .map(|(user_id, _, _)| user_id),
         ResetPasswordRequest::ByCode { email, code, .. } => {
             match state
                 .auth
@@ -727,28 +780,130 @@ struct ConfirmEmailRequest {
     token: String,
 }
 
+/// One landing for both mailed links: a first-confirmation token stamps the
+/// current address, an email-change token (§6.4) applies its pending NEW
+/// address — proved reachable by this very click, so it lands confirmed.
 async fn confirm_email_handler(
     State(state): State<AppState>,
     Json(req): Json<ConfirmEmailRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = state
+    let hash = media::sha256_hex(req.token.as_bytes());
+    let now = store::now_secs();
+    // ONE consume for both kinds — a second lookup could burn a token it then
+    // fails to honor.
+    let (user_id, kind, payload) = state
         .auth
         .consume_auth_token(
-            &media::sha256_hex(req.token.as_bytes()),
-            store::TOKEN_KIND_CONFIRM,
-            store::now_secs(),
+            &hash,
+            &[store::TOKEN_KIND_CONFIRM, store::TOKEN_KIND_EMAIL_CHANGE],
+            now,
         )
         .await?
         .ok_or_else(|| {
             AppError::BadRequest("ссылка недействительна или устарела — запросите новую".into())
         })?;
-    let account = state
-        .auth
-        .confirm_email(&user_id, store::now_secs())
-        .await?;
+    let changed = kind == store::TOKEN_KIND_EMAIL_CHANGE;
+    let account = if changed {
+        let new_email = payload.ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("email_change token without a payload"))
+        })?;
+        state.auth.replace_email(&user_id, &new_email, now).await?
+    } else {
+        state.auth.confirm_email(&user_id, now).await?
+    };
+    // `changed` lets the landing page name what actually happened.
     Ok(Json(
-        serde_json::json!({ "status": "confirmed", "email": account.email }),
+        serde_json::json!({ "status": "confirmed", "email": account.email, "changed": changed }),
     ))
+}
+
+/// Body for POST /api/auth/email (§6.4 change email). `current_password` is
+/// required exactly when the account has one (social-only accounts don't).
+#[derive(serde::Deserialize)]
+struct ChangeEmailRequest {
+    new_email: String,
+    #[serde(default)]
+    current_password: Option<String>,
+}
+
+/// §6.4 — request an email change (Profile «Изменить почту»). Session-only.
+/// Nothing changes until the mailed link is opened FROM THE NEW ADDRESS —
+/// that click both proves reachability and applies the change (see
+/// [`confirm_email_handler`]). Also how a social-only account gains its first
+/// address. The taken-address check up front is a UX courtesy; the store's
+/// unique index stays the authority at apply time.
+async fn change_email_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ChangeEmailRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account = session_account(&state, &headers)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("login required".into()))?;
+    let new_email = auth::normalize_email(&req.new_email);
+    if !auth::email_valid(&new_email) {
+        return Err(AppError::BadRequest("введите корректную почту".into()));
+    }
+    if account.email.as_deref() == Some(new_email.as_str()) {
+        return Err(AppError::BadRequest("это текущий адрес".into()));
+    }
+    // Email change is the stronger privilege (the address owns the reset
+    // path), so an account WITH a password must re-prove it — a stolen
+    // session alone must not move the mailbox. Social-only accounts have no
+    // password; there the session is the only proof that exists.
+    let record = state
+        .auth
+        .user_record(&account.user_id)
+        .await?
+        .ok_or_else(|| crate::store::no_account(&account.user_id))?;
+    if let Some(hash) = record.password_hash.as_deref() {
+        let ok = req
+            .current_password
+            .as_deref()
+            .is_some_and(|p| auth::verify_password(hash, p));
+        if !ok {
+            return Err(AppError::Unauthorized("неверный текущий пароль".into()));
+        }
+    }
+    if state.auth.find_by_email(&new_email).await?.is_some() {
+        return Err(AppError::Conflict("email is already taken".into()));
+    }
+    fixed_window_allow(
+        &state,
+        format!("email-change:{new_email}"),
+        MAIL_SEND_WINDOW_SECS,
+        MAIL_SEND_LIMIT,
+    )?;
+    let token = issue_link_token(
+        &state,
+        &account.user_id,
+        store::TOKEN_KIND_EMAIL_CHANGE,
+        RESET_TOKEN_TTL_SECS,
+        Some(new_email.clone()),
+    )
+    .await?;
+    let link = confirm_link(&state, &token);
+    send_mail_best_effort(
+        &state,
+        &new_email,
+        "Подтвердите новую почту — GEOHOD QUEST",
+        &format!(
+            "Здравствуйте!\n\nВы попросили привязать этот адрес к аккаунту GEOHOD QUEST — подтвердите по ссылке:\n{link}\n\nЕсли это были не вы, просто игнорируйте это письмо."
+        ),
+    )
+    .await;
+    // The displaced mailbox is told at request time — a silent move would let
+    // a stolen session take the account over without the owner ever knowing.
+    if let Some(old_email) = account.email.as_deref() {
+        send_mail_best_effort(
+            &state,
+            old_email,
+            "Запрошена смена почты — GEOHOD QUEST",
+            "Здравствуйте!\n\nДля вашего аккаунта GEOHOD QUEST запрошена смена почты на другой адрес. Если это были вы — подтвердите по письму на новом адресе.\n\nЕсли это были не вы, срочно смените пароль.",
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({ "status": "sent" })))
 }
 
 /// §6.3 — resend the confirmation mail (Profile banner «Ещё раз»). Session-only.

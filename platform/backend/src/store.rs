@@ -732,10 +732,14 @@ pub struct AuthTokenRecord {
     /// Code-verify attempts so far; the code stops verifying at
     /// [`MAX_CODE_ATTEMPTS`] (low-entropy codes must not be brute-forceable).
     pub attempts: u32,
+    /// Kind-specific data the consumer needs atomically with the consume —
+    /// the pending NEW address for [`TOKEN_KIND_EMAIL_CHANGE`]; `None` else.
+    pub payload: Option<String>,
 }
 
 pub const TOKEN_KIND_RESET: &str = "reset";
 pub const TOKEN_KIND_CONFIRM: &str = "confirm";
+pub const TOKEN_KIND_EMAIL_CHANGE: &str = "email_change";
 
 /// One authenticator (`identities` row): a `(method, identifier)` pair that
 /// resolves to an account `user_id`. Every way to sign in is one row — the
@@ -998,15 +1002,23 @@ impl InMemoryAuthStore {
         self.auth_tokens.insert(token_hash.to_string(), rec);
     }
 
-    /// Consume a token: valid kind + not expired + unused → marks used and
-    /// returns the player id; anything else is None (one opaque failure).
-    pub fn consume_auth_token(&mut self, token_hash: &str, kind: &str, now: u64) -> Option<String> {
+    /// Consume a token: one of the accepted kinds + not expired + unused →
+    /// marks used and returns `(player id, kind, payload)`; anything else is
+    /// None (one opaque failure). Accepting a kind SET keeps a shared landing
+    /// (e.g. /auth/confirm) to a single consume — no second lookup can burn a
+    /// token it then fails to honor.
+    pub fn consume_auth_token(
+        &mut self,
+        token_hash: &str,
+        kinds: &[&str],
+        now: u64,
+    ) -> Option<(String, String, Option<String>)> {
         let rec = self.auth_tokens.get_mut(token_hash)?;
-        if rec.kind != kind || rec.used_at.is_some() || rec.expires_at < now {
+        if !kinds.contains(&rec.kind.as_str()) || rec.used_at.is_some() || rec.expires_at < now {
             return None;
         }
         rec.used_at = Some(now);
-        Some(rec.user_id.clone())
+        Some((rec.user_id.clone(), rec.kind.clone(), rec.payload.clone()))
     }
 
     /// Consume by emailed code (§6.2 R2): the player's active (unused,
@@ -1172,10 +1184,48 @@ impl InMemoryAuthStore {
         Ok(account)
     }
 
+    /// §6.4 change email: set a CONFIRMED new address on an existing account,
+    /// releasing the old one (also how a social-only account gains its first
+    /// address). Rejects an address owned by another account (409). Only ever
+    /// called after the new address proved reachable (the mailed link), which
+    /// is why it lands confirmed.
+    pub fn replace_email(
+        &mut self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        if let Some(owner) = self.email_index.get(email)
+            && owner != user_id
+        {
+            return Err(AppError::Conflict("email is already taken".into()));
+        }
+        let account = self
+            .users
+            .get_mut(user_id)
+            .ok_or_else(|| no_account(user_id))?;
+        let old = account.email.replace(email.to_string());
+        account.email_confirmed_at = Some(confirmed_at);
+        let account = account.clone();
+        if let Some(old) = old {
+            self.email_index.remove(&old);
+        }
+        self.email_index
+            .insert(email.to_string(), user_id.to_string());
+        // The move revokes every outstanding mailed key: a reset link sent to
+        // the OLD mailbox minutes ago must not keep opening the account.
+        self.auth_tokens
+            .retain(|_, r| r.user_id != user_id || r.used_at.is_some());
+        // No identities fixup needed: the password row is keyed by user_id,
+        // not by the address, so login by the new email works immediately.
+        Ok(account)
+    }
+
     /// Attach a verified Google email to an EXISTING account that has none yet
     /// (so the account gains an email login/display). No-op-safe: rejects if the
     /// email is taken by another account (409). Sets `email_confirmed_at` since
-    /// Google is authoritative for a verified address.
+    /// Google is authoritative for a verified address. NOT [`Self::replace_email`]:
+    /// attaching a first address moves nothing, so no mailed keys are revoked.
     pub fn attach_email(
         &mut self,
         user_id: &str,
@@ -1477,9 +1527,9 @@ pub trait AuthStore: Send + Sync {
     async fn consume_auth_token(
         &self,
         token_hash: &str,
-        kind: &str,
+        kinds: &[&str],
         now: u64,
-    ) -> Result<Option<String>, AppError>;
+    ) -> Result<Option<(String, String, Option<String>)>, AppError>;
 
     /// See [`InMemoryAuthStore::consume_auth_token_by_code`].
     async fn consume_auth_token_by_code(
@@ -1540,6 +1590,14 @@ pub trait AuthStore: Send + Sync {
 
     /// See [`InMemoryAuthStore::attach_email`].
     async fn attach_email(
+        &self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError>;
+
+    /// See [`InMemoryAuthStore::replace_email`].
+    async fn replace_email(
         &self,
         user_id: &str,
         email: &str,
@@ -1622,10 +1680,10 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
     async fn consume_auth_token(
         &self,
         token_hash: &str,
-        kind: &str,
+        kinds: &[&str],
         now: u64,
-    ) -> Result<Option<String>, AppError> {
-        Ok(lock(self, "auth")?.consume_auth_token(token_hash, kind, now))
+    ) -> Result<Option<(String, String, Option<String>)>, AppError> {
+        Ok(lock(self, "auth")?.consume_auth_token(token_hash, kinds, now))
     }
 
     async fn consume_auth_token_by_code(
@@ -1704,6 +1762,15 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
         lock(self, "auth")?.attach_email(user_id, email, confirmed_at)
+    }
+
+    async fn replace_email(
+        &self,
+        user_id: &str,
+        email: &str,
+        confirmed_at: u64,
+    ) -> Result<UserAccount, AppError> {
+        lock(self, "auth")?.replace_email(user_id, email, confirmed_at)
     }
 }
 
