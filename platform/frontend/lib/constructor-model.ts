@@ -67,6 +67,8 @@ export interface CtorStep {
   title: string;
   /** task_answer: плейсхолдер поля ответа. */
   prompt: string;
+  /** continue: надпись кнопки перехода (пусто — стандартное «продолжить»). */
+  buttonLabel: string;
   action: { desc: string; confirmLabel: string };
   /** Единственное изображение страницы (4:3, ≤100 КБ — контракт пайплайна загрузки). */
   image: string | null;
@@ -267,6 +269,7 @@ export function newStep(template: CtorTemplate): CtorStep {
     kicker: '',
     title: '',
     prompt: '',
+    buttonLabel: '',
     action: { desc: '', confirmLabel: 'Я на месте' },
     image: null,
     imageOrigin: null,
@@ -405,6 +408,9 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     // (и с испорченным значением) нормализуем к null — зона предложит выбрать
     // файл заново вместо того, чтобы кадрировать несуществующий исходник.
     s.imageOrigin = sanitizeImageOrigin(step.imageOrigin);
+    // Тела до появления настраиваемой кнопки «Продолжить» поля не имеют —
+    // нормализуем к пустой строке (= стандартная надпись).
+    if (typeof s.buttonLabel !== 'string') s.buttonLabel = '';
     s.hint = {
       on: legacy.hint?.on ?? true,
       cost: legacy.hint?.cost ?? 5,
@@ -617,6 +623,7 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
       if (nav) sup.navigator = nav;
       break;
     case 'continue':
+      if (s.buttonLabel.trim()) g.rich_content.button_text = s.buttonLabel.trim();
       break;
     case 'congrats':
       g.rich_content.title = s.title || 'Квест пройден!';

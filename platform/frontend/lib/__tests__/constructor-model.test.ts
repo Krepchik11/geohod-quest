@@ -306,6 +306,20 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(d.image).toBe('/assets/img/quest-card.png');
   });
 
+  it('continue: the author button label rides rich_content.button_text into the player', () => {
+    const s = newStep('continue');
+    s.buttonLabel = '  идём дальше  ';
+    const g = stepToGameStep(s, newQuest({}).meta);
+    expect(g.rich_content.button_text).toBe('идём дальше');
+    expect(toDesignStep(g).button).toBe('идём дальше');
+  });
+
+  it('continue: no label — button_text absent, the player keeps its default', () => {
+    const g = stepToGameStep(newStep('continue'), newQuest({}).meta);
+    expect(g.rich_content.button_text).toBeUndefined();
+    expect(toDesignStep(g).button).toBeUndefined();
+  });
+
   it('task_answer: trims and drops blank answers; hint emitted when it has text', () => {
     const s = newStep('task_answer');
     s.acceptable = [' 1730 ', '', 'в 1730'];

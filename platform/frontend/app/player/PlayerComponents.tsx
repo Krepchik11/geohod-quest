@@ -139,6 +139,8 @@ export interface DesignStep {
   video?: StepVideo;
   place?: string;
   prompt?: string | null;
+  /** Author-set advance-button label (rich_content.button_text). */
+  button?: string;
   acceptable?: string[] | null;
   action?: { desc?: string; confirmLabel?: string };
   nav?: { lat: number; lng: number; label?: string };
@@ -523,7 +525,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <PrimaryAction on={h.next} label={copy?.next || "продолжить"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.next || "продолжить"} />
       </div>
     );
   }
