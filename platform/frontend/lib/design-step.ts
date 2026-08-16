@@ -21,6 +21,7 @@ export function toDesignStep(step: GameStep): DesignStep {
     video: video ? { dur: video.duration_label || undefined, label: video.caption || undefined } : undefined,
     place: isStart ? undefined : rich?.place_text,
     prompt: rich?.question_prompt,
+    button: rich?.button_text || undefined,
     acceptable: step.completion?.acceptable,
     action: sup?.physical_action
       ? {

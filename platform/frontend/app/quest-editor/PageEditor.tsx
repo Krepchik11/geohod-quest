@@ -351,6 +351,10 @@ export function PageEditor({ quest, step, msgs, highlight, onMeta, onPatch, onDe
             <label className="adm-label">Текст<small>поддерживает абзацы — пустая строка между ними</small></label>
             <textarea className="textarea" style={{ minHeight: 140 }} value={step.text} onChange={(e) => set({ text: e.target.value })} />
           </div>
+          <div>
+            <label className="adm-label">Текст кнопки<small>необязательно</small></label>
+            <input className="input" placeholder="продолжить" value={step.buttonLabel} onChange={(e) => set({ buttonLabel: e.target.value })} />
+          </div>
         </WspBlock>
       ) : null}
 

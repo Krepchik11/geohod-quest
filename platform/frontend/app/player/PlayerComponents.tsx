@@ -139,6 +139,8 @@ export interface DesignStep {
   video?: StepVideo;
   place?: string;
   prompt?: string | null;
+  /** Author-set advance-button label (rich_content.button_text). */
+  button?: string;
   acceptable?: string[] | null;
   action?: { desc?: string; confirmLabel?: string };
   nav?: { lat: number; lng: number; label?: string };
@@ -435,7 +437,7 @@ export function StepView({ step, quest, copy, st, on }: {
             {quest?.duration && <span><PClock />{quest.duration}</span>}
           </div>
         )}
-        <PrimaryAction on={h.next} label={copy?.start || "начать квест"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.start || "начать квест"} />
       </div>
     );
   }
@@ -448,7 +450,7 @@ export function StepView({ step, quest, copy, st, on }: {
         <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
         <PrimaryAction
           on={h.next}
-          label={step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить")}
+          label={step.button || (step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить"))}
         />
       </div>
     );
@@ -523,7 +525,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <PrimaryAction on={h.next} label={copy?.next || "продолжить"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.next || "продолжить"} />
       </div>
     );
   }
