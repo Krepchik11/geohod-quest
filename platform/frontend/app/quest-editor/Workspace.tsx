@@ -19,7 +19,16 @@ import {
   type CtorSelection,
   type CtorTemplate,
 } from '../../lib/constructor-model';
-import { api, classify, isAuthFailure, type ConstructorQuestWire, type CtorStatus } from '../../lib/api';
+import {
+  api,
+  classify,
+  isAuthFailure,
+  type ConstructorAuthorWire,
+  type ConstructorQuestWire,
+  type CtorStatus,
+} from '../../lib/api';
+import { isAdmin } from '../../lib/roles';
+import { useMe } from '../../lib/use-me';
 import { BuilderScreen } from './Builder';
 import Dashboard from './Dashboard';
 import { TestOverlay } from './TestPlayer';
@@ -44,6 +53,8 @@ type Screen = 'list' | 'builder';
 const bodyToQuest = migrateQuest;
 
 export default function Workspace() {
+  const { role } = useMe();
+
   // ---- Список (дашборд) ----
   const [list, setList] = useState<ConstructorQuestWire[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -69,6 +80,12 @@ export default function Workspace() {
 
   // ---- Тест-игрок (оверлей) ----
   const [test, setTest] = useState<{ quest: CtorQuest; startPos: number } | null>(null);
+
+  // ---- Передача квеста другому автору (#100) ----
+  // Кому можно передать. Список нужен только администратору, поэтому и грузится
+  // только для него; владелец активного квеста берётся из уже загруженного
+  // списка квестов, а не хранится второй копией.
+  const [authors, setAuthors] = useState<ConstructorAuthorWire[] | null>(null);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -102,6 +119,17 @@ export default function Workspace() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, [refreshList]);
+
+  // Who a quest may be handed to — fetched only for an admin, the one role that
+  // may transfer (lib/roles, the same predicate the nav and the gates use). An
+  // editor therefore makes no request at all instead of a guaranteed 403.
+  useEffect(() => {
+    if (!isAdmin(role)) return;
+    void api
+      .listConstructorAuthors()
+      .then(setAuthors)
+      .catch(() => setAuthors(null));
+  }, [role]);
 
   // Server autosave: persist the active draft (debounced) whenever it changes.
   // savedAt is NOT part of `active`, so updating it never retriggers this effect.
@@ -150,7 +178,10 @@ export default function Workspace() {
   const createQuest = async () => {
     const q = newQuest({});
     try {
-      await api.createConstructorQuest({ quest_id: q.id, ...questUpsert(q) });
+      const row = await api.createConstructorQuest({ quest_id: q.id, ...questUpsert(q) });
+      // Держим список актуальным сразу: он источник строки активного квеста
+      // (автор, статус), и без этого новый квест не имел бы её до возврата.
+      setList((l) => [row, ...l]);
       setJustPublished(null);
       setPublishError(null);
       setSavedAt(null);
@@ -181,6 +212,19 @@ export default function Workspace() {
       setScreen('builder');
     } catch (e) {
       showToast(errMessage(e));
+    }
+  };
+
+  /** Передать активный квест другому автору (#100). Админ сохраняет доступ к
+   *  любому квесту, поэтому билдер остаётся открытым и после передачи; строка
+   *  списка обновляется ответом, без повторной загрузки всего списка. */
+  const transferQuest = async (questId: string, userId: string) => {
+    try {
+      const row = await api.setConstructorAuthor(questId, userId);
+      setList((l) => l.map((q) => (q.quest_id === row.quest_id ? row : q)));
+      showToast(`Квест передан: ${row.author}`);
+    } catch (e) {
+      throw new Error(errMessage(e));
     }
   };
 
@@ -385,6 +429,9 @@ export default function Workspace() {
   };
 
   const builderQuest = active ? { ...active, lastSaved: savedAt } : null;
+  // Серверная строка активного квеста: автор и статус живут там, а не в теле
+  // черновика. Одна копия — та, что уже загружена для дашборда.
+  const activeRow = active ? list.find((q) => q.quest_id === active.id) : undefined;
 
   return (
     <>
@@ -399,6 +446,15 @@ export default function Workspace() {
             publishError={publishError}
             publishing={publishing}
             exporting={exporting}
+            transfer={
+              authors && activeRow
+                ? {
+                    current: { id: activeRow.author_id, name: activeRow.author },
+                    candidates: authors,
+                    onTransfer: (userId) => transferQuest(activeRow.quest_id, userId),
+                  }
+                : undefined
+            }
             actions={{
               onSel: selectIn,
               onPatchQuest: patchQuest,

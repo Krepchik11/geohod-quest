@@ -922,7 +922,19 @@ impl InMemoryAuthStore {
     /// passes give the total order (created_at desc, then user_id asc) without a
     /// hand-formatted comparator chain.
     pub fn list_users(&self) -> Vec<UserAccount> {
-        let mut accounts: Vec<UserAccount> = self.users.values().cloned().collect();
+        self.list_users_with_roles(&[])
+    }
+
+    /// The same list narrowed to `roles` (empty = every role). The narrow form
+    /// exists because the whole table is the wrong query for a staff picker: an
+    /// account registry grows with every player, the staff does not.
+    pub fn list_users_with_roles(&self, roles: &[&str]) -> Vec<UserAccount> {
+        let mut accounts: Vec<UserAccount> = self
+            .users
+            .values()
+            .filter(|a| roles.is_empty() || roles.contains(&a.role.as_str()))
+            .cloned()
+            .collect();
         accounts.sort_by_key(|a| a.user_id.clone());
         accounts.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         accounts
@@ -1498,6 +1510,9 @@ pub trait AuthStore: Send + Sync {
     /// See [`InMemoryAuthStore::list_users`].
     async fn list_users(&self) -> Result<Vec<UserAccount>, AppError>;
 
+    /// See [`InMemoryAuthStore::list_users_with_roles`].
+    async fn list_users_with_roles(&self, roles: &[&str]) -> Result<Vec<UserAccount>, AppError>;
+
     /// See [`InMemoryAuthStore::create_session`].
     async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError>;
 
@@ -1642,6 +1657,10 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
 
     async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
         Ok(lock(self, "auth")?.list_users())
+    }
+
+    async fn list_users_with_roles(&self, roles: &[&str]) -> Result<Vec<UserAccount>, AppError> {
+        Ok(lock(self, "auth")?.list_users_with_roles(roles))
     }
 
     async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
@@ -2076,6 +2095,40 @@ pub struct ConstructorQuestSummary {
     pub updated_at: u64,
 }
 
+/// Which author a per-quest mutation was authorized against.
+///
+/// Access is decided on a summary read ([`crate::authz`]) and applied one round
+/// trip later. Ownership is no longer fixed — an admin may hand a quest to
+/// someone else — so between those two moments the quest can change hands, and
+/// an unguarded `WHERE quest_id = $1` would let the previous author's in-flight
+/// delete destroy the new author's quest. Every gated mutation therefore carries
+/// the author it saw and applies only while that still holds.
+///
+/// `Unchecked` is for the one writer with no gate to speak of: publish flips the
+/// lifecycle status of whatever quest it just registered.
+#[derive(Clone, Copy, Debug)]
+pub enum AuthorGuard<'a> {
+    Is(&'a str),
+    Unchecked,
+}
+
+impl AuthorGuard<'_> {
+    pub fn matches(&self, author_id: &str) -> bool {
+        match self {
+            Self::Is(expected) => *expected == author_id,
+            Self::Unchecked => true,
+        }
+    }
+
+    /// The author to compare against, if the guard checks one.
+    pub fn author_id(&self) -> Option<&str> {
+        match self {
+            Self::Is(expected) => Some(expected),
+            Self::Unchecked => None,
+        }
+    }
+}
+
 /// Legacy-row compensator for covers on list wires: a media-URL cover passes,
 /// a `data:` blob (rows that predate media externalization — see
 /// [`crate::media`]) does not, because base64 covers are megabytes per row and
@@ -2266,11 +2319,14 @@ impl InMemoryConstructorStore {
         self.quests.get(quest_id).map(ConstructorQuest::summary)
     }
 
-    /// Replace the editable body + denormalized list fields (autosave). 404 if unknown.
+    /// Replace the editable body + denormalized list fields (autosave). 404 if
+    /// unknown, or if the quest no longer belongs to `expected_author` (see
+    /// [`AuthorGuard`]).
     #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
     pub fn save_body(
         &mut self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         name: &str,
         cover: Option<String>,
         steps_count: u32,
@@ -2278,9 +2334,13 @@ impl InMemoryConstructorStore {
         body: serde_json::Value,
         updated_at: u64,
     ) -> Result<ConstructorQuestSummary, AppError> {
-        let q = self.quests.get_mut(quest_id).ok_or_else(|| {
-            AppError::NotFound(format!("constructor quest '{quest_id}' not found"))
-        })?;
+        let q = self
+            .quests
+            .get_mut(quest_id)
+            .filter(|q| expected_author.matches(&q.author_id))
+            .ok_or_else(|| {
+                AppError::NotFound(format!("constructor quest '{quest_id}' not found"))
+            })?;
         q.name = name.to_string();
         q.cover = cover;
         q.steps_count = steps_count;
@@ -2290,15 +2350,38 @@ impl InMemoryConstructorStore {
         Ok(q.summary())
     }
 
-    /// Set the lifecycle status; `None` if the quest does not exist (the publish
-    /// flow calls this best-effort for quests that were never constructor-tracked).
-    pub fn set_status(
+    /// Hand the quest to another author; `None` if the quest does not exist.
+    /// Both author columns move together — the id decides access, the name is the
+    /// denormalized label the dashboard shows — so a transfer can never leave the
+    /// quest attributed to one account and controlled by another.
+    pub fn set_author(
         &mut self,
         quest_id: &str,
-        status: &str,
+        author_id: &str,
+        author_name: &str,
         updated_at: u64,
     ) -> Option<ConstructorQuestSummary> {
         let q = self.quests.get_mut(quest_id)?;
+        q.author_id = author_id.to_string();
+        q.author_name = author_name.to_string();
+        q.updated_at = updated_at;
+        Some(q.summary())
+    }
+
+    /// Set the lifecycle status; `None` if the quest does not exist or has left
+    /// `expected_author` (the publish flow calls this [`AuthorGuard::Unchecked`]
+    /// and best-effort, for quests that were never constructor-tracked).
+    pub fn set_status(
+        &mut self,
+        quest_id: &str,
+        expected_author: AuthorGuard<'_>,
+        status: &str,
+        updated_at: u64,
+    ) -> Option<ConstructorQuestSummary> {
+        let q = self
+            .quests
+            .get_mut(quest_id)
+            .filter(|q| expected_author.matches(&q.author_id))?;
         q.status = status.to_string();
         q.updated_at = updated_at;
         Some(q.summary())
@@ -2353,9 +2436,14 @@ impl InMemoryConstructorStore {
         self.quests.get(quest_id).map(ConstructorQuest::label)
     }
 
-    /// Delete a quest; `true` if a row was removed.
-    pub fn delete(&mut self, quest_id: &str) -> bool {
-        self.quests.remove(quest_id).is_some()
+    /// Delete a quest; `true` if a row was removed. A quest that has left
+    /// `expected_author` is not this caller's to delete ([`AuthorGuard`]).
+    pub fn delete(&mut self, quest_id: &str, expected_author: AuthorGuard<'_>) -> bool {
+        let owned = self
+            .quests
+            .get(quest_id)
+            .is_some_and(|q| expected_author.matches(&q.author_id));
+        owned && self.quests.remove(quest_id).is_some()
     }
 }
 
@@ -2379,6 +2467,7 @@ pub trait ConstructorStore: Send + Sync {
     async fn save_body(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         name: &str,
         cover: Option<String>,
         steps_count: u32,
@@ -2391,7 +2480,17 @@ pub trait ConstructorStore: Send + Sync {
     async fn set_status(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         status: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError>;
+
+    /// See [`InMemoryConstructorStore::set_author`].
+    async fn set_author(
+        &self,
+        quest_id: &str,
+        author_id: &str,
+        author_name: &str,
         updated_at: u64,
     ) -> Result<Option<ConstructorQuestSummary>, AppError>;
 
@@ -2414,7 +2513,11 @@ pub trait ConstructorStore: Send + Sync {
     async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError>;
 
     /// See [`InMemoryConstructorStore::delete`].
-    async fn delete(&self, quest_id: &str) -> Result<bool, AppError>;
+    async fn delete(
+        &self,
+        quest_id: &str,
+        expected_author: AuthorGuard<'_>,
+    ) -> Result<bool, AppError>;
 }
 
 /// Shared constructor-quest storage handle.
@@ -2440,6 +2543,7 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
     async fn save_body(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         name: &str,
         cover: Option<String>,
         steps_count: u32,
@@ -2449,6 +2553,7 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
     ) -> Result<ConstructorQuestSummary, AppError> {
         lock(self, "constructor")?.save_body(
             quest_id,
+            expected_author,
             name,
             cover,
             steps_count,
@@ -2461,10 +2566,21 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
     async fn set_status(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         status: &str,
         updated_at: u64,
     ) -> Result<Option<ConstructorQuestSummary>, AppError> {
-        Ok(lock(self, "constructor")?.set_status(quest_id, status, updated_at))
+        Ok(lock(self, "constructor")?.set_status(quest_id, expected_author, status, updated_at))
+    }
+
+    async fn set_author(
+        &self,
+        quest_id: &str,
+        author_id: &str,
+        author_name: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        Ok(lock(self, "constructor")?.set_author(quest_id, author_id, author_name, updated_at))
     }
 
     async fn list_all_summaries(&self) -> Result<Vec<ConstructorQuestSummary>, AppError> {
@@ -2490,8 +2606,12 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
         Ok(lock(self, "constructor")?.label_for_quest(quest_id))
     }
 
-    async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
-        Ok(lock(self, "constructor")?.delete(quest_id))
+    async fn delete(
+        &self,
+        quest_id: &str,
+        expected_author: AuthorGuard<'_>,
+    ) -> Result<bool, AppError> {
+        Ok(lock(self, "constructor")?.delete(quest_id, expected_author))
     }
 }
 
@@ -3717,6 +3837,7 @@ mod constructor_tests {
         let updated = s
             .save_body(
                 "q1",
+                AuthorGuard::Is("seed:a"),
                 "Renamed",
                 Some("cover.png".into()),
                 7,
@@ -3738,6 +3859,7 @@ mod constructor_tests {
         assert!(
             s.save_body(
                 "ghost",
+                AuthorGuard::Unchecked,
                 "x",
                 None,
                 0,
@@ -3753,15 +3875,61 @@ mod constructor_tests {
     fn set_status_and_delete() {
         let mut s = InMemoryConstructorStore::new();
         s.create(quest("q1", "Name", 1)).expect("create");
-        let r = s.set_status("q1", CTOR_STATUS_PUBLISHED, 9).expect("known");
+        let r = s
+            .set_status("q1", AuthorGuard::Unchecked, CTOR_STATUS_PUBLISHED, 9)
+            .expect("known");
         assert_eq!(r.status, CTOR_STATUS_PUBLISHED);
         assert_eq!(s.get("q1").expect("present").status, CTOR_STATUS_PUBLISHED);
         // Unknown quest: None (publish calls this best-effort).
-        assert!(s.set_status("ghost", CTOR_STATUS_PUBLISHED, 9).is_none());
+        assert!(
+            s.set_status("ghost", AuthorGuard::Unchecked, CTOR_STATUS_PUBLISHED, 9)
+                .is_none()
+        );
 
-        assert!(s.delete("q1"));
-        assert!(!s.delete("q1"), "second delete is a no-op");
+        assert!(s.delete("q1", AuthorGuard::Is("seed:a")));
+        assert!(
+            !s.delete("q1", AuthorGuard::Is("seed:a")),
+            "second delete is a no-op"
+        );
         assert!(s.get("q1").is_none());
+    }
+
+    /// A per-quest mutation applies only while the quest still belongs to the
+    /// author the caller was authorized against. Without this, an admin transfer
+    /// landing between the access check and the write would let the PREVIOUS
+    /// author's in-flight delete destroy the NEW author's quest.
+    #[test]
+    fn mutations_refuse_a_quest_that_changed_hands() {
+        let mut s = InMemoryConstructorStore::new();
+        s.create(quest("q1", "Name", 1)).expect("create");
+        let stale = AuthorGuard::Is("seed:a");
+        s.set_author("q1", "heir", "Наследник", 5).expect("moved");
+
+        assert!(!s.delete("q1", stale), "delete refuses");
+        assert!(
+            s.set_status("q1", stale, CTOR_STATUS_PUBLISHED, 6)
+                .is_none(),
+            "status refuses"
+        );
+        assert!(
+            s.save_body(
+                "q1",
+                stale,
+                "Stolen",
+                None,
+                1,
+                QuestAttributes::default(),
+                serde_json::json!({}),
+                7
+            )
+            .is_err(),
+            "autosave refuses"
+        );
+        let survived = s.get("q1").expect("still there");
+        assert_eq!(survived.author_id, "heir");
+        assert_eq!(survived.name, "Name", "the stale write did not land");
+        // The new author acts on it normally.
+        assert!(s.delete("q1", AuthorGuard::Is("heir")));
     }
 
     #[test]

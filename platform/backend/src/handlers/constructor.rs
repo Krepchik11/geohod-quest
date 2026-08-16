@@ -12,8 +12,10 @@ use axum::{
     routing::{get, post},
 };
 
+use crate::auth;
 use crate::authz::{
-    require_editor_actor, require_owned_constructor_quest, require_owned_constructor_summary,
+    require_constructor_admin, require_editor_actor, require_owned_constructor_quest,
+    require_owned_constructor_summary,
 };
 use crate::errors::AppError;
 use crate::store::{self, ConstructorQuest, ConstructorQuestSummary, PublishedMeta};
@@ -44,9 +46,14 @@ pub fn router() -> Router<AppState> {
             post(save_constructor_quest_handler)
                 .layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
+        .route("/api/constructor/authors", get(list_authors_handler))
         .route(
             "/api/constructor/quests/{quest_id}/status",
             post(set_constructor_status_handler),
+        )
+        .route(
+            "/api/constructor/quests/{quest_id}/author",
+            post(set_constructor_author_handler),
         )
         .route(
             "/api/constructor/quests/{quest_id}/delete",
@@ -145,6 +152,9 @@ async fn publish_quest_handler(
         .constructor
         .set_status(
             &req.quest_id,
+            // No ownership was read to reach here — publish is gated on the
+            // editor capability, not on the row.
+            store::AuthorGuard::Unchecked,
             store::CTOR_STATUS_PUBLISHED,
             store::now_secs(),
         )
@@ -240,6 +250,27 @@ fn ctor_wire(
         created_at: s.created_at,
         updated_at: s.updated_at,
     }
+}
+
+/// The list row for ONE quest: the three live figures [`ctor_wire`] folds in are
+/// projections over three different tables, keyed only by `quest_id`, so they run
+/// concurrently — one round trip, not three. Every single-quest route answers
+/// through here, so a new column is added in one place instead of three.
+async fn ctor_row(
+    state: &AppState,
+    summary: ConstructorQuestSummary,
+) -> Result<ConstructorQuestWire, AppError> {
+    let (completed, buyers, published) = tokio::try_join!(
+        state.store.completions_for_quest(&summary.quest_id),
+        state.grants.buyers_for_quest(&summary.quest_id),
+        state.grants.get_published(&summary.quest_id),
+    )?;
+    Ok(ctor_wire(
+        summary,
+        completed,
+        buyers,
+        published.map(|m| m.snapshot_version),
+    ))
 }
 
 async fn list_constructor_quests_handler(
@@ -372,15 +403,9 @@ async fn create_constructor_quest_handler(
         body: req.body,
     };
     let summary = state.constructor.create(quest).await?;
-    // A freshly created id can still have a stale published row (re-created id);
-    // report it honestly rather than assuming None.
-    let published_version = state
-        .grants
-        .get_published(&summary.quest_id)
-        .await?
-        .map(|m| m.snapshot_version);
-    let buyers = state.grants.buyers_for_quest(&summary.quest_id).await?;
-    Ok(Json(ctor_wire(summary, 0, buyers, published_version)))
+    // A freshly created id can still carry a stale published row and old grants
+    // (a re-created id); report them honestly rather than assuming zero.
+    Ok(Json(ctor_row(&state, summary).await?))
 }
 
 /// Body for POST /api/constructor/quests/{id}/save (autosave).
@@ -402,7 +427,7 @@ async fn save_constructor_quest_handler(
     headers: HeaderMap,
     Json(req): Json<SaveConstructorQuestRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
+    let gated = require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
     // An inline blob (a legacy body re-saved by the editor) is ingested into the
     // media store here, so the dashboard list can show the real image instead of
@@ -415,6 +440,7 @@ async fn save_constructor_quest_handler(
         .constructor
         .save_body(
             &quest_id,
+            store::AuthorGuard::Is(&gated.author_id),
             &req.name,
             cover.clone(),
             req.steps_count,
@@ -440,7 +466,7 @@ async fn set_constructor_status_handler(
     headers: HeaderMap,
     Json(req): Json<SetConstructorStatusRequest>,
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
-    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
+    let gated = require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     store::validate_ctor_status(&req.status)?;
     // Coherence invariant: a quest can be `test` or `published` ONLY once a frozen
     // snapshot exists (created by the gated Publish in the editor). Without this, a
@@ -463,17 +489,96 @@ async fn set_constructor_status_handler(
     let now = store::now_secs();
     let updated = state
         .constructor
-        .set_status(&quest_id, &req.status, now)
+        .set_status(
+            &quest_id,
+            store::AuthorGuard::Is(&gated.author_id),
+            &req.status,
+            now,
+        )
         .await?
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
-    let completed = state.store.completions_for_quest(&updated.quest_id).await?;
-    let buyers = state.grants.buyers_for_quest(&updated.quest_id).await?;
-    Ok(Json(ctor_wire(
-        updated,
-        completed,
-        buyers,
-        published_version,
-    )))
+    Ok(Json(ctor_row(&state, updated).await?))
+}
+
+/// One account a quest may be handed to.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConstructorAuthorWire"))]
+pub(crate) struct ConstructorAuthorWire {
+    user_id: String,
+    /// The label the quest row will carry once it moves here.
+    name: String,
+    #[cfg_attr(test, ts(type = "\"admin\" | \"editor\""))]
+    role: String,
+}
+
+/// GET /api/constructor/authors — who a quest may be transferred to: the accounts
+/// that can author one ([`auth::role_can_author`]), admins first then editors,
+/// alphabetical within a role. Admin-gated: this is the account registry, and the
+/// transfer it feeds is an admin decision.
+async fn list_authors_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ConstructorAuthorWire>>, AppError> {
+    require_constructor_admin(&state, &headers).await?;
+    let mut authors: Vec<ConstructorAuthorWire> = state
+        .auth
+        .list_users_with_roles(auth::AUTHOR_ROLES)
+        .await?
+        .into_iter()
+        .map(|u| ConstructorAuthorWire {
+            name: u.author_label(),
+            user_id: u.user_id,
+            role: u.role,
+        })
+        .collect();
+    // Admins first, then by name — `auth::ROLES` is the one place display order
+    // for a role is decided.
+    let rank = |r: &str| auth::ROLES.iter().position(|known| *known == r);
+    authors.sort_by(|a, b| (rank(&a.role), &a.name).cmp(&(rank(&b.role), &b.name)));
+    Ok(Json(authors))
+}
+
+/// Body for POST /api/constructor/quests/{id}/author.
+#[derive(serde::Deserialize)]
+struct SetConstructorAuthorRequest {
+    author_id: String,
+}
+
+/// POST /api/constructor/quests/{id}/author — hand the quest to another author.
+///
+/// Admin-only, because it is a change of access, not of content: the previous
+/// author loses the quest outright. The target must be an account that can author
+/// quests — handing one to a player would strand it where nobody may edit it.
+/// Idempotent: transferring to the current owner is a no-op that still answers OK.
+async fn set_constructor_author_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetConstructorAuthorRequest>,
+) -> Result<Json<ConstructorQuestWire>, AppError> {
+    require_constructor_admin(&state, &headers).await?;
+    let target = state
+        .auth
+        .get_user(&req.author_id)
+        .await?
+        .filter(|u| auth::role_can_author(&u.role))
+        .ok_or_else(|| {
+            AppError::BadRequest(
+                "the new author must be a registered editor or administrator".into(),
+            )
+        })?;
+    let updated = state
+        .constructor
+        .set_author(
+            &quest_id,
+            &target.user_id,
+            &target.author_label(),
+            store::now_secs(),
+        )
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))?;
+    Ok(Json(ctor_row(&state, updated).await?))
 }
 
 async fn delete_constructor_quest_handler(
@@ -481,8 +586,12 @@ async fn delete_constructor_quest_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    require_owned_constructor_summary(&state, &headers, &quest_id).await?;
-    if !state.constructor.delete(&quest_id).await? {
+    let gated = require_owned_constructor_summary(&state, &headers, &quest_id).await?;
+    if !state
+        .constructor
+        .delete(&quest_id, store::AuthorGuard::Is(&gated.author_id))
+        .await?
+    {
         return Err(AppError::NotFound(format!(
             "constructor quest '{quest_id}' not found"
         )));

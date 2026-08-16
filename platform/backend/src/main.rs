@@ -387,6 +387,7 @@ mod tests {
             snapshot::StartPointWire,
             handlers::constructor::ConstructorQuestWire,
             handlers::constructor::ConstructorQuestFullWire,
+            handlers::constructor::ConstructorAuthorWire,
             handlers::player::BundleWire,
             handlers::player::CatalogQuest,
             handlers::player::ProductPageWire,
@@ -3296,6 +3297,122 @@ mod tests {
         assert_eq!(product["primary_comic"], blob_cover);
     }
 
+    /// Handing a quest to another author: an ADMIN decision, over the closed set
+    /// of accounts that may own one (editors and admins). The quest leaves the
+    /// old author's workspace and lands in the new one; the old author loses
+    /// every per-quest right with it.
+    async fn scenario_ctor_transfer_author(app: &Router, ids: &Ids) {
+        let owner = editor_bearer(app, &ids.player).await;
+        let owner_h = [("authorization", owner.as_str())];
+        let admin = admin_bearer(app, &ids.player).await;
+        let admin_h = [("authorization", admin.as_str())];
+        let heir = role_bearer(app, "ed2", &ids.player, "editor").await;
+        let heir_h = [("authorization", heir.as_str())];
+        let heir_id = format!("ed2-{}", ids.player);
+        let player_id = {
+            role_bearer(app, "pl", &ids.player, "player").await;
+            format!("pl-{}", ids.player)
+        };
+        let quest = ids.quest.as_str();
+
+        let (st, created) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": quest, "name": "Передаваемый квест", "cover": null, "steps_count": 1,
+                "body": { "id": quest, "meta": { "title": "Передаваемый квест" }, "steps": [1], "versions": [] }
+            }),
+            &owner_h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let owner_id = created["author_id"].as_str().expect("author").to_string();
+
+        // The candidate list is the accounts that may own a quest — admins and
+        // editors, never players — and only an admin may read it.
+        let (st, _) = get_json_h(app, "/api/constructor/authors", &owner_h).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "an editor cannot list accounts");
+        let (st, authors) = get_json_h(app, "/api/constructor/authors", &admin_h).await;
+        assert_eq!(st, StatusCode::OK);
+        let ids_of = |v: &Value| {
+            v.as_array()
+                .expect("authors")
+                .iter()
+                .map(|a| a["user_id"].as_str().expect("id").to_string())
+                .collect::<Vec<_>>()
+        };
+        let listed = ids_of(&authors);
+        assert!(listed.contains(&heir_id), "editors are candidates");
+        assert!(!listed.contains(&player_id), "players are not");
+
+        let transfer = |to: &str| json!({ "author_id": to });
+        let url = format!("/api/constructor/quests/{quest}/author");
+
+        // Only an admin transfers. The owner is not one, and the ops token is
+        // never admin in the constructor (it must not gain cross-author reach).
+        let (st, _) = post_json_h(app, &url, transfer(&heir_id), &owner_h).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "an editor cannot transfer");
+        let (st, _) = post_json_h(
+            app,
+            &url,
+            transfer(&heir_id),
+            &[("x-admin-token", TEST_ADMIN_TOKEN)],
+        )
+        .await;
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "the ops token is not an admin here"
+        );
+
+        // Only an account that may own a quest can receive one.
+        let (st, _) = post_json_h(app, &url, transfer(&player_id), &admin_h).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "a player cannot own a quest");
+        let (st, _) = post_json_h(app, &url, transfer("nobody"), &admin_h).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "unknown account");
+
+        let (st, moved) = post_json_h(app, &url, transfer(&heir_id), &admin_h).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(moved["author_id"], json!(heir_id));
+        assert_eq!(
+            moved["author"],
+            json!(format!("ed2-{}@example.com", ids.player))
+        );
+
+        // The workspace follows the ownership, both ways.
+        let has = |list: &Value| {
+            list.as_array()
+                .expect("list")
+                .iter()
+                .any(|q| q["quest_id"] == quest)
+        };
+        let (_, heir_list) = get_json_h(app, "/api/constructor/quests", &heir_h).await;
+        assert!(has(&heir_list), "the new author sees it");
+        let (_, old_list) = get_json_h(app, "/api/constructor/quests", &owner_h).await;
+        assert!(!has(&old_list), "the old author does not");
+        // …and the rights follow with it: the quest is gone for the old author.
+        let (st, _) = get_json_h(app, &format!("/api/constructor/quests/{quest}"), &owner_h).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{quest}/delete"),
+            json!({}),
+            &owner_h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "no lingering per-quest rights");
+
+        // Transferring to the current owner is a no-op, not an error.
+        let (st, same) = post_json_h(app, &url, transfer(&heir_id), &admin_h).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(same["author_id"], json!(heir_id));
+
+        // And back, so the scenario leaves the quest with its creator.
+        let (st, back) = post_json_h(app, &url, transfer(&owner_id), &admin_h).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(back["author_id"], json!(owner_id));
+    }
+
     async fn scenario_ctor_status_lifecycle(app: &Router, ids: &Ids) {
         let bearer = editor_bearer(app, &ids.player).await;
         let h = [("authorization", bearer.as_str())];
@@ -5180,7 +5297,20 @@ mod tests {
             Some(blob.to_string()),
             "the full entity keeps it",
         );
-        assert!(ctor.delete(&qid).await.expect("delete"));
+        // The SQL author guard: a stale owner cannot delete, the real one can.
+        let real_author = format!("author-{run}");
+        assert!(
+            !ctor
+                .delete(&qid, store::AuthorGuard::Is("someone-else"))
+                .await
+                .expect("delete"),
+            "the guard keeps a stale owner out"
+        );
+        assert!(
+            ctor.delete(&qid, store::AuthorGuard::Is(&real_author))
+                .await
+                .expect("delete")
+        );
     }
 
     /// Everything a per-scenario Postgres test needs: the router over a real
@@ -5302,6 +5432,7 @@ mod tests {
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
         ctor_list_carries_url_covers_only = ids scenario_ctor_list_covers / "ctorcover";
+        ctor_quest_transfers_between_authors = ids scenario_ctor_transfer_author / "ctorxfer";
         review_survives_star_only_rerate_and_pages = ids scenario_review_visibility / "reviews";
         product_page_payload = ids scenario_product_page / "product";
         auth_v2_full_flow = mails scenario_auth_v2 / "authv2";

@@ -228,24 +228,16 @@ pub async fn require_editor_actor(
     let can_edit = via_ops_token
         || account
             .as_ref()
-            .is_some_and(|a| a.role == auth::ROLE_ADMIN || a.role == auth::ROLE_EDITOR);
+            .is_some_and(|a| auth::role_can_author(&a.role));
     if !can_edit {
         return Err(AppError::Forbidden("editor access required".into()));
     }
     Ok(match account {
-        Some(account) => {
-            let is_admin = account.role == auth::ROLE_ADMIN;
-            let author_name = account
-                .display_name
-                .filter(|s| !s.trim().is_empty())
-                .or(account.email)
-                .unwrap_or_else(|| account.user_id.clone());
-            EditorActor {
-                author_id: account.user_id,
-                author_name,
-                is_admin,
-            }
-        }
+        Some(account) => EditorActor {
+            is_admin: account.role == auth::ROLE_ADMIN,
+            author_name: account.author_label(),
+            author_id: account.user_id,
+        },
         None => {
             let claimed = claimed_from_headers(headers);
             EditorActor {
@@ -268,12 +260,16 @@ pub async fn require_editor_actor(
 /// state (the stated lifecycle: a published quest is "owned by author" yet "can be
 /// edited by admin"). For a non-admin, a quest they did not author is
 /// indistinguishable from one that does not exist — the same opaque 404, never a
-/// signal that another author's quest exists. `author_id` is immutable (there is
-/// no quest-transfer), so the fetched row can be reused for the follow-up
-/// mutation with no TOCTOU ownership gap. This is the single chokepoint every
+/// signal that another author's quest exists. This is the single chokepoint every
 /// per-quest constructor handler routes through — including
-/// [`require_owned_constructor_quest`] — so the owner-or-admin rule exists in
-/// exactly one place and cannot be re-derived (and forgotten) per call site.
+/// [`require_owned_constructor_quest`] and [`require_admin_constructor_summary`] —
+/// so the owner-or-admin rule exists in exactly one place and cannot be re-derived
+/// (and forgotten) per call site.
+///
+/// `author_id` is mutable (an admin may transfer a quest), so the returned row is
+/// a snapshot of ownership at gate time. Every mutation that follows it is keyed
+/// by `quest_id` and rewrites the whole field it touches, so a transfer landing in
+/// between costs the loser their edit, never the quest.
 ///
 /// The admin widening comes from [`require_editor_actor`]'s session check ONLY:
 /// the bare ops token satisfies the editor gate but is never admin here, so it
@@ -294,6 +290,25 @@ pub async fn require_owned_constructor_summary(
         .await?
         .filter(|q| actor.is_admin || q.author_id == actor.author_id)
         .ok_or_else(|| AppError::NotFound(format!("constructor quest '{quest_id}' not found")))
+}
+
+/// The editor gate narrowed to a session ADMIN — for constructor surfaces that
+/// are administration, not authoring: who a quest may be handed to, and the
+/// handover itself.
+///
+/// The ops token deliberately does NOT pass. It satisfies the editor gate but
+/// carries no identity and is never admin in the constructor
+/// ([`require_editor_actor`]), so it can neither reach another author's quest nor
+/// move one — an operator credential must not silently redistribute authorship.
+pub async fn require_constructor_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<EditorActor, AppError> {
+    let actor = require_editor_actor(state, headers).await?;
+    if !actor.is_admin {
+        return Err(AppError::Forbidden("admin access required".into()));
+    }
+    Ok(actor)
 }
 
 /// The same gate, then the FULL entity — for the two callers that genuinely read

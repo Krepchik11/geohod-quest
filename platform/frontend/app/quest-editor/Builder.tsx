@@ -25,6 +25,8 @@ import {
   type Gates,
   type GateField,
 } from '../../lib/constructor-model';
+import { ROLE_LABELS } from '../../lib/admin-users';
+import type { ConstructorAuthorWire } from '../../lib/api';
 import { plural } from '../../lib/ru';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
@@ -112,13 +114,80 @@ function TemplatePickerModal({ onClose, onPick }: { onClose: () => void; onPick:
   );
 }
 
+/* ---------- Передача квеста другому автору ---------- */
+
+/** Всё, что нужно блоку «Автор квеста». Отсутствует — блока нет: передавать
+ *  квесты может только администратор, и только ему конструктор их показывает. */
+export interface AuthorTransfer {
+  current: { id: string; name: string };
+  /** Кому можно передать: учётные записи с правом владеть квестом. */
+  candidates: ConstructorAuthorWire[];
+  /** Отклоняется с текстом ошибки — блок сам показывает её и снимает «Передаём…». */
+  onTransfer: (userId: string) => Promise<void>;
+}
+
+function AuthorBlock({ transfer }: { transfer: AuthorTransfer }) {
+  const [picked, setPicked] = useState(transfer.current.id);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Владельца может не быть в списке кандидатов: роль меняется отдельно, и
+  // разжалованный в игроки автор всё ещё владеет своими квестами. Тогда
+  // показываем его отдельной строкой, чтобы поле не молчало о том, чей квест.
+  const known = transfer.candidates.some((c) => c.user_id === transfer.current.id);
+  const hand = () => {
+    setBusy(true);
+    setError(null);
+    transfer
+      .onTransfer(picked)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <WspBlock title="Автор квеста" aside="кому принадлежит квест">
+      <div>
+        <label className="adm-label" htmlFor="qs-author">Автор квеста</label>
+        <select
+          id="qs-author"
+          className="input"
+          value={picked}
+          disabled={busy}
+          onChange={(e) => setPicked(e.target.value)}
+        >
+          {known ? null : <option value={transfer.current.id}>{transfer.current.name}</option>}
+          {transfer.candidates.map((c) => (
+            <option key={c.user_id} value={c.user_id}>
+              {c.name}{c.role === 'admin' ? ` · ${ROLE_LABELS.admin}` : ''}
+            </option>
+          ))}
+        </select>
+        <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+          Квест перейдёт выбранному автору: он появится в его списке и пропадёт из вашего. Купленные доступы, прохождения и опубликованная версия не меняются.
+        </p>
+        {error ? <div className="wsp-error">✗ {error}</div> : null}
+      </div>
+      <div>
+        <button
+          className="btn btn--secondary"
+          type="button"
+          disabled={busy || picked === transfer.current.id}
+          onClick={hand}
+        >
+          {busy ? 'Передаём…' : 'Передать квест'}
+        </button>
+      </div>
+    </WspBlock>
+  );
+}
+
 /* ---------- Настройки квеста ---------- */
 
-export function QuestSettings({ quest, onMeta, highlight }: {
+export function QuestSettings({ quest, onMeta, highlight, transfer }: {
   quest: CtorQuest;
   onMeta: (meta: CtorQuestMeta) => void;
   /** §9.2: control to scroll to + flash after an «Исправить →» click. */
   highlight?: { field?: GateField; nonce: number } | null;
+  /** Передача квеста другому автору — только для администратора. */
+  transfer?: AuthorTransfer;
 }) {
   const m = quest.meta;
   const set = (patch: Partial<CtorQuestMeta>) => onMeta({ ...m, ...patch });
@@ -276,6 +345,9 @@ export function QuestSettings({ quest, onMeta, highlight }: {
           </p>
         </div>
       </WspBlock>
+      {/* Ключ по владельцу: после передачи блок пересоздаётся, и выбор в поле
+          не остаётся от прошлого владельца. */}
+      {transfer ? <AuthorBlock key={transfer.current.id} transfer={transfer} /> : null}
       <WspBlock title="Прохождение" aside="действует на все вопросы квеста">
         <div>
           <label className="adm-label" htmlFor="qs-universal">Универсальный ответ</label>
@@ -409,6 +481,7 @@ export function BuilderScreen({
   publishError,
   publishing,
   exporting,
+  transfer,
   actions,
 }: {
   quest: CtorQuest;
@@ -422,6 +495,8 @@ export function BuilderScreen({
   /** True while the export zip is being fetched — disables the button so a
    *  double-click can't fire two downloads. */
   exporting: boolean;
+  /** Передача квеста другому автору — только для администратора. */
+  transfer?: AuthorTransfer;
   actions: BuilderActions;
 }) {
   const gates: Gates = useMemo(() => computeGates(quest), [quest]);
@@ -543,6 +618,7 @@ export function BuilderScreen({
               quest={quest}
               onMeta={setMeta}
               highlight={highlight && highlight.pageId === null ? highlight : null}
+              transfer={transfer}
             />
           ) : (
             <PageEditor

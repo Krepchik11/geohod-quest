@@ -18,6 +18,7 @@ export type { AttemptMeta } from './AttemptMeta';
 export type { AuthProviders } from './AuthProviders';
 export type { BundleWire } from './BundleWire';
 export type { CheckoutResult } from './CheckoutResult';
+export type { ConstructorAuthorWire } from './ConstructorAuthorWire';
 export type { ConstructorQuestFullWire } from './ConstructorQuestFullWire';
 export type { ConstructorQuestWire } from './ConstructorQuestWire';
 export type { CouponPayload } from './CouponPayload';

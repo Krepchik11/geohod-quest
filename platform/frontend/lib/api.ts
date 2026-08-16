@@ -22,6 +22,7 @@ import type {
   AuthProviders,
   BundleWire,
   CheckoutResult,
+  ConstructorAuthorWire,
   ConstructorQuestFullWire,
   ConstructorQuestWire,
   CouponPayload,
@@ -423,6 +424,17 @@ export const api = {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ status }),
+    }),
+  // Who a quest may be handed to, and the handover itself. Both admin-only on
+  // the server (see handlers/constructor.rs) — the constructor hides them from
+  // everyone else, and the API refuses regardless.
+  listConstructorAuthors: () =>
+    apiFetch<ConstructorAuthorWire[]>('/api/constructor/authors', { headers: adminHeaders() }),
+  setConstructorAuthor: (id: string, authorId: string) =>
+    apiFetch<ConstructorQuestWire>(`/api/constructor/quests/${encodeURIComponent(id)}/author`, {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ author_id: authorId }),
     }),
   deleteConstructorQuest: (id: string) =>
     apiFetch<{ status: string; quest_id: string }>(
