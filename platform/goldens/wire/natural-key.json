@@ -1,0 +1,66 @@
+{
+  "name": "natural-key",
+  "description": "Byte-exact dedup key for play facts. Backend serde_json over facts::natural_key and frontend queue.factNaturalKey must both produce `key` verbatim — any drift duplicates or loses coin events.",
+  "cases": [
+    {
+      "fact": {
+        "type": "answer_submitted",
+        "step_position": 2,
+        "submitted_value": "фонтан",
+        "local_is_correct": false,
+        "coins_delta": 0,
+        "note": "wrong#2",
+        "device_id": "device-a"
+      },
+      "key": "[\"answer_submitted\",2,\"фонтан\",0,\"wrong#2\"]"
+    },
+    {
+      "fact": {
+        "type": "physical_confirmed",
+        "step_position": 0,
+        "submitted_value": null,
+        "local_is_correct": true,
+        "coins_delta": 0,
+        "note": null,
+        "device_id": "device-b"
+      },
+      "key": "[\"physical_confirmed\",0,null,0,null]"
+    },
+    {
+      "fact": {
+        "type": "hint_purchased",
+        "step_position": 3,
+        "submitted_value": null,
+        "local_is_correct": false,
+        "coins_delta": -10,
+        "note": null,
+        "device_id": "device-a"
+      },
+      "key": "[\"hint_purchased\",3,null,-10,null]"
+    },
+    {
+      "fact": {
+        "type": "completion_bonus",
+        "step_position": 7,
+        "submitted_value": null,
+        "local_is_correct": true,
+        "coins_delta": 5,
+        "note": null,
+        "device_id": "device-a"
+      },
+      "key": "[\"completion_bonus\",7,null,5,null]"
+    },
+    {
+      "fact": {
+        "type": "quest_rated",
+        "step_position": 0,
+        "submitted_value": "5",
+        "local_is_correct": true,
+        "coins_delta": 0,
+        "note": "отлично!",
+        "device_id": "device-c"
+      },
+      "key": "[\"quest_rated\",0,\"5\",0,\"отлично!\"]"
+    }
+  ]
+}

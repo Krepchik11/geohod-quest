@@ -71,6 +71,12 @@ pub fn natural_key(f: &Fact) -> NaturalKey {
     )
 }
 
+/// Canonical string form of the natural key. MUST stay byte-identical to the
+/// frontend's `queue.factNaturalKey` — goldens/wire/natural-key.json pins both.
+pub fn natural_key_string(f: &Fact) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&natural_key(f))
+}
+
 /// True if `a` and `b` are the same semantic claim (natural keys equal).
 pub fn semantically_same(a: &Fact, b: &Fact) -> bool {
     natural_key(a) == natural_key(b)
@@ -883,6 +889,41 @@ mod tests {
             project_analytics(&[fact(FactKind::AnswerSubmitted, 2, 0)]).wrongs_submitted,
             0
         );
+    }
+
+    /// Shared wire golden (platform/goldens/wire/natural-key.json) — the SAME
+    /// file the frontend queue tests run; a one-sided change breaks one suite.
+    #[test]
+    fn natural_key_string_matches_wire_golden() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Fixture {
+            name: String,
+            description: String,
+            cases: Vec<Case>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Case {
+            fact: Fact,
+            key: String,
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/wire/natural-key.json"
+        );
+        let fx: Fixture =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("parse golden");
+        assert!(!fx.cases.is_empty());
+        for c in &fx.cases {
+            assert_eq!(
+                natural_key_string(&c.fact).expect("serialize"),
+                c.key,
+                "natural key drifted for {:?}",
+                c.fact.kind
+            );
+        }
     }
 
     #[test]

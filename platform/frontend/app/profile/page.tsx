@@ -8,6 +8,7 @@ import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, ApiError, type Me } from '../../lib/api';
+import { passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
 import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
@@ -409,7 +410,7 @@ function PasswordSheet({ email, onClose }: { email: string | null; onClose: () =
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const save = async () => {
-    if (next.length < 8) {
+    if (!passwordValid(next)) {
       setError('Новый пароль — минимум 8 символов');
       return;
     }

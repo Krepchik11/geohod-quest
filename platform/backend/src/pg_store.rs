@@ -18,7 +18,7 @@ use crate::coupons::{Coupon, CouponRedemption, CouponUsage, Discount};
 use crate::errors::AppError;
 use crate::facts::{
     Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, list_feedbacks_for_snapshot,
-    natural_key, project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
+    project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
 };
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
@@ -33,11 +33,11 @@ fn internal(e: impl Into<anyhow::Error>) -> AppError {
     AppError::Internal(e.into())
 }
 
-/// Canonical string form of the device-agnostic natural key (stored column backing
-/// the UNIQUE constraint; one NOT NULL column because nullable multi-column UNIQUEs
-/// don't dedup in Postgres).
+/// Stored column backing the UNIQUE constraint (one NOT NULL column because
+/// nullable multi-column UNIQUEs don't dedup in Postgres) — the canonical
+/// string form from facts.rs.
 fn natural_key_string(f: &Fact) -> Result<String, AppError> {
-    serde_json::to_string(&natural_key(f)).map_err(internal)
+    crate::facts::natural_key_string(f).map_err(internal)
 }
 
 /// Facts + attempts on PostgreSQL.

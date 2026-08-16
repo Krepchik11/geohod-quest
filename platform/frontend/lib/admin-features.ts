@@ -36,8 +36,22 @@ export interface AdminFeature extends AdminFeatureWire {
   setting?: FeatureSetting;
 }
 
-/** Russian labels for the known registry keys; an unknown key falls back to itself. */
-const META: Record<string, { label: string; description: string; setting?: FeatureSetting }> = {
+/**
+ * The flag registry, in backend order — goldens/wire/features-registry.json
+ * pins it against backend features.rs, so a missed registration breaks a test.
+ */
+export const FEATURE_KEYS = [
+  'auth_google',
+  'auth_telegram',
+  'payments_mock',
+  'payments_yookassa',
+  'player_back_button',
+  'player_universal_answer',
+] as const;
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
+/** Russian labels for the registry; a key typo here is a compile error. */
+const META: Record<FeatureKey, { label: string; description: string; setting?: FeatureSetting }> = {
   auth_google: {
     label: 'Вход через Google',
     description: 'Кнопка «Войти через Google» на странице входа и привязка Google-аккаунта.',
@@ -80,7 +94,8 @@ export interface AdminSettingWire {
 }
 
 export function toAdminFeature(w: AdminFeatureWire): AdminFeature {
-  const meta = META[w.key];
+  // The wire may serve a key newer than this build — fall back gracefully.
+  const meta = (META as Partial<Record<string, (typeof META)[FeatureKey]>>)[w.key];
   return {
     ...w,
     label: meta?.label ?? w.key,

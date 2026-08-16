@@ -203,18 +203,30 @@ pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
+/// Server email rule. Counts Unicode code points, not bytes, so the verdict
+/// matches the client mirror (frontend lib/credentials.ts) — the shared
+/// goldens/wire/credentials.json pins both sides.
+pub fn email_valid(email: &str) -> bool {
+    email.chars().count() >= 3 && email.contains('@') && !email.contains(char::is_whitespace)
+}
+
+/// Server password rule: at least 8 code points. The ONE implementation —
+/// register, reset and change-password all call it.
+pub fn password_valid(password: &str) -> bool {
+    password.chars().count() >= 8
+}
+
+pub const PASSWORD_ERROR: &str = "password must be at least 8 characters";
+
 /// Minimal credential validation: enough to reject obvious garbage without
 /// pretending to be full email validation (real deliverability is proven by
 /// the §6.3 confirmation mail, not by parsing).
 pub fn validate_credentials(email: &str, password: &str) -> Result<(), AppError> {
-    let email_ok = email.len() >= 3 && email.contains('@') && !email.contains(char::is_whitespace);
-    if !email_ok {
+    if !email_valid(email) {
         return Err(AppError::BadRequest("invalid email".into()));
     }
-    if password.len() < 8 {
-        return Err(AppError::BadRequest(
-            "password must be at least 8 characters".into(),
-        ));
+    if !password_valid(password) {
+        return Err(AppError::BadRequest(PASSWORD_ERROR.into()));
     }
     Ok(())
 }
@@ -246,6 +258,58 @@ mod tests {
             let code = generate_reset_code();
             assert_eq!(code.len(), 6);
             assert!(code.chars().all(|c| c.is_ascii_digit()), "{code}");
+        }
+    }
+
+    /// Shared wire golden (platform/goldens/wire/credentials.json) — the SAME
+    /// file the frontend credentials tests run.
+    #[test]
+    fn credentials_match_wire_golden() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Fixture {
+            name: String,
+            description: String,
+            emails: Vec<EmailCase>,
+            passwords: Vec<PasswordCase>,
+        }
+        #[derive(serde::Deserialize)]
+        struct EmailCase {
+            raw: String,
+            normalized: String,
+            valid: bool,
+        }
+        #[derive(serde::Deserialize)]
+        struct PasswordCase {
+            password: String,
+            valid: bool,
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/wire/credentials.json"
+        );
+        let fx: Fixture =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("parse golden");
+        assert!(!fx.emails.is_empty() && !fx.passwords.is_empty());
+        for c in &fx.emails {
+            let normalized = normalize_email(&c.raw);
+            assert_eq!(normalized, c.normalized, "normalize({:?})", c.raw);
+            assert_eq!(
+                validate_credentials(&normalized, "longenough").is_ok(),
+                c.valid,
+                "email verdict for {:?}",
+                c.raw
+            );
+        }
+        for c in &fx.passwords {
+            assert_eq!(
+                validate_credentials("a@b.io", &c.password).is_ok(),
+                c.valid,
+                "password verdict for {:?}",
+                c.password
+            );
         }
     }
 
