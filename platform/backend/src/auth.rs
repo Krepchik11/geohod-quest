@@ -43,6 +43,18 @@ pub const DEFAULT_ROLE: &str = ROLE_PLAYER;
 /// The full set of assignable roles, in display order (admin → editor → player).
 pub const ROLES: [&str; 3] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_PLAYER];
 
+/// The roles that may author quests — open the constructor, publish, and OWN a
+/// quest row (admin ⊃ editor). One definition for both directions of the rule:
+/// the gate that lets a session into the constructor, and the candidate set a
+/// quest may be handed to. A quest owned by an account outside this set would be
+/// a quest nobody can edit.
+pub const AUTHOR_ROLES: &[&str] = &[ROLE_ADMIN, ROLE_EDITOR];
+
+/// See [`AUTHOR_ROLES`].
+pub fn role_can_author(role: &str) -> bool {
+    AUTHOR_ROLES.contains(&role)
+}
+
 /// Sign-in methods — rows in `identities`. `password` is the built-in
 /// email+password login: its row holds the argon2 secret and exists only once a
 /// password is actually set (the login ADDRESS lives on `users.email`, which is
@@ -104,6 +116,19 @@ pub struct UserAccount {
 }
 
 impl UserAccount {
+    /// How this account is labelled as a quest author: display name, else email,
+    /// else the raw id. Denormalized onto the quest row at creation AND at
+    /// transfer, so both writers spell the author the same way.
+    pub fn author_label(&self) -> String {
+        self.display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(self.email.as_deref())
+            .unwrap_or(&self.user_id)
+            .to_string()
+    }
+
     /// §6.3 — the address still awaiting confirmation, if any. THE one rule
     /// behind the profile banner and the resend endpoint: an account with no
     /// email has nothing to confirm.

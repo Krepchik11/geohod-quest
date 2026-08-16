@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { QuestSettings } from '../Builder';
+import { QuestSettings, type AuthorTransfer } from '../Builder';
 import { BAD_START_COORDS_TEXT, newQuest } from '../../../lib/constructor-model';
 
 /**
@@ -128,5 +128,52 @@ describe('QuestSettings universal answer', () => {
     const input = screen.getByLabelText('Универсальный ответ');
     fireEvent.change(input, { target: { value: '' } });
     expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ universalAnswer: '' }));
+  });
+});
+
+/**
+ * Передача квеста другому автору (#100). Блок появляется только когда его
+ * данные переданы — конструктор показывает его администраторам; сервер
+ * отказывает всем остальным независимо от этого.
+ */
+describe('QuestSettings author transfer', () => {
+  const transfer = (over: Partial<AuthorTransfer> = {}): AuthorTransfer => ({
+    current: { id: 'u-1', name: 'Первый автор' },
+    candidates: [
+      { user_id: 'u-1', name: 'Первый автор', role: 'editor' },
+      { user_id: 'u-2', name: 'Второй автор', role: 'admin' },
+    ],
+    onTransfer: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  });
+
+  it('is absent for an editor (no transfer data passed)', () => {
+    render(<QuestSettings quest={newQuest({ title: 'X' })} onMeta={vi.fn()} />);
+    expect(screen.queryByLabelText('Автор квеста')).toBeNull();
+  });
+
+  it('shows the current author preselected and hands the quest over on confirm', () => {
+    const t = transfer();
+    render(<QuestSettings quest={newQuest({ title: 'X' })} onMeta={vi.fn()} transfer={t} />);
+    const select = screen.getByLabelText('Автор квеста') as HTMLSelectElement;
+    expect(select.value).toBe('u-1');
+
+    fireEvent.change(select, { target: { value: 'u-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Передать квест' }));
+    expect(t.onTransfer).toHaveBeenCalledWith('u-2');
+  });
+
+  it('cannot hand the quest to its current author, and says so', () => {
+    const t = transfer();
+    render(<QuestSettings quest={newQuest({ title: 'X' })} onMeta={vi.fn()} transfer={t} />);
+    expect((screen.getByRole('button', { name: 'Передать квест' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('reports a failed handover', async () => {
+    const t = transfer({ onTransfer: vi.fn().mockRejectedValue(new Error('Сервер недоступен')) });
+    render(<QuestSettings quest={newQuest({ title: 'X' })} onMeta={vi.fn()} transfer={t} />);
+    fireEvent.change(screen.getByLabelText('Автор квеста'), { target: { value: 'u-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Передать квест' }));
+    expect(await screen.findByText(/Сервер недоступен/)).toBeTruthy();
   });
 });

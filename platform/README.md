@@ -56,6 +56,7 @@ platform/
 │       ├── errors.rs     # thiserror + IntoResponse, structured errors only
 │       ├── auth.rs       # identity primitives (argon2, session tokens, roles)
 │       ├── social.rs     # Google + Telegram sign-in (OIDC verification)
+│       ├── snapshot.rs   # the ONE reader of a frozen snapshot (chips, start point, colours)
 │       ├── facts.rs      # the event vocabulary + pure deterministic projectors
 │       ├── grants.rs     # lifetime access grants (idempotent by player+quest)
 │       ├── coupons.rs    # discount codes + server-validated redemption
@@ -92,6 +93,20 @@ platform/
 - **Two-tier enforcement**: a registered player id requires `Authorization: Bearer
   <token>` on player-scoped endpoints; anonymous ids are credentialed by device
   possession (`X-User-Id`, sent automatically by `frontend/lib/identity.ts`).
+
+## Quest ownership
+
+A constructor quest belongs to the account that created it: only that author sees it
+in their workspace, and only they may edit, publish or delete it. An **admin** is the
+superuser — they reach every author's quest, and they alone may hand one over
+(`POST /api/constructor/quests/{id}/author`), choosing from the accounts that may own
+a quest at all (editor or admin, `auth::AUTHOR_ROLES`). The shared `ADMIN_TOKEN` never
+qualifies: it carries no identity, so an operator credential cannot redistribute
+authorship.
+
+Because ownership can change, every per-quest mutation carries the owner the access
+check observed (`store::AuthorGuard`) and applies only while that still holds — a
+transfer landing mid-request can cost the loser their edit, never the quest.
 
 ## Feature flags
 

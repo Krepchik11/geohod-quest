@@ -23,11 +23,31 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
-    AttemptMeta, AuthIdentity, AuthStore, CatalogListing, ConstructorQuest,
+    AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, ConstructorQuest,
     ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore, GrantStore,
     KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
     now_rfc3339, now_secs,
 };
+
+/// The `AND author_id = $n` half of a guarded per-quest statement, or nothing.
+/// Paired with [`bind_author_guard`], which supplies `$n` exactly when this
+/// emits it — the two must be called with the same guard.
+fn author_guard_sql(guard: AuthorGuard<'_>, placeholder: usize) -> String {
+    match guard.author_id() {
+        Some(_) => format!(" AND author_id = ${placeholder}"),
+        None => String::new(),
+    }
+}
+
+fn bind_author_guard<'q>(
+    query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    guard: AuthorGuard<'q>,
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    match guard {
+        AuthorGuard::Is(author_id) => query.bind(author_id),
+        AuthorGuard::Unchecked => query,
+    }
+}
 
 fn internal(e: impl Into<anyhow::Error>) -> AppError {
     AppError::Internal(e.into())
@@ -1230,10 +1250,20 @@ impl AuthStore for PgAuthStore {
     /// See [`crate::store::InMemoryAuthStore::list_users`]. Newest-first via the
     /// created_at index; ties broken by user_id for a stable order.
     async fn list_users(&self) -> Result<Vec<UserAccount>, AppError> {
+        self.list_users_with_roles(&[]).await
+    }
+
+    /// See [`crate::store::InMemoryAuthStore::list_users_with_roles`]. The role
+    /// filter runs in SQL, so a staff picker never drags the player table across
+    /// the wire.
+    async fn list_users_with_roles(&self, roles: &[&str]) -> Result<Vec<UserAccount>, AppError> {
+        let owned: Vec<String> = roles.iter().map(|r| (*r).to_string()).collect();
         let rows = sqlx::query(
             "SELECT user_id, email, display_name, role, created_at, email_confirmed_at \
-             FROM users ORDER BY created_at DESC, user_id ASC",
+             FROM users WHERE cardinality($1::text[]) = 0 OR role = ANY($1) \
+             ORDER BY created_at DESC, user_id ASC",
         )
+        .bind(&owned)
         .fetch_all(&self.pool)
         .await
         .map_err(internal)?;
@@ -1901,11 +1931,13 @@ impl ConstructorStore for PgConstructorStore {
     }
 
     /// See [`crate::store::InMemoryConstructorStore::save_body`]. Zero rows updated
-    /// means the id is unknown → 404.
+    /// means the id is unknown, or the quest changed hands since the gate read it
+    /// ([`AuthorGuard`]) → 404 either way.
     #[allow(clippy::too_many_arguments)] // autosave payload; pre-existing shape
     async fn save_body(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         name: &str,
         cover: Option<String>,
         steps_count: u32,
@@ -1917,21 +1949,25 @@ impl ConstructorStore for PgConstructorStore {
             "UPDATE constructor_quests \
              SET name = $2, cover = $3, steps_count = $4, complexity = $5, age_target = $6, \
                  tags = $7, body = $8, updated_at = $9 \
-             WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
+             WHERE quest_id = $1{} RETURNING {CTOR_SUMMARY_COLS}",
+            author_guard_sql(expected_author, 10)
         );
-        let row = sqlx::query(&sql)
-            .bind(quest_id)
-            .bind(name)
-            .bind(&cover)
-            .bind(steps_count as i32)
-            .bind(&attrs.complexity)
-            .bind(&attrs.age_target)
-            .bind(&attrs.tags)
-            .bind(&body)
-            .bind(updated_at as i64)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(internal)?;
+        let row = bind_author_guard(
+            sqlx::query(&sql)
+                .bind(quest_id)
+                .bind(name)
+                .bind(&cover)
+                .bind(steps_count as i32)
+                .bind(&attrs.complexity)
+                .bind(&attrs.age_target)
+                .bind(&attrs.tags)
+                .bind(&body)
+                .bind(updated_at as i64),
+            expected_author,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
         match row {
             Some(r) => ctor_summary_from_row(&r),
             None => Err(AppError::NotFound(format!(
@@ -1944,16 +1980,46 @@ impl ConstructorStore for PgConstructorStore {
     async fn set_status(
         &self,
         quest_id: &str,
+        expected_author: AuthorGuard<'_>,
         status: &str,
         updated_at: u64,
     ) -> Result<Option<ConstructorQuestSummary>, AppError> {
         let sql = format!(
             "UPDATE constructor_quests SET status = $2, updated_at = $3 \
+             WHERE quest_id = $1{} RETURNING {CTOR_SUMMARY_COLS}",
+            author_guard_sql(expected_author, 4)
+        );
+        let row = bind_author_guard(
+            sqlx::query(&sql)
+                .bind(quest_id)
+                .bind(status)
+                .bind(updated_at as i64),
+            expected_author,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::set_author`]. Both author
+    /// columns move in ONE statement, so no reader can see the quest attributed
+    /// to the new owner while access still answers to the old one.
+    async fn set_author(
+        &self,
+        quest_id: &str,
+        author_id: &str,
+        author_name: &str,
+        updated_at: u64,
+    ) -> Result<Option<ConstructorQuestSummary>, AppError> {
+        let sql = format!(
+            "UPDATE constructor_quests SET author_id = $2, author_name = $3, updated_at = $4 \
              WHERE quest_id = $1 RETURNING {CTOR_SUMMARY_COLS}"
         );
         let row = sqlx::query(&sql)
             .bind(quest_id)
-            .bind(status)
+            .bind(author_id)
+            .bind(author_name)
             .bind(updated_at as i64)
             .fetch_optional(&self.pool)
             .await
@@ -2016,9 +2082,16 @@ impl ConstructorStore for PgConstructorStore {
     }
 
     /// See [`crate::store::InMemoryConstructorStore::delete`].
-    async fn delete(&self, quest_id: &str) -> Result<bool, AppError> {
-        let res = sqlx::query("DELETE FROM constructor_quests WHERE quest_id = $1")
-            .bind(quest_id)
+    async fn delete(
+        &self,
+        quest_id: &str,
+        expected_author: AuthorGuard<'_>,
+    ) -> Result<bool, AppError> {
+        let sql = format!(
+            "DELETE FROM constructor_quests WHERE quest_id = $1{}",
+            author_guard_sql(expected_author, 2)
+        );
+        let res = bind_author_guard(sqlx::query(&sql).bind(quest_id), expected_author)
             .execute(&self.pool)
             .await
             .map_err(internal)?;
