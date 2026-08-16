@@ -2057,8 +2057,9 @@ pub struct ConstructorQuest {
 
 /// Dashboard list row — everything in [`ConstructorQuest`] except the heavy
 /// `body`, with the cover reduced by [`list_cover`]: URL covers ride along so
-/// the dashboard can show the real image, `data:` blobs (legacy imports,
-/// megabytes per row) stay on the full [`ConstructorQuest`] (GET-one) only.
+/// the dashboard can show the real image, and the `data:` blobs left on rows
+/// written before covers were externalized (megabytes per row) stay on the full
+/// [`ConstructorQuest`] (GET-one) only.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConstructorQuestSummary {
     pub quest_id: String,
@@ -2080,7 +2081,12 @@ pub struct ConstructorQuestSummary {
 /// [`crate::media`]) does not, because base64 covers are megabytes per row and
 /// belong to the GET-one entity only. The Postgres list query mirrors this as
 /// a CASE purely to keep the blob from crossing the database wire; this
-/// function stays the definition. Delete both once no `data:` cover remains.
+/// function stays the definition.
+///
+/// It can only still fire on a row not written since
+/// [`crate::media::MediaStores::externalize`] shipped: every cover write now
+/// stores a URL, so saving such a quest once converts it for good. Delete both
+/// once no `data:` cover remains.
 pub fn list_cover(cover: Option<&str>) -> Option<String> {
     cover
         .filter(|c| !c.starts_with("data:"))

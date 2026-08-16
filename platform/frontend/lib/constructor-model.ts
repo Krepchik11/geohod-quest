@@ -342,6 +342,20 @@ export function questUpsert(q: CtorQuest): {
 }
 
 /**
+ * Принять обложку, которую сервер реально сохранил. Старое тело квеста может
+ * нести обложку строкой `data:` — сервер перекладывает её в хранилище и
+ * возвращает ссылку. Без этого шага автосейв слал бы мегабайты base64 на каждой
+ * паузе в наборе, а тело в базе так и не сошлось бы со столбцом обложки.
+ *
+ * `sent` — что ушло на сервер: если автор успел выбрать другую обложку, пока шло
+ * сохранение, его выбор важнее ответа на прошлый запрос.
+ */
+export function adoptCover(quest: CtorQuest, sent: string | null, stored: string | null): CtorQuest {
+  if (!stored || stored === sent || quest.meta.cover !== sent) return quest;
+  return { ...quest, meta: { ...quest.meta, cover: stored } };
+}
+
+/**
  * Deep copy of a quest as a fresh draft: new id, retitled «(копия)», no published
  * versions, never-saved. Duplication is a client operation (the server stores the
  * body opaquely), so the copy semantics live in one place next to {@link newQuest}.

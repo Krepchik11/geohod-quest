@@ -5,7 +5,7 @@
  * pick which quests to invite the player into next.
  */
 import type { PublishedQuestWire } from './api';
-import { coverSrc } from './cover';
+import { coverSrc, monogram } from './cover';
 
 /** A quest card on the post-finale catalog. */
 export interface CatalogCard {
@@ -35,10 +35,4 @@ export function nextQuestsForCatalog(
       mark: monogram(q.name),
       cover: coverSrc(q.primary_comic),
     }));
-}
-
-/** First visible character of the title, uppercased — the cover monogram. */
-function monogram(name: string): string {
-  const ch = [...(name || '').trim()][0] || '?';
-  return ch.toUpperCase();
 }

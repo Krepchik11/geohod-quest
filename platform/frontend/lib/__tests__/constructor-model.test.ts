@@ -16,6 +16,7 @@ import {
   newStep,
   nextVersionNumber,
   parseCoords,
+  adoptCover,
   questUpsert,
   removeStep,
   reorderSteps,
@@ -103,6 +104,25 @@ describe('questUpsert', () => {
     expect(p.age_target).toBe('kids');
     expect(p.tags).toEqual(['приключения']);
     expect(p.body).toBe(q);
+  });
+});
+
+describe('adoptCover', () => {
+  const blob = 'data:image/png;base64,AAAA';
+  const url = '/api/media/hash';
+
+  it('takes the URL the server stored for the blob it was sent', () => {
+    const q = newQuest({ title: 'X', cover: blob });
+    expect(adoptCover(q, blob, url).meta.cover).toBe(url);
+  });
+
+  it('leaves the quest alone when nothing changed or the author moved on', () => {
+    const q = newQuest({ title: 'X', cover: blob });
+    expect(adoptCover(q, blob, blob)).toBe(q);
+    expect(adoptCover(q, blob, null)).toBe(q);
+    // Автор выбрал другую обложку, пока шло сохранение — не затираем её.
+    const moved = newQuest({ title: 'X', cover: '/api/media/newer' });
+    expect(adoptCover(moved, blob, url)).toBe(moved);
   });
 });
 

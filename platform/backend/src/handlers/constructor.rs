@@ -117,7 +117,9 @@ async fn publish_quest_handler(
     let meta = PublishedMeta {
         quest_id: req.quest_id.clone(),
         name: req.name,
-        primary_comic: req.primary_comic,
+        // Same rule as the authoring row: the catalog cover is a URL, never a
+        // base64 blob the store card would carry megabytes of per listing.
+        primary_comic: state.media.externalize(req.primary_comic).await?,
         template_summary: req.template_summary,
         snapshot_version: version,
         snapshot_id,
@@ -179,7 +181,9 @@ pub(crate) struct ConstructorQuestWire {
     age_target: String,
     tags: Vec<String>,
     /// List-safe cover ([`crate::store::list_cover`]): a URL, never a `data:`
-    /// blob — those bloated the list by megabytes and stay on the GET-one wire.
+    /// blob — those bloated the list by megabytes. Every cover WRITE is
+    /// externalized to a URL, so only a row not saved since that rule shipped
+    /// still has a blob, and it stays on the GET-one wire.
     cover: Option<String>,
     #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
@@ -352,6 +356,7 @@ async fn create_constructor_quest_handler(
         return Err(AppError::BadRequest("quest_id is required".into()));
     }
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
+    let cover = state.media.externalize(req.cover).await?;
     let now = store::now_secs();
     let quest = ConstructorQuest {
         quest_id: req.quest_id,
@@ -359,7 +364,7 @@ async fn create_constructor_quest_handler(
         author_name: actor.author_name,
         name: req.name,
         status: store::CTOR_STATUS_DRAFT.to_string(),
-        cover: req.cover,
+        cover,
         steps_count: req.steps_count,
         attrs,
         created_at: now,
@@ -399,13 +404,19 @@ async fn save_constructor_quest_handler(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
+    // An inline blob (a legacy body re-saved by the editor) is ingested into the
+    // media store here, so the dashboard list can show the real image instead of
+    // dropping it. The normalized value is echoed back: the editor adopts it, so
+    // the NEXT autosave carries a URL instead of re-shipping megabytes of base64
+    // on every keystroke pause.
+    let cover = state.media.externalize(req.cover).await?;
     let now = store::now_secs();
     let s = state
         .constructor
         .save_body(
             &quest_id,
             &req.name,
-            req.cover,
+            cover.clone(),
             req.steps_count,
             attrs,
             req.body,
@@ -413,7 +424,7 @@ async fn save_constructor_quest_handler(
         )
         .await?;
     Ok(Json(
-        serde_json::json!({ "status": "saved", "quest_id": s.quest_id, "updated_at": s.updated_at }),
+        serde_json::json!({ "status": "saved", "quest_id": s.quest_id, "updated_at": s.updated_at, "cover": cover }),
     ))
 }
 

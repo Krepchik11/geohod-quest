@@ -55,6 +55,58 @@ pub struct StoredBlob {
     pub content_type: String,
 }
 
+/// The image formats this store keeps, with the file extension an export gives
+/// them. ONE table: the upload gate, the `data:` decoder and the export archive
+/// all read it, so adding a format is a single edit and cannot half-land.
+const MEDIA_TYPES: [(&str, &str); 4] = [
+    ("image/jpeg", "jpg"),
+    ("image/png", "png"),
+    ("image/webp", "webp"),
+    ("image/gif", "gif"),
+];
+
+/// The stored content-type for a raw `Content-Type` value (`"IMAGE/PNG; q=1"` →
+/// `"image/png"`): parameters dropped, trimmed, lowercased. `None` when the type
+/// is not one this store keeps. Every door into the store normalizes here, so
+/// an inline `data:` image and an upload header can never be judged differently.
+pub fn normalized_media_type(raw: &str) -> Option<String> {
+    let ct = raw.split(';').next()?.trim().to_ascii_lowercase();
+    MEDIA_TYPES.iter().any(|(t, _)| *t == ct).then_some(ct)
+}
+
+/// File extension for a stored content-type — `"bin"` for anything this store
+/// does not know, so an export never fails on an unexpected blob.
+pub fn extension_for(content_type: &str) -> &'static str {
+    MEDIA_TYPES
+        .iter()
+        .find(|(t, _)| *t == content_type)
+        .map_or("bin", |(_, ext)| *ext)
+}
+
+/// A `data:` image URI decoded into what the store needs. The ONE decoder in the
+/// codebase: the icon composer and the cover externalizer both read it here, so
+/// "what counts as an inline image" cannot drift between them.
+pub struct DataUri {
+    pub bytes: Bytes,
+    pub content_type: String,
+}
+
+/// Parse `data:<image type>;base64,<payload>`. `None` for anything else — a
+/// URL, a type this store will not keep, or a payload that is not base64 — so a
+/// caller can pass the original value through untouched instead of losing it.
+pub fn parse_data_uri(value: &str) -> Option<DataUri> {
+    use base64::Engine;
+    let (meta, payload) = value.strip_prefix("data:")?.split_once(",")?;
+    let content_type = normalized_media_type(meta.strip_suffix(";base64")?)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()?;
+    (!bytes.is_empty()).then(|| DataUri {
+        bytes: Bytes::from(bytes),
+        content_type,
+    })
+}
+
 /// Lowercase-hex sha256 of `bytes` — the universal content-address key (shared
 /// by the import tool by convention, so identical images dedup across sources).
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -254,6 +306,24 @@ impl MediaStores {
         }
     }
 
+    /// The stored-media URL for an authored image reference: an inline `data:`
+    /// image is ingested once and replaced by its content-addressed URL; a URL,
+    /// `None`, and an unreadable `data:` payload pass through unchanged.
+    ///
+    /// Every cover WRITE runs through here — constructor create/save and publish
+    /// — so a newly written cover is always a URL. That is what lets the
+    /// dashboard list carry the real image: a base64 blob is megabytes per row,
+    /// so the list drops it ([`crate::store::list_cover`]) and the row falls back
+    /// to a letter tile on a quest that plainly has a cover. Rows written before
+    /// this rule keep their blob until their author saves the quest once.
+    pub async fn externalize(&self, value: Option<String>) -> Result<Option<String>, AppError> {
+        let Some(raw) = value else { return Ok(None) };
+        let Some(data) = parse_data_uri(&raw) else {
+            return Ok(Some(raw));
+        };
+        Ok(Some(self.put(data.bytes, &data.content_type).await?.url))
+    }
+
     /// Fetch stored bytes for the `GET /api/media/{hash}` serve route. Both
     /// backends serve through this origin: the in-process store from memory, the
     /// R2 store by fetching the object — so media works without a public bucket
@@ -294,6 +364,65 @@ mod tests {
         );
         assert_eq!(media_hash_in_ref("https://x/img.jpg"), None);
         assert_eq!(media_hash_in_ref("data:image/png;base64,xxxx"), None);
+    }
+
+    #[test]
+    fn parse_data_uri_reads_base64_images_only() {
+        let uri = "data:image/png;base64,AAAA";
+        let parsed = parse_data_uri(uri).expect("png");
+        assert_eq!(parsed.content_type, "image/png");
+        assert_eq!(parsed.bytes.as_ref(), &[0u8, 0, 0]);
+        // Charset-style parameters ride between the type and the ;base64 marker.
+        assert_eq!(
+            parse_data_uri("data:IMAGE/JPEG;charset=binary;base64,AAAA")
+                .expect("jpeg")
+                .content_type,
+            "image/jpeg"
+        );
+        // Everything a caller must pass through untouched rather than lose.
+        assert!(parse_data_uri("/api/media/abc").is_none(), "a URL");
+        assert!(
+            parse_data_uri("data:image/png,plain").is_none(),
+            "not base64"
+        );
+        assert!(
+            parse_data_uri("data:text/html;base64,AAAA").is_none(),
+            "not an image"
+        );
+        assert!(
+            parse_data_uri("data:image/png;base64,!!!!").is_none(),
+            "bad payload"
+        );
+        assert!(parse_data_uri("data:image/png;base64,").is_none(), "empty");
+    }
+
+    #[tokio::test]
+    async fn externalize_stores_blobs_and_passes_urls_through() {
+        let store = MediaStores::InMemory(Arc::new(Mutex::new(InMemoryMediaStore::new(
+            "/api/media".to_string(),
+        ))));
+        let hash = sha256_hex(&[0u8, 0, 0]);
+        assert_eq!(
+            store
+                .externalize(Some("data:image/png;base64,AAAA".into()))
+                .await
+                .expect("externalize"),
+            Some(format!("/api/media/{hash}")),
+        );
+        assert_eq!(
+            store.get(&hash).await.expect("get").expect("stored").bytes,
+            Bytes::from_static(&[0u8, 0, 0]),
+        );
+        for untouched in ["/api/media/x", "data:image/png,plain"] {
+            assert_eq!(
+                store
+                    .externalize(Some(untouched.into()))
+                    .await
+                    .expect("externalize"),
+                Some(untouched.to_string()),
+            );
+        }
+        assert_eq!(store.externalize(None).await.expect("externalize"), None);
     }
 
     #[test]

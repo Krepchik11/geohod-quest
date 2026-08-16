@@ -10,7 +10,7 @@ import {
 } from '../../lib/constructor-model';
 import QuestFilters, { type QuestFiltersValue } from './QuestFilters';
 import { matchesAttrs, singleValueFacets } from '../../lib/quest-filters';
-import { coverSrc } from '../../lib/cover';
+import { coverSrc, monogram } from '../../lib/cover';
 import SpaceHeader from '../components/SpaceHeader';
 import StatusControl from './StatusControl';
 
@@ -36,6 +36,23 @@ function thumbBg(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return `linear-gradient(135deg, hsl(${h} 42% 60%), hsl(${(h + 38) % 360} 48% 44%))`;
+}
+
+/**
+ * Плитка обложки строки списка. Одно правило запасного варианта: буква на
+ * градиенте показывается и когда обложки нет, и когда картинка не открылась
+ * (удалённое медиа, нет сети) — иначе в строке остаётся значок битой картинки.
+ */
+function CoverThumb({ name, cover }: { name: string; cover: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const src = broken ? null : coverSrc(cover);
+  return (
+    <div className="qcd-thumb" style={{ background: thumbBg(name) }}>
+      {src
+        ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
+        : <span>{monogram(name)}</span>}
+    </div>
+  );
 }
 
 function fmtDate(unixSecs: number): string {
@@ -209,14 +226,11 @@ export default function Dashboard({
           <div className="qcd-listcard">
             {filtered.map((q) => {
               const published = q.status === 'published';
-              const cover = coverSrc(q.cover);
               return (
                 <div className="qcd-row" key={q.quest_id}>
-                  <div className="qcd-thumb" style={{ background: thumbBg(q.name) }}>
-                    {cover
-                      ? <img src={cover} alt="" loading="lazy" decoding="async" />
-                      : <span>{(q.name[0] || '?').toUpperCase()}</span>}
-                  </div>
+                  {/* Keyed by the cover: a new image gets a fresh tile, so the
+                      «не открылась» flag can never outlive the URL it describes. */}
+                  <CoverThumb key={q.cover ?? ''} name={q.name} cover={q.cover} />
                   <div className="qcd-row__body">
                     <div className="qcd-row__name">{q.name}</div>
                     <div className="qcd-row__meta">

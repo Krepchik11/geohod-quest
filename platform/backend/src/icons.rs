@@ -45,16 +45,6 @@ fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, String> {
     Ok(out.into_inner())
 }
 
-/// Decode a `data:image/…;base64,…` cover into raw bytes.
-pub fn cover_data_uri_bytes(cover: &str) -> Option<Vec<u8>> {
-    use base64::Engine;
-    let rest = cover.strip_prefix("data:")?;
-    let (_, payload) = rest.split_once(";base64,")?;
-    base64::engine::general_purpose::STANDARD
-        .decode(payload)
-        .ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,17 +78,5 @@ mod tests {
     #[test]
     fn compose_icon_rejects_garbage() {
         assert!(compose_icon(b"not an image", 192).is_err());
-    }
-
-    #[test]
-    fn cover_data_uri_decodes() {
-        use base64::Engine;
-        let bytes = sample_jpeg(8, 8);
-        let uri = format!(
-            "data:image/jpeg;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(&bytes)
-        );
-        assert_eq!(cover_data_uri_bytes(&uri).expect("decoded"), bytes);
-        assert!(cover_data_uri_bytes("data:image/png,plain").is_none());
     }
 }

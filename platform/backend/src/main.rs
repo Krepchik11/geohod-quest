@@ -3203,9 +3203,10 @@ mod tests {
         assert_eq!(page["reviews"][0]["text"], "Отличный квест!");
     }
 
-    /// The dashboard list shows the quest cover, but never a `data:` blob —
-    /// base64 covers (legacy imports) are megabytes per row and stay on the
-    /// GET-one wire only.
+    /// The dashboard list shows the quest cover. Every cover write — create,
+    /// save and publish — externalizes an inline `data:` blob into the media
+    /// store first, so the stored value is a URL and the list carries the real
+    /// image instead of dropping it and falling back to a letter tile.
     async fn scenario_ctor_list_covers(app: &Router, ids: &Ids) {
         let bearer = editor_bearer(app, &ids.player).await;
         let h = [("authorization", bearer.as_str())];
@@ -3248,11 +3249,51 @@ mod tests {
                 .clone()
         };
         assert_eq!(cover_of(&url_quest), json!("/api/media/coverhash"));
+        // "AAAA" decodes to three zero bytes; the store addresses them by sha256.
+        // The URL prefix is per-environment, so assert the content address.
+        let hash = crate::media::sha256_hex(&[0u8, 0, 0]);
+        let blob_cover = cover_of(&blob_quest);
         assert_eq!(
-            cover_of(&blob_quest),
-            Value::Null,
-            "data: blob stays off the list"
+            crate::media::media_hash_in_ref(blob_cover.as_str().expect("cover url")),
+            Some(hash.as_str()),
+            "data: blob externalized on create, so the list carries the image"
         );
+        // Saving a legacy body re-externalizes the same way (one rule, both
+        // writes), and echoes the URL back so the editor stops re-sending the
+        // blob on every autosave.
+        let (st, saved) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{blob_quest}/save"),
+            make(&blob_quest, json!("data:image/png;base64,AAAA")),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(saved["cover"], blob_cover, "save echoes the stored cover");
+        let (st, one) = get_json_h(app, &format!("/api/constructor/quests/{blob_quest}"), &h).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(one["cover"], blob_cover);
+
+        // Publish writes the catalog cover from the same client field, so it
+        // externalizes too — a base64 cover must not reach the store card.
+        let (st, _) = post_json_h(
+            app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": blob_quest,
+                "name": "Обложечный квест",
+                "primary_comic": "data:image/png;base64,AAAA",
+                "template_summary": "start",
+                "snapshot_version": 1,
+                "snapshot": { "golden_id": blob_quest, "name": "К", "snapshot_version": 1, "steps": [] }
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, product) = get_json(app, &format!("/api/quests/{blob_quest}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(product["primary_comic"], blob_cover);
     }
 
     async fn scenario_ctor_status_lifecycle(app: &Router, ids: &Ids) {
@@ -5084,6 +5125,62 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (st, _) = get_json_h(&app, &format!("/api/constructor/quests/{qid}"), &admin).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    /// The SQL twin of [`store::list_cover`] — the `CASE` in `CTOR_SUMMARY_COLS`
+    /// that keeps a base64 blob off the list wire. Reached only by writing the
+    /// legacy shape straight through the store: every HTTP write externalizes the
+    /// blob first, so the API path can no longer produce such a row. Mirrors the
+    /// in-memory `summary_for_quest_answers_without_the_heavy_columns`.
+    #[tokio::test]
+    async fn pg_ctor_list_reduces_a_legacy_data_cover() {
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_ctor_list_reduces_a_legacy_data_cover: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        use store::ConstructorStore as _;
+        let ctor = pg_store::PgConstructorStore::new(pool);
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let qid = format!("q-legacycover-{run}");
+        let blob = "data:image/png;base64,AAAA";
+        ctor.create(store::ConstructorQuest {
+            quest_id: qid.clone(),
+            author_id: format!("author-{run}"),
+            author_name: "Автор".into(),
+            name: "Легаси обложка".into(),
+            status: store::CTOR_STATUS_DRAFT.into(),
+            cover: Some(blob.into()),
+            steps_count: 1,
+            attrs: store::QuestAttributes::default(),
+            created_at: 1,
+            updated_at: 1,
+            body: json!({ "id": qid, "steps": [1] }),
+        })
+        .await
+        .expect("create");
+
+        let summary = ctor
+            .summary_for_quest(&qid)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(summary.cover, None, "the list wire drops the blob");
+        assert_eq!(
+            ctor.get(&qid).await.expect("query").expect("row").cover,
+            Some(blob.to_string()),
+            "the full entity keeps it",
+        );
+        assert!(ctor.delete(&qid).await.expect("delete"));
     }
 
     /// Everything a per-scenario Postgres test needs: the router over a real

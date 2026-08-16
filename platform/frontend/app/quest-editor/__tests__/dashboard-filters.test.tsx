@@ -71,6 +71,15 @@ describe('Dashboard thumbnails', () => {
     expect(document.querySelectorAll('.qcd-thumb img')).toHaveLength(1);
     expect(document.querySelectorAll('.qcd-thumb span')[0]?.textContent).toBe('Б');
   });
+
+  it('falls back to the letter tile when the cover image fails to load', () => {
+    setup([quest({ quest_id: 'q1', name: 'Сломанная обложка', cover: '/api/media/gone' })]);
+    const img = document.querySelector('.qcd-thumb img');
+    expect(img).toBeTruthy();
+    fireEvent.error(img!);
+    expect(document.querySelector('.qcd-thumb img')).toBeNull();
+    expect(document.querySelector('.qcd-thumb span')?.textContent).toBe('С');
+  });
 });
 
 describe('Dashboard attribute filters', () => {
