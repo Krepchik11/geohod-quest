@@ -1,20 +1,21 @@
 name: frontend-ci
 
-# Quality gate ONLY — this does NOT deploy. Vercel's native Git integration
-# owns deployment (push to main -> production, PR -> preview). The job here is
-# to stop a broken build/lint/test from ever reaching a deploy, since
-# `next build` alone does not run eslint or vitest.
+# Quality gate ONLY — this does NOT deploy. On a PR it guards the merge; on
+# `main` release.yml calls it and promotes the production build only after it
+# passes. Vercel's Git integration still owns PREVIEW deploys, but no longer
+# production: vercel.json disables Git deployments for `main` so the pipeline can
+# hold the frontend back until the backend is live (see release.yml).
+#
+# It exists because `next build` alone runs neither eslint nor vitest.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "platform/frontend/**"
-      - ".github/workflows/frontend-ci.yml"
   pull_request:
     paths:
       - "platform/frontend/**"
       - ".github/workflows/frontend-ci.yml"
+  # On `main` this runs as a STAGE of release.yml rather than on its own push
+  # trigger, so it gates the production deploy instead of racing it.
+  workflow_call:
 
 defaults:
   run:

@@ -25,6 +25,110 @@ the **R2 bucket** must allow them too, so the PWA can precache media for offline
 
 ---
 
+# Releases
+
+**A push to `main` runs one ordered pipeline** —
+[`.github/workflows/release.yml`](../.github/workflows/release.yml):
+
+```
+quality gates ──> backend image ──> backend LIVE on the VPS ──> frontend promoted
+   (cargo test,      (GHCR)          (gate: /health reports        (vercel deploy
+    vitest, lint)                     this commit's build id)        --prod)
+```
+
+The gate is the whole point. The two halves used to ship on independent clocks:
+Vercel promoted a push in ~2 minutes, while the VPS only noticed a new image when
+`podman-auto-update`'s **daily** timer next fired. A new frontend therefore
+routinely called a backend up to a day behind that could not serve it. Now the
+frontend is promoted only after `https://api.quest.geohod.ru/health` reports the
+`build_id` of the commit being released.
+
+## Build ids, not commit shas
+
+`build_id` is a hash of everything the backend image is built from — the crate and
+the goldens it embeds (`platform/backend/` + `platform/goldens/` minus `parity/`),
+the `platform/.dockerignore` that decides what the build context contains, and
+`backend-image.yml` — and **not** the commit sha. That is what makes the gate
+correct for every commit rather than only for backend ones:
+
+| Commit touches | Image | VPS | Gate |
+|---|---|---|---|
+| backend | rebuilt, new digest | pulls + restarts | waits (~1–3 min) |
+| frontend / docs only | build id unchanged → **not rebuilt**, `:latest` re-pointed at the same manifest | nothing to pull, no restart | passes on the first poll |
+
+A commit-sha identity would have failed both rows: the gate would wait forever for
+a redeploy a frontend-only commit never triggers, and every commit would restart
+the API for no reason. `backend-image.yml` skips the build outright when
+`<image>:build-<id>` already exists, so "unchanged backend ⇒ unchanged digest ⇒ no
+restart" is a guarantee, not a build-cache accident.
+
+## One-time setup
+
+1. **VPS — reconcile every minute, not daily.** Without this the gate stalls on
+   every backend change until it times out.
+   ```sh
+   systemctl --user enable --now podman-auto-update.timer
+   mkdir -p ~/.config/systemd/user/podman-auto-update.timer.d
+   cp platform/deploy/podman-auto-update.timer.d/override.conf \
+      ~/.config/systemd/user/podman-auto-update.timer.d/
+   systemctl --user daemon-reload
+   systemctl --user restart podman-auto-update.timer
+   systemctl --user list-timers | grep auto-update    # next fire ≤ 1 min away
+   ```
+   Deployment stays **pull-based**: the VPS needs no inbound SSH key and no
+   webhook listener, and a host that was offline during a release converges by
+   itself when it comes back.
+
+2. **GitHub — repository secrets** `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+   `VERCEL_PROJECT_ID`. Optional repository **variable** `API_BASE_URL` if the API
+   is not at `https://api.quest.geohod.ru`.
+
+3. **First release only** — the backend currently running predates `build_id` and
+   reports none, so the gate waits for the new image. That is the normal path
+   (≤ 1 min); `podman auto-update` on the host forces it immediately.
+
+## Base-image security updates
+
+"Identical sources are never rebuilt" means an unchanged backend keeps running the
+`rust:1.96-bookworm` / `debian:bookworm-slim` layers it was first built on, however
+old they get. Refresh them with **Actions → release → Run workflow →
+`force_rebuild`**. Caveat: the build id is unchanged by definition, so the gate
+cannot observe that rebuild landing — it passes immediately and the frontend may be
+promoted while the API restarts. Harmless (no frontend or API behaviour changed),
+but do it off-peak.
+
+## When a release fails
+
+- **Gate times out** → the frontend was **not** promoted; production stays on the
+  previous, self-consistent pair. Diagnose on the host with
+  `journalctl --user -u podman-auto-update.service -n 50`, then re-run the workflow.
+- **Frontend job fails** → the backend is already live and serving the *old*
+  frontend. Safe by construction (see the invariant below), but fix forward.
+- **Rollback** → revert the commit and push. The revert restores an earlier backend
+  build id, `backend-image.yml` re-points `:latest` at that existing image, and
+  auto-update rolls the VPS back to it.
+
+## The invariant this pipeline does not enforce
+
+**The API must stay backward compatible with the previous frontend.** Ordering
+closes the skew window in one direction only; in the other it cannot help:
+
+- between the backend restart and the frontend promotion, the old frontend is
+  calling the new backend;
+- an installed PWA holds a cached app shell (`public/sw.js` serves the shell
+  stale-while-revalidate), so returning users can run a frontend that is **days**
+  old against today's backend;
+- an attempt is frozen to the snapshot it bound at creation, so long-lived play
+  sessions outlive any single deploy.
+
+So change the API by *expand then contract*: add the new field/route and ship it,
+let the frontend start using it, and only remove the old one in a later release.
+Deleting or renaming a route in the same commit that stops calling it will break
+every client that has not reloaded. Nothing mechanical enforces this today — the
+parity goldens hold the two *folds* in agreement, not the HTTP surface.
+
+---
+
 ## Go-live runbook (first Supabase + R2 cutover)
 
 A first cutover follows this order; each step links to its detailed section. Two
@@ -45,7 +149,8 @@ consistency rules thread through it:
 3. **VPS** — create the podman secrets (DB URL, admin token, R2 keys, SMTP url), set the R2
    identifiers in the API unit (`R2_PUBLIC_BASE_URL` = the step-2 domain), install +
    start the unit, wire Caddy (the **Backend (VPS · Podman · Caddy)** section).
-4. **Vercel** — set `NEXT_PUBLIC_API_URL`; redeploy. No media env is needed (R2 URLs
+4. **Vercel** — set `NEXT_PUBLIC_API_URL`, then redeploy (**Actions → release → Run
+   workflow**; a Git push no longer deploys `main`). No media env is needed (R2 URLs
    are self-contained in the quest JSON).
 5. **Import the legacy quests** — `npm run upload` (the SAME `R2_PUBLIC_BASE_URL`) →
    `npm run build` → psql `load.sql` into Supabase. The importer lives at
@@ -103,19 +208,36 @@ Leave `payments_mock` OFF in production: it grants access without charging.
    ⚠️ `NEXT_PUBLIC_*` is **baked into the bundle at build time**. Changing it
    requires a **redeploy** to take effect. If it is missing in prod, the build
    **fails by design** (see `lib/api.ts`) instead of silently shipping localhost.
-5. Deploy. From now on: **push to `main` → Production**, **open a PR → Preview URL**.
-   No deploy GitHub Action is needed — Vercel's Git integration does this.
+5. **Release credentials.** Production deploys are driven by CI, not by Git, so add
+   the repository secrets `VERCEL_TOKEN` (Vercel → Settings → Tokens),
+   `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (Project Settings → General, or read
+   them out of `.vercel/project.json` after a local `vercel link`).
+
+6. Deploy. From now on: **open a PR → Preview URL** (Vercel's Git integration),
+   **push to `main` → the release pipeline promotes production once the backend is
+   live** (see **Releases** above).
 
 ## What runs where, and why
 
-- **Deploy** = Vercel Git integration (automatic). Do **not** add a GH Actions deploy job.
+- **Preview deploys** = Vercel Git integration (automatic, PR → preview URL).
+- **Production deploys** = `.github/workflows/release.yml`, via
+  `vercel build --prod` + `vercel deploy --prebuilt --prod`, and only after the
+  backend gate passes. `vercel.json` sets `git.deploymentEnabled.main = false` so a
+  push to `main` cannot promote the frontend behind the pipeline's back — that
+  bypass is exactly the bug the pipeline exists to prevent.
 - **Quality gate** = `.github/workflows/frontend-ci.yml` (lint + typecheck + test +
-  build) on PRs touching `platform/frontend`. `next build` does not run eslint/vitest,
-  so this is the only thing stopping a broken-but-compiling app from deploying.
-  Add it as a **required status check** in GitHub branch protection for `main`.
-- **Ignored builds**: `vercel.json` `ignoreCommand` skips Vercel builds when the
-  commit didn't touch `platform/frontend` (so `backend/` or docs edits don't trigger
-  pointless frontend redeploys).
+  build). `next build` does not run eslint/vitest, so this is the only thing
+  stopping a broken-but-compiling app from deploying. It runs on PRs touching
+  `platform/frontend`, and `release.yml` calls it as a stage on `main` — a
+  regression cannot be published while its test run is still going. Add it as a
+  **required status check** in GitHub branch protection for `main`.
+- **Ignored builds**: `vercel.json` `ignoreCommand` skips *preview* builds when the
+  commit didn't touch `platform/frontend`. (It does not apply to the production
+  deploy, which is `--prebuilt` — CI has already built the output.)
+- **The Vercel CLI runs from the repo root**, not from `platform/frontend`: the
+  project's Root Directory is `platform/frontend` and the CLI applies that setting
+  itself, exactly as the Git integration did. Running it from inside that directory
+  makes it resolve `platform/frontend/platform/frontend` and fail to find the app.
 
 ## Frontend ↔ backend contract
 
@@ -162,14 +284,16 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
 
 ## One-time setup
 
-1. **Build & publish the image** (recommended: via CI). Push to `main` touching
-   `platform/backend/**` runs `backend-image.yml`, producing
+1. **Build & publish the image** (recommended: via CI). Any push to `main` runs the
+   [release pipeline](#releases), which calls `backend-image.yml` and produces
    `ghcr.io/naborka/geohod-quest-api:latest`. Make the package **public**, or
    `podman login ghcr.io` on the VPS once.
    *Fallback (build on VPS):* the context is `platform/` (the crate embeds
    `../goldens` at compile time), so build from there:
    `cd platform && podman build -f backend/Containerfile -t localhost/geohod-quest-api:latest .`
-   then set `Image=localhost/geohod-quest-api:latest` in the API unit.
+   then set `Image=localhost/geohod-quest-api:latest` in the API unit. A locally
+   built image reports `build_id=dev`, which no release can match — so a VPS pinned
+   to one will fail the gate on every deploy until it is pointed back at GHCR.
 
 2. **Create secrets** (never plaintext env files).
    ```sh
@@ -241,46 +365,62 @@ curl -fsS http://127.0.0.1:8082/health                  # local
 curl -fsS https://api.quest.geohod.ru/health            # through Caddy + TLS
 ```
 Then set Vercel's `NEXT_PUBLIC_API_URL` (Production) to `https://api.quest.geohod.ru`
-and redeploy the frontend.
+and redeploy the frontend (**Actions → release → Run workflow** — the value is baked
+into the bundle at build time, so it only takes effect on a new build).
 
 ## Updating
 
-CI rebuilds and pushes `ghcr.io/naborka/geohod-quest-api:latest` (and a
-`sha-<commit>` tag) on every backend change. Migrations run automatically at
-startup (`sqlx::migrate!`, embedded), so updating = pulling a newer image and
-restarting the unit. Three ways, pick one:
+Nothing to do by hand — the [**Releases**](#releases) pipeline owns this, and the
+frontend is held back until the update below has landed. Migrations run at startup
+(`sqlx::migrate!`, embedded), so updating *is* pulling a newer image and restarting
+the unit.
 
-**Recommended — automatic (`podman auto-update`).** The API unit carries
-`AutoUpdate=registry`. Enable the timer once:
-```sh
-systemctl --user enable --now podman-auto-update.timer    # needs linger (set above)
-```
-The timer (default daily) re-pulls `:latest` when its digest changed, restarts
-the unit, and **rolls back to the previous image if the new container fails to
-start**. Inspect:
+**The mechanism.** The API unit carries `AutoUpdate=registry`, and
+`podman-auto-update.timer` re-pulls `:latest` when its digest changed, restarts the
+unit, and **rolls back to the previous image if the new container fails to start**.
+The stock timer fires **daily**, which is far too slow for a gated release — install
+the one-minute drop-in from
+[`deploy/podman-auto-update.timer.d/override.conf`](./deploy/podman-auto-update.timer.d/override.conf)
+(see [Releases → One-time setup](#one-time-setup)). Inspect:
 ```sh
 systemctl --user list-timers | grep auto-update
 podman auto-update --dry-run
 ```
 
-**On-demand (same mechanism, no waiting).** Run it yourself right after a release:
+**Force it now** (same mechanism, no waiting for the timer):
 ```sh
 podman auto-update                 # pulls changed images, restarts, rolls back on failure
 ```
 
-**Manual (no auto-update).** Explicit pull + restart — note a bare `restart`
+**Manual (auto-update disabled).** Explicit pull + restart — note a bare `restart`
 does NOT re-pull (Quadlet `Pull=missing`), so the pull is required:
 ```sh
 podman pull ghcr.io/naborka/geohod-quest-api:latest
 systemctl --user restart geohod-quest-api.service
 ```
 
-**Which build is live / rollback by hand:**
+**Which build is live:**
 ```sh
+curl -fsS https://api.quest.geohod.ru/health     # {"status":"ok","build_id":"<12 hex>"}
+# build_id is the CONTENT id the release gate matches on. To get the commit, read
+# the image label — it may legitimately be OLDER than HEAD, because a commit that
+# left the backend unchanged is never rebuilt:
 podman inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' geohod-quest-api
-# pin a known-good build instead of :latest, then daemon-reload + restart:
-#   Image=ghcr.io/naborka/geohod-quest-api:sha-<commit>
 ```
+
+`/health` reports **one** identity and it is derived. It used to also carry the
+crate version — which was written at the repository's first commit and never bumped
+again, so it answered "is my change live?" with `0.1.0` no matter what was actually
+deployed. That is the failure this pipeline exists to end, so the field is gone
+rather than documented; nothing read it (`build_id` is what the gate matches, and
+the container HEALTHCHECK only looks at the status code). A locally built image
+reports `build_id=dev`.
+
+**Rollback.** Prefer `git revert` + push: the pipeline re-points `:latest` at the
+older image and auto-update follows it, keeping the frontend in step. To pin by
+hand instead, set `Image=ghcr.io/naborka/geohod-quest-api:sha-<commit>` in the unit
+(or `:build-<id>`), then `daemon-reload` + restart — but note that a pinned unit no
+longer tracks `:latest`, so the next release's gate will time out until you unpin.
 
 > After editing any `~/.config/containers/systemd/*.container` file, run
 > `systemctl --user daemon-reload` before restarting — Quadlet regenerates the
@@ -428,5 +568,8 @@ pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
   keep it authoritative and regenerated (`cd platform/frontend && rm -rf node_modules && npm install`).
   Since the backend is Rust, the npm workspace shares no JS — consider dropping the
   `workspaces` field in `platform/package.json` later so there is a single lockfile.
-- **PWA caching**: the service worker can serve stale assets to returning users after
-  a deploy. Verify the SW update/skip-waiting strategy when you cut the first prod release.
+- **PWA caching**: the service worker serves the app shell stale-while-revalidate, so
+  a returning user runs the previous frontend for one navigation after a deploy (and
+  an unopened installed PWA for far longer). The release pipeline cannot fix this —
+  it is why the API must stay backward compatible; see
+  [The invariant this pipeline does not enforce](#the-invariant-this-pipeline-does-not-enforce).

@@ -296,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    tracing::info!(addr = %config.addr, version = %config.version, "starting geohod-backend");
+    tracing::info!(addr = %config.addr, build_id = %config.build_id, "starting geohod-backend");
 
     let app = build_router(state).layer(tower_http::timeout::TimeoutLayer::with_status_code(
         StatusCode::REQUEST_TIMEOUT,
@@ -542,7 +542,7 @@ mod tests {
     fn test_config() -> AppConfig {
         AppConfig {
             addr: "0.0.0.0:0".parse().expect("test addr"),
-            version: "test-0.0.0",
+            build_id: "test-build".to_string(),
             admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
             cors_allowed_origins: Vec::new(),
             media: test_media_cfg(),
@@ -2660,13 +2660,40 @@ mod tests {
 
     // === In-memory backend (fresh state per test, fixed tags) ===
 
+    /// `/health` is the release gate: CI polls it until `build_id` equals the id
+    /// of the commit being released, and only then promotes the frontend (see
+    /// `.github/workflows/release.yml`). So the field is part of the contract, not
+    /// decoration — dropping or renaming it silently disables the gate.
+    ///
+    /// It reports exactly ONE identity, and a derived one. The endpoint used to
+    /// also carry the crate version, which sat at "0.1.0" from the first commit of
+    /// the repository and was never once bumped — so an operator reading it to
+    /// answer "is my change live?" always got the same answer, whatever was
+    /// actually deployed. A constant shaped like a deploy identity is worse than
+    /// no identity at all.
     #[tokio::test]
-    async fn health_returns_ok_and_version() {
+    async fn health_reports_the_build_id_and_nothing_hand_maintained() {
         let app = test_app();
         let (status, body) = get_json(&app, "/health").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
-        assert_eq!(body["version"], "test-0.0.0");
+        assert_eq!(body["build_id"], "test-build");
+        assert!(
+            body.get("version").is_none(),
+            "/health must not report a hand-maintained version — it cannot be kept \
+             true and the release gate does not read it: {body}"
+        );
+    }
+
+    /// Outside a released image there is no `BUILD_ID`, and the fallback must be a
+    /// value no released build can ever produce — otherwise a misconfigured
+    /// container could report an id CI mistakes for the real one and promote the
+    /// frontend against a backend that never updated.
+    #[test]
+    fn build_id_falls_back_to_dev_when_unset() {
+        assert_eq!(config::build_id_from(None), "dev");
+        assert_eq!(config::build_id_from(Some("   ")), "dev");
+        assert_eq!(config::build_id_from(Some("a1b2c3d4e5f6")), "a1b2c3d4e5f6");
     }
 
     /// Admin coupon CRUD: create → list → get → save → delete, with the
@@ -4545,7 +4572,7 @@ mod tests {
         let router = build_router(AppState {
             config: AppConfig {
                 addr: "0.0.0.0:0".parse().expect("test addr"),
-                version: "test-pg",
+                build_id: "test-build".to_string(),
                 admin_token: Some(TEST_ADMIN_TOKEN.to_string()),
                 cors_allowed_origins: Vec::new(),
                 media: media_cfg.clone(),

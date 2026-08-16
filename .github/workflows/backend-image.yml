@@ -1,16 +1,35 @@
 name: backend-image
 
 # Builds the Rust backend container and pushes it to GHCR so the VPS only has to
-# `podman pull` (no compiling on a small VPS). Does NOT deploy — the VPS pulls
-# on its own schedule / via `systemctl --user restart geohod-quest-api`.
+# `podman pull` (no compiling on a small VPS).
+#
+# Called by release.yml and nowhere else — an image published outside that
+# pipeline would reach the VPS with nothing holding the frontend back until the
+# backend is actually serving it, which is the exact failure the pipeline exists
+# to prevent.
+#
+# Identical sources are never rebuilt. The caller passes the content id of the
+# backend sources; if `<image>:build-<id>` already exists in GHCR this job
+# re-points `:latest` at that same manifest instead of building a new one. That
+# makes "unchanged backend ⇒ unchanged digest" a guarantee rather than a
+# build-cache accident, so `podman auto-update` on the VPS does not restart the
+# API for commits that only touched the frontend, the docs, or the workflows.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "platform/backend/**"
-      - ".github/workflows/backend-image.yml"
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      build_id:
+        description: Content id of the backend sources (computed in release.yml).
+        required: true
+        type: string
+      force_rebuild:
+        description: >-
+          Build even when this content id is already in GHCR. Exists because
+          "identical sources are never rebuilt" would otherwise pin the image to a
+          base layer that can never receive a security update.
+        required: false
+        default: false
+        type: boolean
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/geohod-quest-api
@@ -24,12 +43,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Provisions a buildx builder using the docker-container driver, which is
-      # required for the GitHub Actions (type=gha) build cache. The runner's
-      # default builder uses the plain "docker" driver, which cannot export cache.
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -37,16 +50,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Has this backend already been built?
+        id: cached
+        shell: bash
+        run: |
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "force_rebuild requested — rebuilding build-${{ inputs.build_id }} from unchanged sources."
+          elif docker buildx imagetools inspect "$IMAGE:build-${{ inputs.build_id }}" >/dev/null 2>&1; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "build-${{ inputs.build_id }} is already in GHCR — retagging, not rebuilding."
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Moves the tags onto the existing manifest without pulling or rebuilding, so
+      # the digest stays byte-identical and the VPS has nothing to do. This is also
+      # what makes a revert work: `:latest` moves BACK to the older image and
+      # auto-update rolls the VPS back with it.
+      - name: Retag the existing image
+        if: steps.cached.outputs.hit == 'true'
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            --tag "$IMAGE:sha-${{ github.sha }}" \
+            "$IMAGE:build-${{ inputs.build_id }}"
+
+      # Provisions a buildx builder using the docker-container driver, which is
+      # required for the GitHub Actions (type=gha) build cache. The runner's
+      # default builder uses the plain "docker" driver, which cannot export cache.
+      - name: Set up Buildx
+        if: steps.cached.outputs.hit == 'false'
+        uses: docker/setup-buildx-action@v3
+
       - name: Metadata (tags)
+        if: steps.cached.outputs.hit == 'false'
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          # `build-<id>` is the immutable content tag the skip-check above reads
+          # back on later runs; `sha-<commit>` is for humans tracing a deploy;
+          # `:latest` is what the Quadlet unit follows via AutoUpdate=registry.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
+            type=raw,value=build-${{ inputs.build_id }}
             type=sha,format=long
 
       - name: Build and push
+        if: steps.cached.outputs.hit == 'false'
         uses: docker/build-push-action@v6
         with:
           # Context is platform/ (not backend/) because the crate embeds files
@@ -54,6 +106,9 @@ jobs:
           context: platform
           file: platform/backend/Containerfile
           push: true
+          # Baked into the image and reported by GET /health, so the release gate
+          # can tell whether the VPS is already serving this exact backend.
+          build-args: BUILD_ID=${{ inputs.build_id }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

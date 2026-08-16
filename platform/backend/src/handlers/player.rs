@@ -41,11 +41,14 @@ pub fn router() -> Router<AppState> {
         .route("/api/users/me/stats", get(get_my_stats_handler))
 }
 
-/// Health check response for probes and tests.
+/// Health check response for probes, tests and the release gate.
+///
+/// One identity, and a derived one: see [`crate::config::AppConfig::build_id`] for
+/// why the crate version is deliberately absent.
 #[derive(serde::Serialize)]
 struct HealthResponse {
     status: &'static str,
-    version: &'static str,
+    build_id: String,
 }
 
 async fn health_handler(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
@@ -53,7 +56,7 @@ async fn health_handler(State(state): State<AppState>) -> Result<impl IntoRespon
         StatusCode::OK,
         Json(HealthResponse {
             status: "ok",
-            version: state.config.version,
+            build_id: state.config.build_id.clone(),
         }),
     ))
 }

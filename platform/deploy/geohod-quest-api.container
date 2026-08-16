@@ -19,7 +19,13 @@ ContainerName=geohod-quest-api
 Image=ghcr.io/naborka/geohod-quest-api:latest
 # Enables `podman auto-update`: the timer re-pulls this tag when its registry
 # digest changes, restarts the unit, and rolls back to the previous image if the
-# new container fails to start.
+# new container fails to start. This is how a release reaches the VPS — pull-based,
+# so nothing inbound is needed here. The stock timer fires DAILY, which would stall
+# every release: install deploy/podman-auto-update.timer.d/override.conf to
+# reconcile every minute (DEPLOYMENT.md → Releases → One-time setup).
+#
+# Do NOT pin this to a :sha-/:build- tag except to hold a rollback: a pinned unit
+# stops tracking :latest, so the release gate would time out on every deploy.
 AutoUpdate=registry
 PublishPort=127.0.0.1:8082:8082
 Environment=PORT=8082

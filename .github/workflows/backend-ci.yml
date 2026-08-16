@@ -10,17 +10,16 @@ name: backend-ci
 # exercised — the in-memory store is the executable spec, Postgres is parity.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "platform/backend/**"
-      - "platform/goldens/**"
-      - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "platform/backend/**"
       - "platform/goldens/**"
       - ".github/workflows/backend-ci.yml"
+  # On `main` this runs as a STAGE of release.yml rather than on its own push
+  # trigger, so the suite gates the image build instead of racing it. A parallel
+  # push trigger would let a regression be published while its test run is still
+  # going.
+  workflow_call:
 
 defaults:
   run:
