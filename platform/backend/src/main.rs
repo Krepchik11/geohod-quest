@@ -391,6 +391,7 @@ mod tests {
             handlers::player::CatalogQuest,
             handlers::player::ProductPageWire,
             handlers::player::ReviewWire,
+            handlers::player::ReviewsPageWire,
             handlers::admin::AdminIdentityWire,
             handlers::admin::AdminReviewWire,
             handlers::admin::AdminReviewsResponse,
@@ -3062,6 +3063,87 @@ mod tests {
     /// the ops token that constructor_full_lifecycle uses — and until now the
     /// Postgres store never ran ANY constructor scenario. This walks the real
     /// user path over the full transition matrix on both stores.
+    /// §11 review visibility: a later star-only re-rate updates the stars but
+    /// keeps the player's written review, and the reviews endpoint pages past
+    /// the product page's first ten.
+    async fn scenario_review_visibility(app: &Router, ids: &Ids) {
+        let attempt1 = grant_publish_attempt(app, ids).await;
+        let quest = ids.quest.as_str();
+        let rate = |attempt: String, stars: &str, note: Option<&str>| {
+            let uri = format!("/api/attempts/{attempt}/facts");
+            let body = json!({ "facts": [{
+                "type": "quest_rated", "step_position": 0, "submitted_value": stars,
+                "local_is_correct": true, "coins_delta": 0,
+                "note": note, "device_id": "d1"
+            }] });
+            async move {
+                let (st, _) = post_json(app, &uri, body).await;
+                assert_eq!(st, StatusCode::OK);
+            }
+        };
+        rate(attempt1, "5", Some("Отличный квест!")).await;
+
+        // Replay: a new attempt with a star-only re-rate.
+        let (st, att) = post_json(
+            app,
+            "/api/attempts",
+            json!({ "user_id": ids.player, "quest_id": quest }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let attempt2 = att["attempt_id"].as_str().expect("attempt id").to_string();
+        // A whitespace-only note IS a star-only rating (pins the blank rule
+        // in both stores' text selection).
+        rate(attempt2, "3", Some("   ")).await;
+
+        let (st, v) = get_json(app, &format!("/api/quests/{quest}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["rating_avg"], 3.0, "stars follow the latest rating");
+        assert_eq!(v["rating_count"], 1, "a replaying player counts once");
+        assert_eq!(v["reviews_total"], 1, "the written review survives: {v}");
+        assert_eq!(v["reviews"][0]["text"], "Отличный квест!");
+        assert_eq!(
+            v["reviews"][0]["rating"], 3,
+            "shown with the effective stars"
+        );
+
+        // A second reviewer, then page through the dedicated endpoint.
+        let buyer = format!("rev2-{}", ids.player);
+        let (st, _) = post_json(
+            app,
+            "/api/checkout",
+            json!({ "user_id": buyer, "quest_id": quest }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, att) = post_json(
+            app,
+            "/api/attempts",
+            json!({ "user_id": buyer, "quest_id": quest }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let attempt3 = att["attempt_id"].as_str().expect("attempt id").to_string();
+        rate(attempt3, "4", Some("Тоже неплохо")).await;
+
+        let (st, page) = get_json(
+            app,
+            &format!("/api/quests/{quest}/reviews?offset=0&limit=1"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(page["total"], 2);
+        assert_eq!(page["reviews"][0]["text"], "Тоже неплохо", "newest first");
+        assert_eq!(page["reviews"].as_array().expect("page").len(), 1);
+        let (st, page) = get_json(
+            app,
+            &format!("/api/quests/{quest}/reviews?offset=1&limit=1"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(page["reviews"][0]["text"], "Отличный квест!");
+    }
+
     /// The dashboard list shows the quest cover, but never a `data:` blob —
     /// base64 covers (legacy imports) are megabytes per row and stay on the
     /// GET-one wire only.
@@ -4970,6 +5052,7 @@ mod tests {
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
         ctor_list_carries_url_covers_only = ids scenario_ctor_list_covers / "ctorcover";
+        review_survives_star_only_rerate_and_pages = ids scenario_review_visibility / "reviews";
         product_page_payload = ids scenario_product_page / "product";
         auth_v2_full_flow = mails scenario_auth_v2 / "authv2";
         reset_by_code_alongside_link = mails scenario_reset_by_code / "resetcode";

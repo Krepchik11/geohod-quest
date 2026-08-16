@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, classify, type ProductPageWire } from '../../../../lib/api';
+import { api, classify, type ProductPageWire, type ReviewWire } from '../../../../lib/api';
 import { markOwned, useOwns } from '../../../../lib/collection';
 import { currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
@@ -58,6 +58,9 @@ export default function AboutClient({ questId }: { questId: string }) {
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
   const [dl, setDl] = useState<DownloadStage | null>(null);
+  // §11 pagination: pages loaded past the product page's first ten reviews.
+  const [moreReviews, setMoreReviews] = useState<ReviewWire[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   // A ЮKassa return lands here with ?payment={id}; captured once at mount.
   // (Lazy init is hydration-safe: the order card — the only consumer — renders
   // after the client-side product fetch anyway.)
@@ -152,6 +155,15 @@ export default function AboutClient({ questId }: { questId: string }) {
 
   const p = product;
   const free = p.price === 0;
+  const allReviews = p.reviews.concat(moreReviews);
+  const loadMoreReviews = () => {
+    setLoadingMore(true);
+    api
+      .getQuestReviews(questId, allReviews.length)
+      .then((page) => setMoreReviews((cur) => cur.concat(page.reviews)))
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  };
 
   const orderCard = owned ? (
     <div className="qp-order card">
@@ -281,10 +293,10 @@ export default function AboutClient({ questId }: { questId: string }) {
             {p.rating_count > 0 && (
               <p className="qp-reviews__agg">★ {fmtRating(p.rating_avg)} · {p.rating_count} {ratingPlural(p.rating_count)}</p>
             )}
-            {p.reviews.length > 0 ? (
+            {allReviews.length > 0 ? (
               <div className="qp-reviews__list">
-                {p.reviews.map((r, i) => (
-                  <div className="qp-review" key={i}>
+                {allReviews.map((r) => (
+                  <div className="qp-review" key={`${r.author}-${r.created_at}-${r.text}`}>
                     <div className="qp-review__head">
                       <b>{r.author}</b>
                       <span className="qp-review__stars" aria-label={`Оценка ${r.rating} из 5`}>
@@ -295,6 +307,11 @@ export default function AboutClient({ questId }: { questId: string }) {
                     <p>{r.text}</p>
                   </div>
                 ))}
+                {allReviews.length < p.reviews_total && (
+                  <button className="btn btn--secondary" type="button" disabled={loadingMore} onClick={loadMoreReviews}>
+                    Показать ещё
+                  </button>
+                )}
               </div>
             ) : (
               p.rating_count === 0 && <p className="qp-reviews__empty">Пока без отзывов — станьте первым</p>

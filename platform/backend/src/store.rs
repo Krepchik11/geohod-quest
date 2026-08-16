@@ -92,21 +92,22 @@ pub struct AttemptMeta {
     pub created_at: u64,
 }
 
-/// The running best rating for a `(quest, player)` while folding attempts —
-/// `(created_at, attempt_id, rating, text)`, the max by `(created_at, attempt_id)`.
-type BestRating = (u64, String, i64, Option<String>);
-
 /// In-memory append-only fact store + attempt registry.
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryFactStore {
     fact_logs: HashMap<String, Vec<Fact>>,
-    /// Storage-level receive instants, parallel to `fact_logs` (mirrors the
-    /// Postgres `facts.recorded_at` column; never part of the wire shape or the
-    /// dedup key). INVARIANT: `fact_times[a][i]` is the receive time of
+    /// Storage-level metadata parallel to `fact_logs` (never part of the wire
+    /// shape or the dedup key). INVARIANT: `fact_times[a][i]` belongs to
     /// `fact_logs[a][i]` — both vectors are only ever appended together in
     /// [`Self::append_idempotent`] and dropped together, keeping the wire log
     /// borrowable by the pure projectors with zero copies.
-    fact_times: HashMap<String, Vec<u64>>,
+    /// Per fact: `(receive time, store-wide append order)`. The order half
+    /// exists because receive times have seconds granularity — "newest" needs
+    /// a deterministic tiebreaker, the same total order Postgres gets from
+    /// `(recorded_at, seq)`. One vector for both keeps the parallel-index
+    /// invariant unbreakable.
+    fact_times: HashMap<String, Vec<(u64, u64)>>,
+    next_fact_ord: u64,
     attempts: HashMap<String, AttemptMeta>,
     next_attempt_seq: u64,
     /// Idempotency marks for the one-time legacy migration job (phase 4).
@@ -169,29 +170,40 @@ impl InMemoryFactStore {
                 .entry(attempt_id.to_string())
                 .or_default()
                 .push(f.clone());
+            self.next_fact_ord += 1;
             self.fact_times
                 .entry(attempt_id.to_string())
                 .or_default()
-                .push(now_secs());
+                .push((now_secs(), self.next_fact_ord));
             accepted.push(f);
         }
         Some(accepted)
     }
 
     /// Effective per-player ratings for the given quests (or ALL quests when
-    /// `None`) — the input to the public hide-aware fold in [`crate::facts`]. One
-    /// row per `(user_id, quest_id)`: the player's latest rated attempt across
-    /// all versions (ties broken by `(created_at, attempt_id)` for determinism).
-    /// Star-only ratings are included (with `text = None`); the fold and review
-    /// list decide how each is used.
+    /// `None`) — the input to the public hide-aware fold in [`crate::facts`].
+    /// One row per `(user_id, quest_id)`, decoupled as the row type documents:
+    /// stars come from the player's newest `quest_rated` fact anywhere (dropped
+    /// if unparseable), text from their newest non-empty note anywhere — so a
+    /// later star-only re-rate never erases a written review. "Newest" is
+    /// `(receive instant, append order)` — the same `(recorded_at, seq)` order
+    /// the Postgres implementation uses.
     pub fn quest_rating_rows(
         &self,
         quests: Option<&[String]>,
     ) -> Vec<crate::facts::PlayerRatingRow> {
         let wanted: Option<std::collections::HashSet<&str>> =
             quests.map(|qs| qs.iter().map(String::as_str).collect());
-        // (quest_id, user_id) -> (created_at, attempt_id, rating, text) — max wins.
-        let mut best: HashMap<(String, String), BestRating> = HashMap::new();
+        type Slot<T> = Option<(u64, u64, T)>; // (recorded_at, seq, payload)
+        type BestSlots = (Slot<Option<i64>>, Slot<String>); // newest stars, newest text
+        fn is_newer<T>(slot: &Slot<T>, at: u64, seq: u64) -> bool {
+            match slot {
+                Some((a, s, _)) => (at, seq) > (*a, *s),
+                None => true,
+            }
+        }
+        // (quest_id, user_id) -> newest stars fact + newest texted fact.
+        let mut best: HashMap<(String, String), BestSlots> = HashMap::new();
         for meta in self.attempts.values() {
             if let Some(w) = &wanted
                 && !w.contains(meta.quest_id.as_str())
@@ -201,30 +213,43 @@ impl InMemoryFactStore {
             let Some(log) = self.fact_logs.get(&meta.attempt_id) else {
                 continue;
             };
-            let Some((rating, text)) = crate::facts::effective_rating(log) else {
-                continue;
-            };
-            let key = (meta.quest_id.clone(), meta.user_id.clone());
-            let newer = match best.get(&key) {
-                Some((at, aid, _, _)) => (meta.created_at, meta.attempt_id.as_str()) > (*at, aid),
-                None => true,
-            };
-            if newer {
-                best.insert(
-                    key,
-                    (meta.created_at, meta.attempt_id.clone(), rating, text),
-                );
+            let times = self.fact_times.get(&meta.attempt_id);
+            for (i, f) in log.iter().enumerate() {
+                if f.kind != FactKind::QuestRated {
+                    continue;
+                }
+                let (at, ord) = times
+                    .and_then(|t| t.get(i).copied())
+                    .unwrap_or((meta.created_at, 0));
+                let key = (meta.quest_id.clone(), meta.user_id.clone());
+                let entry = best.entry(key).or_default();
+                if is_newer(&entry.0, at, ord) {
+                    entry.0 = Some((at, ord, crate::facts::parse_rating(f)));
+                }
+                if let Some(text) = crate::facts::review_text(f)
+                    && is_newer(&entry.1, at, ord)
+                {
+                    entry.1 = Some((at, ord, text));
+                }
             }
         }
         best.into_iter()
-            .map(|((quest_id, user_id), (created_at, _aid, rating, text))| {
-                crate::facts::PlayerRatingRow {
+            .filter_map(|((quest_id, user_id), (stars, text))| {
+                let (rated_at, _, rating) = stars?;
+                let rating = rating?; // newest rating unparseable → row dropped
+                let (text_at, text_ord, text) = match text {
+                    Some((at, ord, t)) => (at, ord, Some(t)),
+                    None => (0, 0, None),
+                };
+                Some(crate::facts::PlayerRatingRow {
                     user_id,
                     quest_id,
                     rating,
+                    rated_at,
                     text,
-                    created_at,
-                }
+                    text_at,
+                    text_ord,
+                })
             })
             .collect()
     }
@@ -312,7 +337,7 @@ impl InMemoryFactStore {
                     continue;
                 }
                 let recorded_at = times
-                    .and_then(|t| t.get(i).copied())
+                    .and_then(|t| t.get(i).map(|(at, _)| *at))
                     .unwrap_or(meta.created_at);
                 out.push(crate::facts::FeedbackReportRow {
                     quest_id: meta.quest_id.clone(),
@@ -451,7 +476,7 @@ impl InMemoryFactStore {
                     .iter()
                     .zip(times)
                     .filter(|(f, _)| f.kind == FactKind::AttemptCompleted)
-                    .map(|(_, t)| *t as i64)
+                    .map(|(_, (t, _))| *t as i64)
                     .min()?;
                 (from..to_excl)
                     .contains(&at)

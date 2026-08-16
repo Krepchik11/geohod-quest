@@ -121,62 +121,84 @@ impl PgFactStore {
 
 #[async_trait::async_trait]
 impl FactStore for PgFactStore {
-    /// See [`crate::store::InMemoryFactStore::quest_rating_rows`]. Per `(quest,
-    /// player)` the latest rated attempt's last `quest_rated` fact — the input to
-    /// the public hide-aware fold. `None` scans every quest (admin list);
-    /// `Some(&[..])` scopes it (product page + catalog). Unparseable ratings are
-    /// dropped, mirroring [`crate::facts::effective_rating`].
+    /// See [`crate::store::InMemoryFactStore::quest_rating_rows`] — one row per
+    /// `(quest, player)`, stars and text decoupled as the row type documents.
+    /// `None` scans every quest (admin list); `Some(&[..])` scopes it (product
+    /// page + reviews endpoint). Unparseable ratings are dropped, mirroring the
+    /// in-memory fold.
     async fn quest_rating_rows(
         &self,
         quests: Option<&[String]>,
     ) -> Result<Vec<crate::facts::PlayerRatingRow>, AppError> {
         use sqlx::Row;
-        // Inner DISTINCT ON keeps the last quest_rated per attempt (a newer
-        // re-rating wins); outer DISTINCT ON keeps, per (quest, player), the newest
-        // rated attempt (ties by attempt_id, matching the in-memory tuple order).
-        const SELECT: &str = "SELECT DISTINCT ON (a.quest_id, a.user_id)
-                    a.quest_id, a.user_id, a.created_at, last_rated.data
-             FROM ( SELECT DISTINCT ON (f.attempt_id) f.attempt_id, f.data
-                    FROM facts f
-                    WHERE f.data->>'type' = 'quest_rated'
-                    ORDER BY f.attempt_id, f.seq DESC ) AS last_rated
-             JOIN attempts a ON a.attempt_id = last_rated.attempt_id";
-        const ORDER: &str = " ORDER BY a.quest_id, a.user_id, a.created_at DESC, a.attempt_id DESC";
-        let rows = match quests {
-            Some([]) => return Ok(Vec::new()),
-            Some(qs) => sqlx::query(&format!("{SELECT} WHERE a.quest_id = ANY($1){ORDER}"))
-                .bind(qs)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(internal)?,
-            None => sqlx::query(&format!("{SELECT}{ORDER}"))
-                .fetch_all(&self.pool)
-                .await
-                .map_err(internal)?,
-        };
+        // Stars and text are decoupled (see PlayerRatingRow): per (quest,
+        // player), the newest quest_rated fact supplies the stars, the newest
+        // one with a non-blank note supplies the text — one scan, both picked
+        // by ordered aggregates over the same `(recorded_at DESC, seq DESC)`
+        // order the in-memory fold uses. The btrim FILTER restates
+        // `facts::review_text` (whitespace set included) purely so blank notes
+        // never cross the wire; the Rust helper stays the definition and the
+        // scenario twin tests pin the two together.
+        const NOTE_PRESENT: &str = "btrim(coalesce(f.data->>'note', ''), E' \\t\\n\\r') <> ''";
+        let sql = format!(
+            "SELECT a.quest_id, a.user_id,
+                    (array_agg(f.data->>'submitted_value'
+                        ORDER BY f.recorded_at DESC, f.seq DESC))[1] AS stars,
+                    (array_agg(f.recorded_at
+                        ORDER BY f.recorded_at DESC, f.seq DESC))[1] AS rated_at,
+                    (array_agg(f.data->>'note'
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text,
+                    (array_agg(f.recorded_at
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text_at,
+                    (array_agg(f.seq
+                        ORDER BY f.recorded_at DESC, f.seq DESC)
+                        FILTER (WHERE {NOTE_PRESENT}))[1] AS text_ord
+             FROM facts f
+             JOIN attempts a ON a.attempt_id = f.attempt_id
+             WHERE f.data->>'type' = 'quest_rated'
+               AND ($1::text[] IS NULL OR a.quest_id = ANY($1))
+             GROUP BY a.quest_id, a.user_id"
+        );
+        if let Some([]) = quests {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(&sql)
+            .bind(quests)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
-            let data: serde_json::Value = r.try_get("data").map_err(internal)?;
-            let Some(rating) = data
-                .get("submitted_value")
-                .and_then(|v| v.as_str())
-                .and_then(|v| v.trim().parse::<i64>().ok())
-            else {
-                continue; // unparseable rating → excluded (mirrors effective_rating)
+            let stars: Option<String> = r.try_get("stars").map_err(internal)?;
+            let Some(rating) = stars.as_deref().and_then(crate::facts::parse_rating_value) else {
+                continue; // unparseable newest rating → excluded (mirrors in-memory)
             };
-            let text = data
-                .get("note")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(str::to_string);
-            let created_at: i64 = r.try_get("created_at").map_err(internal)?;
+            let rated_at: i64 = r.try_get("rated_at").map_err(internal)?;
+            // The FILTER makes text/text_at/text_ord NULL together; the Rust
+            // trim re-applies review_text's rule (Unicode whitespace, wider
+            // than btrim's set), and a note that only it blanks drops whole.
+            let text: Option<String> = r.try_get("text").map_err(internal)?;
+            let text = text.as_deref().map(str::trim).filter(|t| !t.is_empty());
+            let (text_at, text_ord) = if text.is_some() {
+                let at: Option<i64> = r.try_get("text_at").map_err(internal)?;
+                let ord: Option<i64> = r.try_get("text_ord").map_err(internal)?;
+                (
+                    at.unwrap_or(0).max(0) as u64,
+                    ord.unwrap_or(0).max(0) as u64,
+                )
+            } else {
+                (0, 0)
+            };
             out.push(crate::facts::PlayerRatingRow {
                 user_id: r.try_get("user_id").map_err(internal)?,
                 quest_id: r.try_get("quest_id").map_err(internal)?,
                 rating,
-                text,
-                created_at: created_at as u64,
+                rated_at: rated_at.max(0) as u64,
+                text_at,
+                text_ord,
+                text: text.map(str::to_string),
             });
         }
         Ok(out)

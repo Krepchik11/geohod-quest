@@ -7,19 +7,22 @@ import React from 'react';
 /**
  * §3 product page flows: model-data rendering, not-owned → sheet → owned in
  * place (no redirect), free instant grant, delisted quest 404 state, chips
- * hidden when unknown, reviews aggregate until §11.
+ * hidden when unknown, §11 reviews list + «Показать ещё» paging.
  */
-const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock } = vi.hoisted(() => ({
-  getProductMock: vi.fn(),
-  listGrantsMock: vi.fn(),
-  checkoutMock: vi.fn(),
-  downloadMock: vi.fn(async () => ({})),
-  pollMock: vi.fn(),
-}));
+const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock, reviewsMock } =
+  vi.hoisted(() => ({
+    getProductMock: vi.fn(),
+    listGrantsMock: vi.fn(),
+    checkoutMock: vi.fn(),
+    downloadMock: vi.fn(async () => ({})),
+    pollMock: vi.fn(),
+    reviewsMock: vi.fn(),
+  }));
 vi.mock('../../../../../lib/api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   api: {
     getQuestProduct: getProductMock,
+    getQuestReviews: reviewsMock,
     listGrants: listGrantsMock,
     checkout: checkoutMock,
     getBundle: vi.fn(),
@@ -68,6 +71,38 @@ describe('productChips', () => {
 });
 
 describe('AboutClient', () => {
+  it('«Показать ещё» pages the reviews past the first ten', async () => {
+    const firstTen = Array.from({ length: 10 }, (_, i) => ({
+      author: 'Игрок', rating: 5, text: `отзыв ${i}`, created_at: 1700000000 - i,
+    }));
+    getProductMock.mockResolvedValue({
+      ...PRODUCT, rating_count: 12, reviews: firstTen, reviews_total: 12,
+    });
+    reviewsMock.mockResolvedValue({
+      reviews: [{ author: 'Игрок', rating: 4, text: 'одиннадцатый отзыв', created_at: 1 }],
+      total: 12,
+    });
+    render(<AboutClient questId="q1" />);
+    const btn = await screen.findByRole('button', { name: /Показать ещё/ });
+    fireEvent.click(btn);
+    await screen.findByText('одиннадцатый отзыв');
+    expect(reviewsMock).toHaveBeenCalledWith('q1', 10);
+    // 11 of 12 shown — the button stays for the tail.
+    expect(screen.getByRole('button', { name: /Показать ещё/ })).toBeTruthy();
+  });
+
+  it('no «Показать ещё» when every review is already on the page', async () => {
+    getProductMock.mockResolvedValue({
+      ...PRODUCT,
+      rating_count: 1,
+      reviews: [{ author: 'Игрок', rating: 5, text: 'единственный', created_at: 1 }],
+      reviews_total: 1,
+    });
+    render(<AboutClient questId="q1" />);
+    await screen.findByText('единственный');
+    expect(screen.queryByRole('button', { name: /Показать ещё/ })).toBeNull();
+  });
+
   it('renders model data: breadcrumb, meta, description, author, chips', async () => {
     render(<AboutClient questId="q1" />);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Тайны старого Белграда' })).toBeTruthy());
