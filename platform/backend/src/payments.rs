@@ -90,6 +90,8 @@ pub struct CheckoutRequest {
 /// Untagged: settled checkouts keep the historical `{grant, created}` shape;
 /// redirect checkouts answer `{payment: {payment_id, confirmation_url}}`.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CheckoutResult"))]
 #[serde(untagged)]
 pub enum CheckoutResponse {
     Settled { grant: AccessGrant, created: bool },
@@ -99,6 +101,7 @@ pub enum CheckoutResponse {
 /// The client's marching orders for a redirect provider: send the payer to
 /// `confirmation_url`, then poll `GET /api/payments/{payment_id}` on return.
 #[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RedirectPayment {
     pub payment_id: String,
     pub confirmation_url: String,

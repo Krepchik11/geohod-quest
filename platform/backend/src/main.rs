@@ -356,6 +356,107 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
+    /// The committed wire contract (frontend/lib/generated/) must equal what
+    /// the serde structs export TODAY — a backend change that alters the wire
+    /// fails here unless the regenerated types land in the same commit
+    /// (issue #66). This test is ALSO the generator — regenerate with:
+    ///   UPDATE_WIRE=1 cargo test wire_bindings_are_committed
+    #[test]
+    fn wire_bindings_are_committed() {
+        use ts_rs::TS;
+        let update = std::env::var("UPDATE_WIRE").is_ok();
+        let committed = std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../frontend/lib/generated"
+        ));
+        let tmp = if update {
+            let _ = std::fs::remove_dir_all(&committed);
+            committed.clone()
+        } else {
+            std::env::temp_dir().join(format!("geohod-wire-{}", std::process::id()))
+        };
+        let _ = std::fs::remove_dir_all(&tmp);
+        macro_rules! export_all {
+            ($($t:ty),* $(,)?) => { $(<$t as TS>::export_all_to(&tmp).expect("export");)* }
+        }
+        export_all!(
+            payments::CheckoutResponse,
+            handlers::payments::PaymentStatusResponse,
+            handlers::payments::CouponVerdict,
+            handlers::player::StartPointWire,
+            handlers::constructor::ConstructorQuestWire,
+            handlers::constructor::ConstructorQuestFullWire,
+            handlers::player::BundleWire,
+            handlers::player::CatalogQuest,
+            handlers::player::ProductPageWire,
+            handlers::player::ReviewWire,
+            handlers::admin::AdminIdentityWire,
+            handlers::admin::AdminReviewWire,
+            handlers::admin::AdminReviewsResponse,
+            handlers::admin::ReviewHideRequest,
+            handlers::admin::AdminReportWire,
+            handlers::admin::AdminFeedbackGroupWire,
+            handlers::admin::AdminFeedbackResponse,
+            handlers::admin::FeedbackResolveRequest,
+            handlers::auth::AuthProviders,
+            handlers::auth::Me,
+            handlers::admin::AdminUserWire,
+            handlers::admin::FeatureWire,
+            handlers::player::PublicFeaturesResponse,
+            handlers::admin::SettingWire,
+            handlers::admin::CouponPayload,
+            handlers::admin::AdminCouponWire,
+            store::AttemptMeta,
+            facts::PlayerStats,
+            crate::grants::AccessGrant,
+            crate::media::MediaRef,
+            admin_stats::StatsTotals,
+            admin_stats::DailyPoint,
+            admin_stats::QuestStatsRow,
+            admin_stats::OverviewResponse,
+            admin_stats::FunnelStep,
+            admin_stats::QuestStatsResponse,
+        );
+        let list = |dir: &std::path::Path| -> Vec<String> {
+            let mut names: Vec<String> = std::fs::read_dir(dir)
+                .expect("read dir")
+                .map(|e| e.expect("entry").file_name().into_string().expect("utf8"))
+                .filter(|n| n.ends_with(".ts") && n != "index.ts")
+                .collect();
+            names.sort();
+            names
+        };
+        let fresh = list(&tmp);
+        let index: String = fresh
+            .iter()
+            .map(|n| {
+                let t = n.trim_end_matches(".ts");
+                format!("export type {{ {t} }} from './{t}';\n")
+            })
+            .collect();
+        if update {
+            std::fs::write(committed.join("index.ts"), index).expect("write index.ts");
+            return;
+        }
+        assert_eq!(
+            fresh,
+            list(&committed),
+            "generated type set drifted — rerun with UPDATE_WIRE=1"
+        );
+        for name in &fresh {
+            let a = std::fs::read_to_string(tmp.join(name)).expect("fresh");
+            let b = std::fs::read_to_string(committed.join(name)).expect("committed");
+            assert_eq!(a, b, "{name} drifted — rerun with UPDATE_WIRE=1");
+        }
+        let committed_index =
+            std::fs::read_to_string(committed.join("index.ts")).expect("index.ts");
+        assert_eq!(
+            committed_index, index,
+            "index.ts drifted — rerun with UPDATE_WIRE=1"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// Admin secret wired into the test app so admin-gated scenarios can
     /// authenticate (and assert that the wrong/absent token is rejected).
     const TEST_ADMIN_TOKEN: &str = "test-admin-secret";

@@ -379,19 +379,27 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
 /// the PUBLIC client ids they need (Google client id for GIS, Telegram bot client
 /// id for `Telegram.Login.init`). `null` when unconfigured OR switched off by
 /// the admin feature toggle — either way the UI hides the button.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AuthProviders"))]
+pub(crate) struct AuthProviders {
+    google_client_id: Option<String>,
+    telegram_client_id: Option<String>,
+}
+
 async fn auth_providers_handler(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<AuthProviders>, AppError> {
     let overrides = state.flags.all().await?;
     let on = |f: Feature| f.effective(overrides.get(f.key()).copied());
-    Ok(Json(serde_json::json!({
-        "google_client_id": on(Feature::AuthGoogle)
+    Ok(Json(AuthProviders {
+        google_client_id: on(Feature::AuthGoogle)
             .then(|| state.config.google_client_id.clone())
             .flatten(),
-        "telegram_client_id": on(Feature::AuthTelegram)
+        telegram_client_id: on(Feature::AuthTelegram)
             .then(|| state.config.telegram_client_id.clone())
             .flatten(),
-    })))
+    }))
 }
 
 /// POST /api/auth/unlink — `{provider}`. Removes a linked social provider from the
@@ -873,10 +881,28 @@ async fn delete_account_handler(
 
 /// Profile for the resolved identity: the account when registered, a synthetic
 /// anonymous profile otherwise (registered=false).
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "Me"))]
+pub(crate) struct Me {
+    user_id: String,
+    registered: bool,
+    email: Option<String>,
+    display_name: Option<String>,
+    role: Option<String>,
+    /// §6.3: absent for an anonymous profile, `null`-able for an account —
+    /// the double Option keeps «absent» and «null» distinct on the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional, type = "number | null"))]
+    email_confirmed_at: Option<Option<u64>>,
+    methods: Vec<String>,
+    can_unlink: bool,
+}
+
 async fn get_me_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<Me>, AppError> {
     let claimed = claimed_from_headers(&headers);
     let user_id = resolve_user(&state, &headers, &claimed).await?;
     let account = state.auth.get_user(&user_id).await?;
@@ -887,20 +913,31 @@ async fn get_me_handler(
             // methods for the list (a method works iff its identities row
             // exists), the reachability verdict for unlink UI — the client
             // renders these, it never re-derives the rules.
-            let methods = auth::signin_methods(&identities);
+            let methods = auth::signin_methods(&identities)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
             let can_unlink = auth::reachable_ways(&a, &identities) > 1;
-            serde_json::json!({
-                "user_id": a.user_id, "registered": true,
-                "email": a.email, "display_name": a.display_name, "role": a.role,
-                "email_confirmed_at": a.email_confirmed_at,
-                "methods": methods,
-                "can_unlink": can_unlink,
-            })
+            Me {
+                user_id: a.user_id,
+                registered: true,
+                email: a.email,
+                display_name: a.display_name,
+                role: Some(a.role),
+                email_confirmed_at: Some(a.email_confirmed_at),
+                methods,
+                can_unlink,
+            }
         }
-        None => serde_json::json!({
-            "user_id": user_id, "registered": false,
-            "email": null, "display_name": null, "role": null,
-            "methods": [], "can_unlink": false,
-        }),
+        None => Me {
+            user_id,
+            registered: false,
+            email: None,
+            display_name: None,
+            role: None,
+            email_confirmed_at: None,
+            methods: vec![],
+            can_unlink: false,
+        },
     }))
 }

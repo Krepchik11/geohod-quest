@@ -16,6 +16,7 @@ const wire = (
   name,
   primary_comic,
   template_summary: '',
+  description: null, pages: null, tasks: null, paid_hints: null,
   snapshot_version: 1,
   snapshot_id: `${quest_id}-v1`,
   city: null,

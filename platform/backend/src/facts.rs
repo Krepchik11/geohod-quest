@@ -158,11 +158,16 @@ pub fn project_analytics(facts: &[Fact]) -> Analytics {
 /// plain signed fold as everywhere else — it MAY be negative; the display floor
 /// for "rating" is client-side only (SPEC).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PlayerStats"))]
 pub struct PlayerStats {
     pub balance: i32,
+    #[cfg_attr(test, ts(type = "number"))]
     pub quests_completed: usize,
     pub completed_quest_ids: Vec<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     pub attempts_count: usize,
+    #[cfg_attr(test, ts(type = "number"))]
     pub grants_count: usize,
 }
 

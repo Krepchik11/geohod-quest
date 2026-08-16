@@ -38,7 +38,7 @@ import type { PublishedQuestWire } from '../../lib/api';
 
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
-    quest_id: 'q', name: 'Квест', primary_comic: null, template_summary: '',
+    quest_id: 'q', name: 'Квест', primary_comic: null, template_summary: '', description: null, pages: null, tasks: null, paid_hints: null,
     snapshot_version: 1, snapshot_id: 's', city: 'Белград', duration: '2 часа',
     price: 890, rating_avg: 4.5, rating_count: 10, players: 100,
     complexity: 'medium', age_target: 'everyone', tags: ['история'],

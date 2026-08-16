@@ -5,7 +5,7 @@ import type { PublishedQuestWire } from '../api';
 /** §2.3 hero facts — computed from the LIVE catalog response, never fabricated. */
 function q(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
-    quest_id: 'q', name: 'n', primary_comic: null, template_summary: '',
+    quest_id: 'q', name: 'n', primary_comic: null, template_summary: '', description: null, pages: null, tasks: null, paid_hints: null,
     snapshot_version: 1, snapshot_id: 's', city: null, duration: null,
     price: null, rating_avg: 0, rating_count: 0, players: 0,
     complexity: null, age_target: null, tags: [], ...over,

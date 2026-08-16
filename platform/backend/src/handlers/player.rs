@@ -176,7 +176,9 @@ fn point_of(v: &serde_json::Value) -> Option<StartPointWire> {
 /// Wire shape of the quest start point (see [`snapshot_start_point`]). Bare
 /// coordinates by design: the button reads «Место старта» and nothing else.
 #[derive(serde::Serialize, Debug, PartialEq)]
-struct StartPointWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StartPointWire"))]
+pub(crate) struct StartPointWire {
     lat: f64,
     lng: f64,
 }
@@ -184,6 +186,22 @@ struct StartPointWire {
 #[derive(serde::Deserialize)]
 struct BundleQuery {
     user_id: String,
+}
+
+/// The grant-gated bundle envelope: the frozen snapshot JSON plus its identity.
+/// `primary_comic` is the catalog cover (lives in meta, not the frozen snapshot)
+/// so the client can precache it for offline alongside the snapshot's media —
+/// same value the store card resolves, so the precached bytes match what renders.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BundleWire"))]
+pub(crate) struct BundleWire {
+    quest_id: String,
+    snapshot_id: String,
+    snapshot_version: u32,
+    primary_comic: Option<String>,
+    #[cfg_attr(test, ts(type = "unknown"))]
+    snapshot: Option<serde_json::Value>,
 }
 
 /// Bundle download primitive: latest frozen snapshot JSON, gated by grant
@@ -194,7 +212,7 @@ async fn get_bundle_handler(
     Path(quest_id): Path<String>,
     headers: HeaderMap,
     Query(q): Query<BundleQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<BundleWire>, AppError> {
     let user_id = resolve_user(&state, &headers, &q.user_id).await?;
     let (meta, snapshot) = state
         .grants
@@ -206,16 +224,13 @@ async fn get_bundle_handler(
             "no access grant for quest '{quest_id}'"
         )));
     }
-    Ok(Json(serde_json::json!({
-        "quest_id": meta.quest_id,
-        "snapshot_id": meta.snapshot_id,
-        "snapshot_version": meta.snapshot_version,
-        // Catalog cover (lives in meta, not the frozen snapshot) so the client can
-        // precache it for offline alongside the snapshot's media — same value the
-        // store card resolves, so the precached bytes match what renders.
-        "primary_comic": meta.primary_comic,
-        "snapshot": snapshot,
-    })))
+    Ok(Json(BundleWire {
+        quest_id: meta.quest_id,
+        snapshot_id: meta.snapshot_id,
+        snapshot_version: meta.snapshot_version,
+        primary_comic: meta.primary_comic,
+        snapshot,
+    }))
 }
 
 /// Marketplace catalog row: the stored [`PublishedMeta`] plus the live aggregate
@@ -223,13 +238,17 @@ async fn get_bundle_handler(
 /// finale `quest_rated` facts (never stored), so a freshly published quest reports
 /// `rating_count: 0` and the client shows "no ratings yet" instead of a fake score.
 #[derive(serde::Serialize)]
-struct CatalogQuest {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PublishedQuestWire"))]
+pub(crate) struct CatalogQuest {
     #[serde(flatten)]
     meta: PublishedMeta,
     rating_avg: f64,
+    #[cfg_attr(test, ts(type = "number"))]
     rating_count: usize,
     /// Public players counter: real distinct completions + the author's marketing
     /// `players_bonus`. The raw bonus is never sent on its own (see PublishedMeta).
+    #[cfg_attr(test, ts(type = "number"))]
     players: i64,
     /// Author attributes from the constructor row (store-page filters); `None` /
     /// empty for a legacy/direct publish that has no constructor row.
@@ -328,12 +347,16 @@ async fn list_quests_handler(
 /// name + how many of their quests are on sale, and snapshot-derived content
 /// chips. Visibility matches the catalog: a delisted quest 404s here too.
 #[derive(serde::Serialize)]
-struct ProductPageWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ProductPageWire"))]
+pub(crate) struct ProductPageWire {
     #[serde(flatten)]
     meta: PublishedMeta,
     rating_avg: f64,
+    #[cfg_attr(test, ts(type = "number"))]
     rating_count: usize,
     /// Public players counter: real distinct completions + marketing `players_bonus`.
+    #[cfg_attr(test, ts(type = "number"))]
     players: i64,
     /// Author display label from the constructor row; None for legacy/direct
     /// publishes that have no constructor lifecycle.
@@ -343,6 +366,7 @@ struct ProductPageWire {
     /// §11 reviews v1: newest-first, first page of 10.
     reviews: Vec<ReviewWire>,
     /// Total ratings that carry text («{M} с отзывом»).
+    #[cfg_attr(test, ts(type = "number"))]
     reviews_total: usize,
     /// «Место старта» — see [`snapshot_start_point`]; None hides the button.
     start_point: Option<StartPointWire>,
@@ -351,10 +375,14 @@ struct ProductPageWire {
 /// §11: one public review — author FIRST NAME only (display name's first word;
 /// anonymous → «Игрок»), never an email; month-precision timestamp client-side.
 #[derive(serde::Serialize)]
-struct ReviewWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewWire"))]
+pub(crate) struct ReviewWire {
     author: String,
+    #[cfg_attr(test, ts(type = "number"))]
     rating: i64,
     text: String,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
 }
 
@@ -540,7 +568,9 @@ async fn get_measure_rates_handler(
 /// universal answer is plaintext by design — the same trust model as the
 /// acceptable lists inside quest snapshots (the client is the matcher).
 #[derive(serde::Serialize)]
-struct PublicFeaturesResponse {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PublicFeatures"))]
+pub(crate) struct PublicFeaturesResponse {
     flags: std::collections::HashMap<&'static str, bool>,
     /// The platform-wide universal answer; `None` unless the
     /// `player_universal_answer` flag is on AND a value is set.

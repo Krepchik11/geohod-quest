@@ -21,6 +21,7 @@ use crate::errors::AppError;
 /// amount (clamped to the price at redemption — a 300 ₽ coupon on a 200 ₽
 /// quest yields a free checkout, not a negative charge).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     tag = "discount_type",
     content = "discount_value",
@@ -30,13 +31,14 @@ pub enum Discount {
     /// 1..=100 percent off.
     Percent(u8),
     /// Whole rubles off, > 0.
-    Fixed(i64),
+    Fixed(#[cfg_attr(test, ts(type = "number"))] i64),
 }
 
 /// An admin-managed discount code. `code` is stored normalized (uppercase,
 /// trimmed); `quest_ids: None` means the coupon applies to every paid quest,
 /// `Some(list)` restricts it to the listed quests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Coupon {
     pub coupon_id: String,
     pub code: String,
@@ -67,9 +69,11 @@ pub struct CouponRedemption {
 
 /// Aggregate usage folded from the redemption log (admin list/detail).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct CouponUsage {
     pub used: u32,
     pub last_redeemed_at: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     pub total_discounted: i64,
 }
 
@@ -77,6 +81,7 @@ pub struct CouponUsage {
 /// archive states; precedence Exhausted > Expired > Paused > Active matches
 /// the admin list badges (a spent coupon shows «Исчерпан» even past its date).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum CouponStatus {
     Active,

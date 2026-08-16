@@ -35,7 +35,7 @@ export function asRole(role: string | null | undefined): Role {
 /** View-model for one user (list row + detail). */
 export interface AdminUser {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   role: Role;
   createdAt: number;

@@ -40,7 +40,10 @@ async fn checkout_handler(
 }
 
 #[derive(serde::Serialize)]
-struct PaymentStatusResponse {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PaymentStatusWire"))]
+pub(crate) struct PaymentStatusResponse {
+    #[cfg_attr(test, ts(type = "\"pending\" | \"succeeded\" | \"canceled\""))]
     status: &'static str,
     grant: Option<AccessGrant>,
 }
@@ -117,6 +120,32 @@ struct ValidateCouponRequest {
     code: String,
 }
 
+/// Verdict of the promo preview: `valid: true` carries the priced discount,
+/// `valid: false` the player-facing reason. Untagged — the boolean IS the
+/// discriminant on the wire.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CouponVerdict"))]
+#[serde(untagged)]
+pub(crate) enum CouponVerdict {
+    Valid {
+        #[cfg_attr(test, ts(type = "true"))]
+        valid: bool,
+        code: String,
+        #[cfg_attr(test, ts(type = "number"))]
+        price: i64,
+        #[cfg_attr(test, ts(type = "number"))]
+        discount_amount: i64,
+        #[cfg_attr(test, ts(type = "number"))]
+        final_price: i64,
+    },
+    Invalid {
+        #[cfg_attr(test, ts(type = "false"))]
+        valid: bool,
+        message: String,
+    },
+}
+
 /// Purchase-sheet promo preview: never mutates, always 200 with a verdict.
 /// `{valid: true, ...}` carries the priced discount; `{valid: false, message}`
 /// carries the player-facing reason (unknown and deleted codes read the same).
@@ -124,9 +153,12 @@ async fn validate_coupon_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<ValidateCouponRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<CouponVerdict>, AppError> {
     let user_id = resolve_user(&state, &headers, &req.user_id).await?;
-    let invalid = |message: &str| serde_json::json!({"valid": false, "message": message});
+    let invalid = |message: &str| CouponVerdict::Invalid {
+        valid: false,
+        message: message.to_string(),
+    };
     let Ok(code) = coupons::normalize_code(&req.code) else {
         return Ok(Json(invalid("промокод не найден")));
     };
@@ -140,11 +172,11 @@ async fn validate_coupon_handler(
             Ok(quote) => quote,
             Err(reason) => return Ok(Json(invalid(reason))),
         };
-    Ok(Json(serde_json::json!({
-        "valid": true,
-        "code": code,
-        "price": price,
-        "discount_amount": discount_amount,
-        "final_price": price - discount_amount,
-    })))
+    Ok(Json(CouponVerdict::Valid {
+        valid: true,
+        code,
+        price,
+        discount_amount,
+        final_price: price - discount_amount,
+    }))
 }

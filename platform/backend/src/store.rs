@@ -80,12 +80,15 @@ pub(crate) fn rfc3339_from_unix(secs: u64) -> String {
 /// Registry entry for one attempt: who plays which quest on which frozen snapshot.
 /// The snapshot binding is set once at creation and never changes (version freeze).
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AttemptMeta"))]
 pub struct AttemptMeta {
     pub attempt_id: String,
     pub user_id: String,
     pub quest_id: String,
     pub snapshot_id: String,
     /// Unix seconds at creation (0 on clock error; informational only).
+    #[cfg_attr(test, ts(type = "number"))]
     pub created_at: u64,
 }
 
@@ -486,6 +489,7 @@ impl InMemoryFactStore {
 /// in the constructor settings); they are optional so quests published before the
 /// metadata migration simply omit them rather than show fabricated values.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PublishedMeta {
     pub quest_id: String,
     pub name: String,
@@ -502,6 +506,7 @@ pub struct PublishedMeta {
     pub duration: Option<String>,
     /// Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
     #[serde(default)]
+    #[cfg_attr(test, ts(type = "number | null"))]
     pub price: Option<i64>,
     /// Store description from the constructor settings (product page, §3.1).
     #[serde(default)]
@@ -519,6 +524,7 @@ pub struct PublishedMeta {
     /// settings. Kept out of the client payload (`skip_serializing`) so the raw
     /// padding is never revealed alone — handlers fold it into the `players` total.
     #[serde(default, skip_serializing)]
+    #[cfg_attr(test, ts(skip))]
     pub players_bonus: i64,
 }
 

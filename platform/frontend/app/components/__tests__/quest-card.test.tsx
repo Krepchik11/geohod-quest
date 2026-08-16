@@ -36,7 +36,7 @@ import type { PublishedQuestWire } from '../../../lib/api';
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
     quest_id: 'q1', name: 'Тайны старого Белграда', primary_comic: null,
-    template_summary: '', snapshot_version: 1, snapshot_id: 's1',
+    template_summary: '', description: null, pages: null, tasks: null, paid_hints: null, snapshot_version: 1, snapshot_id: 's1',
     city: 'Белград', duration: '2–3 часа', price: 890,
     rating_avg: 4.8, rating_count: 24, players: 0,
     complexity: null, age_target: null, tags: [], ...over,

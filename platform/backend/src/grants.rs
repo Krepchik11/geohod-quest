@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 /// How a grant was obtained, recorded for audit at creation (first wins on an
 /// idempotent re-checkout). Mirrors the TypeScript `AccessGrant['source']` union.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum GrantSource {
     Payment,
     CouponRedemption,
@@ -30,6 +31,8 @@ pub enum GrantSource {
 /// timestamp stamped once at creation; `source` and `source_ref` are the audit
 /// trail (the latter is `None` for free/coupon paths with nothing to reference).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GrantWire"))]
 pub struct AccessGrant {
     pub user_id: String,
     pub quest_id: String,

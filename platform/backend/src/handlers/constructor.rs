@@ -184,18 +184,23 @@ async fn publish_quest_handler(
 
 /// One dashboard list row.
 #[derive(serde::Serialize)]
-struct ConstructorQuestWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConstructorQuestWire"))]
+pub(crate) struct ConstructorQuestWire {
     quest_id: String,
     name: String,
     /// Display label of the author (denormalized at creation).
     author: String,
     author_id: String,
+    #[cfg_attr(test, ts(type = "\"draft\" | \"test\" | \"published\""))]
     status: String,
     steps: u32,
     /// Distinct players who completed this quest (derived from the fact log).
+    #[cfg_attr(test, ts(type = "number"))]
     completed: usize,
     /// Distinct grant holders — the honest «{N} купивших» for destructive
     /// status confirms (§9.1). Count only, no identities.
+    #[cfg_attr(test, ts(type = "number"))]
     buyers: usize,
     /// Live published snapshot version, if any. None ⇒ the coherence guard will
     /// reject `test`/`published`, so the UI routes into the publish panel.
@@ -206,26 +211,35 @@ struct ConstructorQuestWire {
     // No `cover`: the dashboard renders a name-derived thumbnail, not the stored
     // cover image, so the base64 cover was dead weight that bloated the list
     // (megabytes for media-heavy quests). It stays on the GET-one full wire.
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     updated_at: u64,
 }
 
 /// A single quest with its full editable body (for opening in the builder).
 #[derive(serde::Serialize)]
-struct ConstructorQuestFullWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConstructorQuestFullWire"))]
+pub(crate) struct ConstructorQuestFullWire {
     quest_id: String,
     name: String,
     author: String,
     author_id: String,
+    #[cfg_attr(test, ts(type = "\"draft\" | \"test\" | \"published\""))]
     status: String,
     steps: u32,
+    #[cfg_attr(test, ts(type = "number"))]
     completed: usize,
     cover: Option<String>,
     complexity: String,
     age_target: String,
     tags: Vec<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
+    #[cfg_attr(test, ts(type = "number"))]
     updated_at: u64,
+    #[cfg_attr(test, ts(type = "unknown"))]
     body: serde_json::Value,
 }
 

@@ -108,10 +108,12 @@ async fn get_version_feedbacks_handler(
 /// account, a Telegram `@username` (`t.me/…`) otherwise. Anonymous players (no
 /// account row) carry no contact.
 #[derive(serde::Serialize, Clone)]
-struct AdminIdentityWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminIdentityWire"))]
+pub(crate) struct AdminIdentityWire {
     user_id: String,
     display_name: Option<String>,
-    /// "google" | "telegram" | "email" | "anon".
+    #[cfg_attr(test, ts(type = "\"google\" | \"telegram\" | \"email\" | \"anon\""))]
     kind: &'static str,
     /// Present (for `mailto:`) only when `kind` is google/email.
     email: Option<String>,
@@ -212,20 +214,26 @@ async fn resolve_admin_identities(
 /// One row of the global reviews list: an effective per-`(player, quest)` rating
 /// (star-only included), whether it is hidden, and the resolved author identity.
 #[derive(serde::Serialize)]
-struct AdminReviewWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminReviewWire"))]
+pub(crate) struct AdminReviewWire {
     quest_id: String,
     quest_name: String,
     quest_city: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     rating: i64,
     /// `None` for a star-only rating (counts toward the average, no text).
     text: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
     hidden: bool,
     identity: AdminIdentityWire,
 }
 
 #[derive(serde::Serialize)]
-struct AdminReviewsResponse {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminReviewsResponse"))]
+pub(crate) struct AdminReviewsResponse {
     reviews: Vec<AdminReviewWire>,
 }
 
@@ -278,7 +286,9 @@ async fn admin_list_reviews_handler(
 
 /// Body for hide/unhide — the `(player, quest)` the moderation decision keys on.
 #[derive(serde::Deserialize)]
-struct ReviewHideRequest {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewHideBody"))]
+pub(crate) struct ReviewHideRequest {
     user_id: String,
     quest_id: String,
 }
@@ -312,8 +322,11 @@ async fn admin_unhide_review_handler(
 
 /// One report inside a feedback group — its note, server time, and author identity.
 #[derive(serde::Serialize)]
-struct AdminReportWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminReportWire"))]
+pub(crate) struct AdminReportWire {
     note: String,
+    #[cfg_attr(test, ts(type = "number"))]
     recorded_at: u64,
     identity: AdminIdentityWire,
 }
@@ -322,7 +335,9 @@ struct AdminReportWire {
 /// step label, its human version number, whether it is the current version, and its
 /// reports newest-first.
 #[derive(serde::Serialize)]
-struct AdminFeedbackGroupWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminFeedbackGroupWire"))]
+pub(crate) struct AdminFeedbackGroupWire {
     quest_id: String,
     quest_name: String,
     quest_city: Option<String>,
@@ -337,7 +352,9 @@ struct AdminFeedbackGroupWire {
 }
 
 #[derive(serde::Serialize)]
-struct AdminFeedbackResponse {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminFeedbackResponse"))]
+pub(crate) struct AdminFeedbackResponse {
     groups: Vec<AdminFeedbackGroupWire>,
 }
 
@@ -427,7 +444,9 @@ async fn admin_list_feedback_handler(
 
 /// Body for resolve/reopen — the `(quest, snapshot, step)` group key.
 #[derive(serde::Deserialize)]
-struct FeedbackResolveRequest {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FeedbackResolveBody"))]
+pub(crate) struct FeedbackResolveRequest {
     quest_id: String,
     snapshot_id: String,
     step_position: i32,
@@ -508,12 +527,15 @@ async fn run_migration_handler(
 /// hash or session tokens. The backend does not model telegram/phone, so the UI
 /// renders contact fields present-only and simply omits the ones it has no data for.
 #[derive(serde::Serialize)]
-struct AdminUserWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminUserWire"))]
+pub(crate) struct AdminUserWire {
     user_id: String,
     /// `null` for a social-only account (no login email).
     email: Option<String>,
     display_name: Option<String>,
     role: String,
+    #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
 }
 
@@ -609,7 +631,9 @@ async fn set_user_role_handler(
 /// default) plus the runtime state (override, effective toggle) and whether
 /// the deployment is configured for it at all.
 #[derive(serde::Serialize)]
-struct FeatureWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminFeatureWire"))]
+pub(crate) struct FeatureWire {
     key: &'static str,
     default_enabled: bool,
     /// The stored admin override; `null` = the code default applies.
@@ -678,7 +702,9 @@ async fn set_feature_handler(
 /// Wire shape of a runtime setting: its stable key and the stored value
 /// (`null` = unset — settings have no default values).
 #[derive(serde::Serialize)]
-struct SettingWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminSettingWire"))]
+pub(crate) struct SettingWire {
     key: &'static str,
     value: Option<String>,
 }
@@ -860,7 +886,9 @@ async fn admin_stats_quest_handler(
 /// Body for coupon create/save: the editable fields exactly as the admin form
 /// collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
 #[derive(serde::Deserialize)]
-struct CouponPayload {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CouponPayload"))]
+pub(crate) struct CouponPayload {
     code: String,
     #[serde(flatten)]
     discount: Discount,
@@ -908,7 +936,9 @@ impl CouponPayload {
 /// One coupon as served to the admin UI: the stored record plus the DERIVED
 /// status and the usage fold (never persisted — always честный пересчёт).
 #[derive(serde::Serialize)]
-struct AdminCouponWire {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminCouponWire"))]
+pub(crate) struct AdminCouponWire {
     #[serde(flatten)]
     coupon: Coupon,
     status: coupons::CouponStatus,
