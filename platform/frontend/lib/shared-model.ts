@@ -119,8 +119,19 @@ export interface QuestSnapshot {
   start_point?: { lat: number; lng: number } | null;
 }
 
+/**
+ * Fact kinds awarded at most once EVER per (player, quest) — mirrors the
+ * backend's `facts::once_per_quest`. The server enforces the line at append
+ * time; local folds collapse replayed copies against this same list.
+ */
+export const ONCE_PER_QUEST_TYPES = new Set<Fact['type']>([
+  'completion_bonus',
+  'rating_bonus',
+  'comment_bonus',
+]);
+
 export interface Fact {
-  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated';
+  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated' | 'rating_bonus' | 'comment_bonus';
   step_position: number;
   submitted_value?: string | null;
   local_is_correct: boolean;

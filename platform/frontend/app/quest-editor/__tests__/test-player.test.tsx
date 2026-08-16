@@ -74,10 +74,10 @@ describe('конструкторский тест-игрок: подсказка
 });
 
 describe('конструкторский тест-игрок: финал', () => {
-  it('«что дальше» не мёртвая кнопка — тест завершается', async () => {
+  it('«Пропустить оценку» не мёртвая кнопка — тест завершается', async () => {
     render(<TestOverlay quest={draftWithHint()} startPos={2} onClose={vi.fn()} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: /что дальше/ }));
+    await user.click(await screen.findByRole('button', { name: /Пропустить оценку/ }));
     expect(await screen.findByText(/Тест окончен/)).toBeTruthy();
   });
 });

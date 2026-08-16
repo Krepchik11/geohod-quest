@@ -57,6 +57,17 @@ describe('foldLocalPlayerStats', () => {
     expect(foldLocalPlayerStats(logs)).toEqual({ balance: 15, completed_quest_ids: ['q1'] });
   });
 
+  it('collapses the rating/comment bonuses once per quest too (§11 rewards)', () => {
+    const rateBonus = (type: 'rating_bonus' | 'comment_bonus') =>
+      fact({ type, step_position: 3, coins_delta: 5 });
+    const logs: AttemptLog[] = [
+      { quest_id: 'q1', facts: [bonus(), rateBonus('rating_bonus'), rateBonus('comment_bonus'), completed()] },
+      // A replay re-emits all three locally; every once-ever kind collapses.
+      { quest_id: 'q1', facts: [bonus(), rateBonus('rating_bonus'), rateBonus('comment_bonus'), completed()] },
+    ];
+    expect(foldLocalPlayerStats(logs)).toEqual({ balance: 15, completed_quest_ids: ['q1'] });
+  });
+
   it('keeps a separate completion bonus per DISTINCT quest', () => {
     const logs: AttemptLog[] = [
       { quest_id: 'q1', facts: [bonus(), completed()] },

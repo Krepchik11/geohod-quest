@@ -17,6 +17,11 @@ import {
 
 /** The canonical once-per-quest completion bonus (SPEC). */
 export const COMPLETION_BONUS = 5;
+/** §11: once-ever rewards for the finale — stars and a written review. The
+ *  server enforces once-per-(player, quest) at append time; the per-log
+ *  guards below are only the optimistic local filter. */
+export const RATING_BONUS = 5;
+export const COMMENT_BONUS = 5;
 
 /** The ONE terminal predicate — both players and the engine share it. */
 export function isTerminalStep(step: GameStep): boolean {
@@ -126,18 +131,36 @@ function completeAttempt(b: Builder): void {
     coins_delta: 0,
     note: step.rich_content.button_text || 'Квест пройден',
   });
-  if (!b.state.facts.some((f) => f.type === 'completion_bonus')) {
-    append(b, {
-      type: 'completion_bonus',
-      step_position: pos,
-      submitted_value: null,
-      local_is_correct: true,
-      coins_delta: COMPLETION_BONUS,
-      note: 'Бонус за прохождение',
-    });
+  if (awardOnce(b, 'completion_bonus', COMPLETION_BONUS, 'Бонус за прохождение')) {
     b.effects = { ...b.effects, toast: { amount: COMPLETION_BONUS, narrative: 'Бонус за прохождение' } };
   }
   claimGiftIfNeeded(b, pos);
+}
+
+/**
+ * Append a once-ever bonus fact unless this log already carries one; true when
+ * awarded. The per-log guard is only the optimistic local filter — the server
+ * holds the once-per-(player, quest) line across attempts and devices, and the
+ * cross-attempt local fold collapses replays (ONCE_PER_QUEST_TYPES). Bonus
+ * facts never carry free text beyond a fixed label: the note is part of the
+ * natural key, so variable text would mint a fresh fact on every change.
+ */
+function awardOnce(
+  b: Builder,
+  type: 'completion_bonus' | 'rating_bonus' | 'comment_bonus',
+  coins: number,
+  note: string | null,
+): boolean {
+  if (b.state.facts.some((f) => f.type === type)) return false;
+  append(b, {
+    type,
+    step_position: b.state.stepIdx,
+    submitted_value: null,
+    local_is_correct: true,
+    coins_delta: coins,
+    note,
+  });
+  return true;
 }
 
 /** Gift is claimed when its step COMPLETES (confirm / correct answer / terminal),
@@ -301,6 +324,19 @@ export function transition(
         coins_delta: 0,
         note: text,
       });
+      // §11 rewards (see awardOnce for the once-ever contract).
+      const gotRating = awardOnce(b, 'rating_bonus', RATING_BONUS, null);
+      const gotComment = !!text && awardOnce(b, 'comment_bonus', COMMENT_BONUS, null);
+      if (gotRating || gotComment) {
+        b.effects = {
+          ...b.effects,
+          toast: {
+            amount: (gotRating ? RATING_BONUS : 0) + (gotComment ? COMMENT_BONUS : 0),
+            narrative:
+              gotRating && gotComment ? 'За оценку и отзыв' : gotComment ? 'За отзыв' : 'За оценку',
+          },
+        };
+      }
       break;
     }
 

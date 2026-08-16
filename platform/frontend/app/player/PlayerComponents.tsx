@@ -163,12 +163,12 @@ export interface StepCopy {
   onward?: string;
   submit?: string;
   wrong1?: string;
-  /* Финал «Квест пройден!» — оценка необязательна, не блокирует «что дальше». */
+  /* Финал (§11): «ОТПРАВИТЬ ОЦЕНКУ» активна при звёздах + отзыве; выход без
+     отзыва — вторая кнопка (её ярлык зависит от того, выбраны ли звёзды). */
   final?: string;
-  whatNext?: string;
-  /** Финал «пройти заново» — перезапуск этого же квеста с нуля. */
-  playAgain?: string;
+  submitRating?: string;
   skipRating?: string;
+  skipRated?: string;
   rateLead?: string;
   rateThanks?: string;
   /* Пост-финальный каталог «Продолжите путешествие». */
@@ -231,8 +231,6 @@ export interface StepHandlers {
   reviewText?: (v: string) => void;
   /** Final screen «что дальше» — leave the finale (into the catalog). */
   onward?: () => void;
-  /** Final screen «пройти заново» — replay this quest from step 0 (real player only). */
-  replay?: () => void;
   /** Step back through history to reread earlier content (real player only). */
   back?: () => void;
 }
@@ -245,10 +243,10 @@ const noop = () => {};
  *
  * `Required<Omit<…>>` is load-bearing — adding a handler to `StepHandlers` without
  * listing it here is a compile error, so previews can never silently lose a control.
- * `back` and `replay` are omitted: they are real-player-only affordances whose
+ * `back` is omitted: it is a real-player-only affordance whose
  * absence is itself the intended rendering.
  */
-export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back' | 'replay'>> = {
+export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back'>> = {
   next: noop,
   confirm: noop,
   submit: noop,
@@ -557,13 +555,15 @@ export function RateStars({ value, onRate }: { value?: number; onRate?: (n: numb
 }
 
 /* ============================================================
-   FINAL — «Квест пройден!»
-   Rating is OPTIONAL and never blocks: tapping a star records it and shows an
-   inline thank-you; the forward action («что дальше») is always available and
-   leads into the post-finale catalog. Replaces the old inline congrats branch —
-   the single final-screen implementation, shared by the player, the constructor
-   test-player and editor previews. Stats are coins + time only (resolved design
-   decision; the «шагов» tile was dropped).
+   FINAL — «ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ» (§11).
+   The finale is the review funnel: «ОТПРАВИТЬ ОЦЕНКУ» unlocks only when the
+   stars AND a review text are in; the second button is the exit for everyone
+   else. BOTH actions commit-and-leave (openCatalog) — a chosen star rating
+   still commits and still pays its bonus on the exit path, which is why that
+   button's label flips to «Отправить без отзыва» once stars are tapped.
+   The single final-screen implementation, shared by the player, the
+   constructor test-player and editor previews. Stats are coins + time only
+   (resolved design decision; the «шагов» tile was dropped).
    ============================================================ */
 export function FinalScreen({ quest, copy, st, on }: {
   quest?: QuestMeta;
@@ -575,13 +575,8 @@ export function FinalScreen({ quest, copy, st, on }: {
   const h = on || {};
   const coins = s.coinsEarned != null ? s.coinsEarned : (quest?.completionBonus || 5);
   const rated = (s.rating || 0) > 0;
-  // The forward action is always available (rating never blocks); «Пропустить
-  // оценку» is just a quieter label for the same action while still unrated.
   const onward = h.onward;
-  // «пройти заново» is a real-player affordance (restart this quest from step 0).
-  // It is gated on a wired handler so the constructor test-player and editor
-  // previews — which pass none — never render a dead button.
-  const replay = h.replay;
+  const canSubmit = rated && !!s.reviewText?.trim();
 
   return (
     <div className="p-stepbody p-final">
@@ -589,7 +584,7 @@ export function FinalScreen({ quest, copy, st, on }: {
           "reread the last step" reachable here too. Previews pass no handler. */}
       {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
       <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
-      <h2 className="p-title">{copy?.final || "Квест пройден!"}</h2>
+      <h2 className="p-title">{copy?.final || "ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ"}</h2>
       <Flourish />
       <div className="p-final-coins"><PCoin size={30} /><PCoin size={38} /><PCoin size={30} /></div>
       <div className="p-final-stats">
@@ -598,12 +593,12 @@ export function FinalScreen({ quest, copy, st, on }: {
       </div>
 
       <div className="p-ratecard">
-        {rated ? (
+        <p className="lead">{copy?.rateLead || "Оцените квест, оставьте отзыв и получите дополнительные коины"}</p>
+        <RateStars value={s.rating} onRate={h.rate} />
+        {rated && (
           <>
-            <RateStars value={s.rating} onRate={h.rate} />
             <span className="p-rate-thanks"><PCheck />{copy?.rateThanks || "Спасибо за оценку — отправим автору"}</span>
-            {/* §11: optional review text — revealed by the star tap, skippable,
-                never blocks «что дальше» (committed together with the rating). */}
+            {/* §11: the review text — committed together with the rating. */}
             {h.reviewText && (
               <textarea
                 className="p-reviewtext"
@@ -614,25 +609,21 @@ export function FinalScreen({ quest, copy, st, on }: {
               />
             )}
           </>
-        ) : (
-          <>
-            <p className="lead">{copy?.rateLead || "Понравился квест? Оцените — это поможет автору. Можно пропустить."}</p>
-            <RateStars value={s.rating} onRate={h.rate} />
-          </>
         )}
       </div>
 
       <div className="p-actions">
         {onward && (
-          <button className="p-btn p-btn--solid" type="button" onClick={onward}>
-            {copy?.whatNext || "что дальше"} <PArrow />
+          <button className="p-btn p-btn--solid" type="button" disabled={!canSubmit} onClick={onward}>
+            {copy?.submitRating || "ОТПРАВИТЬ ОЦЕНКУ"} <PArrow />
           </button>
         )}
-        {replay && (
-          <button className="p-btn p-btn--ghost" type="button" onClick={replay}>{copy?.playAgain || "пройти заново"}</button>
-        )}
-        {onward && !rated && (
-          <button className="p-skip" type="button" onClick={onward}>{copy?.skipRating || "Пропустить оценку"}</button>
+        {onward && !canSubmit && (
+          <button className="p-btn p-btn--ghost" type="button" onClick={onward}>
+            {rated
+              ? (copy?.skipRated || "Отправить без отзыва")
+              : (copy?.skipRating || "Пропустить оценку")}
+          </button>
         )}
       </div>
     </div>

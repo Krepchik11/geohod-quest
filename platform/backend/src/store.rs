@@ -145,24 +145,35 @@ impl InMemoryFactStore {
     /// Append `incoming` idempotently to a KNOWN attempt's log. Returns the newly
     /// accepted facts, or `None` if the attempt does not exist (handler maps to 404).
     ///
-    /// Dedup is by device-agnostic natural key within the attempt. A
-    /// `completion_bonus` additionally dedups across ALL attempts of the same
-    /// (player, quest): the canonical +5 is awarded once per player+quest, ever —
-    /// duplicates from retries, devices, resets, and replays are absorbed.
+    /// Dedup is by device-agnostic natural key within the attempt. The
+    /// once-ever kinds ([`crate::facts::once_per_quest`]: completion, rating
+    /// and comment bonuses) additionally dedup across ALL attempts of the same
+    /// (player, quest) — duplicates from retries, devices, resets, and replays
+    /// are absorbed.
     pub fn append_idempotent(
         &mut self,
         attempt_id: &str,
         incoming: Vec<Fact>,
     ) -> Option<Vec<Fact>> {
         let meta = self.attempts.get(attempt_id)?.clone();
+        // One scan for the already-awarded once-ever kinds of this (player,
+        // quest); accepted bonuses join the set so a batch can't double-award.
+        let mut awarded: std::collections::HashSet<FactKind> = self
+            .attempts
+            .values()
+            .filter(|m| m.user_id == meta.user_id && m.quest_id == meta.quest_id)
+            .filter_map(|m| self.fact_logs.get(&m.attempt_id))
+            .flatten()
+            .map(|f| f.kind)
+            .filter(|k| crate::facts::once_per_quest(*k))
+            .collect();
         let mut accepted: Vec<Fact> = Vec::new();
         for f in incoming {
             let duplicate_in_log = self
                 .fact_logs
                 .get(attempt_id)
                 .is_some_and(|log| log.iter().any(|e| semantically_same(e, &f)));
-            let duplicate_bonus = f.kind == FactKind::CompletionBonus
-                && self.bonus_already_awarded(&meta.user_id, &meta.quest_id);
+            let duplicate_bonus = crate::facts::once_per_quest(f.kind) && !awarded.insert(f.kind);
             if duplicate_in_log || duplicate_bonus {
                 continue;
             }
@@ -267,16 +278,6 @@ impl InMemoryFactStore {
             self.fact_logs.remove(&id);
             self.fact_times.remove(&id);
         }
-    }
-
-    /// True if any attempt of (player, quest) already holds a completion bonus.
-    fn bonus_already_awarded(&self, user_id: &str, quest_id: &str) -> bool {
-        self.attempts
-            .values()
-            .filter(|m| m.user_id == user_id && m.quest_id == quest_id)
-            .filter_map(|m| self.fact_logs.get(&m.attempt_id))
-            .flatten()
-            .any(|f| f.kind == FactKind::CompletionBonus)
     }
 
     /// Authoritative projected state + bound snapshot + fact count for a known

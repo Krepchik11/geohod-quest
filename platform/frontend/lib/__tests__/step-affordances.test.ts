@@ -71,9 +71,10 @@ describe('PREVIEW_HANDLERS', () => {
     expect(html).toContain('p-submit');
   });
 
-  it('renders the finale complete (rating, «что дальше», review field)', () => {
+  it('renders the finale complete (rating, «ОТПРАВИТЬ ОЦЕНКУ», skip button)', () => {
     const html = render({ template: 'congrats', title: 'Готово' }, PREVIEW_HANDLERS);
-    expect(html).toContain('что дальше');
+    expect(html).toContain('ОТПРАВИТЬ ОЦЕНКУ');
+    expect(html).toContain('Пропустить оценку');
     expect(html).toContain('p-rate');
   });
 });

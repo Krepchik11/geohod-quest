@@ -17,7 +17,7 @@ use crate::auth::{UserAccount, UserRecord};
 use crate::coupons::{Coupon, CouponRedemption, CouponUsage, Discount};
 use crate::errors::AppError;
 use crate::facts::{
-    Fact, FactKind, MigrationResult, PerVersionStats, ProjectedState, list_feedbacks_for_snapshot,
+    Fact, MigrationResult, PerVersionStats, ProjectedState, list_feedbacks_for_snapshot,
     project_state, project_version_stats, synthesize_legacy_snapshot_and_facts,
 };
 use crate::grants::{AccessGrant, GrantSource};
@@ -282,13 +282,14 @@ impl FactStore for PgFactStore {
 
         let mut accepted = Vec::new();
         for f in incoming {
-            if f.kind == FactKind::CompletionBonus {
+            if crate::facts::once_per_quest(f.kind) {
                 let res = sqlx::query(
-                    "INSERT INTO bonus_awards (user_id, quest_id) VALUES ($1, $2)
+                    "INSERT INTO bonus_awards (user_id, quest_id, kind) VALUES ($1, $2, $3)
                      ON CONFLICT DO NOTHING",
                 )
                 .bind(&user_id)
                 .bind(&quest_id)
+                .bind(f.kind.wire_tag())
                 .execute(&mut *tx)
                 .await
                 .map_err(internal)?;

@@ -35,6 +35,44 @@ pub enum FactKind {
     /// Optional finale rating (1–5) in `submitted_value`; routed to the author.
     /// coins_delta is always 0 — a projection no-op for balance/state.
     QuestRated,
+    /// §11 +5 for leaving a star rating, first time ever per (player, quest).
+    RatingBonus,
+    /// §11 +5 for writing a review, first time ever per (player, quest). The
+    /// text itself rides `quest_rated.note`, NEVER this fact — the note is
+    /// part of the natural key, so carrying it here would mint a fresh bonus
+    /// on every comment edit.
+    CommentBonus,
+}
+
+impl FactKind {
+    /// The serde wire tag (snake_case), as a static string — keys the
+    /// `bonus_awards` rows (and must stay what migration 0005 defaults old
+    /// rows to for CompletionBonus). Pinned against serde by a test.
+    pub fn wire_tag(self) -> &'static str {
+        match self {
+            Self::PhysicalConfirmed => "physical_confirmed",
+            Self::AnswerSubmitted => "answer_submitted",
+            Self::GiftClaimed => "gift_claimed",
+            Self::HintPurchased => "hint_purchased",
+            Self::CompletionBonus => "completion_bonus",
+            Self::AttemptCompleted => "attempt_completed",
+            Self::FeedbackReported => "feedback_reported",
+            Self::NavigatorUsed => "navigator_used",
+            Self::QuestRated => "quest_rated",
+            Self::RatingBonus => "rating_bonus",
+            Self::CommentBonus => "comment_bonus",
+        }
+    }
+}
+
+/// Fact kinds awarded at most once EVER per `(player, quest)` — enforced at
+/// append time by both stores (the client's per-log guard is only an
+/// optimistic duplicate filter; replays and other devices land here).
+pub fn once_per_quest(kind: FactKind) -> bool {
+    matches!(
+        kind,
+        FactKind::CompletionBonus | FactKind::RatingBonus | FactKind::CommentBonus
+    )
 }
 
 /// One immutable player event. All kinds share the same shape (the discriminator
@@ -685,6 +723,29 @@ mod tests {
             .iter()
             .map(|(p, q)| ((*p).to_string(), (*q).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn wire_tag_matches_serde_for_every_kind() {
+        for kind in [
+            FactKind::PhysicalConfirmed,
+            FactKind::AnswerSubmitted,
+            FactKind::GiftClaimed,
+            FactKind::HintPurchased,
+            FactKind::CompletionBonus,
+            FactKind::AttemptCompleted,
+            FactKind::FeedbackReported,
+            FactKind::NavigatorUsed,
+            FactKind::QuestRated,
+            FactKind::RatingBonus,
+            FactKind::CommentBonus,
+        ] {
+            assert_eq!(
+                serde_json::to_value(kind).expect("serialize"),
+                kind.wire_tag(),
+                "wire_tag drifted from the serde tag"
+            );
+        }
     }
 
     #[test]
