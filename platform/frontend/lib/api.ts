@@ -505,14 +505,14 @@ export const api = {
     body: { token: string; password: string } | { email: string; code: string; password: string },
   ) => apiFetch<Session>('/api/auth/reset', { method: 'POST', body: JSON.stringify(body) }),
   authConfirmEmail: (token: string) =>
-    apiFetch<{ status: string; email: string }>('/api/auth/confirm', {
+    apiFetch<{ status: string; email: string; changed: boolean }>('/api/auth/confirm', {
       method: 'POST',
       body: JSON.stringify({ token }),
     }),
-  authChangeEmail: (new_email: string) =>
+  authChangeEmail: (new_email: string, current_password: string | null) =>
     apiFetch<{ status: 'sent' }>('/api/auth/email', {
       method: 'POST',
-      body: JSON.stringify({ new_email }),
+      body: JSON.stringify({ new_email, current_password }),
     }),
   authResendConfirm: () =>
     apiFetch<{ status: 'sent' | 'already-confirmed' }>('/api/auth/confirm/resend', {

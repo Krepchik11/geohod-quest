@@ -3541,7 +3541,9 @@ mod tests {
         let bearer = format!("Bearer {token}");
         let h = [("authorization", bearer.as_str())];
 
-        // No session → 401; garbage address → 400.
+        // No session → 401; garbage address → 400; a password account must
+        // re-prove its password (a stolen session alone must not move the
+        // mailbox that owns the reset path).
         let (st, _) = post_json(app, "/api/auth/email", json!({ "new_email": new_email })).await;
         assert_eq!(st, StatusCode::UNAUTHORIZED);
         let (st, _) = post_json_h(
@@ -3552,17 +3554,34 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/email",
+            json!({ "new_email": new_email, "current_password": "wrong-password" }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED, "wrong password rejected");
 
-        // Request the change: the mail goes to the NEW address, nothing changes yet.
+        // Request the change: the mail goes to the NEW address, nothing
+        // changes yet, and the OLD address is notified.
         let (st, v) = post_json_h(
             app,
             "/api/auth/email",
-            json!({ "new_email": new_email }),
+            json!({ "new_email": new_email, "current_password": "hunter2hunter2" }),
             &h,
         )
         .await;
         assert_eq!(st, StatusCode::OK, "change requested: {v}");
         assert_eq!(v["status"], "sent");
+        assert!(
+            mails
+                .lock()
+                .expect("lock")
+                .iter()
+                .any(|m| m.to == old_email && m.subject.contains("смена почты")),
+            "displaced mailbox is warned"
+        );
         let (_, me) = get_json_h(app, "/api/users/me", &[("authorization", &bearer)]).await;
         assert_eq!(me["email"], old_email, "unchanged until confirmed");
 
@@ -3571,6 +3590,7 @@ mod tests {
         let (st, v) = post_json(app, "/api/auth/confirm", json!({ "token": change_token })).await;
         assert_eq!(st, StatusCode::OK, "confirm: {v}");
         assert_eq!(v["email"], new_email);
+        assert_eq!(v["changed"], true, "the landing can name what happened");
         let (_, me) = get_json_h(app, "/api/users/me", &[("authorization", &bearer)]).await;
         assert_eq!(me["email"], new_email);
         assert_eq!(me["needs_email_confirmation"], false, "arrives confirmed");
@@ -3588,7 +3608,7 @@ mod tests {
         let (st, _) = post_json_h(
             app,
             "/api/auth/email",
-            json!({ "new_email": new_email }),
+            json!({ "new_email": new_email, "current_password": "hunter2hunter2" }),
             &oh,
         )
         .await;

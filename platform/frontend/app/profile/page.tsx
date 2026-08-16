@@ -8,7 +8,7 @@ import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, classify, isAuthFailure, type Me } from '../../lib/api';
-import { passwordValid } from '../../lib/credentials';
+import { emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
 import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
@@ -283,7 +283,13 @@ export default function ProfilePage() {
       {sheet === 'name' && (
         <NameSheet current={nameLabel} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); reload(); }} />
       )}
-      {sheet === 'email' && <EmailSheet current={emailLabel} onClose={() => setSheet(null)} />}
+      {sheet === 'email' && (
+        <EmailSheet
+          current={emailLabel}
+          hasPassword={!!ready?.me?.methods.includes('email')}
+          onClose={() => setSheet(null)}
+        />
+      )}
       {sheet === 'password' && <PasswordSheet email={emailLabel} onClose={() => setSheet(null)} />}
       {sheet === 'delete' && (
         <DeleteSheet
@@ -417,25 +423,37 @@ function NameSheet({ current, onClose, onSaved }: { current: string | null; onCl
   );
 }
 
-function EmailSheet({ current, onClose }: { current: string | null; onClose: () => void }) {
+function EmailSheet({ current, hasPassword, onClose }: {
+  current: string | null;
+  hasPassword: boolean;
+  onClose: () => void;
+}) {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const save = async () => {
+    const normalized = normalizeEmail(email);
+    if (!emailValid(normalized)) {
+      setError(emailError(normalized));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await api.authChangeEmail(email.trim());
+      await api.authChangeEmail(normalized, hasPassword ? password : null);
       toast('Письмо отправлено — подтвердите новый адрес по ссылке');
       onClose();
     } catch (e) {
       const f = classify(e);
       setError(
-        f.kind === 'rejected' && f.status === 409
-          ? 'Эта почта уже занята другим аккаунтом'
-          : f.kind === 'rejected' && f.status === 400
-            ? f.error || 'Введите корректную почту'
-            : 'Сервер недоступен — попробуйте позже',
+        f.kind === 'unauthorized'
+          ? 'Неверный текущий пароль'
+          : f.kind === 'rejected' && f.status === 409
+            ? 'Эта почта уже занята другим аккаунтом'
+            : f.kind === 'rejected'
+              ? f.error || 'Введите корректную почту'
+              : 'Сервер недоступен — попробуйте позже',
       );
       setBusy(false);
     }
@@ -454,8 +472,24 @@ function EmailSheet({ current, onClose }: { current: string | null; onClose: () 
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
+        {hasPassword && (
+          <input
+            className="input"
+            type="password"
+            aria-label="Текущий пароль"
+            placeholder="текущий пароль"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        )}
         {error && <p className="af-error">{error}</p>}
-        <button className="btn btn--block btn--md" type="button" disabled={busy || !email.trim()} onClick={() => void save()}>
+        <button
+          className="btn btn--block btn--md"
+          type="button"
+          disabled={busy || !email.trim() || (hasPassword && !password)}
+          onClick={() => void save()}
+        >
           Отправить подтверждение
         </button>
         <button className="psheet__cancel" type="button" onClick={onClose}>Отмена</button>

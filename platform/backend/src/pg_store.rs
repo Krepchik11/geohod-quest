@@ -1355,16 +1355,17 @@ impl AuthStore for PgAuthStore {
     async fn consume_auth_token(
         &self,
         token_hash: &str,
-        kind: &str,
+        kinds: &[&str],
         now: u64,
-    ) -> Result<Option<(String, Option<String>)>, AppError> {
+    ) -> Result<Option<(String, String, Option<String>)>, AppError> {
+        let kinds: Vec<String> = kinds.iter().map(|k| k.to_string()).collect();
         let row = sqlx::query(
             "UPDATE auth_tokens SET used_at = $3
-             WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at >= $3
-             RETURNING user_id, payload",
+             WHERE token_hash = $1 AND kind = ANY($2) AND used_at IS NULL AND expires_at >= $3
+             RETURNING user_id, kind, payload",
         )
         .bind(token_hash)
-        .bind(kind)
+        .bind(&kinds)
         .bind(now as i64)
         .fetch_optional(&self.pool)
         .await
@@ -1372,6 +1373,7 @@ impl AuthStore for PgAuthStore {
         row.map(|r| {
             Ok((
                 r.try_get::<String, _>("user_id").map_err(internal)?,
+                r.try_get::<String, _>("kind").map_err(internal)?,
                 r.try_get::<Option<String>, _>("payload")
                     .map_err(internal)?,
             ))
@@ -1642,13 +1644,15 @@ impl AuthStore for PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::replace_email`] — the unique
-    /// index on `users.email` is the taken-address gate.
+    /// index on `users.email` is the taken-address gate, and the outstanding
+    /// mailed keys die in the same transaction the address moves.
     async fn replace_email(
         &self,
         user_id: &str,
         email: &str,
         confirmed_at: u64,
     ) -> Result<UserAccount, AppError> {
+        let mut tx = self.pool.begin().await.map_err(internal)?;
         let updated = sqlx::query(
             "UPDATE users SET email = $2, email_confirmed_at = $3 \
              WHERE user_id = $1 \
@@ -1657,7 +1661,7 @@ impl AuthStore for PgAuthStore {
         .bind(user_id)
         .bind(email)
         .bind(confirmed_at as i64)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| match e {
             sqlx::Error::Database(db) if db.is_unique_violation() => {
@@ -1665,6 +1669,12 @@ impl AuthStore for PgAuthStore {
             }
             other => internal(other),
         })?;
+        sqlx::query("DELETE FROM auth_tokens WHERE user_id = $1 AND used_at IS NULL")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        tx.commit().await.map_err(internal)?;
         updated
             .ok_or_else(|| crate::store::no_account(user_id))
             .and_then(|row| account_from_row(&row))
