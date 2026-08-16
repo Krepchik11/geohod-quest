@@ -4,7 +4,6 @@ import {
   identityBadge,
   identityContact,
   identityName,
-  plural,
   questAverage,
   questFilterOptions,
   relativeTime,
@@ -109,13 +108,7 @@ describe('questFilterOptions', () => {
   });
 });
 
-describe('plural / formatAverage / templateLabel', () => {
-  it('pluralizes Russian counts', () => {
-    expect(plural(1, 'запись', 'записи', 'записей')).toBe('запись');
-    expect(plural(3, 'запись', 'записи', 'записей')).toBe('записи');
-    expect(plural(5, 'запись', 'записи', 'записей')).toBe('записей');
-    expect(plural(11, 'запись', 'записи', 'записей')).toBe('записей');
-  });
+describe('formatAverage / templateLabel', () => {
   it('formats one-decimal averages', () => {
     expect(formatAverage(4)).toBe('4');
     expect(formatAverage(14 / 3)).toBe('4.7');

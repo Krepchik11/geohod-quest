@@ -1,26 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDaysIso,
   boundsFor,
   chartVm,
   completionRate,
   funnelVm,
   kpisFor,
   periodLabel,
-  plural,
   questMetaLine,
   stepsLabel,
   questRowVm,
   questsCountLabel,
 } from '../admin-stats';
+import { addDays } from '../utc-day';
 
 describe('date helpers', () => {
-  it('addDaysIso shifts across month and leap boundaries', () => {
-    expect(addDaysIso('2026-07-16', -6)).toBe('2026-07-10');
-    expect(addDaysIso('2026-03-01', -1)).toBe('2026-02-28');
-    expect(addDaysIso('2024-03-01', -1)).toBe('2024-02-29');
-  });
-
   it('boundsFor maps chips to inclusive ranges', () => {
     expect(boundsFor('7', { from: '', to: '' }, '2026-07-16')).toEqual({
       from: '2026-07-10',
@@ -35,6 +28,8 @@ describe('date helpers', () => {
     // An empty/half-typed custom input must NOT silently become «Всё время».
     expect(boundsFor('custom', { from: '', to: '2026-07-16' }, '2026-07-16')).toBeNull();
     expect(boundsFor('custom', { from: '2026-07-1', to: '2026-07-16' }, '2026-07-16')).toBeNull();
+    // A non-existent date (30 февраля) is rejected in the form, not sent to the server.
+    expect(boundsFor('custom', { from: '2026-02-30', to: '2026-07-16' }, '2026-07-16')).toBeNull();
   });
 
   it('periodLabel renders the design shape', () => {
@@ -43,11 +38,7 @@ describe('date helpers', () => {
 });
 
 describe('plurals', () => {
-  it('picks russian forms', () => {
-    expect(plural(1, 'квест', 'квеста', 'квестов')).toBe('квест');
-    expect(plural(3, 'квест', 'квеста', 'квестов')).toBe('квеста');
-    expect(plural(11, 'квест', 'квеста', 'квестов')).toBe('квестов');
-    expect(plural(21, 'квест', 'квеста', 'квестов')).toBe('квест');
+  it('agrees the quests-count label', () => {
     expect(questsCountLabel(6)).toBe('6 квестов');
   });
 });
@@ -111,7 +102,7 @@ describe('chartVm', () => {
 
   it('buckets weekly past 62 days, aligning full weeks to the newest edge', () => {
     // 90 days of a constant 1 start/day: 12 full weeks + a 6-day remainder.
-    const daily = Array.from({ length: 90 }, (_, i) => day(addDaysIso('2026-01-01', i), 1, 0));
+    const daily = Array.from({ length: 90 }, (_, i) => day(addDays('2026-01-01', i), 1, 0));
     const vm = chartVm(daily)!;
     expect(vm.grid[4].label).toBe('10'); // nice(7) = 10
     expect(vm.xLabels).toHaveLength(6);

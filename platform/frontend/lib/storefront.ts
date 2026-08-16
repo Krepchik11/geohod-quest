@@ -1,19 +1,11 @@
 import type { PublishedQuestWire } from './api';
+import { plural } from './ru';
 
 /**
  * Storefront pure helpers — one source of truth for the labels the landing,
  * the quest cards and the product page share (§2.2/§2.3/§3). No fabricated
  * values: everything derives from the live catalog/product payloads.
  */
-
-/** Russian plural picker: forms = [1, 2–4, 5–0]. */
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m = n % 10;
-  const h = n % 100;
-  if (m === 1 && h !== 11) return one;
-  if (m >= 2 && m <= 4 && (h < 12 || h > 14)) return few;
-  return many;
-}
 
 export const ratingPlural = (n: number) => plural(n, 'оценка', 'оценки', 'оценок');
 export const playersPlural = (n: number) => plural(n, 'игрок сыграл', 'игрока сыграли', 'игроков сыграли');

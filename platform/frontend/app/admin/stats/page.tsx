@@ -9,20 +9,19 @@ import {
 import {
   CHART,
   RANGE_CHIPS,
-  addDaysIso,
   boundsFor,
-  fmtInt,
   funnelVm,
   kpisFor,
   overviewVm,
   periodLabel,
   questMetaLine,
   stepsLabel,
-  todayUtc,
   type ChartVm,
   type KpiVm,
   type StatsRangeKey,
 } from '../../../lib/admin-stats';
+import { formatNumber } from '../../../lib/ru';
+import { addDays, todayUtc } from '../../../lib/utc-day';
 import { AdminPageHead } from '../ui';
 
 /**
@@ -33,7 +32,7 @@ import { AdminPageHead } from '../ui';
  */
 export default function AdminStatsPage() {
   const [rangeKey, setRangeKey] = useState<StatsRangeKey>('30');
-  const [customFrom, setCustomFrom] = useState(() => addDaysIso(todayUtc(), -29));
+  const [customFrom, setCustomFrom] = useState(() => addDays(todayUtc(), -29));
   const [customTo, setCustomTo] = useState(() => todayUtc());
   const [overview, setOverview] = useState<AdminStatsOverviewWire | null>(null);
   const [overviewError, setOverviewError] = useState(false);
@@ -411,7 +410,7 @@ function DetailBody({ detail }: { detail: AdminStatsQuestWire }) {
               denominator can be smaller than the all-versions «Начато» KPI, so
               both numbers are spelled out here. */}
           <div className="ast-funnel__hint">
-            доля игроков, дошедших до шага · от {fmtInt(detail.funnel_started)} начавших на версии{' '}
+            доля игроков, дошедших до шага · от {formatNumber(detail.funnel_started)} начавших на версии{' '}
             {detail.snapshot_version}
           </div>
         </div>

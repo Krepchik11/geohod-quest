@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { plural } from '../../lib/storefront';
+import { plural } from '../../lib/ru';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.

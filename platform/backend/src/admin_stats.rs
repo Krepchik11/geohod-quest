@@ -567,6 +567,87 @@ mod tests {
         assert_eq!(parse_day("2026-07-1x"), None);
     }
 
+    /// Shared calendar goldens (platform/goldens/utc-day/) — the SAME files the
+    /// frontend vitest suite runs; drift on either side breaks one suite.
+    /// `add_days` has no Rust counterpart on purpose: the golden folds the
+    /// composition parse_day + delta, which is how backend code shifts days.
+    #[test]
+    fn utc_day_goldens_match_frontend() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Fixture {
+            name: String,
+            description: String,
+            parse_day: Vec<ParseCase>,
+            day_from_unix: Vec<DayCase>,
+            add_days: Vec<AddCase>,
+            span_days: Vec<SpanCase>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ParseCase {
+            input: String,
+            unix: Option<i64>,
+        }
+        #[derive(serde::Deserialize)]
+        struct DayCase {
+            unix: i64,
+            day: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct AddCase {
+            day: String,
+            delta: i64,
+            expected: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct SpanCase {
+            from: String,
+            to: String,
+            expected: i64,
+        }
+
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../goldens/utc-day");
+        let mut ran = 0;
+        for entry in std::fs::read_dir(dir).expect("shared utc-day fixtures dir must exist") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let fx: Fixture =
+                serde_json::from_str(&std::fs::read_to_string(&path).expect("read fixture"))
+                    .expect("fixture must match the utc-day schema exactly");
+            for c in &fx.parse_day {
+                assert_eq!(parse_day(&c.input), c.unix, "parse_day({:?})", c.input);
+            }
+            for c in &fx.day_from_unix {
+                assert_eq!(day_from_unix(c.unix), c.day, "day_from_unix({})", c.unix);
+            }
+            for c in &fx.add_days {
+                let base = parse_day(&c.day).expect("add_days base must be valid");
+                assert_eq!(
+                    day_from_unix(base + c.delta * 86_400),
+                    c.expected,
+                    "add_days({}, {})",
+                    c.day,
+                    c.delta
+                );
+            }
+            for c in &fx.span_days {
+                let range = DayRange::new(&c.from, &c.to).expect("span range must be valid");
+                assert_eq!(
+                    range.len_days(),
+                    c.expected,
+                    "span_days({}, {})",
+                    c.from,
+                    c.to
+                );
+            }
+            ran += 1;
+        }
+        assert!(ran >= 1, "no utc-day fixtures found");
+    }
+
     #[test]
     fn parse_rfc3339_utc_matches_store_format() {
         // The exact shape store::now_rfc3339 produces.

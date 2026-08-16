@@ -13,7 +13,6 @@ import {
   fmtTime,
   newQuest,
   newStep,
-  plural,
   type CtorAgeTarget,
   type CtorComplexity,
   serializeDraft,
@@ -26,6 +25,7 @@ import {
   type Gates,
   type GateField,
 } from '../../lib/constructor-model';
+import { plural } from '../../lib/ru';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, PREVIEW_HANDLERS, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';

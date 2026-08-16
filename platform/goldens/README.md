@@ -80,6 +80,20 @@ Rules pinned by these fixtures:
 - `start_point`: PRESENCE of the snapshot key decides — present (even null)
   is the author's word; absent = legacy snapshot, first valid step navigator.
 
+## UTC-day fixtures (`utc-day/*.json`)
+
+Shared calendar-day rules (issue #69), run by `backend` (`admin_stats` tests)
+and `frontend` (`lib/__tests__/utc-day.test.ts`):
+
+- `parse_day` — strict `YYYY-MM-DD` → Unix seconds; round-trip validation
+  rejects non-existent dates (`2026-02-30`, `2100-02-29`);
+- `day_from_unix` — instant → UTC day, negatives clamp to epoch;
+- `add_days` — day shifted by a delta (Rust has no `add_days`: the golden
+  folds the composition `parse_day` + delta, which is how backend code shifts);
+- `span_days` — inclusive day count of a range.
+
+Kept in its own directory: the parity readers glob every `*.json` in theirs.
+
 ## Quest goldens
 
 - `golden-mystery-fortress-v1.json` — quest snapshot derived from a real export.

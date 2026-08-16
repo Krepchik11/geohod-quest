@@ -4,11 +4,11 @@ import React, { useState } from 'react';
 import {
   nextVersionNumber,
   parseCoords,
-  plural,
   type CtorQuest,
   type GateField,
   type Gates,
 } from '../../lib/constructor-model';
+import { plural } from '../../lib/ru';
 
 interface ChecklistRow {
   st: 'ok' | 'err' | 'warn';

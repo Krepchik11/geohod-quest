@@ -1,5 +1,6 @@
 import type { AdminIdentityWire, AdminReviewWire } from './api';
-import { fmtRating, plural } from './storefront';
+import { plural } from './ru';
+import { fmtRating } from './storefront';
 
 /**
  * View-model helpers for the two moderation tabs (Отзывы + Обратная связь) — pure
@@ -8,12 +9,8 @@ import { fmtRating, plural } from './storefront';
  * `kind`), the step-template label map, quest-filter options, and the hide-aware
  * quest average that powers the confirm-dialog before→after preview (a same-grain TS
  * mirror of the server fold, kept in step by tests).
- *
- * Pluralization and the one-decimal rating formatter are the app's single source
- * (`storefront`); re-exported so the pages import every helper from this one module.
  */
 
-export { plural };
 export { fmtRating as formatAverage };
 
 /** Relative Russian time from a unix-seconds instant, e.g. «2 дня назад». */

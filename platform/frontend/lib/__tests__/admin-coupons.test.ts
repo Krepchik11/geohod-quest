@@ -65,7 +65,7 @@ describe('labels', () => {
     expect(discountLabel(coupon())).toBe('−20%');
     expect(discountLabel(coupon({ discountType: 'fixed', discountValue: 300 }))).toBe('−300 ₽');
     expect(discountLabel(coupon({ discountType: 'fixed', discountValue: 1200 }))).toBe(
-      '−1 200 ₽',
+      '−1 200 ₽',
     );
   });
 

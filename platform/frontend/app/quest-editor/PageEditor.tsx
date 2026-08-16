@@ -6,12 +6,12 @@ import {
   IMAGE_TEMPLATES,
   TPL_BY_KEY,
   parseCoords,
-  plural,
   type CtorQuest,
   type CtorQuestMeta,
   type CtorStep,
   type GateField,
 } from '../../lib/constructor-model';
+import { plural } from '../../lib/ru';
 import { byteBudgetLabel, STEP_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';

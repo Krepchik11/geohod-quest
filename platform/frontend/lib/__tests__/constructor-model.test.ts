@@ -16,7 +16,6 @@ import {
   newStep,
   nextVersionNumber,
   parseCoords,
-  plural,
   questUpsert,
   removeStep,
   reorderSteps,
@@ -754,14 +753,5 @@ describe('migrateQuest (legacy draft bodies)', () => {
     const twice = migrateQuest(JSON.parse(JSON.stringify(once)), 'q-new')!;
     expect(twice).toEqual(once);
     expect(once.steps[0].image).toBe('/cover.jpg');
-  });
-});
-
-describe('plural', () => {
-  it('declines RU forms', () => {
-    expect(plural(1, 'страница', 'страницы', 'страниц')).toBe('страница');
-    expect(plural(3, 'страница', 'страницы', 'страниц')).toBe('страницы');
-    expect(plural(11, 'страница', 'страницы', 'страниц')).toBe('страниц');
-    expect(plural(22, 'страница', 'страницы', 'страниц')).toBe('страницы');
   });
 });

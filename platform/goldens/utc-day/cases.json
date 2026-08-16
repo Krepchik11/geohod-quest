@@ -1,0 +1,47 @@
+{
+  "name": "utc-day-core",
+  "description": "Shared UTC calendar-day rules: parse_day round-trip validation, day_from_unix negative clamp, addDays as parse+delta composition, inclusive spanDays. Executed by backend admin_stats tests and frontend utc-day tests.",
+  "parse_day": [
+    { "input": "1970-01-01", "unix": 0 },
+    { "input": "2026-07-16", "unix": 1784160000 },
+    { "input": "2024-02-29", "unix": 1709164800 },
+    { "input": "2000-02-29", "unix": 951782400 },
+    { "input": "1969-12-31", "unix": null },
+    { "input": "2026-02-30", "unix": null },
+    { "input": "2100-02-29", "unix": null },
+    { "input": "2026-13-01", "unix": null },
+    { "input": "2026-00-10", "unix": null },
+    { "input": "2026-01-00", "unix": null },
+    { "input": "2026-7-16", "unix": null },
+    { "input": "2026/07/16", "unix": null },
+    { "input": "2026-07-16T00:00:00Z", "unix": null },
+    { "input": "", "unix": null }
+  ],
+  "day_from_unix": [
+    { "unix": 0, "day": "1970-01-01" },
+    { "unix": 86399, "day": "1970-01-01" },
+    { "unix": 86400, "day": "1970-01-02" },
+    { "unix": -5, "day": "1970-01-01" },
+    { "unix": 1784160000, "day": "2026-07-16" },
+    { "unix": 1784246399, "day": "2026-07-16" },
+    { "unix": 4107456000, "day": "2100-02-28" }
+  ],
+  "add_days": [
+    { "day": "2026-07-16", "delta": -6, "expected": "2026-07-10" },
+    { "day": "2026-03-01", "delta": -1, "expected": "2026-02-28" },
+    { "day": "2024-03-01", "delta": -1, "expected": "2024-02-29" },
+    { "day": "2100-03-01", "delta": -1, "expected": "2100-02-28" },
+    { "day": "2000-03-01", "delta": -1, "expected": "2000-02-29" },
+    { "day": "2026-12-31", "delta": 1, "expected": "2027-01-01" },
+    { "day": "2026-07-16", "delta": 0, "expected": "2026-07-16" },
+    { "day": "2026-01-01", "delta": 365, "expected": "2027-01-01" },
+    { "day": "2024-01-01", "delta": 366, "expected": "2025-01-01" }
+  ],
+  "span_days": [
+    { "from": "2026-07-10", "to": "2026-07-16", "expected": 7 },
+    { "from": "2026-07-16", "to": "2026-07-16", "expected": 1 },
+    { "from": "2026-02-01", "to": "2026-03-01", "expected": 29 },
+    { "from": "2024-02-01", "to": "2024-03-01", "expected": 30 },
+    { "from": "2025-12-25", "to": "2026-01-05", "expected": 12 }
+  ]
+}
