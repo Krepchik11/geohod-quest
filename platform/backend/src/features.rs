@@ -13,6 +13,9 @@
 //! - **toggle** — `override.unwrap_or(default)`; clearing the override
 //!   returns the flag to its code default.
 
+use crate::AppState;
+use crate::errors::AppError;
+
 /// A feature an admin can switch at runtime. Variants are the whole registry;
 /// overrides stored under keys no variant claims are ignored (stale rows from
 /// removed flags are harmless).
@@ -84,6 +87,32 @@ impl Feature {
     /// code default otherwise. Every evaluation site goes through here.
     pub fn effective(self, override_enabled: Option<bool>) -> bool {
         override_enabled.unwrap_or(self.default_enabled())
+    }
+}
+
+/// The runtime toggle verdict for a feature: the admin override when one is
+/// stored, the code default otherwise. This is only the *toggle* half of the
+/// evaluation — capability ([`feature_available`]) is enforced by the gated
+/// endpoints themselves, so a flag can never enable what the deployment
+/// cannot do.
+pub async fn feature_enabled(state: &AppState, feature: Feature) -> Result<bool, AppError> {
+    Ok(feature.effective(state.flags.get(feature.key()).await?))
+}
+
+/// The capability half: whether this deployment is configured for the feature
+/// at all (credentials present). Reported to the admin panel so a switched-on
+/// but unconfigured flag is visibly inert.
+pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
+    match feature {
+        Feature::AuthGoogle => state.google.is_some(),
+        Feature::AuthTelegram => state.telegram.is_some(),
+        Feature::PaymentsMock => true,
+        Feature::PaymentsYookassa => state.yookassa.is_some(),
+        // Pure client behavior — nothing to configure server-side.
+        Feature::PlayerBackButton => true,
+        // Client-side matching; the answer value is a runtime setting, so
+        // there is no deployment capability to check.
+        Feature::PlayerUniversalAnswer => true,
     }
 }
 

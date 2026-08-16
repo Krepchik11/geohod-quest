@@ -214,17 +214,15 @@ impl InMemoryFactStore {
             }
         }
         best.into_iter()
-            .map(
-                |((quest_id, user_id), (created_at, _aid, rating, text))| {
-                    crate::facts::PlayerRatingRow {
-                        user_id,
-                        quest_id,
-                        rating,
-                        text,
-                        created_at,
-                    }
-                },
-            )
+            .map(|((quest_id, user_id), (created_at, _aid, rating, text))| {
+                crate::facts::PlayerRatingRow {
+                    user_id,
+                    quest_id,
+                    rating,
+                    text,
+                    created_at,
+                }
+            })
             .collect()
     }
 
@@ -896,8 +894,7 @@ impl InMemoryAuthStore {
 
     /// Store an opaque session token for the player.
     pub fn create_session(&mut self, token: &str, user_id: &str) {
-        self.sessions
-            .insert(token.to_string(), user_id.to_string());
+        self.sessions.insert(token.to_string(), user_id.to_string());
     }
 
     /// Resolve a session token to its player id.
@@ -965,9 +962,8 @@ impl InMemoryAuthStore {
     /// issuing invalidates prior unused tokens of the same kind — with codes
     /// in play, N outstanding credentials would be N× guessable.
     pub fn create_auth_token(&mut self, token_hash: &str, rec: AuthTokenRecord) {
-        self.auth_tokens.retain(|_, r| {
-            r.user_id != rec.user_id || r.kind != rec.kind || r.used_at.is_some()
-        });
+        self.auth_tokens
+            .retain(|_, r| r.user_id != rec.user_id || r.kind != rec.kind || r.used_at.is_some());
         self.auth_tokens.insert(token_hash.to_string(), rec);
     }
 
@@ -1040,9 +1036,11 @@ impl InMemoryAuthStore {
         if self.identities.contains_key(&key) {
             return Err(AppError::Conflict(CONFLICT_IDENTITY_TAKEN.into()));
         }
-        if self.identities.values().any(|s| {
-            s.identity.user_id == identity.user_id && s.identity.method == identity.method
-        }) {
+        if self
+            .identities
+            .values()
+            .any(|s| s.identity.user_id == identity.user_id && s.identity.method == identity.method)
+        {
             return Err(AppError::Conflict(CONFLICT_METHOD_TAKEN.into()));
         }
         self.identities.insert(
@@ -1085,12 +1083,8 @@ impl InMemoryAuthStore {
 
     /// Identities for MANY accounts in one pass — `user_id -> its identities` —
     /// so admin identity resolution avoids an N+1 over `identities_for_user`.
-    pub fn identities_for_users(
-        &self,
-        user_ids: &[String],
-    ) -> HashMap<String, Vec<AuthIdentity>> {
-        let wanted: std::collections::HashSet<&str> =
-            user_ids.iter().map(String::as_str).collect();
+    pub fn identities_for_users(&self, user_ids: &[String]) -> HashMap<String, Vec<AuthIdentity>> {
+        let wanted: std::collections::HashSet<&str> = user_ids.iter().map(String::as_str).collect();
         let mut out: HashMap<String, Vec<AuthIdentity>> = HashMap::new();
         for s in self.identities.values() {
             if wanted.contains(s.identity.user_id.as_str()) {
@@ -4072,12 +4066,20 @@ mod feedback_report_tests {
             .register_user("dev:r1", "b@c.io", "phc-hash", None)
             .expect("register");
         assert_eq!(
-            store.find_by_email("b@c.io").unwrap().password_hash.as_deref(),
+            store
+                .find_by_email("b@c.io")
+                .unwrap()
+                .password_hash
+                .as_deref(),
             Some("phc-hash")
         );
         store.set_password("dev:r1", "phc-hash-2").expect("set");
         assert_eq!(
-            store.find_by_email("b@c.io").unwrap().password_hash.as_deref(),
+            store
+                .find_by_email("b@c.io")
+                .unwrap()
+                .password_hash
+                .as_deref(),
             Some("phc-hash-2")
         );
     }
