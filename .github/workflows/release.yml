@@ -105,7 +105,32 @@ jobs:
             echo "::error::Refusing to release: ${missing[*]} are unset or empty on the «Production» environment, so the frontend could not be promoted. Nothing was built or deployed — production stays on its current, self-consistent frontend/backend pair. VERCEL_TOKEN is a secret; VERCEL_ORG_ID and VERCEL_PROJECT_ID are variables. Settings → Environments → Production; see platform/DEPLOYMENT.md → «Releases»."
             exit 1
           fi
-          echo "Release credentials present." >> "$GITHUB_STEP_SUMMARY"
+
+          # Present is not the same as working, and the difference is a whole
+          # release. Ask Vercel whether THIS token can read THAT project, which
+          # is exactly what `vercel pull` will do at the end of the chain — with
+          # the backend already live and no way back. Credentials that resolve
+          # locally prove nothing about the ones this repository stores.
+          #
+          # Body discarded and only the status kept: the project payload is
+          # noise, and nothing here should risk printing a credential.
+          echo "Project id: ${VERCEL_PROJECT_ID}, scope: ${VERCEL_ORG_ID}."
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_ORG_ID}" || echo 000)"
+          case "$code" in
+            200) ;;
+            401|403)
+              echo "::error::Refusing to release: Vercel answered ${code} for project ${VERCEL_PROJECT_ID} in scope ${VERCEL_ORG_ID}. The stored VERCEL_TOKEN is rejected or cannot see that scope — it is expired, revoked, or was issued for a different account. Mint a new one (Vercel → Settings → Tokens) and replace the secret on the «Production» environment. Nothing was built or deployed."
+              exit 1 ;;
+            404)
+              echo "::error::Refusing to release: Vercel answered 404 for project ${VERCEL_PROJECT_ID} in scope ${VERCEL_ORG_ID}. The token works, but that project/scope pair does not exist for it. Re-read both ids from «vercel link» (.vercel/project.json) and fix the variables on the «Production» environment. Nothing was built or deployed."
+              exit 1 ;;
+            *)
+              echo "::error::Refusing to release: could not reach the Vercel API (status ${code}). Nothing was built or deployed; re-run when Vercel is reachable."
+              exit 1 ;;
+          esac
+          echo "Vercel project \`${VERCEL_PROJECT_ID}\` reachable with the stored token." >> "$GITHUB_STEP_SUMMARY"
 
   # The release identity: a hash of the sources the backend image is built from.
   #
@@ -239,14 +264,20 @@ jobs:
       # and the CLI applies that setting itself — the same way the Git integration
       # did. Running from inside the directory makes the CLI resolve
       # platform/frontend/platform/frontend and fail to find the app.
+      #
+      # None of them pass `--token`. The CLI reads VERCEL_TOKEN from the
+      # environment, which is Vercel's own documented CI practice: an explicit
+      # flag puts the credential in the runner's process listing. It also made
+      # the failure mode worse — an unset secret produced "you defined --token,
+      # but it's missing a value" instead of a plain authentication error.
       - name: Pull the production environment
         # Fetches the project's production env vars, incl. NEXT_PUBLIC_API_URL —
         # which is inlined into the bundle, so Vercel stays its single source of
         # truth rather than it being duplicated into repository secrets.
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: vercel pull --yes --environment=production
 
       - name: Build
-        run: vercel build --prod --token="$VERCEL_TOKEN"
+        run: vercel build --prod
 
       - name: Promote to production
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: vercel deploy --prebuilt --prod
