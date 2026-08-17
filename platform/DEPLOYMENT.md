@@ -79,9 +79,25 @@ restart" is a guarantee, not a build-cache accident.
    webhook listener, and a host that was offline during a release converges by
    itself when it comes back.
 
-2. **GitHub — repository secrets** `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
-   `VERCEL_PROJECT_ID`. Optional repository **variable** `API_BASE_URL` if the API
-   is not at `https://api.quest.geohod.ru`.
+2. **GitHub — a `Production` environment** (Settings → Environments → New
+   environment, named exactly `Production`) carrying:
+   - **secret** `VERCEL_TOKEN` — a credential.
+   - **variables** `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` — identifiers, not
+     credentials; they appear in URLs and in `.vercel/project.json`, and masking
+     them only makes a failed deploy harder to read.
+
+   ⚠️ An environment's secrets and variables are **invisible to a job that does
+   not declare `environment:`** — they expand to the empty string with no
+   warning. `preflight` and `frontend` both declare it. A job you add later that
+   needs them must too, or it will fail with a value that looks unset while the
+   settings page plainly shows it.
+
+   Optional repository **variable** `API_BASE_URL` if the API is not at
+   `https://api.quest.geohod.ru`.
+
+   The release's `preflight` job asserts all three before anything is built or
+   pushed, so a missing one stops the run with the names it wants instead of
+   deploying the backend and failing at the last step.
 
 3. **First release only** — the backend currently running predates `build_id` and
    reports none, so the gate waits for the new image. That is the normal path
@@ -99,6 +115,8 @@ but do it off-peak.
 
 ## When a release fails
 
+- **Preflight fails** → nothing was built, pushed or deployed. The error names the
+  `Production` environment credentials that are unset; set them and re-run.
 - **Gate times out** → the frontend was **not** promoted; production stays on the
   previous, self-consistent pair. Diagnose on the host with
   `journalctl --user -u podman-auto-update.service -n 50`, then re-run the workflow.
@@ -208,10 +226,12 @@ Leave `payments_mock` OFF in production: it grants access without charging.
    ⚠️ `NEXT_PUBLIC_*` is **baked into the bundle at build time**. Changing it
    requires a **redeploy** to take effect. If it is missing in prod, the build
    **fails by design** (see `lib/api.ts`) instead of silently shipping localhost.
-5. **Release credentials.** Production deploys are driven by CI, not by Git, so add
-   the repository secrets `VERCEL_TOKEN` (Vercel → Settings → Tokens),
-   `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (Project Settings → General, or read
-   them out of `.vercel/project.json` after a local `vercel link`).
+5. **Release credentials.** Production deploys are driven by CI, not by Git, so
+   put `VERCEL_TOKEN` (Vercel → Settings → Tokens) as a **secret**, and
+   `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` (Project Settings → General, or read
+   them out of `.vercel/project.json` after a local `vercel link`) as
+   **variables**, on the GitHub `Production` environment — see **One-time setup →
+   2** above for why the scope matters.
 
 6. Deploy. From now on: **open a PR → Preview URL** (Vercel's Git integration),
    **push to `main` → the release pipeline promotes production once the backend is

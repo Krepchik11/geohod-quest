@@ -29,7 +29,10 @@ name: release
 # Operator prerequisites (one-time, see platform/DEPLOYMENT.md → "Releases"):
 #   VPS      podman-auto-update.timer drop-in installed (reconcile every minute,
 #            not daily) — otherwise every release stalls until the gate times out.
-#   Secrets  VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+#   GitHub   A `Production` environment carrying the secret VERCEL_TOKEN and the
+#            variables VERCEL_ORG_ID / VERCEL_PROJECT_ID. Asserted by `preflight`,
+#            which every shipping step depends on. Jobs that use them must name
+#            the environment — an environment's values are invisible otherwise.
 #   Variable API_BASE_URL (optional; defaults to https://api.quest.geohod.ru)
 
 on:
@@ -59,6 +62,51 @@ permissions:
   contents: read
 
 jobs:
+  # Every operator prerequisite the pipeline consumes, asserted BEFORE anything
+  # ships. The chain's first irreversible act is pushing `:latest` to GHCR — the
+  # VPS follows that tag on its own timer, so a push IS the deploy — and the last
+  # act needs credentials this repository holds. Without this job the two are
+  # ordered the wrong way round: the backend goes live, and only then does the
+  # frontend step discover it cannot promote, leaving production permanently
+  # half-shipped on a new backend with the previous frontend. It is not a
+  # theoretical failure — every release from the pipeline's first run onward died
+  # exactly there, on an unset VERCEL_TOKEN, reported as the Vercel CLI's
+  # "You defined --token, but it's missing a value".
+  #
+  # `secrets` cannot be read in a job-level `if`, so the check is a step that
+  # reads them through `env` and names the missing ones itself.
+  #
+  # `environment:` is not decoration. The credentials live on the `Production`
+  # environment, and an environment's secrets and variables are invisible to a
+  # job that does not name it — they expand to the empty string, silently. That
+  # is precisely how a correctly-configured repository still produced
+  # "--token, but it's missing a value": the values were there, the job just
+  # could not see them.
+  preflight:
+    runs-on: ubuntu-latest
+    environment: Production
+    steps:
+      - name: Required release credentials are configured
+        shell: bash
+        env:
+          # A token is a credential (secret); an org/project id is an identifier
+          # that appears in URLs and in .vercel/project.json (variable). Masking
+          # an id buys nothing and makes a failed deploy harder to read.
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          set -uo pipefail
+          missing=()
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Refusing to release: ${missing[*]} are unset or empty on the «Production» environment, so the frontend could not be promoted. Nothing was built or deployed — production stays on its current, self-consistent frontend/backend pair. VERCEL_TOKEN is a secret; VERCEL_ORG_ID and VERCEL_PROJECT_ID are variables. Settings → Environments → Production; see platform/DEPLOYMENT.md → «Releases»."
+            exit 1
+          fi
+          echo "Release credentials present." >> "$GITHUB_STEP_SUMMARY"
+
   # The release identity: a hash of the sources the backend image is built from.
   #
   # Deliberately NOT the commit sha. The gate compares this value against what the
@@ -112,7 +160,9 @@ jobs:
     uses: ./.github/workflows/frontend-ci.yml
 
   backend-image:
-    needs: [identity, backend-tests]
+    # `preflight` gates the whole chain from here: this job's push of `:latest` is
+    # what the VPS auto-updates from, so it is the first step that cannot be undone.
+    needs: [preflight, identity, backend-tests]
     permissions:
       contents: read
       packages: write
@@ -167,9 +217,12 @@ jobs:
   frontend:
     needs: [backend-live, frontend-tests]
     runs-on: ubuntu-latest
+    # Same environment as `preflight`, for the same reason: without it these
+    # three expand to empty and the Vercel CLI reports a missing token value.
+    environment: Production
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - uses: actions/checkout@v4
