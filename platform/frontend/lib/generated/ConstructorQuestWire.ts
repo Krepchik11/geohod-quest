@@ -23,9 +23,7 @@ buyers: number,
  */
 published_version: number | null, complexity: string, age_target: string, tags: Array<string>, 
 /**
- * List-safe cover ([`crate::store::list_cover`]): a URL, never a `data:`
- * blob — those bloated the list by megabytes. Every cover WRITE is
- * externalized to a URL, so only a row not saved since that rule shipped
- * still has a blob, and it stays on the GET-one wire.
+ * Media URL. Never a `data:` blob — those bloated the list by megabytes;
+ * every write externalizes ([`crate::media::MediaStores::externalize_tree`]).
  */
 cover: string | null, created_at: number, updated_at: number, };

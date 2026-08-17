@@ -10,10 +10,11 @@
 //! Mirrors the storage layer's two-variant pattern (in-memory spec + durable
 //! backend), here `MediaStores::{InMemory, R2}`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::config::MediaConfig;
@@ -123,6 +124,71 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 pub fn media_hash_in_ref(reference: &str) -> Option<&str> {
     let tail = reference.split(['?', '#']).next()?.rsplit('/').next()?;
     (tail.len() == 64 && tail.bytes().all(|b| b.is_ascii_hexdigit())).then_some(tail)
+}
+
+/// Read every string value in a JSON tree, in document order.
+///
+/// THE recursive walk over authored content. A media reference can sit anywhere
+/// in a quest body — cover, step image, its uncropped origin, whatever role the
+/// shape grows next — so both directions (finding references for an export,
+/// replacing inline images on a write) ride on this one walk instead of on a
+/// field list that silently misses whatever nobody remembered to add.
+pub fn visit_strings(value: &Value, f: &mut impl FnMut(&str)) {
+    match value {
+        Value::String(s) => f(s),
+        Value::Array(items) => {
+            for item in items {
+                visit_strings(item, f);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                visit_strings(item, f);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// [`visit_strings`]'s writing twin: replace a string wherever `f` returns one,
+/// leave it alone on `None`.
+pub fn map_strings(value: &mut Value, f: &mut impl FnMut(&str) -> Option<String>) {
+    match value {
+        Value::String(s) => {
+            if let Some(replacement) = f(s) {
+                *s = replacement;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                map_strings(item, f);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                map_strings(item, f);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Uploads in flight per payload while externalizing. A quest carries one image
+/// per step, so a handful of parallel round trips is the whole win.
+const MAX_CONCURRENT_UPLOADS: usize = 8;
+
+/// One finished upload, folded into the replacement map. A task that produced no
+/// storable image contributes nothing, so its string stays as authored.
+fn collect_upload(
+    joined: Result<Result<Option<(String, String)>, AppError>, tokio::task::JoinError>,
+    stored: &mut HashMap<String, String>,
+) -> Result<(), AppError> {
+    let uploaded = joined
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("media externalize task panicked: {e}")))?;
+    if let Some((uri, url)) = uploaded? {
+        stored.insert(uri, url);
+    }
+    Ok(())
 }
 
 /// In-process content-addressed store (tests + local dev). Bytes are kept in a
@@ -306,22 +372,81 @@ impl MediaStores {
         }
     }
 
-    /// The stored-media URL for an authored image reference: an inline `data:`
-    /// image is ingested once and replaced by its content-addressed URL; a URL,
-    /// `None`, and an unreadable `data:` payload pass through unchanged.
+    /// Move EVERY inline image in an authored payload into the store: each
+    /// `data:` image anywhere in the tree is stored once and replaced by its
+    /// content-addressed URL. Returns how many distinct images moved.
     ///
-    /// Every cover WRITE runs through here — constructor create/save and publish
-    /// — so a newly written cover is always a URL. That is what lets the
-    /// dashboard list carry the real image: a base64 blob is megabytes per row,
-    /// so the list drops it ([`crate::store::list_cover`]) and the row falls back
-    /// to a letter tile on a quest that plainly has a cover. Rows written before
-    /// this rule keep their blob until their author saves the quest once.
+    /// Structural, not a field list. The cover was externalized by name once,
+    /// which is exactly why the step images were not — a rule that names fields
+    /// only covers the fields somebody remembered. Riding on [`visit_strings`]
+    /// makes the rule "no authored payload is stored with pixels inside it",
+    /// whatever roles the body shape has today or grows later.
+    ///
+    /// Distinct payloads upload concurrently, [`MAX_CONCURRENT_UPLOADS`] at a
+    /// time: a legacy quest carries one image per step, and serializing those
+    /// round trips would dominate a save. Identical payloads collapse before
+    /// upload, and identical BYTES collapse again at the content address, so a
+    /// picture reused across steps is stored once.
+    pub async fn externalize_tree(&self, value: &mut Value) -> Result<usize, AppError> {
+        // The cheap prefix test, not a full parse: deciding what is really an
+        // image would decode megabytes of base64 twice, once here and once on
+        // upload. Anything that turns out not to be a storable image simply
+        // yields no replacement below and is left untouched.
+        let mut inline = BTreeSet::new();
+        visit_strings(value, &mut |s| {
+            if s.starts_with("data:") {
+                inline.insert(s.to_string());
+            }
+        });
+        if inline.is_empty() {
+            return Ok(0);
+        }
+        let mut uploads = tokio::task::JoinSet::new();
+        let mut stored: HashMap<String, String> = HashMap::new();
+        for uri in inline {
+            // Wait for a slot before opening another. The payload decides how
+            // many distinct images it contains, so an unbounded fan-out would
+            // let one pathological body open a connection per image.
+            if uploads.len() >= MAX_CONCURRENT_UPLOADS
+                && let Some(joined) = uploads.join_next().await
+            {
+                collect_upload(joined, &mut stored)?;
+            }
+            let store = self.clone();
+            uploads.spawn(async move {
+                match parse_data_uri(&uri) {
+                    Some(data) => store
+                        .put(data.bytes, &data.content_type)
+                        .await
+                        .map(|stored| Some((uri, stored.url))),
+                    None => Ok(None),
+                }
+            });
+        }
+        while let Some(joined) = uploads.join_next().await {
+            collect_upload(joined, &mut stored)?;
+        }
+        map_strings(value, &mut |s| stored.get(s).cloned());
+        Ok(stored.len())
+    }
+
+    /// The stored-media URL for a single authored image reference: an inline
+    /// `data:` image is ingested once and replaced by its content-addressed URL;
+    /// a URL, `None`, and an unreadable `data:` payload pass through unchanged.
+    ///
+    /// The scalar door for the denormalized cover column, defined in terms of
+    /// [`Self::externalize_tree`] so the column and the body inside it cannot be
+    /// judged by different rules and end up disagreeing about the same picture.
     pub async fn externalize(&self, value: Option<String>) -> Result<Option<String>, AppError> {
         let Some(raw) = value else { return Ok(None) };
-        let Some(data) = parse_data_uri(&raw) else {
-            return Ok(Some(raw));
-        };
-        Ok(Some(self.put(data.bytes, &data.content_type).await?.url))
+        let mut one = Value::String(raw);
+        self.externalize_tree(&mut one).await?;
+        match one {
+            Value::String(s) => Ok(Some(s)),
+            other => Err(AppError::Internal(anyhow::anyhow!(
+                "externalize returned a non-string: {other}"
+            ))),
+        }
     }
 
     /// Fetch stored bytes for the `GET /api/media/{hash}` serve route. Both
@@ -423,6 +548,59 @@ mod tests {
             );
         }
         assert_eq!(store.externalize(None).await.expect("externalize"), None);
+    }
+
+    /// The rule that replaced "externalize the fields we remembered": every
+    /// inline image in the tree moves, at any depth and under any key, and
+    /// everything that is not a storable image is left exactly as authored.
+    #[tokio::test]
+    async fn externalize_tree_moves_every_inline_image_at_any_depth() {
+        let store = MediaStores::InMemory(Arc::new(Mutex::new(InMemoryMediaStore::new(
+            "/api/media".to_string(),
+        ))));
+        let png = "data:image/png;base64,AAAA";
+        let jpeg = "data:image/jpeg;base64,AQID";
+        let mut body = serde_json::json!({
+            "meta": { "cover": png, "title": "Квест" },
+            "steps": [
+                { "image": { "url": jpeg, "origin": { "url": png, "rect": { "x": 0 } } } },
+                { "image": { "url": "/api/media/already-a-url" }, "hint": null },
+                { "note": "data:text/html;base64,AAAA", "bad": "data:image/png;base64,!!!!" },
+            ],
+        });
+
+        // Three inline strings, but only two distinct images: the repeated cover
+        // collapses before it is ever uploaded.
+        assert_eq!(store.externalize_tree(&mut body).await.expect("tree"), 2);
+
+        let png_url = format!("/api/media/{}", sha256_hex(&[0u8, 0, 0]));
+        let jpeg_url = format!("/api/media/{}", sha256_hex(&[1u8, 2, 3]));
+        assert_eq!(body["meta"]["cover"], png_url);
+        assert_eq!(body["steps"][0]["image"]["url"], jpeg_url);
+        assert_eq!(body["steps"][0]["image"]["origin"]["url"], png_url);
+        // Untouched: an already-stored URL, a non-image data URI, an undecodable
+        // payload, and every value that is not a string.
+        assert_eq!(body["steps"][1]["image"]["url"], "/api/media/already-a-url");
+        assert_eq!(body["steps"][2]["note"], "data:text/html;base64,AAAA");
+        assert_eq!(body["steps"][2]["bad"], "data:image/png;base64,!!!!");
+        assert_eq!(body["meta"]["title"], "Квест");
+        assert_eq!(body["steps"][0]["image"]["origin"]["rect"]["x"], 0);
+
+        // The bytes really are in the store, addressed by their content.
+        assert_eq!(
+            store
+                .get(&sha256_hex(&[1u8, 2, 3]))
+                .await
+                .expect("get")
+                .expect("stored")
+                .bytes,
+            Bytes::from_static(&[1u8, 2, 3]),
+        );
+
+        // Idempotent: a second pass finds nothing inline and changes nothing.
+        let once = body.clone();
+        assert_eq!(store.externalize_tree(&mut body).await.expect("tree"), 0);
+        assert_eq!(body, once);
     }
 
     #[test]

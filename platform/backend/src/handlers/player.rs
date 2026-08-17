@@ -549,20 +549,14 @@ async fn get_quest_icon_handler(
         .primary_comic
         .as_deref()
         .ok_or_else(|| AppError::NotFound("quest has no cover".into()))?;
-    let bytes = if let Some(data) = media::parse_data_uri(cover) {
-        data.bytes
-    } else if let Some(hash) = media::media_hash_in_ref(cover) {
-        state
-            .media
-            .get(hash)
-            .await?
-            .ok_or_else(|| AppError::NotFound("cover media not found".into()))?
-            .bytes
-    } else {
-        return Err(AppError::NotFound(
-            "cover is not a resolvable media ref".into(),
-        ));
-    };
+    let hash = media::media_hash_in_ref(cover)
+        .ok_or_else(|| AppError::NotFound("cover is not a resolvable media ref".into()))?;
+    let bytes = state
+        .media
+        .get(hash)
+        .await?
+        .ok_or_else(|| AppError::NotFound("cover media not found".into()))?
+        .bytes;
     let png = icons::compose_icon(&bytes, size)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("icon compose failed: {e}")))?;
     Ok((

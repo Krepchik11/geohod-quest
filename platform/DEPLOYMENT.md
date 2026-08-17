@@ -496,6 +496,35 @@ One-time setup:
    curl -fsSI "https://media.quest.geohod.ru/<hash>"   # -> 200, content-type image/png
    ```
 
+### One-off: move already-stored images into R2
+
+Quests authored before media was externalized carry their cover and every step
+image as base64 **inside the row**. Nothing writes such a row any more — create,
+save and publish all take the payload apart first — but the rows already written
+have to be converted, and that cannot be a SQL migration: the payloads must be
+decoded and put in the bucket.
+
+Run it once after deploying, with the ops token. It is idempotent and
+restartable, so re-running it is free and interrupting it is safe:
+
+```sh
+curl -fsS -X POST https://api.quest.geohod.ru/api/migrate/media \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"limit": 10}'
+# -> {"quests_scanned":…,"quests_rewritten":…,"images_stored":…,"complete":false}
+```
+
+`limit` caps how many rows one call rewrites (default 10) so the work fits inside
+the request timeout; **repeat until `complete` is `true`**. It rewrites the
+authoring row, the catalog cover, and every frozen snapshot — including
+superseded versions, which players mid-attempt are still bound to.
+
+Until it has run, a quest written the old way keeps its pictures in the row: the
+dashboard list carries them (slow), its PWA icon endpoint answers 404, and
+re-publishing that quest at its **existing** version is refused as a frozen
+snapshot, because the payload now arrives externalized while the stored one is
+not. All three are fixed by the run, not by another deploy.
+
 ## Payments (YooKassa)
 
 Checkout charges through YooKassa (redirect flow: the payer confirms on the

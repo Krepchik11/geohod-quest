@@ -637,6 +637,24 @@ impl InMemoryGrantStore {
         Ok(())
     }
 
+    /// Replace a frozen snapshot's media references in place — the media
+    /// backfill's only writer. `false` when no such snapshot is stored.
+    ///
+    /// Not a hole in the freeze guard above. The snapshot keeps its id, its
+    /// version and its content: every reference this rewrites resolves to the
+    /// exact bytes the `data:` payload carried, because the store is addressed
+    /// by the sha256 of those bytes. An attempt bound to this snapshot plays
+    /// identically before and after — which is precisely what invariant 4
+    /// protects, and what re-publishing different CONTENT under a live id would
+    /// break.
+    pub fn rewrite_snapshot_media(&mut self, snapshot_id: &str, data: serde_json::Value) -> bool {
+        let Some(slot) = self.snapshots.get_mut(snapshot_id).filter(|s| s.is_some()) else {
+            return false;
+        };
+        *slot = Some(data);
+        true
+    }
+
     /// Latest published meta + frozen snapshot JSON for the bundle endpoint.
     pub fn get_bundle(&self, quest_id: &str) -> Option<(PublishedMeta, Option<serde_json::Value>)> {
         let meta = self.published.get(quest_id)?.clone();
@@ -648,6 +666,22 @@ impl InMemoryGrantStore {
     /// (skips the published-row fetch `get_bundle` would repeat).
     pub fn get_snapshot(&self, snapshot_id: &str) -> Option<serde_json::Value> {
         self.snapshots.get(snapshot_id).cloned().flatten()
+    }
+
+    /// Every stored snapshot that has content, oldest id first. Ids only — the
+    /// bodies are the largest rows in the system and a caller that wants one
+    /// asks for it. The media backfill walks THIS rather than the published
+    /// list: a superseded version is still bound by live attempts (invariant 4),
+    /// so it is exactly as much a player download as the current one.
+    pub fn list_snapshot_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .snapshots
+            .iter()
+            .filter(|(_, data)| data.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
     }
 
     /// All grants — internal/admin use only (exposes every player's purchases
@@ -1854,6 +1888,16 @@ pub trait GrantStore: Send + Sync {
 
     /// See [`InMemoryGrantStore::get_snapshot`].
     async fn get_snapshot(&self, snapshot_id: &str) -> Result<Option<serde_json::Value>, AppError>;
+
+    /// See [`InMemoryGrantStore::list_snapshot_ids`].
+    async fn list_snapshot_ids(&self) -> Result<Vec<String>, AppError>;
+
+    /// See [`InMemoryGrantStore::rewrite_snapshot_media`].
+    async fn rewrite_snapshot_media(
+        &self,
+        snapshot_id: &str,
+        data: serde_json::Value,
+    ) -> Result<bool, AppError>;
 }
 
 /// Shared grant/published-quest storage handle.
@@ -1930,6 +1974,18 @@ impl GrantStore for std::sync::Mutex<InMemoryGrantStore> {
 
     async fn get_snapshot(&self, snapshot_id: &str) -> Result<Option<serde_json::Value>, AppError> {
         Ok(lock(self, "grants")?.get_snapshot(snapshot_id))
+    }
+
+    async fn list_snapshot_ids(&self) -> Result<Vec<String>, AppError> {
+        Ok(lock(self, "grants")?.list_snapshot_ids())
+    }
+
+    async fn rewrite_snapshot_media(
+        &self,
+        snapshot_id: &str,
+        data: serde_json::Value,
+    ) -> Result<bool, AppError> {
+        Ok(lock(self, "grants")?.rewrite_snapshot_media(snapshot_id, data))
     }
 }
 
@@ -2075,10 +2131,9 @@ pub struct ConstructorQuest {
 }
 
 /// Dashboard list row — everything in [`ConstructorQuest`] except the heavy
-/// `body`, with the cover reduced by [`list_cover`]: URL covers ride along so
-/// the dashboard can show the real image, and the `data:` blobs left on rows
-/// written before covers were externalized (megabytes per row) stay on the full
-/// [`ConstructorQuest`] (GET-one) only.
+/// `body`. The cover rides along verbatim: it is a media URL, because no write
+/// stores anything else and [`crate::backfill`] converted the rows written
+/// before that was true.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConstructorQuestSummary {
     pub quest_id: String,
@@ -2086,7 +2141,6 @@ pub struct ConstructorQuestSummary {
     pub author_name: String,
     pub name: String,
     pub status: String,
-    /// List-safe cover per [`list_cover`].
     pub cover: Option<String>,
     pub steps_count: u32,
     /// Complexity / audience / tags — the dashboard's filterable columns.
@@ -2127,23 +2181,6 @@ impl AuthorGuard<'_> {
             Self::Unchecked => None,
         }
     }
-}
-
-/// Legacy-row compensator for covers on list wires: a media-URL cover passes,
-/// a `data:` blob (rows that predate media externalization — see
-/// [`crate::media`]) does not, because base64 covers are megabytes per row and
-/// belong to the GET-one entity only. The Postgres list query mirrors this as
-/// a CASE purely to keep the blob from crossing the database wire; this
-/// function stays the definition.
-///
-/// It can only still fire on a row not written since
-/// [`crate::media::MediaStores::externalize`] shipped: every cover write now
-/// stores a URL, so saving such a quest once converts it for good. Delete both
-/// once no `data:` cover remains.
-pub fn list_cover(cover: Option<&str>) -> Option<String> {
-    cover
-        .filter(|c| !c.starts_with("data:"))
-        .map(str::to_string)
 }
 
 /// A quest's human label for internal surfaces (moderation lists, statistics):
@@ -2252,7 +2289,7 @@ impl ConstructorQuest {
             author_name: self.author_name.clone(),
             name: self.name.clone(),
             status: self.status.clone(),
-            cover: list_cover(self.cover.as_deref()),
+            cover: self.cover.clone(),
             steps_count: self.steps_count,
             attrs: self.attrs.clone(),
             created_at: self.created_at,
@@ -2348,6 +2385,36 @@ impl InMemoryConstructorStore {
         q.body = body;
         q.updated_at = updated_at;
         Ok(q.summary())
+    }
+
+    /// Replace a quest's media references in place — the media backfill's only
+    /// writer. `false` means the row moved on and was left alone.
+    ///
+    /// Deliberately narrow. It writes cover and body ONLY, and leaves
+    /// `updated_at` where it was, because moving a picture out of the row does
+    /// not edit the quest — the author changed nothing and must not see a new
+    /// "saved at". And it applies only while `updated_at` still equals what the
+    /// caller read: a backfill walking the whole registry would otherwise
+    /// overwrite an autosave that landed between that read and this write, and
+    /// silently destroy the author's edit. A contended row simply keeps its
+    /// inline images until the next run.
+    pub fn rewrite_media(
+        &mut self,
+        quest_id: &str,
+        expected_updated_at: u64,
+        cover: Option<String>,
+        body: serde_json::Value,
+    ) -> bool {
+        let Some(q) = self
+            .quests
+            .get_mut(quest_id)
+            .filter(|q| q.updated_at == expected_updated_at)
+        else {
+            return false;
+        };
+        q.cover = cover;
+        q.body = body;
+        true
     }
 
     /// Hand the quest to another author; `None` if the quest does not exist.
@@ -2485,6 +2552,15 @@ pub trait ConstructorStore: Send + Sync {
         updated_at: u64,
     ) -> Result<Option<ConstructorQuestSummary>, AppError>;
 
+    /// See [`InMemoryConstructorStore::rewrite_media`].
+    async fn rewrite_media(
+        &self,
+        quest_id: &str,
+        expected_updated_at: u64,
+        cover: Option<String>,
+        body: serde_json::Value,
+    ) -> Result<bool, AppError>;
+
     /// See [`InMemoryConstructorStore::set_author`].
     async fn set_author(
         &self,
@@ -2571,6 +2647,16 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
         updated_at: u64,
     ) -> Result<Option<ConstructorQuestSummary>, AppError> {
         Ok(lock(self, "constructor")?.set_status(quest_id, expected_author, status, updated_at))
+    }
+
+    async fn rewrite_media(
+        &self,
+        quest_id: &str,
+        expected_updated_at: u64,
+        cover: Option<String>,
+        body: serde_json::Value,
+    ) -> Result<bool, AppError> {
+        Ok(lock(self, "constructor")?.rewrite_media(quest_id, expected_updated_at, cover, body))
     }
 
     async fn set_author(
@@ -3852,7 +3938,6 @@ mod constructor_tests {
         // Attributes are list columns: the dashboard filters on the summary row.
         assert_eq!(updated.attrs, attrs);
         let full = s.get("q1").expect("present");
-        // The full entity keeps the raw cover (the summary reduces it via list_cover).
         assert_eq!(full.cover.as_deref(), Some("cover.png"));
         assert_eq!(full.body["steps"].as_array().expect("steps").len(), 2);
 
@@ -3972,20 +4057,54 @@ mod constructor_tests {
     fn summary_for_quest_answers_without_the_heavy_columns() {
         let mut s = InMemoryConstructorStore::new();
         let mut q = quest("q1", "Имя", 1);
-        q.cover = Some("data:image/png;base64,AAAA".into());
+        q.cover = Some("/api/media/coverhash".into());
         q.body = serde_json::json!({ "id": "q1", "steps": [1, 2, 3] });
         s.create(q).expect("create");
 
         let summary = s.summary_for_quest("q1").expect("present");
-        // Same row the list view returns — a type that CANNOT carry the body,
-        // and whose cover is reduced by list_cover (this data: blob drops out),
-        // so an authorize-only caller cannot accidentally load them.
+        // Same row the list view returns — a type that CANNOT carry the body, so
+        // an authorize-only caller cannot accidentally load it. The cover rides
+        // along whole: it is a reference, which is the point of externalizing.
         assert_eq!(summary, s.get("q1").expect("present").summary());
-        assert_eq!(summary.cover, None, "data: blob reduced away");
+        assert_eq!(summary.cover.as_deref(), Some("/api/media/coverhash"));
         assert_eq!(summary.name, "Имя");
         assert_eq!(summary.author_id, "seed:a");
         assert_eq!(summary.status, CTOR_STATUS_DRAFT);
         assert_eq!(s.summary_for_quest("ghost"), None);
+    }
+
+    /// The optimistic guard the media backfill relies on: a rewrite applies only
+    /// while the row is still the one its caller read, and it does not stamp a
+    /// new `updated_at` — moving a picture out of the row is not an edit.
+    #[test]
+    fn rewrite_media_needs_the_updated_at_it_read() {
+        let mut s = InMemoryConstructorStore::new();
+        let mut q = quest("q1", "Имя", 1);
+        q.updated_at = 20;
+        q.cover = Some("data:image/png;base64,AAAA".into());
+        s.create(q).expect("create");
+
+        assert!(
+            !s.rewrite_media("q1", 19, Some("/api/media/x".into()), serde_json::json!({})),
+            "a stale reader must not write"
+        );
+        assert!(!s.rewrite_media("ghost", 20, None, serde_json::json!({})));
+        assert_eq!(
+            s.get("q1").expect("present").cover.as_deref(),
+            Some("data:image/png;base64,AAAA"),
+            "a refused rewrite changes nothing",
+        );
+
+        assert!(s.rewrite_media(
+            "q1",
+            20,
+            Some("/api/media/x".into()),
+            serde_json::json!({ "steps": [] })
+        ));
+        let after = s.get("q1").expect("present");
+        assert_eq!(after.cover.as_deref(), Some("/api/media/x"));
+        assert_eq!(after.body, serde_json::json!({ "steps": [] }));
+        assert_eq!(after.updated_at, 20);
     }
 
     #[test]
