@@ -16,22 +16,17 @@ use std::io::Write;
 use serde_json::Value;
 
 use crate::errors::AppError;
-use crate::media::{MediaStores, extension_for, media_hash_in_ref};
+use crate::media::{MediaStores, extension_for, map_strings, media_hash_in_ref, visit_strings};
 use crate::store::ConstructorQuest;
 
 pub const FORMAT_VERSION: u32 = 1;
 
 fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
-    match value {
-        Value::String(s) => {
-            if let Some(hash) = media_hash_in_ref(s) {
-                out.insert(hash.to_string());
-            }
+    visit_strings(value, &mut |s| {
+        if let Some(hash) = media_hash_in_ref(s) {
+            out.insert(hash.to_string());
         }
-        Value::Array(items) => items.iter().for_each(|v| collect_media_hashes(v, out)),
-        Value::Object(map) => map.values().for_each(|v| collect_media_hashes(v, out)),
-        _ => {}
-    }
+    });
 }
 
 /// Rewrite every media URL in `value` to its zip-relative path, in place.
@@ -39,20 +34,11 @@ fn collect_media_hashes(value: &Value, out: &mut BTreeSet<String>) {
 /// media store — an orphaned reference) are left untouched: the export still
 /// succeeds, that one field just keeps pointing at the live URL.
 fn rewrite_media_urls(value: &mut Value, hash_to_path: &BTreeMap<String, String>) {
-    match value {
-        Value::String(s) => {
-            if let Some(path) = media_hash_in_ref(s).and_then(|h| hash_to_path.get(h)) {
-                *s = path.clone();
-            }
-        }
-        Value::Array(items) => items
-            .iter_mut()
-            .for_each(|v| rewrite_media_urls(v, hash_to_path)),
-        Value::Object(map) => map
-            .values_mut()
-            .for_each(|v| rewrite_media_urls(v, hash_to_path)),
-        _ => {}
-    }
+    map_strings(value, &mut |s| {
+        media_hash_in_ref(s)
+            .and_then(|hash| hash_to_path.get(hash))
+            .cloned()
+    });
 }
 
 #[derive(serde::Serialize)]

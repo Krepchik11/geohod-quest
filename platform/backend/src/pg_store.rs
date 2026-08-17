@@ -1042,6 +1042,38 @@ impl GrantStore for PgGrantStore {
                 .map_err(internal),
         }
     }
+
+    /// See [`crate::store::InMemoryGrantStore::list_snapshot_ids`].
+    async fn list_snapshot_ids(&self) -> Result<Vec<String>, AppError> {
+        let rows = sqlx::query(
+            "SELECT snapshot_id FROM snapshots WHERE data IS NOT NULL ORDER BY snapshot_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| r.try_get::<String, _>("snapshot_id").map_err(internal))
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::rewrite_snapshot_media`].
+    async fn rewrite_snapshot_media(
+        &self,
+        snapshot_id: &str,
+        data: serde_json::Value,
+    ) -> Result<bool, AppError> {
+        // `data IS NOT NULL` mirrors the in-memory store: a version registered
+        // without content has nothing to rewrite and must not gain any here.
+        let res = sqlx::query(
+            "UPDATE snapshots SET data = $2 WHERE snapshot_id = $1 AND data IS NOT NULL",
+        )
+        .bind(snapshot_id)
+        .bind(&data)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
+    }
 }
 
 /// Identity (the `users` + `identities` tables + sessions) on PostgreSQL.
@@ -1729,11 +1761,7 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
         author_name: row.try_get("author_name").map_err(internal)?,
         name: row.try_get("name").map_err(internal)?,
         status: row.try_get("status").map_err(internal)?,
-        cover: crate::store::list_cover(
-            row.try_get::<Option<String>, _>("list_cover")
-                .map_err(internal)?
-                .as_deref(),
-        ),
+        cover: row.try_get("cover").map_err(internal)?,
         steps_count: steps_count.max(0) as u32,
         attrs: QuestAttributes {
             complexity: row.try_get("complexity").map_err(internal)?,
@@ -1746,17 +1774,14 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
 }
 
 /// Columns selected for a summary row (kept in one place so list/save/status
-/// agree). Deliberately EXCLUDES the heavy `body`, and reduces the cover to
-/// `list_cover` in SQL so a TOASTed base64 blob (the old multi-second list
-/// load) never crosses the database wire (`left()` detoasts only the prefix
-/// slice, unlike `LIKE`, which would detoast the whole value) — the CASE mirrors
-/// [`crate::store::list_cover`], which stays the definition and re-applies in
-/// [`ctor_summary_from_row`]. The alias keeps the raw `cover` column free for
-/// GET-one, which appends `cover`/`body` because the builder needs the full
-/// entity (a legacy base64 cover included).
-const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, \
-     CASE WHEN left(cover, 5) = 'data:' THEN NULL ELSE cover END AS list_cover, steps_count, \
-     complexity, age_target, tags, created_at, updated_at";
+/// agree). Deliberately EXCLUDES the heavy `body`; the cover is selected as it
+/// is stored, because what is stored is a media URL. It used to be reduced by a
+/// `CASE` that nulled a `data:` prefix, to keep a TOASTed base64 blob off the
+/// database wire on the dashboard list — no write has produced such a value
+/// since media was externalized, and [`crate::backfill`] converted the rows that
+/// still had one.
+const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, cover, \
+     steps_count, complexity, age_target, tags, created_at, updated_at";
 
 impl PgConstructorStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -1898,9 +1923,8 @@ impl ConstructorStore for PgConstructorStore {
 
     /// See [`crate::store::InMemoryConstructorStore::get`].
     async fn get(&self, quest_id: &str) -> Result<Option<ConstructorQuest>, AppError> {
-        let sql = format!(
-            "SELECT {CTOR_SUMMARY_COLS}, cover, body FROM constructor_quests WHERE quest_id = $1"
-        );
+        let sql =
+            format!("SELECT {CTOR_SUMMARY_COLS}, body FROM constructor_quests WHERE quest_id = $1");
         let row = sqlx::query(&sql)
             .bind(quest_id)
             .fetch_optional(&self.pool)
@@ -1917,9 +1941,7 @@ impl ConstructorStore for PgConstructorStore {
                     author_name: s.author_name,
                     name: s.name,
                     status: s.status,
-                    // The full entity keeps the RAW cover (base64 included) —
-                    // the summary's list_cover alias never shadows this column.
-                    cover: row.try_get("cover").map_err(internal)?,
+                    cover: s.cover,
                     steps_count: s.steps_count,
                     attrs: s.attrs,
                     created_at: s.created_at,
@@ -2000,6 +2022,30 @@ impl ConstructorStore for PgConstructorStore {
         .await
         .map_err(internal)?;
         row.as_ref().map(ctor_summary_from_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryConstructorStore::rewrite_media`]. The
+    /// `updated_at` equality in the WHERE clause IS the optimistic guard — the
+    /// row is rewritten only while it is still the one the caller read.
+    async fn rewrite_media(
+        &self,
+        quest_id: &str,
+        expected_updated_at: u64,
+        cover: Option<String>,
+        body: serde_json::Value,
+    ) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            "UPDATE constructor_quests SET cover = $3, body = $4 \
+             WHERE quest_id = $1 AND updated_at = $2",
+        )
+        .bind(quest_id)
+        .bind(expected_updated_at as i64)
+        .bind(&cover)
+        .bind(&body)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
     }
 
     /// See [`crate::store::InMemoryConstructorStore::set_author`]. Both author

@@ -27,6 +27,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod admin_stats;
 mod auth;
 mod authz;
+mod backfill;
 mod config;
 mod coupons;
 mod errors;
@@ -749,14 +750,11 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::FORBIDDEN);
-        let (st, _) = post_json_h(
-            &app,
-            "/api/migrate/legacy",
-            json!({"key": "k"}),
-            &[("x-admin-token", "anything")],
-        )
-        .await;
-        assert_eq!(st, StatusCode::FORBIDDEN);
+        for path in ["/api/migrate/legacy", "/api/migrate/media"] {
+            let (st, _) =
+                post_json_h(&app, path, json!({}), &[("x-admin-token", "anything")]).await;
+            assert_eq!(st, StatusCode::FORBIDDEN, "{path}");
+        }
         // The user-management surface fails closed too: with ADMIN_TOKEN unset the
         // shared-secret header is inert, and there is no admin session to fall back
         // on, so listing is forbidden.
@@ -3205,11 +3203,13 @@ mod tests {
         assert_eq!(page["reviews"][0]["text"], "Отличный квест!");
     }
 
-    /// The dashboard list shows the quest cover. Every cover write — create,
-    /// save and publish — externalizes an inline `data:` blob into the media
-    /// store first, so the stored value is a URL and the list carries the real
-    /// image instead of dropping it and falling back to a letter tile.
-    async fn scenario_ctor_list_covers(app: &Router, ids: &Ids) {
+    /// No authored payload is stored with pixels inside it. Create, save and
+    /// publish all take an inline `data:` image apart — the cover column, every
+    /// image anywhere in the body, and the frozen snapshot a player downloads —
+    /// and store a reference instead. That is what lets the dashboard list carry
+    /// the real image rather than falling back to a letter tile, and what keeps
+    /// a quest record from growing to megabytes of base64.
+    async fn scenario_media_externalized_on_write(app: &Router, ids: &Ids) {
         let bearer = editor_bearer(app, &ids.player).await;
         let h = [("authorization", bearer.as_str())];
         let make = |id: &str, cover: serde_json::Value| {
@@ -3218,7 +3218,9 @@ mod tests {
                 "name": "Обложечный квест",
                 "cover": cover,
                 "steps_count": 1,
-                "body": { "id": id, "meta": { "title": "К" }, "steps": [1], "versions": [] }
+                "body": { "id": id, "meta": { "title": "К", "cover": cover },
+                          "steps": [{ "image": { "url": "data:image/jpeg;base64,AQID" } }],
+                          "versions": [] }
             })
         };
         let url_quest = format!("{}-url", ids.quest);
@@ -3275,9 +3277,24 @@ mod tests {
         let (st, one) = get_json_h(app, &format!("/api/constructor/quests/{blob_quest}"), &h).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(one["cover"], blob_cover);
+        // The BODY is taken apart too, not just the two columns beside it: the
+        // step image and the cover copy inside the body are references, so the
+        // stored record is kilobytes rather than one base64 string per step.
+        let step_image = crate::media::sha256_hex(&[1u8, 2, 3]);
+        assert_eq!(one["body"]["meta"]["cover"], blob_cover);
+        assert_eq!(
+            crate::media::media_hash_in_ref(
+                one["body"]["steps"][0]["image"]["url"]
+                    .as_str()
+                    .expect("step image url")
+            ),
+            Some(step_image.as_str()),
+            "an image inside the body is externalized by the same rule",
+        );
 
         // Publish writes the catalog cover from the same client field, so it
-        // externalizes too — a base64 cover must not reach the store card.
+        // externalizes too — a base64 cover must not reach the store card — and
+        // so does the frozen snapshot, which is what every player downloads.
         let (st, _) = post_json_h(
             app,
             "/api/quests/publish",
@@ -3287,7 +3304,8 @@ mod tests {
                 "primary_comic": "data:image/png;base64,AAAA",
                 "template_summary": "start",
                 "snapshot_version": 1,
-                "snapshot": { "golden_id": blob_quest, "name": "К", "snapshot_version": 1, "steps": [] }
+                "snapshot": { "golden_id": blob_quest, "name": "К", "snapshot_version": 1,
+                              "steps": [{ "image": "data:image/jpeg;base64,AQID" }] }
             }),
             &h,
         )
@@ -3296,6 +3314,27 @@ mod tests {
         let (st, product) = get_json(app, &format!("/api/quests/{blob_quest}")).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(product["primary_comic"], blob_cover);
+        let (_, _) = post_json(
+            app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": blob_quest}),
+        )
+        .await;
+        let (st, bundle) = get_json(
+            app,
+            &format!("/api/quests/{blob_quest}/bundle?user_id={}", ids.player),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            crate::media::media_hash_in_ref(
+                bundle["snapshot"]["steps"][0]["image"]
+                    .as_str()
+                    .expect("snapshot image url")
+            ),
+            Some(step_image.as_str()),
+            "the frozen snapshot ships references, not megabytes of base64",
+        );
     }
 
     /// Handing a quest to another author: an ADMIN decision, over the closed set
@@ -5250,16 +5289,17 @@ mod tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
-    /// The SQL twin of [`store::list_cover`] — the `CASE` in `CTOR_SUMMARY_COLS`
-    /// that keeps a base64 blob off the list wire. Reached only by writing the
-    /// legacy shape straight through the store: every HTTP write externalizes the
-    /// blob first, so the API path can no longer produce such a row. Mirrors the
-    /// in-memory `summary_for_quest_answers_without_the_heavy_columns`.
+    /// PostgreSQL parity for [`backfill`]. The in-memory tests there are the
+    /// spec; this drives the same one-off through the real SQL writers — the
+    /// `updated_at` guard in the UPDATE, and the snapshot rewrite that goes
+    /// around a freeze guard which would (correctly) refuse a republish. The
+    /// legacy row is written straight through the store because no HTTP write
+    /// can produce one any more.
     #[tokio::test]
-    async fn pg_ctor_list_reduces_a_legacy_data_cover() {
+    async fn pg_media_backfill_rewrites_a_legacy_row() {
         dotenv().ok();
         let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("pg_ctor_list_reduces_a_legacy_data_cover: skipped (DATABASE_URL not set)");
+            eprintln!("pg_media_backfill_rewrites_a_legacy_row: skipped (DATABASE_URL not set)");
             return;
         };
         let pool = sqlx::postgres::PgPoolOptions::new()
@@ -5271,14 +5311,21 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        use store::ConstructorStore as _;
-        let ctor = pg_store::PgConstructorStore::new(pool);
+        let ctor: store::ConstructorStores =
+            Arc::new(pg_store::PgConstructorStore::new(pool.clone()));
+        let grants: store::GrantStores = Arc::new(pg_store::PgGrantStore::new(pool));
+        let media = media::MediaStores::InMemory(Arc::new(Mutex::new(
+            media::InMemoryMediaStore::new("/api/media".to_string()),
+        )));
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
-        let qid = format!("q-legacycover-{run}");
+        let qid = format!("q-legacymedia-{run}");
+        let snapshot_id = format!("{qid}-v1");
         let blob = "data:image/png;base64,AAAA";
+        let url_of = format!("/api/media/{}", media::sha256_hex(&[0u8, 0, 0]));
+        let real_author = format!("author-{run}");
         ctor.create(store::ConstructorQuest {
             quest_id: qid.clone(),
-            author_id: format!("author-{run}"),
+            author_id: real_author.clone(),
             author_name: "Автор".into(),
             name: "Легаси обложка".into(),
             status: store::CTOR_STATUS_DRAFT.into(),
@@ -5287,24 +5334,74 @@ mod tests {
             attrs: store::QuestAttributes::default(),
             created_at: 1,
             updated_at: 1,
-            body: json!({ "id": qid, "steps": [1] }),
+            body: json!({ "id": qid, "steps": [{ "image": blob }] }),
         })
         .await
         .expect("create");
-
-        let summary = ctor
-            .summary_for_quest(&qid)
+        grants
+            .register_published(
+                &qid,
+                PublishedMeta {
+                    quest_id: qid.clone(),
+                    name: "Легаси обложка".into(),
+                    primary_comic: Some(blob.into()),
+                    template_summary: "demo".into(),
+                    snapshot_version: 1,
+                    snapshot_id: snapshot_id.clone(),
+                    city: None,
+                    duration: None,
+                    price: None,
+                    description: None,
+                    pages: None,
+                    tasks: None,
+                    paid_hints: None,
+                    players_bonus: 0,
+                },
+                Some(json!({ "steps": [{ "image": blob }] })),
+            )
             .await
-            .expect("query")
-            .expect("row");
-        assert_eq!(summary.cover, None, "the list wire drops the blob");
+            .expect("publish");
+
+        // The registry is shared with every other pg test, so budget for this
+        // row plus whatever else is lying around, and assert on the row itself.
+        let report = backfill::run_media_backfill(&media, &ctor, &grants, 200)
+            .await
+            .expect("backfill");
+        assert!(report.quests_rewritten >= 1);
+
+        let stored = ctor.get(&qid).await.expect("query").expect("row");
+        assert_eq!(stored.cover.as_deref(), Some(url_of.as_str()));
+        assert_eq!(stored.body["steps"][0]["image"], url_of);
+        assert_eq!(stored.updated_at, 1, "a rewrite is not an edit");
         assert_eq!(
-            ctor.get(&qid).await.expect("query").expect("row").cover,
-            Some(blob.to_string()),
-            "the full entity keeps it",
+            grants
+                .get_published(&qid)
+                .await
+                .expect("query")
+                .expect("row")
+                .primary_comic
+                .as_deref(),
+            Some(url_of.as_str()),
         );
-        // The SQL author guard: a stale owner cannot delete, the real one can.
-        let real_author = format!("author-{run}");
+        assert_eq!(
+            grants
+                .get_snapshot(&snapshot_id)
+                .await
+                .expect("query")
+                .expect("frozen")["steps"][0]["image"],
+            url_of,
+            "the frozen snapshot a player downloads carries a reference",
+        );
+
+        // The SQL guards: a stale `updated_at` cannot rewrite, and a stale owner
+        // cannot delete.
+        assert!(
+            !ctor
+                .rewrite_media(&qid, 999, None, json!({}))
+                .await
+                .expect("rewrite"),
+            "the optimistic guard keeps a stale reader out"
+        );
         assert!(
             !ctor
                 .delete(&qid, store::AuthorGuard::Is("someone-else"))
@@ -5437,7 +5534,7 @@ mod tests {
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
-        ctor_list_carries_url_covers_only = ids scenario_ctor_list_covers / "ctorcover";
+        authored_payloads_are_stored_without_pixels = ids scenario_media_externalized_on_write / "ctorcover";
         ctor_quest_transfers_between_authors = ids scenario_ctor_transfer_author / "ctorxfer";
         review_survives_star_only_rerate_and_pages = ids scenario_review_visibility / "reviews";
         product_page_payload = ids scenario_product_page / "product";

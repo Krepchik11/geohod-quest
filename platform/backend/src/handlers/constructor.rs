@@ -69,12 +69,13 @@ pub fn router() -> Router<AppState> {
 /// create/save (the whole editable `body`) and publish (the frozen `snapshot`).
 /// Axum's default extractor limit is 2 MiB, but a single quest legitimately
 /// exceeds that: even a spec-compliant quest near the ≤5 MB bundle target blows
-/// past 2 MiB, and imported legacy quests reach ~13 MB. With media stored INLINE
-/// as base64 (the structural root cause — see the publish/save handlers), that
-/// payload must currently travel in one request, so the cap is raised here.
-/// Scoped to these editor-gated routes only; every other route keeps the 2 MiB
-/// default. The real fix is externalizing media to content-addressed blobs so the
-/// body carries references, not bytes — a separate change.
+/// past 2 MiB.
+///
+/// Nothing is STORED inline any more — every authored payload is externalized on
+/// the way in (see the create/save/publish handlers) — but an INCOMING one still
+/// can be: an imported legacy quest reaches ~13 MB, and it has to be accepted
+/// before it can be taken apart. Scoped to these editor-gated routes only; every
+/// other route keeps the 2 MiB default.
 const MAX_AUTHORING_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(serde::Deserialize)]
@@ -109,13 +110,20 @@ struct PublishRequest {
 async fn publish_quest_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<PublishRequest>,
+    Json(mut req): Json<PublishRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Publishing is the editor capability (role editor/admin or the ops token):
     // authoring lives behind /quest-editor, which only editors/admins can open, but
     // publish is a direct API call so the role is enforced here too. Author binding
     // (which editor owns which quest) remains a tracked follow-up.
     require_editor_actor(&state, &headers).await?;
+    // The frozen snapshot is what every player downloads, so it is the payload
+    // that must NOT carry pixels. Externalized before it is registered, because
+    // afterwards it is immutable and nothing may rewrite it — and strictly AFTER
+    // the gate above, so no unauthorized caller can put bytes in the store.
+    if let Some(snapshot) = req.snapshot.as_mut() {
+        state.media.externalize_tree(snapshot).await?;
+    }
     let version = req.snapshot_version.unwrap_or(1);
     let (pages, tasks, paid_hints) = snapshot::snapshot_chips(req.snapshot.as_ref());
     let snapshot_id = req
@@ -190,10 +198,8 @@ pub(crate) struct ConstructorQuestWire {
     complexity: String,
     age_target: String,
     tags: Vec<String>,
-    /// List-safe cover ([`crate::store::list_cover`]): a URL, never a `data:`
-    /// blob — those bloated the list by megabytes. Every cover WRITE is
-    /// externalized to a URL, so only a row not saved since that rule shipped
-    /// still has a blob, and it stays on the GET-one wire.
+    /// Media URL. Never a `data:` blob — those bloated the list by megabytes;
+    /// every write externalizes ([`crate::media::MediaStores::externalize_tree`]).
     cover: Option<String>,
     #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
@@ -380,13 +386,14 @@ struct CreateConstructorQuestRequest {
 async fn create_constructor_quest_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<CreateConstructorQuestRequest>,
+    Json(mut req): Json<CreateConstructorQuestRequest>,
 ) -> Result<Json<ConstructorQuestWire>, AppError> {
     let actor = require_editor_actor(&state, &headers).await?;
     if req.quest_id.trim().is_empty() {
         return Err(AppError::BadRequest("quest_id is required".into()));
     }
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
+    state.media.externalize_tree(&mut req.body).await?;
     let cover = state.media.externalize(req.cover).await?;
     let now = store::now_secs();
     let quest = ConstructorQuest {
@@ -425,15 +432,16 @@ async fn save_constructor_quest_handler(
     State(state): State<AppState>,
     Path(quest_id): Path<String>,
     headers: HeaderMap,
-    Json(req): Json<SaveConstructorQuestRequest>,
+    Json(mut req): Json<SaveConstructorQuestRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let gated = require_owned_constructor_summary(&state, &headers, &quest_id).await?;
     let attrs = store::QuestAttributes::from_wire(req.complexity, req.age_target, req.tags)?;
-    // An inline blob (a legacy body re-saved by the editor) is ingested into the
-    // media store here, so the dashboard list can show the real image instead of
-    // dropping it. The normalized value is echoed back: the editor adopts it, so
-    // the NEXT autosave carries a URL instead of re-shipping megabytes of base64
-    // on every keystroke pause.
+    // A legacy body re-saved by the editor arrives with its pictures inside it;
+    // they are ingested here so what lands in the row is references. The cover
+    // column is normalized the same way and echoed back — the editor adopts it,
+    // so the NEXT autosave carries a URL instead of re-shipping megabytes of
+    // base64 on every keystroke pause.
+    state.media.externalize_tree(&mut req.body).await?;
     let cover = state.media.externalize(req.cover).await?;
     let now = store::now_secs();
     let s = state

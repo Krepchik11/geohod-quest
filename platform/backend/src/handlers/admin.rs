@@ -1,6 +1,6 @@
 //! Admin routes: users/roles, coupons CRUD, feature toggles + runtime settings,
-//! stats, moderation (reviews/feedback), and the ops-token trio (legacy
-//! migration + per-version stats/feedbacks).
+//! stats, moderation (reviews/feedback), and the ops-token surface (the legacy
+//! and media migrations + per-version stats/feedbacks).
 
 use axum::{
     Router,
@@ -18,7 +18,7 @@ use crate::features::Feature;
 use crate::features::feature_available;
 use crate::settings::Setting;
 use crate::store::PublishedMeta;
-use crate::{AppState, admin_stats, auth, store};
+use crate::{AppState, admin_stats, auth, backfill, store};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -75,6 +75,7 @@ pub fn router() -> Router<AppState> {
             get(admin_stats_quest_handler),
         )
         .route("/api/migrate/legacy", post(run_migration_handler))
+        .route("/api/migrate/media", post(run_media_backfill_handler))
 }
 
 async fn get_version_stats_handler(
@@ -526,6 +527,33 @@ async fn run_migration_handler(
         )
         .await?;
     Ok(Json(res))
+}
+
+/// Body for POST /api/migrate/media. `limit` caps the rows one call rewrites so
+/// the work fits a request; omit it for [`backfill::DEFAULT_LIMIT`].
+#[derive(serde::Deserialize)]
+struct MediaBackfillRequest {
+    limit: Option<usize>,
+}
+
+/// POST /api/migrate/media — move the media of already-stored rows into the
+/// media store (see [`backfill`]). Ops-token gated like the legacy migration:
+/// it rewrites production content, and it is an operator action, not a product
+/// feature. Idempotent and restartable; re-run while `complete` is false.
+async fn run_media_backfill_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<MediaBackfillRequest>,
+) -> Result<Json<backfill::MediaBackfillReport>, AppError> {
+    require_ops_token(&state, &headers)?;
+    let limit = req.limit.unwrap_or(backfill::DEFAULT_LIMIT);
+    if limit == 0 {
+        return Err(AppError::BadRequest("limit must be at least 1".into()));
+    }
+    Ok(Json(
+        backfill::run_media_backfill(&state.media, &state.constructor, &state.grants, limit)
+            .await?,
+    ))
 }
 
 /// One registered account as served by the admin user list (admin-users spec).
