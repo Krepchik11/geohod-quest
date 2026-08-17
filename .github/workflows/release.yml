@@ -30,9 +30,11 @@ name: release
 #   VPS      podman-auto-update.timer drop-in installed (reconcile every minute,
 #            not daily) — otherwise every release stalls until the gate times out.
 #   GitHub   A `Production` environment carrying the secret VERCEL_TOKEN and the
-#            variables VERCEL_ORG_ID / VERCEL_PROJECT_ID. Asserted by `preflight`,
-#            which every shipping step depends on. Jobs that use them must name
-#            the environment — an environment's values are invisible otherwise.
+#            variables VERCEL_ORG_ID / VERCEL_PROJECT_ID. A token scoped to this
+#            one project is enough, and is the right choice. Asserted by
+#            `preflight`, which every shipping step depends on. Jobs that use
+#            them must name the environment — an environment's values are
+#            invisible otherwise.
 #   Variable API_BASE_URL (optional; defaults to https://api.quest.geohod.ru)
 
 on:
@@ -239,57 +241,100 @@ jobs:
             sleep 10
           done
 
+
+  # The promotion. Vercel builds the frontend from THIS commit and aliases it to
+  # production once it is serving.
+  #
+  # Two curl calls, no CLI. That is not minimalism for its own sake: the release
+  # credential is a project-scoped token, which is the correct least-privilege
+  # choice for a pipeline that deploys exactly one project — and the CLI cannot
+  # use one. Every CLI path (`link`, `pull`) resolves the team by first loading
+  # the token's USER, which a project-scoped token has none of, so it fails with
+  # "Not able to load user … (404)" or "Could not retrieve Project Settings"
+  # while the REST API answers 200 for the same project. The API takes the scope
+  # as an explicit `teamId`, so nothing has to be inferred from the credential.
+  #
+  # Build settings and production env vars (NEXT_PUBLIC_API_URL, inlined into the
+  # bundle) stay in the Vercel project, which remains their single source of
+  # truth — the same ones a preview deployment uses.
   frontend:
     needs: [backend-live, frontend-tests]
     runs-on: ubuntu-latest
-    # Same environment as `preflight`, for the same reason: without it these
-    # three expand to empty and the Vercel CLI reports a missing token value.
+    # `preflight` already proved this token can read this project. Both jobs name
+    # the environment because an environment's secrets and variables are
+    # invisible to a job that does not.
     environment: Production
     env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      # Nothing is checked out: the sources Vercel builds come from the commit
+      # named here, not from the runner.
+      - name: Create the production deployment
+        id: create
+        shell: bash
+        # Repository coordinates go through the environment rather than being
+        # interpolated into the script, so no workflow expression can become code.
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # `skipAutoDetectionConfirmation` is the documented setting for
+          # automated pipelines: without it a framework re-detection answers 400
+          # and asks a human to confirm.
+          created="$(curl -sS -X POST \
+            "https://api.vercel.com/v13/deployments?teamId=${VERCEL_ORG_ID}&forceNew=1&skipAutoDetectionConfirmation=1" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -nc \
+                  --arg project "$VERCEL_PROJECT_ID" \
+                  --arg org "$REPO_OWNER" \
+                  --arg repo "$REPO_NAME" \
+                  --arg sha "$SHA" \
+                  '{name: $repo, project: $project, target: "production",
+                    gitSource: {type: "github", org: $org, repo: $repo, ref: "main", sha: $sha}}')")"
+          id="$(jq -r '.id // empty' <<<"$created")"
+          if [ -z "$id" ]; then
+            echo "::error::Vercel refused the deployment: $(jq -c '.error // .' <<<"$created")"
+            exit 1
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "Deploying \`${SHA}\` as \`${id}\`." >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install the Vercel CLI
-        run: npm install --global vercel@latest
-
-      # Every `vercel` command below runs from the REPO ROOT, not from
-      # platform/frontend: the Vercel project's Root Directory is platform/frontend
-      # and the CLI applies that setting itself — the same way the Git integration
-      # did. Running from inside the directory makes the CLI resolve
-      # platform/frontend/platform/frontend and fail to find the app.
-      #
-      # None of them pass `--token`. The CLI reads VERCEL_TOKEN from the
-      # environment, which is Vercel's own documented CI practice: an explicit
-      # flag puts the credential in the runner's process listing. It also made
-      # the failure mode worse — an unset secret produced "you defined --token,
-      # but it's missing a value" instead of a plain authentication error.
-      #
-      # The link is what tells the CLI WHICH project. Setting VERCEL_ORG_ID and
-      # VERCEL_PROJECT_ID in the environment does not: that mechanism appears
-      # nowhere in this CLI's help or reference docs, and relying on it is why
-      # every release died at "Retrieving project… Could not retrieve Project
-      # Settings" while the very same token and ids answered 200 from the same
-      # runner one job earlier. `--project` with `--team` is the documented
-      # non-interactive form, and it writes the `.vercel/` the next three
-      # commands read.
-      - name: Link the Vercel project
-        run: vercel link --yes --project "$VERCEL_PROJECT_ID" --team "$VERCEL_ORG_ID"
-
-      - name: Pull the production environment
-        # Fetches the project's production env vars, incl. NEXT_PUBLIC_API_URL —
-        # which is inlined into the bundle, so Vercel stays its single source of
-        # truth rather than it being duplicated into repository secrets.
-        run: vercel pull --yes --environment=production
-
-      - name: Build
-        run: vercel build --prod
-
-      - name: Promote to production
-        run: vercel deploy --prebuilt --prod
+      - name: Wait until the frontend is serving
+        shell: bash
+        env:
+          DEPLOYMENT_ID: ${{ steps.create.outputs.id }}
+          # A cold Next.js build on Vercel is minutes; this is headroom, not a
+          # target.
+          TIMEOUT_SECONDS: "900"
+        run: |
+          set -uo pipefail
+          deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          while :; do
+            deployment="$(curl -sS \
+              "https://api.vercel.com/v13/deployments/${DEPLOYMENT_ID}?teamId=${VERCEL_ORG_ID}" \
+              -H "Authorization: Bearer ${VERCEL_TOKEN}")"
+            state="$(jq -r '.readyState // "UNREACHABLE"' <<<"$deployment")"
+            case "$state" in
+              READY)
+                url="$(jq -r '.url // "?"' <<<"$deployment")"
+                echo "Frontend live at https://${url}."
+                echo "Frontend live at <https://${url}>." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+              ERROR|CANCELED|BLOCKED)
+                echo "::error::Vercel deployment ${DEPLOYMENT_ID} ended ${state}. The backend is already live, so production serves the PREVIOUS frontend until this is fixed and the release re-run. Build logs: $(jq -r '.inspectorUrl // "see the Vercel dashboard"' <<<"$deployment")"
+                exit 1
+                ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Vercel deployment ${DEPLOYMENT_ID} is still ${state} after ${TIMEOUT_SECONDS}s. Production serves the previous frontend."
+              exit 1
+            fi
+            echo "waiting — ${state}"
+            sleep 10
+          done

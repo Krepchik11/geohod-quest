@@ -228,10 +228,17 @@ Leave `payments_mock` OFF in production: it grants access without charging.
    **fails by design** (see `lib/api.ts`) instead of silently shipping localhost.
 5. **Release credentials.** Production deploys are driven by CI, not by Git, so
    put `VERCEL_TOKEN` (Vercel → Settings → Tokens) as a **secret**, and
-   `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` (Project Settings → General, or read
-   them out of `.vercel/project.json` after a local `vercel link`) as
-   **variables**, on the GitHub `Production` environment — see **One-time setup →
-   2** above for why the scope matters.
+   `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` as **variables**, on the GitHub
+   `Production` environment — see **One-time setup → 2** above for why the scope
+   matters.
+
+   Scope the token to **this project only**. The pipeline deploys exactly one
+   project and needs nothing else. Read both ids straight from the API with that
+   token — no linking, no dashboard hunting:
+   ```sh
+   curl -s -H "Authorization: Bearer $VERCEL_TOKEN" https://api.vercel.com/v9/projects \
+     | jq '.projects[] | {VERCEL_PROJECT_ID: .id, VERCEL_ORG_ID: .accountId, rootDirectory}'
+   ```
 
 6. Deploy. From now on: **open a PR → Preview URL** (Vercel's Git integration),
    **push to `main` → the release pipeline promotes production once the backend is
@@ -240,24 +247,36 @@ Leave `payments_mock` OFF in production: it grants access without charging.
 ## What runs where, and why
 
 - **Preview deploys** = Vercel Git integration (automatic, PR → preview URL).
-- **Production deploys** = `.github/workflows/release.yml`, via
-  `vercel build --prod` + `vercel deploy --prebuilt --prod`, and only after the
-  backend gate passes. `vercel.json` sets `git.deploymentEnabled.main = false` so a
-  push to `main` cannot promote the frontend behind the pipeline's back — that
-  bypass is exactly the bug the pipeline exists to prevent.
+- **Production deploys** = `.github/workflows/release.yml`, via the Vercel REST
+  API (`POST /v13/deployments` pinned to the released commit, then poll
+  `readyState` until `READY`), and only after the backend gate passes.
+  `vercel.json` sets `git.deploymentEnabled.main = false` so a push to `main`
+  cannot promote the frontend behind the pipeline's back — that bypass is exactly
+  the bug the pipeline exists to prevent. That setting stops **automatic**
+  deployments only; an explicit API deployment is unaffected, which is what the
+  pipeline uses.
+- **Why the API and not the CLI**: the release credential is a token scoped to
+  this one project — the correct least-privilege choice. Every CLI path resolves
+  the team by first loading the token's *user*, which such a token does not have,
+  so `vercel link` fails with `Not able to load user … (404)` and `vercel pull`
+  with `Could not retrieve Project Settings`. The REST API takes the scope as an
+  explicit `teamId`, so nothing is inferred from the credential.
 - **Quality gate** = `.github/workflows/frontend-ci.yml` (lint + typecheck + test +
   build). `next build` does not run eslint/vitest, so this is the only thing
   stopping a broken-but-compiling app from deploying. It runs on PRs touching
   `platform/frontend`, and `release.yml` calls it as a stage on `main` — a
   regression cannot be published while its test run is still going. Add it as a
   **required status check** in GitHub branch protection for `main`.
-- **Ignored builds**: `vercel.json` `ignoreCommand` skips *preview* builds when the
-  commit didn't touch `platform/frontend`. (It does not apply to the production
-  deploy, which is `--prebuilt` — CI has already built the output.)
-- **The Vercel CLI runs from the repo root**, not from `platform/frontend`: the
-  project's Root Directory is `platform/frontend` and the CLI applies that setting
-  itself, exactly as the Git integration did. Running it from inside that directory
-  makes it resolve `platform/frontend/platform/frontend` and fail to find the app.
+- **Every release builds the frontend.** `vercel.json` carried an `ignoreCommand`
+  that skipped a build when the commit did not touch `platform/frontend`. A skipped
+  build ends the deployment as `CANCELED`, which a release cannot tell apart from a
+  broken one — so a backend-only commit would have failed every release. Vercel now
+  builds each released commit, and the pipeline waits for it. One build per release
+  is the price of a promotion that either happened or failed, with nothing in
+  between.
+- **Nothing is checked out for the deploy.** The sources Vercel builds come from
+  the commit named in the API call, and the build settings (Root Directory
+  `platform/frontend`, framework, install command) live in the Vercel project.
 
 ## Frontend ↔ backend contract
 
