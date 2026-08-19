@@ -2,10 +2,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
-import { toDesignStep } from '../../lib/design-step';
+import { elapsedLabel, toDesignStep } from '../../lib/design-step';
 import type { QuestTheme } from '../../lib/quest-theme';
 import { theme as snapshotTheme } from '../../lib/snapshot';
-import { projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
+import { latestRating, projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
   COMPLETION_BONUS,
   hydratedPlayState,
@@ -95,7 +95,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
   const [startTs, setStartTs] = useState(() => Date.now());
-  const [finalTime, setFinalTime] = useState('0:01');
+  const [finalTime, setFinalTime] = useState('0:00');
   const [answer, setAnswer] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
   const [wrongFlash, setWrongFlash] = useState(false);
@@ -123,18 +123,15 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
   };
 
-  const elapsed = () => {
-    const m = Math.max(1, Math.round((Date.now() - startTs) / 60000));
-    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
-  };
-
   /** Единственный путь правил: transition движка → стейт + слив эффектов.
    *  Приземление на терминал движок завершает сам (бонус один раз —
    *  идемпотентно по логу), поэтому эффектов-на-стейт нет. */
   const runEvent = (event: PlayEvent) => {
     const result = transition(play, event, ctx);
     setPlay(result.state);
-    if (result.effects.appended.some((f) => f.type === 'attempt_completed')) setFinalTime(elapsed());
+    if (result.effects.appended.some((f) => f.type === 'attempt_completed')) {
+      setFinalTime(elapsedLabel(startTs, Date.now()));
+    }
     if (result.effects.toast) showToast(result.effects.toast.amount, result.effects.toast.narrative);
     if (result.effects.advanced) {
       setAnswer('');
@@ -164,7 +161,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     setAnswer('');
     setWrongFlash(false);
     setStartTs(Date.now());
-    setFinalTime('0:01');
+    setFinalTime('0:00');
   };
 
   const offeredHint = play.hintOfferPos != null ? quest.steps[play.hintOfferPos].supporting?.hint : null;
@@ -180,10 +177,15 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     buyHint: () => runEvent({ type: 'buy_hint' }),
     confirm: () => runEvent({ type: 'physical_confirm' }),
     submit: (value: string) => runEvent({ type: 'answer', value }),
-    rate: (n: number) => setRating(n),
+    // Первое касание звезды платит за оценку — ровно как в плеере, чтобы автор
+    // видел ту же анимацию монет; дальнейшие смены звёзд только локальные.
+    rate: (n: number) => {
+      setRating(n);
+      if (latestRating(play.facts) === 0) runEvent({ type: 'rate', value: n, text: null });
+    },
     reviewText: setReviewText,
-    // «что дальше» в настоящем плеере открывает каталог других квестов; черновик
-    // каталога не имеет — тест на этом заканчивается.
+    // В плеере отсюда игрок уходит в магазин; в черновике магазина нет — тест
+    // на этом заканчивается.
     onward: () => setOverlay('over'),
   };
 

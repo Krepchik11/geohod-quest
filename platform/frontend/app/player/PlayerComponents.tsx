@@ -172,14 +172,7 @@ export interface StepCopy {
   skipRated?: string;
   rateLead?: string;
   rateThanks?: string;
-  /* Пост-финальный каталог «Продолжите путешествие». */
-  catalogKicker?: string;
-  catalogTitle?: string;
-  catalogLead?: string;
-  catalogShare?: string;
-  catalogHome?: string;
-  catalogEmpty?: string;
-  shareCopied?: string;
+  /* Меню игрока. */
   menuTitle?: string;
   feedback?: string;
   exit?: string;
@@ -230,7 +223,7 @@ export interface StepHandlers {
   rate?: (n: number) => void;
   /** §11: review-text change (committed with the rating on «что дальше»). */
   reviewText?: (v: string) => void;
-  /** Final screen «что дальше» — leave the finale (into the catalog). */
+  /** Final screen exit — commit the rating and leave for the store. */
   onward?: () => void;
   /** Step back through history to reread earlier content (real player only). */
   back?: () => void;
@@ -570,9 +563,9 @@ export function RateStars({ value, onRate }: { value?: number; onRate?: (n: numb
    FINAL — «ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ» (§11).
    The finale is the review funnel: «ОТПРАВИТЬ ОЦЕНКУ» unlocks only when the
    stars AND a review text are in; the second button is the exit for everyone
-   else. BOTH actions commit-and-leave (openCatalog) — a chosen star rating
-   still commits and still pays its bonus on the exit path, which is why that
-   button's label flips to «Отправить без отзыва» once stars are tapped.
+   else. BOTH actions commit-and-leave — a chosen star rating still commits on
+   the exit path, which is why that button's label flips to «Отправить без
+   отзыва» once stars are tapped.
    The single final-screen implementation, shared by the player, the
    constructor test-player and editor previews. Stats are coins + time only
    (resolved design decision; the «шагов» tile was dropped).
@@ -637,86 +630,6 @@ export function FinalScreen({ quest, copy, st, on }: {
               : (copy?.skipRating || "Пропустить оценку")}
           </button>
         )}
-      </div>
-    </div>
-  );
-}
-
-/** A quest card on the post-finale catalog. Rich meta (city/duration/rating/badge)
- *  is optional and renders only when present — the thin published list omits it. */
-export interface CatalogCardView {
-  id: string;
-  title: string;
-  mark: string;
-  cover?: string | null;
-  badge?: string;
-  city?: string;
-  duration?: string;
-  rating?: string;
-}
-
-export interface CatalogHandlers {
-  pick?: (id: string) => void;
-  share?: () => void;
-  home?: () => void;
-  /** Back to the finale (the catalog replaces it in place). */
-  back?: () => void;
-}
-
-/* ============================================================
-   CATALOG — «Продолжите путешествие» (after the finale)
-   The resolved post-finale invite: the finale is no longer a dead end — it offers
-   the next quests to play, with share + home as soft exits.
-   ============================================================ */
-export function CatalogScreen({ quests, copy, on }: {
-  quests: CatalogCardView[];
-  copy?: StepCopy | null;
-  on?: CatalogHandlers;
-}) {
-  const h = on || {};
-  return (
-    <div className="p-stepbody p-catalog">
-      {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
-      <div className="p-catalog__head">
-        <p className="p-kicker">{copy?.catalogKicker || "маршрут окончен"}</p>
-        <h2 className="p-title">{copy?.catalogTitle || "Продолжите путешествие"}</h2>
-        <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)", textAlign: "center" }}>
-          {copy?.catalogLead || "Рядом — ещё истории этого города. Монеты переходят в ваш баланс."}
-        </p>
-      </div>
-
-      {quests.length > 0 ? (
-        <>
-          {quests.map((q) => (
-            <button key={q.id} className="q-card" type="button" onClick={() => h.pick && h.pick(q.id)}>
-              <div className="q-card__cover">
-                {q.badge && <span className="badge">{q.badge}</span>}
-                {q.cover ? <img src={q.cover} alt="" /> : <span className="qmark">{q.mark}</span>}
-              </div>
-              <div className="q-card__body">
-                <div className="q-card__title">{q.title}</div>
-                {(q.city || q.duration || q.rating) && (
-                  <div className="q-card__meta">
-                    {q.city && <span><PPin size={12} />{q.city}</span>}
-                    {q.duration && <span><PClock size={12} />{q.duration}</span>}
-                    {q.rating && <span className="star">★ {q.rating}</span>}
-                  </div>
-                )}
-                <span className="q-card__cta">{copy?.start || "начать квест"} <PArrow /></span>
-              </div>
-            </button>
-          ))}
-          <div className="p-catalog__sep">или</div>
-        </>
-      ) : (
-        <p className="p-text" style={{ fontSize: "13.5px", color: "var(--p-muted)", textAlign: "center" }}>
-          {copy?.catalogEmpty || "Скоро здесь появятся новые истории."}
-        </p>
-      )}
-
-      <div className="p-catalog__foot">
-        <button className="p-btn p-btn--ghost" type="button" onClick={h.share}>{copy?.catalogShare || "поделиться результатом"}</button>
-        <button className="p-skip" type="button" onClick={h.home}>{copy?.catalogHome || "На главную"}</button>
       </div>
     </div>
   );
