@@ -1711,6 +1711,38 @@ mod tests {
         assert_eq!(card["players"], 1);
     }
 
+    /// «Прохождения» counts distinct FINISHERS, and one finisher earns up to
+    /// three once-ever bonuses (§11: completion, rating, review). The Postgres
+    /// backend reads them out of `bonus_awards`, where each is its own row since
+    /// migration 0005 — counting rows would report one player as three.
+    async fn scenario_completions_count_distinct_finishers(app: &Router, ids: &Ids) {
+        let attempt = grant_publish_attempt(app, ids).await;
+        let (st, v) = post_json(
+            app,
+            &format!("/api/attempts/{attempt}/facts"),
+            json!({"facts": [
+                fact_json(FactKind::CompletionBonus, 3, 5, "device-a"),
+                fact_json(FactKind::RatingBonus, 3, 5, "device-a"),
+                fact_json(FactKind::CommentBonus, 3, 5, "device-a"),
+            ]}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["accepted"].as_array().expect("accepted").len(), 3);
+
+        let (_, list) = get_json(app, "/api/quests").await;
+        let card = list
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|q| q["quest_id"] == ids.quest)
+            .expect("quest in store");
+        assert_eq!(card["players"], 1, "one player finished it, not three");
+
+        let (_, prod) = get_json(app, &format!("/api/quests/{}", ids.quest)).await;
+        assert_eq!(prod["players"], 1, "the product page counts the same way");
+    }
+
     async fn scenario_version_freeze(app: &Router, ids: &Ids) {
         let first = grant_publish_attempt(app, ids).await;
 
@@ -5544,6 +5576,7 @@ mod tests {
         cross_device_duplicate_award_absorbed = ids scenario_cross_device_duplicate / "dup";
         concurrent_duplicate_batch_collapses_to_one = ids scenario_concurrent_duplicate_batch / "race";
         completion_bonus_idempotent_across_attempts = ids scenario_completion_bonus_once / "bonus";
+        completions_count_distinct_finishers = ids scenario_completions_count_distinct_finishers / "finishers";
         rating_and_comment_bonuses_once_ever = ids scenario_rating_rewards / "raterew";
         version_freeze_new_publish_does_not_rebind = ids scenario_version_freeze / "freeze";
         checkout_idempotent_coupon100_and_publish_list = ids scenario_checkout_and_publish_list / "shop";
