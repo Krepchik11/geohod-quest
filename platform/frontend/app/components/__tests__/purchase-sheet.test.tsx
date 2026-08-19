@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
 /**
@@ -257,7 +257,13 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
     await waitFor(() => expect(assign).toHaveBeenCalled());
     const pageshow = new Event('pageshow');
     Object.defineProperty(pageshow, 'persisted', { value: true });
-    window.dispatchEvent(pageshow);
+    // Inside act: the return handler asks the server for the payment and
+    // re-renders on the answer. Dispatched bare, that whole chain lands
+    // whenever the machine gets to it, and the assertions below became a race
+    // the release gate loses on a loaded runner.
+    await act(async () => {
+      window.dispatchEvent(pageshow);
+    });
     return { ...hosts, restore };
   }
 
