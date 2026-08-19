@@ -1,0 +1,5 @@
+{
+  "name": "once-per-quest",
+  "description": "The ONE list of fact kinds awarded at most once per (player, quest). The server refuses a repeat at append time (facts::once_per_quest) and names these kinds as plain strings in PlayerStats.quest_bonuses; the client withholds them from the engine and reads that wire list through the same names (isOncePerQuest). Let the two drift and a real bonus is dropped in silence.",
+  "kinds": ["completion_bonus", "rating_bonus", "comment_bonus"]
+}

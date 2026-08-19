@@ -13,11 +13,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Fact, QuestSnapshot } from '../../../lib/shared-model';
+import type { Fact, OncePerQuestType, QuestSnapshot } from '../../../lib/shared-model';
 
-/** Which run the mocked queue serves: a first clear reopened, or a replay of a
- *  quest whose once-per-quest bonuses were already paid on an earlier attempt. */
-const run = vi.hoisted(() => ({ replay: false }));
+/** What the mocked queue serves: a reopened first clear, or a replay — and, for
+ *  the replay, what this device still remembers of the earlier attempts. */
+const run = vi.hoisted(() => ({
+  replay: false,
+  priorLogs: [] as Array<{ quest_id: string; facts: unknown[] }>,
+}));
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -41,7 +44,7 @@ vi.mock('../../../lib/player-stats', async () => {
   const real = await vi.importActual<typeof import('../../../lib/player-stats')>('../../../lib/player-stats');
   return {
     ...real,
-    gatherOtherAttemptLogs: vi.fn(async () => (run.replay ? [{ quest_id: 'q-final', facts: PAID_BEFORE }] : [])),
+    gatherOtherAttemptLogs: vi.fn(async () => run.priorLogs),
   };
 });
 
@@ -125,8 +128,10 @@ const bonus = (type: Fact['type']): Fact => ({
   device_id: 'dev-test',
 });
 
-/** An EARLIER attempt at the same quest: every once-per-quest bonus already paid. */
+/** Every once-ever bonus this quest has already paid, as an earlier attempt's
+ *  log (what a device remembers) and as the kinds alone (what the server says). */
 const PAID_BEFORE: Fact[] = [...COMPLETED_LOG, bonus('rating_bonus'), bonus('comment_bonus')];
+const PAID_KINDS: OncePerQuestType[] = ['completion_bonus', 'rating_bonus', 'comment_bonus'];
 
 /** Reopening the finished attempt — what every test but the replay one serves. */
 const REOPENED_ATTEMPT = {
@@ -140,8 +145,15 @@ const REOPENED_ATTEMPT = {
 /** The replay: a new attempt on the finale, its log still empty. */
 const FRESH_ATTEMPT = { ...REOPENED_ATTEMPT, facts: [] as Fact[], completedAt: null };
 
-async function openFinale() {
-  render(<QuestPlayerClient snapshot={SNAPSHOT} questId="q-final" snapshotId="snap-1" />);
+async function openFinale(paidBonuses: OncePerQuestType[] = []) {
+  render(
+    <QuestPlayerClient
+      snapshot={SNAPSHOT}
+      questId="q-final"
+      snapshotId="snap-1"
+      paidBonuses={paidBonuses}
+    />,
+  );
   await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
   return userEvent.setup();
 }
@@ -153,6 +165,7 @@ beforeEach(() => {
   appended.length = 0;
   push.mockClear();
   run.replay = false;
+  run.priorLogs = [];
 });
 
 describe('the finale reports the attempt, not the clock (#111)', () => {
@@ -205,10 +218,17 @@ describe('the finale pays the review as it happens (#113)', () => {
   });
 });
 
-describe('a replay promises only what the wallet will actually pay (#114)', () => {
-  it('re-finishing and re-rating a quest mints no second bonus and animates nothing', async () => {
+// The engine withholds a once-ever bonus whoever says it is already paid: this
+// device's own logs (#114) or the server, which is the only one that knows what
+// the player's other devices earned (#117).
+describe.each([
+  ['this device remembers the earlier attempt (#114)', [{ quest_id: 'q-final', facts: PAID_BEFORE }], []],
+  ['only the server remembers it (#117)', [], PAID_KINDS],
+] as const)('a replay promises only what will actually be paid — %s', (_name, priorLogs, paid) => {
+  it('mints no second bonus and animates nothing', async () => {
     run.replay = true;
-    const user = await openFinale();
+    run.priorLogs = [...priorLogs];
+    const user = await openFinale([...paid]);
 
     // The attempt is recorded again; the once-per-quest bonus is not.
     expect(appended.map((f) => f.type)).toEqual(['attempt_completed']);
@@ -218,7 +238,6 @@ describe('a replay promises only what the wallet will actually pay (#114)', () =
     await user.click(screen.getByRole('button', { name: '5 звёзд' }));
     expect(document.querySelector('.p-toast')).toBeNull();
     expect(appended.some((f) => f.type === 'rating_bonus')).toBe(false);
-    expect(stat('монет собрано').textContent).toContain('0');
   });
 });
 

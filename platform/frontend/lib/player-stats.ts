@@ -22,6 +22,7 @@
  *  - a quest counts as completed when ANY of its attempts holds attempt_completed.
  */
 import { isOncePerQuest, type Fact, type OncePerQuestType } from './shared-model';
+import type { QuestBonusesWire } from './generated/QuestBonusesWire';
 import { getFacts, listAttempts } from './queue';
 
 /** One attempt's fact log tagged with its quest — the fold's input unit. */
@@ -76,12 +77,26 @@ export function foldLocalPlayerStats(logs: AttemptLog[]): PlayerStatsFold {
 }
 
 /**
- * What this quest has already paid the player, on ANY attempt — the engine's
- * input for the same rule (`PlayCtx.earnedBonuses`). Folded from the logs the
- * wallet folds, so the two cannot disagree (issue #114).
+ * The server's answer, read as kinds this client understands. The wire carries
+ * plain strings — a build that does not know a kind must drop it rather than
+ * hand the engine something it cannot act on.
  */
-export function earnedQuestBonuses(logs: AttemptLog[], questId: string): Set<OncePerQuestType> {
-  const earned = new Set<OncePerQuestType>();
+export function serverQuestBonuses(answer: QuestBonusesWire | null): OncePerQuestType[] {
+  return (answer?.kinds ?? []).filter(isOncePerQuest);
+}
+
+/**
+ * What this quest has already paid the player — the engine's input for the same
+ * rule (`PlayCtx.earnedBonuses`). Two sources, one answer: this device's logs,
+ * which the wallet also folds so the two cannot disagree (issue #114), and what
+ * the server knows from every other device (issue #117).
+ */
+export function earnedQuestBonuses(
+  logs: AttemptLog[],
+  questId: string,
+  paidElsewhere: readonly OncePerQuestType[] = [],
+): Set<OncePerQuestType> {
+  const earned = new Set<OncePerQuestType>(paidElsewhere);
   for (const log of logs) {
     if (log.quest_id !== questId) continue;
     for (const f of log.facts) if (isOncePerQuest(f.type)) earned.add(f.type);

@@ -391,6 +391,7 @@ mod tests {
             handlers::constructor::ConstructorAuthorWire,
             snapshot::ThemeWire,
             handlers::player::BundleWire,
+            handlers::player::QuestBonusesWire,
             handlers::player::CatalogQuest,
             handlers::player::ProductPageWire,
             handlers::player::ReviewWire,
@@ -1615,6 +1616,29 @@ mod tests {
             v2["accepted"].as_array().expect("accepted").len(),
             0,
             "bonus is once per (player, quest), ever"
+        );
+
+        // The same answer, told to the client BEFORE it plays: a device that
+        // never saw this quest has nothing of its own to read (issue #117).
+        let (st, paid) = get_json_h(
+            app,
+            &format!("/api/quests/{}/bonuses", ids.quest),
+            &[("x-user-id", ids.player.as_str())],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(paid["kinds"], json!(["completion_bonus"]));
+
+        let (_, none) = get_json_h(
+            app,
+            &format!("/api/quests/{}-never-played/bonuses", ids.quest),
+            &[("x-user-id", ids.player.as_str())],
+        )
+        .await;
+        assert_eq!(
+            none["kinds"],
+            json!([]),
+            "a quest paid nothing names nothing"
         );
     }
 

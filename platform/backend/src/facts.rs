@@ -45,6 +45,23 @@ pub enum FactKind {
 }
 
 impl FactKind {
+    /// Every kind there is. The `wire_tag` match below is exhaustive, so a new
+    /// variant cannot be forgotten there; this list is what lets a test walk
+    /// them all, and the compiler will not remind anyone to extend it.
+    pub const ALL: [FactKind; 11] = [
+        Self::PhysicalConfirmed,
+        Self::AnswerSubmitted,
+        Self::GiftClaimed,
+        Self::HintPurchased,
+        Self::CompletionBonus,
+        Self::AttemptCompleted,
+        Self::FeedbackReported,
+        Self::NavigatorUsed,
+        Self::QuestRated,
+        Self::RatingBonus,
+        Self::CommentBonus,
+    ];
+
     /// The serde wire tag (snake_case), as a static string — keys the
     /// `bonus_awards` rows (and must stay what migration 0005 defaults old
     /// rows to for CompletionBonus). Pinned against serde by a test.
@@ -66,8 +83,9 @@ impl FactKind {
 }
 
 /// Fact kinds awarded at most once EVER per `(player, quest)` — enforced at
-/// append time by both stores (the client's per-log guard is only an
-/// optimistic duplicate filter; replays and other devices land here).
+/// append time by both stores, and told to the client before it plays so it
+/// withholds the same ones (issue #117). The list is pinned for both languages
+/// by `goldens/wire/once-per-quest.json`.
 pub fn once_per_quest(kind: FactKind) -> bool {
     matches!(
         kind,
@@ -207,6 +225,20 @@ pub struct PlayerStats {
     pub attempts_count: usize,
     #[cfg_attr(test, ts(type = "number"))]
     pub grants_count: usize,
+}
+
+/// The once-ever bonuses these logs already paid — the ONE read behind both
+/// halves of the rule: the gate that refuses a repeat at append time and the
+/// answer the player is given before it plays. Sorted by wire tag, so callers
+/// (and their goldens) get a stable order.
+pub fn awarded_bonuses<'a>(logs: impl Iterator<Item = &'a Fact>) -> Vec<FactKind> {
+    let mut kinds: Vec<FactKind> = logs
+        .map(|f| f.kind)
+        .filter(|k| once_per_quest(*k))
+        .collect();
+    kinds.sort_by_key(|k| k.wire_tag());
+    kinds.dedup();
+    kinds
 }
 
 /// Pure player-stats fold over `(quest_id, attempt fact log)` pairs — one pair
@@ -727,25 +759,58 @@ mod tests {
 
     #[test]
     fn wire_tag_matches_serde_for_every_kind() {
-        for kind in [
-            FactKind::PhysicalConfirmed,
-            FactKind::AnswerSubmitted,
-            FactKind::GiftClaimed,
-            FactKind::HintPurchased,
-            FactKind::CompletionBonus,
-            FactKind::AttemptCompleted,
-            FactKind::FeedbackReported,
-            FactKind::NavigatorUsed,
-            FactKind::QuestRated,
-            FactKind::RatingBonus,
-            FactKind::CommentBonus,
-        ] {
+        for kind in FactKind::ALL {
             assert_eq!(
                 serde_json::to_value(kind).expect("serialize"),
                 kind.wire_tag(),
                 "wire_tag drifted from the serde tag"
             );
         }
+    }
+
+    /// The shared list (`goldens/wire/once-per-quest.json`) the frontend reads
+    /// too: the server refuses a repeat of exactly these kinds, and the client
+    /// withholds exactly these. Drift either way and a real bonus is dropped in
+    /// silence, so the list is one file, not two lists.
+    #[test]
+    fn once_per_quest_matches_the_shared_golden() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Golden {
+            #[allow(dead_code)]
+            name: String,
+            #[allow(dead_code)]
+            description: String,
+            kinds: Vec<String>,
+        }
+        let raw = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../goldens/wire/once-per-quest.json"
+        ))
+        .expect("shared once-per-quest golden must exist");
+        let golden: Golden = serde_json::from_str(&raw).expect("golden parses");
+        let ours: Vec<String> = FactKind::ALL
+            .into_iter()
+            .filter(|k| once_per_quest(*k))
+            .map(|k| k.wire_tag().to_string())
+            .collect();
+        assert_eq!(ours, golden.kinds);
+    }
+
+    #[test]
+    fn awarded_bonuses_names_each_once_ever_kind_once_in_a_stable_order() {
+        let log = [
+            fact(FactKind::GiftClaimed, 2, 5),
+            fact(FactKind::RatingBonus, 3, 5),
+            fact(FactKind::CompletionBonus, 3, 5),
+            fact(FactKind::RatingBonus, 3, 5),
+            fact(FactKind::HintPurchased, 1, -5),
+        ];
+        assert_eq!(
+            awarded_bonuses(log.iter()),
+            vec![FactKind::CompletionBonus, FactKind::RatingBonus],
+            "once-ever kinds only, deduped, sorted by wire tag"
+        );
     }
 
     #[test]

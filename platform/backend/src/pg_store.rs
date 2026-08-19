@@ -463,6 +463,33 @@ impl FactStore for PgFactStore {
     }
 
     /// See [`crate::store::InMemoryFactStore::completions_by_quest`]. Counts
+    /// The once-ever bonuses this player already holds for this quest, straight
+    /// from the ledger whose PRIMARY KEY refuses the second one. The in-memory
+    /// twin derives the same answer from its logs — it has no ledger.
+    async fn awarded_bonuses(
+        &self,
+        user_id: &str,
+        quest_id: &str,
+    ) -> Result<Vec<crate::facts::FactKind>, AppError> {
+        let rows = sqlx::query(
+            "SELECT kind FROM bonus_awards WHERE user_id = $1 AND quest_id = $2 ORDER BY kind",
+        )
+        .bind(user_id)
+        .bind(quest_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let mut kinds = Vec::with_capacity(rows.len());
+        for row in rows {
+            let kind: String = row.try_get("kind").map_err(internal)?;
+            // Rows older than migration 0005 carry kinds this build may not know.
+            if let Ok(kind) = serde_json::from_value(serde_json::Value::String(kind)) {
+                kinds.push(kind);
+            }
+        }
+        Ok(kinds)
+    }
+
     /// `bonus_awards` rows per quest: each row is one (player, quest) completion
     /// bonus, so `COUNT(*)` is the distinct-finisher count — matching the
     /// in-memory backend, which derives the same from the fact log.

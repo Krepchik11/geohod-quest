@@ -9,6 +9,7 @@ import type { Fact } from '../shared-model';
 import {
   completedQuestDetails,
   earnedQuestBonuses,
+  serverQuestBonuses,
   foldLocalPlayerStats,
   gatherLocalAttemptLogs,
   gatherOtherAttemptLogs,
@@ -114,6 +115,35 @@ describe('earnedQuestBonuses (what the engine must not pay twice, #114)', () => 
   it('ignores per-attempt earnings — gifts are re-earned on every replay', () => {
     const logs: AttemptLog[] = [{ quest_id: 'q1', facts: [gift(5), hint(2), completed()] }];
     expect(earnedQuestBonuses(logs, 'q1')).toEqual(new Set());
+  });
+
+  it('takes the server\u2019s word too — a second device has no logs to read (#117)', () => {
+    expect(earnedQuestBonuses([], 'q1', ['completion_bonus'])).toEqual(new Set(['completion_bonus']));
+  });
+
+  it('unions the two — each side may know what the other does not', () => {
+    const logs: AttemptLog[] = [{ quest_id: 'q1', facts: [rating()] }];
+    expect(earnedQuestBonuses(logs, 'q1', ['completion_bonus']))
+      .toEqual(new Set(['completion_bonus', 'rating_bonus']));
+  });
+});
+
+describe('serverQuestBonuses (reading the server answer, #117)', () => {
+  it('keeps the once-ever kinds', () => {
+    expect(serverQuestBonuses({ kinds: ['completion_bonus', 'rating_bonus'] })).toEqual([
+      'completion_bonus',
+      'rating_bonus',
+    ]);
+  });
+
+  it('drops what this build cannot act on — the wire is strings, not our type', () => {
+    expect(serverQuestBonuses({ kinds: ['gift_claimed', 'completion_bonus', 'нет такого'] })).toEqual([
+      'completion_bonus',
+    ]);
+  });
+
+  it('no answer means nothing known, never nothing paid', () => {
+    expect(serverQuestBonuses(null)).toEqual([]);
   });
 });
 

@@ -142,6 +142,20 @@ impl InMemoryFactStore {
         meta
     }
 
+    /// The once-ever bonuses this player already holds for this quest, on ANY
+    /// attempt. Derived from the logs because this backend has no award ledger;
+    /// the Postgres one reads `bonus_awards`, which is the same answer because
+    /// that table is what accepts the fact in the first place.
+    pub fn awarded_bonuses(&self, user_id: &str, quest_id: &str) -> Vec<FactKind> {
+        crate::facts::awarded_bonuses(
+            self.attempts
+                .values()
+                .filter(|m| m.user_id == user_id && m.quest_id == quest_id)
+                .filter_map(|m| self.fact_logs.get(&m.attempt_id))
+                .flatten(),
+        )
+    }
+
     /// Append `incoming` idempotently to a KNOWN attempt's log. Returns the newly
     /// accepted facts, or `None` if the attempt does not exist (handler maps to 404).
     ///
@@ -156,16 +170,13 @@ impl InMemoryFactStore {
         incoming: Vec<Fact>,
     ) -> Option<Vec<Fact>> {
         let meta = self.attempts.get(attempt_id)?.clone();
-        // One scan for the already-awarded once-ever kinds of this (player,
-        // quest); accepted bonuses join the set so a batch can't double-award.
+        // The already-awarded once-ever kinds of this (player, quest) — the SAME
+        // read the client is answered with, so what it withholds and what this
+        // refuses can never be two different sets. Accepted bonuses join it, so
+        // a batch cannot double-award.
         let mut awarded: std::collections::HashSet<FactKind> = self
-            .attempts
-            .values()
-            .filter(|m| m.user_id == meta.user_id && m.quest_id == meta.quest_id)
-            .filter_map(|m| self.fact_logs.get(&m.attempt_id))
-            .flatten()
-            .map(|f| f.kind)
-            .filter(|k| crate::facts::once_per_quest(*k))
+            .awarded_bonuses(&meta.user_id, &meta.quest_id)
+            .into_iter()
             .collect();
         let mut accepted: Vec<Fact> = Vec::new();
         for f in incoming {
@@ -1381,6 +1392,13 @@ pub trait FactStore: Send + Sync {
         key: &str,
     ) -> Result<MigrationResult, AppError>;
 
+    /// See [`InMemoryFactStore::awarded_bonuses`].
+    async fn awarded_bonuses(
+        &self,
+        user_id: &str,
+        quest_id: &str,
+    ) -> Result<Vec<crate::facts::FactKind>, AppError>;
+
     /// See [`InMemoryFactStore::attempt_logs_for_user`].
     async fn attempt_logs_for_user(
         &self,
@@ -1496,6 +1514,14 @@ impl FactStore for std::sync::Mutex<InMemoryFactStore> {
         key: &str,
     ) -> Result<MigrationResult, AppError> {
         Ok(lock(self, "store")?.run_legacy_migration(historical_grants, answer_cards, key))
+    }
+
+    async fn awarded_bonuses(
+        &self,
+        user_id: &str,
+        quest_id: &str,
+    ) -> Result<Vec<crate::facts::FactKind>, AppError> {
+        Ok(lock(self, "store")?.awarded_bonuses(user_id, quest_id))
     }
 
     async fn attempt_logs_for_user(

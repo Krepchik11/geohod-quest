@@ -30,6 +30,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/attempts/{attempt_id}/state", get(get_state_handler))
         .route("/api/quests", get(list_quests_handler))
         .route("/api/quests/{quest_id}/bundle", get(get_bundle_handler))
+        .route(
+            "/api/quests/{quest_id}/bonuses",
+            get(get_quest_bonuses_handler),
+        )
         .route("/api/quests/{quest_id}", get(get_quest_product_handler))
         .route(
             "/api/quests/{quest_id}/reviews",
@@ -177,7 +181,35 @@ pub(crate) struct BundleWire {
     snapshot: Option<serde_json::Value>,
 }
 
-/// Bundle download primitive: latest frozen snapshot JSON, gated by grant
+/// The once-ever bonuses this quest has already paid the caller.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "QuestBonusesWire"))]
+pub(crate) struct QuestBonusesWire {
+    kinds: Vec<String>,
+}
+
+/// What this quest has already paid the caller, on ANY of their devices — the
+/// one thing a device that never played it cannot read out of its own storage.
+/// The player asks before it plays and withholds these, so a replay is never
+/// promised coins that are already banked (issue #117). Not access-gated: it
+/// answers about the caller's own history and says nothing about the quest.
+async fn get_quest_bonuses_handler(
+    State(state): State<AppState>,
+    Path(quest_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<QuestBonusesWire>, AppError> {
+    let user_id = resolve_user(&state, &headers, &claimed_from_headers(&headers)).await?;
+    let kinds = state.store.awarded_bonuses(&user_id, &quest_id).await?;
+    Ok(Json(QuestBonusesWire {
+        kinds: kinds
+            .into_iter()
+            .map(|k| k.wire_tag().to_string())
+            .collect(),
+    }))
+}
+
+/// Bundle download primitive: latest frozen snapshot JSON, gated by grant/// Bundle download primitive: latest frozen snapshot JSON, gated by grant
 /// (SPEC: "Grant before attempt/bundle"). Asset packing comes with the media
 /// store phase.
 async fn get_bundle_handler(

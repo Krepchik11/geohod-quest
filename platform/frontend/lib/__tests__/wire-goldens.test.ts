@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { emailValid, normalizeEmail, passwordValid } from '../credentials';
 import { factNaturalKey } from '../queue';
-import type { Fact } from '../shared-model';
+import { isOncePerQuest, type Fact, type OncePerQuestType } from '../shared-model';
 import { FEATURE_KEYS } from '../admin-features';
 import { CLIENT_FEATURE_KEYS } from '../client-features';
 
@@ -61,5 +61,30 @@ describe('features-registry golden (shared with cargo test)', () => {
 
   it('the client-visible union covers exactly the served flags', () => {
     expect([...CLIENT_FEATURE_KEYS]).toEqual(fx.client_visible);
+  });
+});
+
+/** Every fact kind there is — the compile check below names any that is missing. */
+const ALL_KINDS = [
+  'physical_confirmed',
+  'answer_submitted',
+  'gift_claimed',
+  'attempt_completed',
+  'hint_purchased',
+  'completion_bonus',
+  'feedback_reported',
+  'navigator_used',
+  'quest_rated',
+  'rating_bonus',
+  'comment_bonus',
+] as const satisfies readonly Fact['type'][];
+type MissingKind = Exclude<Fact['type'], (typeof ALL_KINDS)[number]>;
+const _everyKindIsListed: MissingKind extends never ? true : MissingKind = true;
+
+describe('once-per-quest golden (shared with cargo test)', () => {
+  const fx = wire('once-per-quest.json', ['kinds']) as { kinds: OncePerQuestType[] };
+
+  it('the client withholds exactly the kinds the server refuses a repeat of', () => {
+    expect(ALL_KINDS.filter(isOncePerQuest)).toEqual(fx.kinds);
   });
 });

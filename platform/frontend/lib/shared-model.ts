@@ -135,7 +135,7 @@ const ONCE_PER_QUEST = ['completion_bonus', 'rating_bonus', 'comment_bonus'] as 
 /** A fact kind from that list — what the engine withholds and the folds collapse. */
 export type OncePerQuestType = (typeof ONCE_PER_QUEST)[number];
 
-export function isOncePerQuest(type: Fact['type']): type is OncePerQuestType {
+export function isOncePerQuest(type: string): type is OncePerQuestType {
   return (ONCE_PER_QUEST as readonly string[]).includes(type);
 }
 
