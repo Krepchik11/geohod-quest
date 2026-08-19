@@ -79,7 +79,16 @@ describe('ImageZone — upload', () => {
   // committed. One body, so the contract has one place to change.
   it.each([
     ['кнопка «Отмена»', async () => fireEvent.click(await screen.findByRole('button', { name: 'Отмена' }))],
-    ['Escape', async () => { await screen.findByRole('dialog'); fireEvent.keyDown(document, { key: 'Escape' }); }],
+    // Нажатие повторяется, пока не подействует: подписку на Escape вешает
+    // эффект наложения, а диалог виден в DOM уже до него — на медленной машине
+    // одиночное нажатие уходило в пустоту и роняло гейт релиза.
+    ['Escape', async () => {
+      await screen.findByRole('dialog');
+      await waitFor(() => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    }],
   ])('commits nothing when the author dismisses the crop with %s', async (_name, dismiss) => {
     const { onChange, pickFile } = setup();
     pickFile();
