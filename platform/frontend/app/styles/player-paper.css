@@ -164,7 +164,7 @@
   padding: 0;
 }
 
-/* Floating back button for the chromeless screens (finale, post-finale catalog):
+/* Floating back button for the chromeless finale:
    no TopBar there, but "reread the previous step" must stay reachable. Anchored
    to .pframe (position:relative), so it does not scroll with .p-scroll content. */
 .p-backfab {

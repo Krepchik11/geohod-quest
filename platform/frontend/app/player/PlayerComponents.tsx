@@ -172,7 +172,7 @@ export interface StepCopy {
   skipRated?: string;
   rateLead?: string;
   rateThanks?: string;
-  /* Пост-финальный каталог «Продолжите путешествие». */
+  /* Меню игрока. */
   menuTitle?: string;
   feedback?: string;
   exit?: string;
