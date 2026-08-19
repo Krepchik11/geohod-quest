@@ -8,38 +8,30 @@ import { canEditQuests, isAdmin } from '../../lib/roles';
 import { useMe } from '../../lib/use-me';
 
 /**
- * §1.2 mobile bottom tab bar — «Магазин» / «Мои квесты» / «Профиль», plus the
- * role-gated site sections («Редактор», «Админка») for editors/admins: on
- * mobile the top nav is hidden, so this bar is where ALL sections live — the
- * same rule as the desktop header. Rendered from the root layout but mounts
- * ONLY on the three top-level storefront pages; the player, product page,
- * editor, admin and auth keep the full viewport (the product page has its own
- * sticky purchase bar). Visibility above 768px is CSS (.tab-bar is
- * display:none on desktop).
+ * §1.2 mobile bottom tab bar — «Магазин» / «Профиль», plus the role-gated
+ * site sections («Редактор», «Админка») for editors/admins: on mobile the
+ * top nav is hidden, so this bar is where ALL sections live — the same rule
+ * as the desktop header. Rendered from the root layout but mounts ONLY on
+ * the top-level storefront pages; the player, product page, editor, admin
+ * and auth keep the full viewport (the product page has its own sticky
+ * purchase bar). Visibility above 768px is CSS (.tab-bar is display:none on
+ * desktop).
  */
 // `match` is the pathname the tab represents (visibility + active state); `href`
 // is where tapping it navigates. They differ for «Магазин»: the store grid sits
 // below the hero on `/`, so the tab jumps to #shop like the desktop header does.
 const TABS = [
   { match: '/', href: '/#shop', label: 'Магазин', icon: 'shop' },
-  { match: '/my-quests', href: '/my-quests', label: 'Мои квесты', icon: 'list' },
   { match: '/profile', href: '/profile', label: 'Профиль', icon: 'user' },
 ] as const;
 
 const VISIBLE_ON = new Set(TABS.map((t) => t.match));
 
-function TabIcon({ icon }: { icon: 'shop' | 'list' | 'user' | 'edit' | 'admin' }) {
+function TabIcon({ icon }: { icon: 'shop' | 'user' | 'edit' | 'admin' }) {
   if (icon === 'shop') {
     return (
       <span className="tab-bar__ic tab-bar__ic--shop" aria-hidden>
         <span /><span /><span /><span />
-      </span>
-    );
-  }
-  if (icon === 'list') {
-    return (
-      <span className="tab-bar__ic tab-bar__ic--list" aria-hidden>
-        <span /><span /><span />
       </span>
     );
   }

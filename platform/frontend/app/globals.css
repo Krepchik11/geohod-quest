@@ -299,8 +299,6 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .tab-bar__tab.is-active { color:var(--blue); font-weight:600; }
   .tab-bar__ic--shop { display:grid; grid-template-columns:7px 7px; gap:2px; }
   .tab-bar__ic--shop span { width:7px; height:7px; border-radius:2px; background:currentColor; }
-  .tab-bar__ic--list { display:flex; flex-direction:column; gap:3px; }
-  .tab-bar__ic--list span { width:16px; height:2.5px; border-radius:2px; background:currentColor; }
   .tab-bar__ic--svg { display:grid; place-items:center; width:22px; height:22px; }
   .tab-bar__ic--user { display:flex; flex-direction:column; align-items:center; gap:1px; }
   .tab-bar__ic--user span:first-child { width:7px; height:7px; border-radius:50%; background:currentColor; }
