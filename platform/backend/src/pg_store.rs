@@ -462,7 +462,6 @@ impl FactStore for PgFactStore {
             .collect())
     }
 
-    /// See [`crate::store::InMemoryFactStore::completions_by_quest`]. Counts
     /// The once-ever bonuses this player already holds for this quest, straight
     /// from the ledger whose PRIMARY KEY refuses the second one. The in-memory
     /// twin derives the same answer from its logs — it has no ledger.
@@ -490,17 +489,23 @@ impl FactStore for PgFactStore {
         Ok(kinds)
     }
 
-    /// `bonus_awards` rows per quest: each row is one (player, quest) completion
-    /// bonus, so `COUNT(*)` is the distinct-finisher count — matching the
-    /// in-memory backend, which derives the same from the fact log.
+    /// See [`crate::store::InMemoryFactStore::completions_by_quest`]. Distinct
+    /// finishers per quest: `bonus_awards` holds one row per (player, quest,
+    /// KIND), so the rows have to be filtered to the completion bonus —
+    /// counting them all reports a player who also rated and reviewed as three
+    /// finishers (issue #120). The in-memory backend counts distinct players
+    /// with a `CompletionBonus` fact, which is the same set.
     async fn completions_by_quest(
         &self,
     ) -> Result<std::collections::HashMap<String, usize>, AppError> {
-        let rows =
-            sqlx::query("SELECT quest_id, COUNT(*) AS n FROM bonus_awards GROUP BY quest_id")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(internal)?;
+        let rows = sqlx::query(
+            "SELECT quest_id, COUNT(DISTINCT user_id) AS n FROM bonus_awards \
+             WHERE kind = $1 GROUP BY quest_id",
+        )
+        .bind(crate::facts::FactKind::CompletionBonus.wire_tag())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
         let mut out = std::collections::HashMap::new();
         for row in rows {
             let quest_id: String = row.try_get("quest_id").map_err(internal)?;
@@ -512,15 +517,20 @@ impl FactStore for PgFactStore {
 
     /// See [`crate::store::InMemoryFactStore::completions_for_quest`]. Single-quest
     /// count via the `bonus_awards(quest_id)` index — the editor's per-quest pages
-    /// use this instead of `completions_by_quest`'s whole-table GROUP BY.
+    /// use this instead of `completions_by_quest`'s whole-table GROUP BY. Same
+    /// kind filter, for the same reason.
     async fn completions_for_quest(&self, quest_id: &str) -> Result<usize, AppError> {
-        let n: i64 = sqlx::query("SELECT COUNT(*) AS n FROM bonus_awards WHERE quest_id = $1")
-            .bind(quest_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(internal)?
-            .try_get("n")
-            .map_err(internal)?;
+        let n: i64 = sqlx::query(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM bonus_awards \
+             WHERE quest_id = $1 AND kind = $2",
+        )
+        .bind(quest_id)
+        .bind(crate::facts::FactKind::CompletionBonus.wire_tag())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?
+        .try_get("n")
+        .map_err(internal)?;
         Ok(n.max(0) as usize)
     }
 
