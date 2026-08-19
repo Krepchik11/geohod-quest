@@ -29,10 +29,11 @@ vi.mock('../../../lib/client-features', () => ({
   useUniversalAnswer: () => null,
 }));
 
-vi.mock('../../../lib/player-stats', () => ({
-  foldLocalPlayerStats: () => ({ balance: 0 }),
-  gatherOtherAttemptLogs: vi.fn(async () => []),
-}));
+/** Only the IO is stubbed — the coin fold and the bonus rule stay real. */
+vi.mock('../../../lib/player-stats', async () => {
+  const real = await vi.importActual<typeof import('../../../lib/player-stats')>('../../../lib/player-stats');
+  return { ...real, gatherOtherAttemptLogs: vi.fn(async () => []) };
+});
 
 vi.mock('../sound', () => ({ coinChime: vi.fn(), spendChime: vi.fn() }));
 

@@ -13,13 +13,13 @@ import {
   shouldOfferHint,
   type Fact,
   type GameStep,
+  type OncePerQuestType,
 } from './shared-model';
 
 /** The canonical once-per-quest completion bonus (SPEC). */
 export const COMPLETION_BONUS = 5;
-/** §11: once-ever rewards for the finale — stars and a written review. The
- *  server enforces once-per-(player, quest) at append time; the per-log
- *  guards below are only the optimistic local filter. */
+/** §11: once-ever rewards for the finale — stars and a written review. Once
+ *  per (player, quest), like the completion bonus: see `awardOnce`. */
 export const RATING_BONUS = 5;
 export const COMMENT_BONUS = 5;
 
@@ -58,7 +58,12 @@ export interface PlayCtx {
   deviceId: string;
   /** Universal answers in effect: the snapshot's and the platform-wide one. */
   universalAnswers: Array<string | null | undefined>;
+  /** Bonuses this quest already paid on an earlier attempt — see `awardOnce`
+   *  (lib/player-stats.earnedQuestBonuses reads them). */
+  earnedBonuses: ReadonlySet<OncePerQuestType>;
 }
+
+export const NO_EARNED_BONUSES: ReadonlySet<OncePerQuestType> = new Set();
 
 export type PlayEvent =
   | { type: 'physical_confirm' }
@@ -138,20 +143,19 @@ function completeAttempt(b: Builder): void {
 }
 
 /**
- * Append a once-ever bonus fact unless this log already carries one; true when
- * awarded. The per-log guard is only the optimistic local filter — the server
- * holds the once-per-(player, quest) line across attempts and devices, and the
- * cross-attempt local fold collapses replays (ONCE_PER_QUEST_TYPES). Bonus
- * facts never carry free text beyond a fixed label: the note is part of the
- * natural key, so variable text would mint a fresh fact on every change.
+ * Append a once-ever bonus fact unless this player already holds it for this
+ * quest; true when awarded. Once per (player, quest) is what the wallet and the
+ * server mean too, so a replay is paid nothing and animates nothing (#114).
+ * Bonus facts never carry free text beyond a fixed label: the note is part of
+ * the natural key, so variable text would mint a fresh fact on every change.
  */
 function awardOnce(
   b: Builder,
-  type: 'completion_bonus' | 'rating_bonus' | 'comment_bonus',
+  type: OncePerQuestType,
   coins: number,
   note: string | null,
 ): boolean {
-  if (b.state.facts.some((f) => f.type === type)) return false;
+  if (b.ctx.earnedBonuses.has(type) || b.state.facts.some((f) => f.type === type)) return false;
   append(b, {
     type,
     step_position: b.state.stepIdx,

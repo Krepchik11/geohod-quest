@@ -8,6 +8,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import type { Fact } from '../shared-model';
 import {
   completedQuestDetails,
+  earnedQuestBonuses,
   foldLocalPlayerStats,
   gatherLocalAttemptLogs,
   gatherOtherAttemptLogs,
@@ -91,6 +92,28 @@ describe('foldLocalPlayerStats', () => {
 
   it('empty input folds to zeros', () => {
     expect(foldLocalPlayerStats([])).toEqual({ balance: 0, completed_quest_ids: [] });
+  });
+});
+
+describe('earnedQuestBonuses (what the engine must not pay twice, #114)', () => {
+  const rating = () => fact({ type: 'rating_bonus', step_position: 3, coins_delta: 5 });
+
+  it('names the once-ever bonuses this quest already paid, across all its attempts', () => {
+    const logs: AttemptLog[] = [
+      { quest_id: 'q1', facts: [gift(5), bonus(), completed()] },
+      { quest_id: 'q1', facts: [rating()] },
+    ];
+    expect(earnedQuestBonuses(logs, 'q1')).toEqual(new Set(['completion_bonus', 'rating_bonus']));
+  });
+
+  it('ignores other quests — a bonus is earned per quest, not per player', () => {
+    const logs: AttemptLog[] = [{ quest_id: 'q2', facts: [bonus(), rating()] }];
+    expect(earnedQuestBonuses(logs, 'q1')).toEqual(new Set());
+  });
+
+  it('ignores per-attempt earnings — gifts are re-earned on every replay', () => {
+    const logs: AttemptLog[] = [{ quest_id: 'q1', facts: [gift(5), hint(2), completed()] }];
+    expect(earnedQuestBonuses(logs, 'q1')).toEqual(new Set());
   });
 });
 

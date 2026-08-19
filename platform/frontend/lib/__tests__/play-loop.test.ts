@@ -6,10 +6,11 @@
  * overdraft-legal hint purchases, and advance clamping.
  */
 import { describe, expect, it } from 'vitest';
-import type { GameStep } from '../shared-model';
+import type { GameStep, OncePerQuestType } from '../shared-model';
 import {
   COMMENT_BONUS,
   COMPLETION_BONUS,
+  NO_EARNED_BONUSES,
   RATING_BONUS,
   initialPlayState,
   transition,
@@ -56,6 +57,7 @@ const ctx = (steps: GameStep[]): PlayCtx => ({
   steps,
   deviceId: 'device-t',
   universalAnswers: [],
+  earnedBonuses: NO_EARNED_BONUSES,
 });
 
 describe('answers and the wrong-answer ordinal', () => {
@@ -220,6 +222,42 @@ describe('§11 rating rewards', () => {
     const again = transition(first.state, { type: 'rate', value: 3, text: 'Передумал' }, c);
     expect(again.effects.appended.map((f) => f.type)).toEqual(['quest_rated']);
     expect(again.effects.toast).toBeNull();
+  });
+});
+
+describe('once-ever bonuses are once per QUEST, not per attempt (#114)', () => {
+  const withEarned = (steps: GameStep[], ...earned: OncePerQuestType[]): PlayCtx => ({
+    ...ctx(steps),
+    earnedBonuses: new Set(earned),
+  });
+
+  it('a replay of a finished quest completes without minting a second completion bonus', () => {
+    const c = withEarned([physicalStep({ position: 0 }), terminalStep({ position: 1 })], 'completion_bonus');
+    const r = transition(initialPlayState(), { type: 'physical_confirm' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual([
+      'physical_confirmed',
+      'gift_claimed',
+      'attempt_completed',
+    ]);
+    // The step gift IS re-earned every attempt (server keeps one per attempt),
+    // so its toast still plays — only the once-per-quest bonus is withheld.
+    expect(r.effects.toast).toEqual({ amount: 5, narrative: 'дар' });
+  });
+
+  it('a replay pays nothing for stars or a review already rewarded, and animates nothing', () => {
+    const c = withEarned([terminalStep({ position: 0 })], 'rating_bonus', 'comment_bonus');
+    const done = transition(initialPlayState(), { type: 'enter_terminal' }, c).state;
+    const r = transition(done, { type: 'rate', value: 5, text: 'Ещё раз отлично' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual(['quest_rated']);
+    expect(r.effects.toast).toBeNull();
+  });
+
+  it('withholds only what was already earned — the unearned review bonus still pays', () => {
+    const c = withEarned([terminalStep({ position: 0 })], 'rating_bonus');
+    const done = transition(initialPlayState(), { type: 'enter_terminal' }, c).state;
+    const r = transition(done, { type: 'rate', value: 5, text: 'Первый отзыв' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual(['quest_rated', 'comment_bonus']);
+    expect(r.effects.toast).toEqual({ amount: COMMENT_BONUS, narrative: 'За отзыв' });
   });
 });
 
