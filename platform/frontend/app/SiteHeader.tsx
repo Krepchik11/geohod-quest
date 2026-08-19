@@ -39,7 +39,6 @@ export default function SiteHeader() {
       <nav className="site-nav" aria-label="Основная навигация">
         <Link href="/">главная</Link>
         <Link href="/#shop">магазин квестов</Link>
-        <Link href="/my-quests">мои квесты</Link>
         {/* §1.3: absolute anchor so «контакты» works from every page, not just /. */}
         <Link href="/#contacts">контакты</Link>
         {(canEditQuests(role) || hasAdminToken()) && (
