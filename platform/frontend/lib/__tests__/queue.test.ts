@@ -148,6 +148,22 @@ describe('openAttempt (player open / «Пройти заново»)', () => {
     // coins are never lost: the superseded attempt keeps its facts
     expect(await getFacts(completed.attempt_key)).toHaveLength(2);
   });
+
+  // The finale's «в пути» stat is a duration, so the instant the attempt
+  // finished has to survive a reload — it is read back off the completion
+  // fact's own queue row, never re-measured from the clock (issue #111).
+  it('reports when the attempt finished, and null while it is still running', async () => {
+    const running = await ensureActiveAttempt(QUEST, SNAP);
+    await appendFact(running.attempt_key, fact({ step_position: 0 }));
+    expect((await openAttempt(QUEST, SNAP)).completedAt).toBeNull();
+
+    await appendFact(running.attempt_key, fact({ type: 'attempt_completed', step_position: 3 }));
+    const opened = await openAttempt(QUEST, SNAP);
+    const rows = await getFacts(running.attempt_key);
+    expect(opened.completedAt).toBe(rows.find((r) => r.fact.type === 'attempt_completed')!.queued_at);
+    // stable across reopens — the whole point of the fix
+    expect((await openAttempt(QUEST, SNAP)).completedAt).toBe(opened.completedAt);
+  });
 });
 
 describe('facts store', () => {

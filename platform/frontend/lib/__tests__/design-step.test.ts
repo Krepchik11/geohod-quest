@@ -4,7 +4,7 @@
  * all 7 designed templates from real snapshot data, including video blocks.
  */
 import { describe, expect, it } from 'vitest';
-import { toDesignStep } from '../design-step';
+import { elapsedLabel, toDesignStep } from '../design-step';
 import { getSnapshot } from '../goldens';
 
 describe('toDesignStep over golden-ironia-sudby-v1 (all 7 templates)', () => {
@@ -67,5 +67,33 @@ describe('toDesignStep over golden-mystery-fortress-v1 (legacy 4-step golden)', 
     const answers = steps.filter((s) => s.template === 'task_answer');
     expect(answers.length).toBe(2);
     for (const a of answers) expect((a.acceptable || []).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The finale's «в пути» stat. It is a DURATION between two recorded instants —
+ * never a reading of the current clock — so reopening a finished quest shows
+ * the same number forever (issue #111).
+ */
+describe('elapsedLabel', () => {
+  const start = '2026-08-19T10:00:00.000Z';
+
+  it('formats the gap between start and finish as h:mm', () => {
+    expect(elapsedLabel(start, '2026-08-19T11:24:00.000Z')).toBe('1:24');
+    expect(elapsedLabel(start, '2026-08-19T10:07:30.000Z')).toBe('0:07');
+    expect(elapsedLabel(start, start)).toBe('0:00');
+  });
+
+  it('accepts epoch milliseconds too (the constructor test player counts in ms)', () => {
+    expect(elapsedLabel(0, 84 * 60_000)).toBe('1:24');
+  });
+
+  it('is 0:00 when either instant is missing — never «time since now»', () => {
+    expect(elapsedLabel(null, '2026-08-19T11:24:00.000Z')).toBe('0:00');
+    expect(elapsedLabel(start, null)).toBe('0:00');
+  });
+
+  it('clamps a finish that precedes the start (device clock moved)', () => {
+    expect(elapsedLabel('2026-08-19T11:00:00.000Z', start)).toBe('0:00');
   });
 });

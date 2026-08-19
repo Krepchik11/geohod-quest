@@ -80,4 +80,14 @@ describe('конструкторский тест-игрок: финал', () =>
     await user.click(await screen.findByRole('button', { name: /Пропустить оценку/ }));
     expect(await screen.findByText(/Тест окончен/)).toBeTruthy();
   });
+
+  // Автор смотрит ровно то, что увидит игрок: монеты за оценку прилетают на
+  // первое касание звезды, с той же анимацией (#113).
+  it('первое касание звезды показывает монеты за оценку', async () => {
+    render(<TestOverlay quest={draftWithHint()} startPos={2} onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '5 звёзд' }));
+    expect(await screen.findByText('+5 монет')).toBeTruthy();
+    expect(screen.getByText('За оценку')).toBeTruthy();
+  });
 });

@@ -17,10 +17,9 @@ import {
 } from '../../lib/play-loop';
 import { queueFactSink } from '../../lib/fact-sink';
 import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
-import { toDesignStep } from '../../lib/design-step';
+import { elapsedLabel, toDesignStep } from '../../lib/design-step';
 import { stepAt, theme as snapshotTheme } from '../../lib/snapshot';
-import { api, type PublishedQuestWire } from '../../lib/api';
-import { nextQuestsForCatalog } from '../../lib/catalog';
+import { api } from '../../lib/api';
 import {
   factNaturalKey,
   ensureActiveAttempt,
@@ -39,8 +38,8 @@ import { useOnline } from './useOnline';
 import { useStepHistory } from './useStepHistory';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
-  PlayerFrame, StepView, TopBar, CoinToast, PCheck,
-  HintPopup, HintRevealPopup, MenuOverlay, FeedbackSheet, CatalogScreen,
+  PlayerFrame, StepView, TopBar, CoinToast,
+  HintPopup, HintRevealPopup, MenuOverlay, FeedbackSheet,
 } from '../player/PlayerComponents';
 
 /** RU copy, classic tone — shared with the constructor preview/test player. */
@@ -48,6 +47,11 @@ import { PLAYER_COPY as COPY } from '../../lib/player-copy';
 
 const SOUND_PREF_KEY = 'geohod-player-sound:v1';
 const TOAST_MS = 1900;
+/** Where the finale lets the player out: the store grid, same target as the
+ *  «Магазин» tab. It already lists every other quest with search, filters and
+ *  reviews, so the player has no second, thinner copy of that list to sit
+ *  through first (issue #112). */
+const STORE_HREF = '/#shop';
 
 /** Sound preference (default on). `localStorage` throws in private mode / when
  *  storage is disabled, and a preference must never crash play — so both the read
@@ -68,14 +72,6 @@ function persistSoundOn(on: boolean): void {
   }
 }
 
-/** Elapsed attempt time as the design's h:mm stat (e.g. «1:24»). */
-function formatElapsed(createdAt: string | null): string {
-  if (!createdAt) return '0:00';
-  const ms = Math.max(0, Date.now() - new Date(createdAt).getTime());
-  const minutes = Math.floor(ms / 60_000);
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
-}
-
 interface PlayerState {
   /** The game-rule state — owned by the engine (lib/play-loop). `stepIdx` is an
    *  ARRAY INDEX, the single step identity in this component: every fact is
@@ -90,6 +86,11 @@ interface PlayerState {
   /* Local attempt identity from the IndexedDB queue (server id lives there too). */
   attemptKey: string | null;
   attemptCreatedAt: string | null;
+  /** When the attempt finished. Recorded ONCE — on hydrate it comes back from
+   *  the queue row of the completion fact — because «в пути» is the duration of
+   *  the attempt, not the age of it: reading the clock at render time made the
+   *  finished quest's own stat grow on every reopen (issue #111). */
+  attemptCompletedAt: string | null;
   /* Per-fact queue status mirror (natural key → status). Internal only: it drives
      the debounced silent flush (pending → 0 ends the loop); never rendered. */
   queueStatus: Record<string, 'pending' | 'sent'>;
@@ -100,13 +101,14 @@ interface PlayerState {
 }
 
 type PlayerAction =
-  | { type: 'apply'; play: PlayState; appended: Fact[] }
+  | { type: 'apply'; play: PlayState; appended: Fact[]; completedAt: string | null }
   | {
       type: 'hydrate';
       facts: Fact[];
       stepIdx: number;
       attemptKey: string;
       attemptCreatedAt: string;
+      attemptCompletedAt: string | null;
       queueStatus: Record<string, 'pending' | 'sent'>;
       showStartGate: boolean;
     }
@@ -118,6 +120,7 @@ const initialState: PlayerState = {
   play: initialPlayState(),
   attemptKey: null,
   attemptCreatedAt: null,
+  attemptCompletedAt: null,
   queueStatus: {},
   showStartGate: false,
   toast: null,
@@ -132,7 +135,12 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
         const key = factNaturalKey(fact);
         if (!queueStatus[key]) queueStatus = { ...queueStatus, [key]: 'pending' };
       }
-      return { ...state, play: action.play, queueStatus };
+      return {
+        ...state,
+        play: action.play,
+        queueStatus,
+        attemptCompletedAt: state.attemptCompletedAt ?? action.completedAt,
+      };
     }
     case 'hydrate':
       return {
@@ -140,6 +148,7 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
         play: hydratedPlayState(action.facts, action.stepIdx),
         attemptKey: action.attemptKey,
         attemptCreatedAt: action.attemptCreatedAt,
+        attemptCompletedAt: action.attemptCompletedAt,
         queueStatus: action.queueStatus,
         showStartGate: action.showStartGate,
       };
@@ -174,7 +183,7 @@ export default function QuestPlayerClient({
   // перекрашивается новой публикацией — как и всё остальное его содержимое.
   const theme = useMemo(() => snapshotTheme(snapshot), [snapshot]);
   const [state, dispatch] = useReducer(playerReducer, initialState);
-  const { play, attemptKey, attemptCreatedAt, queueStatus, showStartGate, toast } = state;
+  const { play, attemptKey, attemptCreatedAt, attemptCompletedAt, queueStatus, showStartGate, toast } = state;
   const { facts, stepIdx, maxStepIdx, hintOfferPos, hintRevealPos } = play;
 
   // Coins: there is exactly ONE balance — the player's
@@ -226,18 +235,10 @@ export default function QuestPlayerClient({
     rating: 0,
     /** §11: optional review text typed on the finale (sent with the rating). */
     reviewText: '',
-    /** Post-finale catalog («Продолжите путешествие») shown after «что дальше». */
-    showCatalog: false,
-    /** «Ссылка скопирована» confirmation after a clipboard share fallback. */
-    shareToast: false,
     /** §8.4: paper confirm for «Сбросить прогресс» from the menu. */
     resetConfirm: false,
     soundOn: readSoundOn(),
   }));
-
-  // Lazily-loaded list of other published quests for the post-finale catalog
-  // (null = not fetched yet). Thin metadata; see lib/catalog.nextQuestsForCatalog.
-  const [published, setPublished] = useState<PublishedQuestWire[] | null>(null);
 
   const toggleSound = useCallback(() => {
     setUi((u) => {
@@ -300,18 +301,22 @@ export default function QuestPlayerClient({
       const to = Math.max(0, Math.min(idx, maxStepIdx, steps.length - 1));
       setUi((u) => ({ ...u, wrong: false, answer: '' }));
       const result = transition(play, { type: 'advance_to', to }, buildCtx());
-      dispatch({ type: 'apply', play: result.state, appended: [] });
+      dispatch({ type: 'apply', play: result.state, appended: [], completedAt: null });
     },
-    isOverlayOpen: () => ui.menuOpen || ui.showCatalog,
-    onCloseOverlay: () =>
-      setUi((u) => (u.menuOpen ? { ...u, menuOpen: false } : { ...u, showCatalog: false })),
+    isOverlayOpen: () => ui.menuOpen,
+    onCloseOverlay: () => setUi((u) => ({ ...u, menuOpen: false })),
   });
 
   /** The ONE rule path: engine transition → reducer + sink + designed effects. */
   const runEvent = useCallback(
     (event: PlayEvent) => {
       const result = transition(play, event, buildCtx());
-      dispatch({ type: 'apply', play: result.state, appended: result.effects.appended });
+      // The completion instant is stamped exactly once, where completion
+      // happens; every later read comes off the queue row instead (issue #111).
+      const completedAt = result.effects.appended.some((f) => f.type === 'attempt_completed')
+        ? new Date().toISOString()
+        : null;
+      dispatch({ type: 'apply', play: result.state, appended: result.effects.appended, completedAt });
       result.effects.appended.forEach((f) => sink.append(f));
       if (result.effects.toast) {
         showToast(result.effects.toast.amount, result.effects.toast.narrative, ui.soundOn);
@@ -402,59 +407,47 @@ export default function QuestPlayerClient({
   // author via admin version-stats. Last-wins + idempotent: re-rating appends a
   // new fact, the same score never re-appends (mirrors latestRating).
   const recordRating = useCallback(
-    (value: number, reviewText?: string) => {
-      runEvent({ type: 'rate', value, text: reviewText ?? null });
-    },
+    (value: number, reviewText?: string | null) => runEvent({ type: 'rate', value, text: reviewText ?? null }),
     [runEvent]
   );
 
-  // Fetch the catalog list once (guarded). Used as a prefetch on reaching the
-  // finale AND as a fallback when «что дальше» is tapped — at most one request,
-  // so the catalog never flashes its empty state while loading.
-  const loadCatalog = useCallback(() => {
-    if (published == null) {
-      api.listQuests().then(setPublished).catch(() => setPublished([]));
-    }
-  }, [published]);
+  // The score the finale shows: what the player just tapped, else what the log
+  // already carries (a reopened finale keeps its rating).
+  const committedRating = latestRating(facts);
+  const shownRating = ui.rating || committedRating;
 
-  // «что дальше» / «Пропустить»: commit the FINAL rating (once, idempotent), then
-  // reveal the post-finale catalog. Committing the single final value — rather than
-  // one fact per tap — avoids a re-selection ordering bug: with per-tap facts, a
-  // 5→4→5 sequence would dedup the second 5 onto the first by natural key, leaving
-  // 4 as the highest-seq fact and mis-recording the score. «отправим» is future
-  // tense, so committing on proceed matches the copy too.
-  const openCatalog = useCallback(() => {
-    recordRating(ui.rating, ui.reviewText);
-    setUi((u) => ({ ...u, showCatalog: true }));
-    loadCatalog();
-  }, [recordRating, ui.rating, ui.reviewText, loadCatalog, setUi]);
+  // §11 pays for the stars and pays again for the review. Both rewards land the
+  // moment the player earns them — the first star tap commits the score, sending
+  // the review commits the text — so the coin animation and the «монет собрано»
+  // counter move together with the action that caused them (issue #113).
+  // The first tap is the ONLY per-tap commit: a 5→4→5 re-selection would dedup
+  // the second 5 onto the first by natural key and leave 4 as the highest-seq
+  // fact, so every later change rides the single commit on the way out.
+  const handleRate = useCallback(
+    (value: number) => {
+      setUi((u) => ({ ...u, rating: value }));
+      if (committedRating === 0) recordRating(value, null);
+    },
+    [committedRating, recordRating, setUi]
+  );
 
-  // Share the finished quest: native share sheet when available, else copy the
-  // link and confirm with the «Ссылка скопирована» toast.
-  const handleShare = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const url = `${window.location.origin}/quest/${encodeURIComponent(questId)}`;
-    const nav = window.navigator;
-    if (nav && typeof nav.share === 'function') {
-      nav.share({ title: snapshot.name, url }).catch(() => {});
+  // Leaving the finale must not cut the coin animation short, so the store waits
+  // out the toast when the exit itself earned coins.
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
+
+  // «ОТПРАВИТЬ ОЦЕНКУ» / «Пропустить оценку»: commit whatever the card holds
+  // (idempotent — an unchanged score appends nothing) and leave for the store.
+  const finish = useCallback(() => {
+    const result = recordRating(shownRating, ui.reviewText);
+    const go = () => router.push(STORE_HREF);
+    if (!result.effects.toast) {
+      go();
       return;
     }
-    const confirmCopy = () => {
-      setUi((u) => ({ ...u, shareToast: true }));
-      setTimeout(() => setUi((u) => ({ ...u, shareToast: false })), TOAST_MS);
-    };
-    if (nav?.clipboard?.writeText) {
-      nav.clipboard.writeText(url).then(confirmCopy, confirmCopy);
-    } else {
-      confirmCopy();
-    }
-  }, [questId, snapshot.name, setUi]);
-
-  // Prefetch the catalog when the player reaches the finale, so «что дальше»
-  // reveals the next quests without a loading flash.
-  useEffect(() => {
-    if (onFinale) loadCatalog();
-  }, [onFinale, loadCatalog]);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(go, TOAST_MS);
+  }, [recordRating, shownRating, ui.reviewText, router]);
 
   // Re-mirror per-fact queue status into state (chips + pending counts).
   const refreshQueueStatus = useCallback(async (key: string) => {
@@ -496,6 +489,7 @@ export default function QuestPlayerClient({
           stepIdx: opened.attempt.last_step_idx,
           attemptKey: opened.attempt.attempt_key,
           attemptCreatedAt: opened.attempt.created_at,
+          attemptCompletedAt: opened.completedAt,
           queueStatus: opened.queueStatus,
           showStartGate: opened.showStartGate,
         });
@@ -600,10 +594,10 @@ export default function QuestPlayerClient({
         hintRevealed: proj.revealedHints.includes(stepIdx),
         wrong: ui.wrong,
         answer: ui.answer,
-        rating: ui.rating || latestRating(facts),
+        rating: shownRating,
         reviewText: ui.reviewText,
         coinsEarned: runEarned,
-        time: formatElapsed(attemptCreatedAt),
+        time: elapsedLabel(attemptCreatedAt, attemptCompletedAt),
       }}
       on={{
         next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
@@ -613,12 +607,9 @@ export default function QuestPlayerClient({
         buyHint: handleBuyHint,
         navigator: handleNavigator,
         play: () => { /* inline video playback lands with real media refs */ },
-        // Tapping a star only updates local state + shows the inline thanks;
-        // quest_rated (and its §11 bonuses) commit with the final value on the
-        // exit action — submit or skip, both run openCatalog.
-        rate: (n: number) => setUi((u) => ({ ...u, rating: n })),
+        rate: handleRate,
         reviewText: (v: string) => setUi((u) => ({ ...u, reviewText: v })),
-        onward: openCatalog,
+        onward: finish,
         // Chromeless finale: the floating back button lets the player reread
         // the last steps (view-only rewind; completion facts stay guarded).
         // No replay affordance here (§11) — restarting lives in the menu.
@@ -627,30 +618,11 @@ export default function QuestPlayerClient({
     />
   );
 
-  // Post-finale catalog of other published quests (thin metadata → cover + title
-  // + CTA). Picking one opens its player; share/home are the soft exits.
-  const body = ui.showCatalog ? (
-    <CatalogScreen
-      quests={nextQuestsForCatalog(published || [], questId)}
-      copy={COPY}
-      on={{
-        pick: (id) => router.push(`/quest/${encodeURIComponent(id)}`),
-        share: handleShare,
-        home: () => router.push('/'),
-        back: () => setUi((u) => ({ ...u, showCatalog: false })),
-      }}
-    />
-  ) : stepBody;
-
-  // The final and catalog screens are chromeless (no top bar) — matching the design.
-  const showTop = !onFinale && !ui.showCatalog;
+  // The final screen is chromeless (no top bar) — matching the design.
+  const showTop = !onFinale;
 
   return (
-    <PlayerFrame
-      tw={{ anims: true }}
-      screenLabel={ui.showCatalog ? 'player-catalog' : `player-step-${stepIdx}`}
-      theme={theme}
-    >
+    <PlayerFrame tw={{ anims: true }} screenLabel={`player-step-${stepIdx}`} theme={theme}>
       {showTop && (
         <>
           <TopBar
@@ -666,11 +638,8 @@ export default function QuestPlayerClient({
           </div>
         </>
       )}
-      <div className="p-scroll">{body}</div>
+      <div className="p-scroll">{stepBody}</div>
       {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
-      {ui.shareToast && (
-        <div className="p-toast" role="status"><PCheck size={18} /><span>{COPY.shareCopied || 'Ссылка скопирована'}</span></div>
-      )}
 
       {hintStep?.supporting?.hint && (
         <HintPopup

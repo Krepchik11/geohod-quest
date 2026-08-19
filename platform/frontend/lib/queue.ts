@@ -174,6 +174,11 @@ export interface OpenedAttempt {
   queueStatus: Record<string, 'pending' | 'sent'>;
   /** SPEC start gate — shown only for an in-progress (hydrated, not-yet-completed) attempt. */
   showStartGate: boolean;
+  /** When the attempt finished (the completion fact's own queue timestamp), or
+   *  null while it is still running. The finale's «в пути» stat is the gap
+   *  between this and `attempt.created_at`, so it is read back from storage
+   *  instead of being re-measured against the clock on every render. */
+  completedAt: string | null;
 }
 
 /**
@@ -198,11 +203,13 @@ export async function openAttempt(
     : await ensureActiveAttempt(questId, snapshotId);
   const rows = await getFacts(attempt.attempt_key);
   const facts = rows.map((r) => r.fact);
+  const completed = rows.find((r) => r.fact.type === 'attempt_completed');
   return {
     attempt,
     facts,
     queueStatus: Object.fromEntries(rows.map((r) => [r.key, r.status])),
-    showStartGate: rows.length > 0 && !facts.some((f) => f.type === 'attempt_completed'),
+    showStartGate: rows.length > 0 && !completed,
+    completedAt: completed?.queued_at ?? null,
   };
 }
 
