@@ -6,6 +6,8 @@ import { storeBundle, precacheBundleMedia } from '../../lib/download';
 import { api } from '../../lib/api';
 import { currentUserId } from '../../lib/identity';
 import { resolveGate, type GateResolution } from '../../lib/bundle-resolver';
+import { serverQuestBonuses } from '../../lib/player-stats';
+import type { OncePerQuestType } from '../../lib/shared-model';
 import { PlayerFrame, Flourish } from '../player/PlayerComponents';
 import QuestPlayerClient from './QuestPlayerClient';
 
@@ -21,6 +23,12 @@ type GateState = { kind: 'loading' } | GateResolution;
  */
 export default function BundleGate({ questId }: { questId: string }) {
   const [state, setState] = useState<GateState>({ kind: 'loading' });
+  // What the server says this quest already paid this player, on ANY device
+  // (issue #117). Asked here, in parallel with resolution, and never waited
+  // for: the gate's whole point is that a downloaded quest opens without the
+  // network. Until the answer lands — and offline, where it never does — the
+  // player withholds only what its own logs prove, which is what it did before.
+  const [paidBonuses, setPaidBonuses] = useState<readonly OncePerQuestType[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,9 +43,18 @@ export default function BundleGate({ questId }: { questId: string }) {
       const restart =
         typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).get('restart') === '1';
+      const online = typeof navigator === 'undefined' || navigator.onLine;
+      if (online) {
+        void api.questBonuses(questId).then(
+          (answer) => {
+            if (!cancelled) setPaidBonuses(serverQuestBonuses(answer));
+          },
+          () => {},
+        );
+      }
       const resolution = await resolveGate(questId, restart, {
         userId: currentUserId(),
-        online: typeof navigator === 'undefined' || navigator.onLine,
+        online,
         getBundle: (id, userId) => api.getBundle(id, userId),
         persist: async (wire) => {
           const row = await storeBundle(wire);
@@ -88,7 +105,14 @@ export default function BundleGate({ questId }: { questId: string }) {
       />
     );
   }
-  return <QuestPlayerClient snapshot={state.snapshot} questId={questId} snapshotId={state.snapshotId} />;
+  return (
+    <QuestPlayerClient
+      snapshot={state.snapshot}
+      questId={questId}
+      snapshotId={state.snapshotId}
+      paidBonuses={paidBonuses}
+    />
+  );
 }
 
 /** Terminal gate states in the player's paper language (frame, flourish, outline button). */

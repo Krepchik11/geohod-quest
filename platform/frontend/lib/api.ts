@@ -36,6 +36,7 @@ import type {
   ProductPageWire,
   PublicFeatures,
   PublishedQuestWire,
+  QuestBonusesWire,
   ReviewHideBody,
   ReviewsPageWire,
 } from './generated';
@@ -264,6 +265,11 @@ export const api = {
   // Bundle download primitive: latest frozen snapshot JSON, grant-gated (403 without grant).
   getBundle: (questId: string, userId: string): Promise<BundleWire> =>
     apiFetch<BundleWire>(`/api/quests/${questId}/bundle?user_id=${encodeURIComponent(userId)}`),
+
+  // What this quest has already paid the caller, on any of their devices — the
+  // player asks before it plays (issue #117).
+  questBonuses: (questId: string): Promise<QuestBonusesWire> =>
+    apiFetch<QuestBonusesWire>(`/api/quests/${questId}/bonuses`),
 
   appendFacts: (attemptId: string, facts: unknown[]) =>
     apiFetch(`/api/attempts/${attemptId}/facts`, { method: 'POST', body: JSON.stringify({ facts }) }),

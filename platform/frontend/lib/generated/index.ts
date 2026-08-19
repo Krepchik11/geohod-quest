@@ -34,6 +34,7 @@ export type { PlayerStats } from './PlayerStats';
 export type { ProductPageWire } from './ProductPageWire';
 export type { PublicFeatures } from './PublicFeatures';
 export type { PublishedQuestWire } from './PublishedQuestWire';
+export type { QuestBonusesWire } from './QuestBonusesWire';
 export type { RedirectPayment } from './RedirectPayment';
 export type { ReviewHideBody } from './ReviewHideBody';
 export type { ReviewWire } from './ReviewWire';

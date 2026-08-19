@@ -101,7 +101,7 @@ const SHIFTED: QuestSnapshot = {
 };
 
 async function openAnswerStep(snapshot: QuestSnapshot = SNAPSHOT) {
-  render(<QuestPlayerClient snapshot={snapshot} questId="q-hint" snapshotId="snap-1" />);
+  render(<QuestPlayerClient snapshot={snapshot} questId="q-hint" snapshotId="snap-1" paidBonuses={[]} />);
   const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: 'начать квест' }));
   await screen.findByPlaceholderText('Введите ответ');
@@ -161,7 +161,7 @@ describe('hint during play', () => {
     hydration.facts = [PURCHASED_AT_STEP_1];
     hydration.lastStepIdx = 1;
     hydration.showStartGate = true; // an in-progress attempt hydrates behind the gate
-    render(<QuestPlayerClient snapshot={SNAPSHOT} questId="q-hint" snapshotId="snap-1" />);
+    render(<QuestPlayerClient snapshot={SNAPSHOT} questId="q-hint" snapshotId="snap-1" paidBonuses={[]} />);
     const user = userEvent.setup();
     // An in-progress attempt hydrates behind the start gate.
     await user.click(await screen.findByRole('button', { name: 'продолжить попытку' }));

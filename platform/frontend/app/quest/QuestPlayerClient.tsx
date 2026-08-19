@@ -2,7 +2,7 @@
 
 import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Fact, GameStep, QuestSnapshot } from '../../lib/shared-model';
+import type { Fact, GameStep, OncePerQuestType, QuestSnapshot } from '../../lib/shared-model';
 import { projectState, latestRating } from '../../lib/shared-model';
 
 import {
@@ -181,11 +181,17 @@ export default function QuestPlayerClient({
   snapshot,
   questId,
   snapshotId,
+  paidBonuses,
 }: {
   snapshot: QuestSnapshot;
   questId: string;
   /** Snapshot identity for attempt binding (bundle snapshot_id). */
   snapshotId: string;
+  /** Once-ever bonuses the SERVER says this quest already paid — read by the
+   *  gate before this mounts, because a device that never played the quest has
+   *  nothing in its own queue to read (issue #117). Empty when the answer is
+   *  unknown (offline, or the request failed): unknown withholds nothing. */
+  paidBonuses: readonly OncePerQuestType[];
 }) {
   const router = useRouter();
   const online = useOnline();
@@ -231,9 +237,13 @@ export default function QuestPlayerClient({
   // already-earned completion bonus, so the finale never claims coins the wallet did
   // not receive.
   const priorWallet = useMemo(() => foldLocalPlayerStats(priorLogs).balance, [priorLogs]);
-  // What this quest already paid: the engine withholds exactly what the wallet
-  // above withholds, because both read these logs.
-  const earnedBonuses = useMemo(() => earnedQuestBonuses(priorLogs, questId), [priorLogs, questId]);
+  // What this quest already paid — this device's logs plus what the server knows
+  // of the others. A bonus named here is never minted again, so the wallet above
+  // never has a second copy to collapse.
+  const earnedBonuses = useMemo(
+    () => earnedQuestBonuses(priorLogs, questId, paidBonuses),
+    [priorLogs, questId, paidBonuses]
+  );
   const runEarned = walletBalance - priorWallet;
 
   /** Pending (unsynced) fact count — internal only: gates the debounced silent flush. */
