@@ -12,7 +12,7 @@
  *
  * The fold MUST match the backend's semantics so the two agree once synced:
  *  - balance is the signed sum of coins_delta across ALL of a player's attempts;
- *  - the once-ever bonuses (completion, rating, comment — ONCE_PER_QUEST_TYPES)
+ *  - the once-ever bonuses (completion, rating, comment — isOncePerQuest)
  *    are counted at most ONCE per quest, because the server dedups them
  *    once-per-(player, quest) at append time — locally each replayed attempt
  *    still carries its own bonus facts, so we collapse them here;
@@ -21,7 +21,7 @@
  *    attempt;
  *  - a quest counts as completed when ANY of its attempts holds attempt_completed.
  */
-import { ONCE_PER_QUEST_TYPES, type Fact } from './shared-model';
+import { isOncePerQuest, type Fact, type OncePerQuestType } from './shared-model';
 import { getFacts, listAttempts } from './queue';
 
 /** One attempt's fact log tagged with its quest — the fold's input unit. */
@@ -61,9 +61,9 @@ export function foldLocalPlayerStats(logs: AttemptLog[]): PlayerStatsFold {
   let balance = 0;
   const completed: string[] = [];
   for (const [quest_id, facts] of factsByQuest) {
-    const counted = new Set<Fact['type']>();
+    const counted = new Set<OncePerQuestType>();
     for (const f of facts) {
-      if (ONCE_PER_QUEST_TYPES.has(f.type)) {
+      if (isOncePerQuest(f.type)) {
         if (counted.has(f.type)) continue; // once-per-quest, matching the server
         counted.add(f.type);
       }
@@ -75,15 +75,37 @@ export function foldLocalPlayerStats(logs: AttemptLog[]): PlayerStatsFold {
   return { balance, completed_quest_ids: completed };
 }
 
-/** Gather one log per attempt (active AND superseded) straight from the queue. */
-export async function gatherLocalAttemptLogs(): Promise<AttemptLog[]> {
-  const attempts = await listAttempts();
-  const logs: AttemptLog[] = [];
-  for (const a of attempts) {
-    const facts = (await getFacts(a.attempt_key)).map((r) => r.fact);
-    logs.push({ quest_id: a.quest_id, facts, created_at: a.created_at });
+/**
+ * What this quest has already paid the player, on ANY attempt — the engine's
+ * input for the same rule (`PlayCtx.earnedBonuses`). Folded from the logs the
+ * wallet folds, so the two cannot disagree (issue #114).
+ */
+export function earnedQuestBonuses(logs: AttemptLog[], questId: string): Set<OncePerQuestType> {
+  const earned = new Set<OncePerQuestType>();
+  for (const log of logs) {
+    if (log.quest_id !== questId) continue;
+    for (const f of log.facts) if (isOncePerQuest(f.type)) earned.add(f.type);
   }
-  return logs;
+  return earned;
+}
+
+/** One log per stored attempt (active AND superseded), minus `exceptKey`. The
+ *  reads are independent, so they run together rather than one attempt at a
+ *  time — this sits on the player's mount path. */
+async function gatherAttemptLogs(exceptKey: string | null): Promise<AttemptLog[]> {
+  const attempts = (await listAttempts()).filter((a) => a.attempt_key !== exceptKey);
+  return Promise.all(
+    attempts.map(async (a) => ({
+      quest_id: a.quest_id,
+      facts: (await getFacts(a.attempt_key)).map((r) => r.fact),
+      created_at: a.created_at,
+    })),
+  );
+}
+
+/** Gather one log per attempt (active AND superseded) straight from the queue. */
+export function gatherLocalAttemptLogs(): Promise<AttemptLog[]> {
+  return gatherAttemptLogs(null);
 }
 
 /** §7.2 — per-quest completion details: date of the completing attempt and the
@@ -120,15 +142,8 @@ export function completedQuestDetails(logs: AttemptLog[]): Record<string, Comple
  * and spends without re-reading the active attempt's possibly-stale stored copy.
  * Passing a null key returns every attempt (no active attempt yet).
  */
-export async function gatherOtherAttemptLogs(activeKey: string | null): Promise<AttemptLog[]> {
-  const attempts = await listAttempts();
-  const logs: AttemptLog[] = [];
-  for (const a of attempts) {
-    if (a.attempt_key === activeKey) continue;
-    const facts = (await getFacts(a.attempt_key)).map((r) => r.fact);
-    logs.push({ quest_id: a.quest_id, facts });
-  }
-  return logs;
+export function gatherOtherAttemptLogs(activeKey: string | null): Promise<AttemptLog[]> {
+  return gatherAttemptLogs(activeKey);
 }
 
 /**

@@ -16,7 +16,12 @@ import {
   type PlayState,
 } from '../../lib/play-loop';
 import { queueFactSink } from '../../lib/fact-sink';
-import { foldLocalPlayerStats, gatherOtherAttemptLogs, type AttemptLog } from '../../lib/player-stats';
+import {
+  earnedQuestBonuses,
+  foldLocalPlayerStats,
+  gatherOtherAttemptLogs,
+  type AttemptLog,
+} from '../../lib/player-stats';
 import { elapsedLabel, toDesignStep } from '../../lib/design-step';
 import { stepAt, theme as snapshotTheme } from '../../lib/snapshot';
 import { api } from '../../lib/api';
@@ -98,6 +103,10 @@ interface PlayerState {
   showStartGate: boolean;
   /** Designed coin toast: positive = gift/bonus, negative = spend. */
   toast: { amount: number; narrative?: string } | null;
+  /** The queue has been read (or failed): true once the facts and the prior
+   *  attempts are known. Rules that fire by themselves wait for it — an engine
+   *  run against an unread log awards what the log would have withheld. */
+  hydrated: boolean;
 }
 
 type PlayerAction =
@@ -112,6 +121,7 @@ type PlayerAction =
       queueStatus: Record<string, 'pending' | 'sent'>;
       showStartGate: boolean;
     }
+  | { type: 'hydrateFailed' }
   | { type: 'dismissStartGate' }
   | { type: 'setQueueStatus'; status: Record<string, 'pending' | 'sent'> }
   | { type: 'setToast'; toast: PlayerState['toast'] };
@@ -124,6 +134,7 @@ const initialState: PlayerState = {
   queueStatus: {},
   showStartGate: false,
   toast: null,
+  hydrated: false,
 };
 
 function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
@@ -151,7 +162,10 @@ function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
         attemptCompletedAt: action.attemptCompletedAt,
         queueStatus: action.queueStatus,
         showStartGate: action.showStartGate,
+        hydrated: true,
       };
+    case 'hydrateFailed':
+      return { ...state, hydrated: true };
     case 'dismissStartGate':
       return { ...state, showStartGate: false };
     case 'setQueueStatus':
@@ -183,7 +197,7 @@ export default function QuestPlayerClient({
   // перекрашивается новой публикацией — как и всё остальное его содержимое.
   const theme = useMemo(() => snapshotTheme(snapshot), [snapshot]);
   const [state, dispatch] = useReducer(playerReducer, initialState);
-  const { play, attemptKey, attemptCreatedAt, attemptCompletedAt, queueStatus, showStartGate, toast } = state;
+  const { play, attemptKey, attemptCreatedAt, attemptCompletedAt, queueStatus, showStartGate, toast, hydrated } = state;
   const { facts, stepIdx, maxStepIdx, hintOfferPos, hintRevealPos } = play;
 
   // Coins: there is exactly ONE balance — the player's
@@ -194,7 +208,8 @@ export default function QuestPlayerClient({
   // earns and spends. foldLocalPlayerStats dedups every once-ever bonus
   // (completion, rating, comment) once-per-quest exactly as the server does, so
   // replaying a quest never re-credits them and the wallet never "jumps" or
-  // needs a correction popup.
+  // needs a correction popup. «Начать заново» reloads the page, so reading them
+  // once on mount is enough.
   const [priorLogs, setPriorLogs] = useState<AttemptLog[]>([]);
 
   // Guards the mount hydration to exactly one execution. Hydration is a
@@ -216,6 +231,9 @@ export default function QuestPlayerClient({
   // already-earned completion bonus, so the finale never claims coins the wallet did
   // not receive.
   const priorWallet = useMemo(() => foldLocalPlayerStats(priorLogs).balance, [priorLogs]);
+  // What this quest already paid: the engine withholds exactly what the wallet
+  // above withholds, because both read these logs.
+  const earnedBonuses = useMemo(() => earnedQuestBonuses(priorLogs, questId), [priorLogs, questId]);
   const runEarned = walletBalance - priorWallet;
 
   /** Pending (unsynced) fact count — internal only: gates the debounced silent flush. */
@@ -287,8 +305,9 @@ export default function QuestPlayerClient({
       // The quest-wide universal answer frozen in the snapshot and the
       // platform-wide one (admin flag+value).
       universalAnswers: [snapshot.universal_answer, globalUniversalAnswer],
+      earnedBonuses,
     }),
-    [steps, snapshot.universal_answer, globalUniversalAnswer]
+    [steps, snapshot.universal_answer, globalUniversalAnswer, earnedBonuses]
   );
 
   const stepHistory = useStepHistory(historyBackOn, {
@@ -387,8 +406,8 @@ export default function QuestPlayerClient({
   // The engine's own log guard makes a repeat enter_terminal a no-op.
   const onFinale = isTerminalStep(currentStep);
   useEffect(() => {
-    if (onFinale) runEvent({ type: 'enter_terminal' });
-  }, [onFinale, runEvent]);
+    if (hydrated && onFinale) runEvent({ type: 'enter_terminal' });
+  }, [hydrated, onFinale, runEvent]);
 
   // «Начать заново»: re-enter the gate with the restart intent so the fresh run
   // adopts the LATEST published version — resolution + version freeze live in one
@@ -483,6 +502,8 @@ export default function QuestPlayerClient({
       try {
         await migrateLegacyLocalStorage(questId, snapshotId, window.localStorage);
         const opened = await openAttempt(questId, snapshotId);
+        // Read before the hydrate below, so no rule ever runs without it (#114).
+        setPriorLogs(await gatherOtherAttemptLogs(opened.attempt.attempt_key).catch(() => []));
         dispatch({
           type: 'hydrate',
           facts: opened.facts,
@@ -495,6 +516,7 @@ export default function QuestPlayerClient({
         });
       } catch (err) {
         console.warn('queue hydration failed (in-memory only)', err);
+        dispatch({ type: 'hydrateFailed' });
       }
     })();
   }, [questId, snapshotId]);
@@ -505,19 +527,6 @@ export default function QuestPlayerClient({
     if (!attemptKey) return;
     void runFlush();
   }, [attemptKey, runFlush]);
-
-  // Load the prior slice of the cross-quest wallet (every attempt except the active
-  // one). Refires whenever the active attempt changes — including «пройти заново»,
-  // which supersedes the old attempt: it then folds into `priorLogs` so the wallet
-  // continues from its real value instead of resetting to 0.
-  useEffect(() => {
-    if (!attemptKey) return;
-    let alive = true;
-    gatherOtherAttemptLogs(attemptKey)
-      .then((logs) => { if (alive) setPriorLogs(logs); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [attemptKey]);
 
   // Flush shortly after new facts appear. Completion, the completion bonus, the
   // final gift and the finale rating all land as facts, and nothing else pushes

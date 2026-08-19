@@ -8,6 +8,7 @@ import { theme as snapshotTheme } from '../../lib/snapshot';
 import { latestRating, projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
   COMPLETION_BONUS,
+  NO_EARNED_BONUSES,
   hydratedPlayState,
   isTerminalStep,
   transition,
@@ -79,7 +80,12 @@ function TestPopup({ title, text, primary, ghost }: {
 function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: number; onNav: (msg: string) => void }) {
   const total = quest.steps.length;
   const clamp = (n: number) => Math.max(0, Math.min(n, total - 1));
-  const ctx: PlayCtx = { steps: quest.steps, deviceId: 'test-player', universalAnswers: [quest.universalAnswer] };
+  const ctx: PlayCtx = {
+    steps: quest.steps,
+    deviceId: 'test-player',
+    universalAnswers: [quest.universalAnswer],
+    earnedBonuses: NO_EARNED_BONUSES,
+  };
 
   // ONE rule state — the same engine the real player runs (lib/play-loop).
   // Старт прямо с «Поздравления» сразу даёт терминальный бонус (как в дизайне):

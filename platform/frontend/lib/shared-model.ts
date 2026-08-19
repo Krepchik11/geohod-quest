@@ -127,13 +127,17 @@ export interface QuestSnapshot {
 /**
  * Fact kinds awarded at most once EVER per (player, quest) — mirrors the
  * backend's `facts::once_per_quest`. The server enforces the line at append
- * time; local folds collapse replayed copies against this same list.
+ * time; the engine withholds them and local folds collapse replayed copies,
+ * all against this one list.
  */
-export const ONCE_PER_QUEST_TYPES = new Set<Fact['type']>([
-  'completion_bonus',
-  'rating_bonus',
-  'comment_bonus',
-]);
+const ONCE_PER_QUEST = ['completion_bonus', 'rating_bonus', 'comment_bonus'] as const;
+
+/** A fact kind from that list — what the engine withholds and the folds collapse. */
+export type OncePerQuestType = (typeof ONCE_PER_QUEST)[number];
+
+export function isOncePerQuest(type: Fact['type']): type is OncePerQuestType {
+  return (ONCE_PER_QUEST as readonly string[]).includes(type);
+}
 
 export interface Fact {
   type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated' | 'rating_bonus' | 'comment_bonus';

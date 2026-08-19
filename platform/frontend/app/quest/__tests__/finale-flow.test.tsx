@@ -15,6 +15,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Fact, QuestSnapshot } from '../../../lib/shared-model';
 
+/** Which run the mocked queue serves: a first clear reopened, or a replay of a
+ *  quest whose once-per-quest bonuses were already paid on an earlier attempt. */
+const run = vi.hoisted(() => ({ replay: false }));
+
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 
@@ -35,7 +39,10 @@ vi.mock('../../../lib/client-features', () => ({
 /** The REAL coin fold — the «монет собрано» tile is part of what is asserted. */
 vi.mock('../../../lib/player-stats', async () => {
   const real = await vi.importActual<typeof import('../../../lib/player-stats')>('../../../lib/player-stats');
-  return { foldLocalPlayerStats: real.foldLocalPlayerStats, gatherOtherAttemptLogs: vi.fn(async () => []) };
+  return {
+    ...real,
+    gatherOtherAttemptLogs: vi.fn(async () => (run.replay ? [{ quest_id: 'q-final', facts: PAID_BEFORE }] : [])),
+  };
 });
 
 vi.mock('../sound', () => ({ coinChime: vi.fn(), spendChime: vi.fn() }));
@@ -56,13 +63,7 @@ vi.mock('../../../lib/queue', async () => {
     appendFact: vi.fn(async (_key: string, fact: Fact) => {
       appended.push(fact);
     }),
-    openAttempt: vi.fn(async () => ({
-      attempt: { attempt_key: 'att-1', created_at: STARTED_AT, last_step_idx: 1 },
-      facts: COMPLETED_LOG,
-      queueStatus: {},
-      showStartGate: false,
-      completedAt: FINISHED_AT,
-    })),
+    openAttempt: vi.fn(async () => (run.replay ? FRESH_ATTEMPT : REOPENED_ATTEMPT)),
   };
 });
 
@@ -114,6 +115,31 @@ const COMPLETED_LOG: Fact[] = [
   },
 ];
 
+const bonus = (type: Fact['type']): Fact => ({
+  type,
+  step_position: 1,
+  submitted_value: null,
+  local_is_correct: true,
+  coins_delta: 5,
+  note: null,
+  device_id: 'dev-test',
+});
+
+/** An EARLIER attempt at the same quest: every once-per-quest bonus already paid. */
+const PAID_BEFORE: Fact[] = [...COMPLETED_LOG, bonus('rating_bonus'), bonus('comment_bonus')];
+
+/** Reopening the finished attempt — what every test but the replay one serves. */
+const REOPENED_ATTEMPT = {
+  attempt: { attempt_key: 'att-1', created_at: STARTED_AT, last_step_idx: 1 },
+  facts: COMPLETED_LOG,
+  queueStatus: {},
+  showStartGate: false,
+  completedAt: FINISHED_AT,
+};
+
+/** The replay: a new attempt on the finale, its log still empty. */
+const FRESH_ATTEMPT = { ...REOPENED_ATTEMPT, facts: [] as Fact[], completedAt: null };
+
 async function openFinale() {
   render(<QuestPlayerClient snapshot={SNAPSHOT} questId="q-final" snapshotId="snap-1" />);
   await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
@@ -126,6 +152,7 @@ const stat = (label: string) =>
 beforeEach(() => {
   appended.length = 0;
   push.mockClear();
+  run.replay = false;
 });
 
 describe('the finale reports the attempt, not the clock (#111)', () => {
@@ -175,6 +202,23 @@ describe('the finale pays the review as it happens (#113)', () => {
     // the animation is still on screen — the player has not been sent away yet
     expect(push).not.toHaveBeenCalled();
     await waitFor(() => expect(push).toHaveBeenCalledWith('/#shop'), { timeout: 3000 });
+  });
+});
+
+describe('a replay promises only what the wallet will actually pay (#114)', () => {
+  it('re-finishing and re-rating a quest mints no second bonus and animates nothing', async () => {
+    run.replay = true;
+    const user = await openFinale();
+
+    // The attempt is recorded again; the once-per-quest bonus is not.
+    expect(appended.map((f) => f.type)).toEqual(['attempt_completed']);
+    expect(document.querySelector('.p-toast')).toBeNull();
+    expect(stat('монет собрано').textContent).toContain('0');
+
+    await user.click(screen.getByRole('button', { name: '5 звёзд' }));
+    expect(document.querySelector('.p-toast')).toBeNull();
+    expect(appended.some((f) => f.type === 'rating_bonus')).toBe(false);
+    expect(stat('монет собрано').textContent).toContain('0');
   });
 });
 
