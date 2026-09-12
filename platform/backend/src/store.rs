@@ -849,6 +849,8 @@ pub const MAX_CODE_ATTEMPTS: u32 = 5;
 pub struct InMemoryAuthStore {
     users: HashMap<String, UserAccount>,
     email_index: HashMap<String, String>,
+    /// Open sessions keyed by sha256 of the bearer token (never the token —
+    /// [`crate::auth::session_hash`]), valued by the account they belong to.
     sessions: HashMap<String, String>,
     /// Single-use auth tokens keyed by sha256(token): reset/confirm (§6).
     auth_tokens: HashMap<String, AuthTokenRecord>,
@@ -985,21 +987,34 @@ impl InMemoryAuthStore {
         accounts
     }
 
-    /// Store an opaque session token for the player.
-    pub fn create_session(&mut self, token: &str, user_id: &str) {
-        self.sessions.insert(token.to_string(), user_id.to_string());
+    /// Open a session for the player. The key is [`crate::auth::session_hash`]
+    /// of the token, never the token — see the `sessions` field.
+    pub fn create_session(&mut self, token_hash: &str, user_id: &str) {
+        self.sessions
+            .insert(token_hash.to_string(), user_id.to_string());
     }
 
-    /// Resolve a session token to its player id.
-    pub fn get_session(&self, token: &str) -> Option<String> {
-        self.sessions.get(token).cloned()
+    /// Resolve a session to its player id.
+    pub fn get_session(&self, token_hash: &str) -> Option<String> {
+        self.sessions.get(token_hash).cloned()
     }
 
-    /// The account behind a session token in one step — mirror of the Postgres
+    /// The account behind a session in one step — mirror of the Postgres
     /// single-JOIN path. An anonymous session (no account row) yields `None`.
-    pub fn account_for_session(&self, token: &str) -> Option<UserAccount> {
-        let user_id = self.sessions.get(token)?;
+    pub fn account_for_session(&self, token_hash: &str) -> Option<UserAccount> {
+        let user_id = self.sessions.get(token_hash)?;
         self.users.get(user_id).cloned()
+    }
+
+    /// Sign the account out everywhere, optionally sparing ONE session (the
+    /// device performing the change). Every credential change calls this: a
+    /// password the owner just replaced must not leave a stolen session alive.
+    /// Returns how many sessions were dropped.
+    pub fn delete_sessions_for_user(&mut self, user_id: &str, keep: Option<&str>) -> usize {
+        let before = self.sessions.len();
+        self.sessions
+            .retain(|hash, owner| owner != user_id || keep == Some(hash.as_str()));
+        before - self.sessions.len()
     }
 
     /// §7.3 «Изменить имя» — set/clear the display name.
@@ -1113,7 +1128,7 @@ impl InMemoryAuthStore {
         if let Some(email) = &account.email {
             self.email_index.remove(email);
         }
-        self.sessions.retain(|_, p| p != user_id);
+        self.delete_sessions_for_user(user_id, None);
         self.auth_tokens.retain(|_, r| r.user_id != user_id);
         self.identities.retain(|_, s| s.identity.user_id != user_id);
         true
@@ -1574,7 +1589,14 @@ pub trait AuthStore: Send + Sync {
     async fn list_users_with_roles(&self, roles: &[&str]) -> Result<Vec<UserAccount>, AppError>;
 
     /// See [`InMemoryAuthStore::create_session`].
-    async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError>;
+    async fn create_session(&self, token_hash: &str, user_id: &str) -> Result<(), AppError>;
+
+    /// See [`InMemoryAuthStore::delete_sessions_for_user`].
+    async fn delete_sessions_for_user(
+        &self,
+        user_id: &str,
+        keep: Option<&str>,
+    ) -> Result<usize, AppError>;
 
     /// See [`InMemoryAuthStore::set_display_name`].
     async fn set_display_name(
@@ -1620,10 +1642,10 @@ pub trait AuthStore: Send + Sync {
     async fn delete_user(&self, user_id: &str) -> Result<bool, AppError>;
 
     /// See [`InMemoryAuthStore::get_session`].
-    async fn get_session(&self, token: &str) -> Result<Option<String>, AppError>;
+    async fn get_session(&self, token_hash: &str) -> Result<Option<String>, AppError>;
 
     /// See [`InMemoryAuthStore::account_for_session`].
-    async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError>;
+    async fn account_for_session(&self, token_hash: &str) -> Result<Option<UserAccount>, AppError>;
 
     /// See [`InMemoryAuthStore::find_identity`].
     async fn find_identity(
@@ -1723,9 +1745,17 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         Ok(lock(self, "auth")?.list_users_with_roles(roles))
     }
 
-    async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
-        lock(self, "auth")?.create_session(token, user_id);
+    async fn create_session(&self, token_hash: &str, user_id: &str) -> Result<(), AppError> {
+        lock(self, "auth")?.create_session(token_hash, user_id);
         Ok(())
+    }
+
+    async fn delete_sessions_for_user(
+        &self,
+        user_id: &str,
+        keep: Option<&str>,
+    ) -> Result<usize, AppError> {
+        Ok(lock(self, "auth")?.delete_sessions_for_user(user_id, keep))
     }
 
     async fn set_display_name(
@@ -1780,12 +1810,12 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         Ok(lock(self, "auth")?.delete_user(user_id))
     }
 
-    async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
-        Ok(lock(self, "auth")?.get_session(token))
+    async fn get_session(&self, token_hash: &str) -> Result<Option<String>, AppError> {
+        Ok(lock(self, "auth")?.get_session(token_hash))
     }
 
-    async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
-        Ok(lock(self, "auth")?.account_for_session(token))
+    async fn account_for_session(&self, token_hash: &str) -> Result<Option<UserAccount>, AppError> {
+        Ok(lock(self, "auth")?.account_for_session(token_hash))
     }
 
     async fn find_identity(

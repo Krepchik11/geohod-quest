@@ -35,7 +35,19 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
-tower-http = { version = "0.6.11", features = ["trace", "cors", "timeout"] }
+tower-http = { version = "0.6.11", features = [
+    "trace",
+    "cors",
+    "timeout",
+    # Negotiated response compression. The quest bundle is repetitive JSON and
+    # is downloaded on a phone, on the street; br when the client takes it,
+    # gzip otherwise. The default predicate already skips images and tiny
+    # bodies, so content-addressed media is passed through untouched.
+    "compression-br",
+    "compression-gzip",
+    # X-Content-Type-Options on every response (see build_router).
+    "set-header",
+] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # Quest export archive (manifest + quest.json + media/*). Deflate only — no

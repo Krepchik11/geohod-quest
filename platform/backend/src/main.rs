@@ -16,7 +16,7 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::{
     Router,
-    http::{StatusCode, header},
+    http::{HeaderName, HeaderValue, StatusCode, header},
 };
 use dotenvy::dotenv;
 
@@ -152,6 +152,22 @@ fn build_router(state: AppState) -> Router {
         .merge(handlers::admin::router())
         .merge(handlers::auth::router())
         .layer(TraceLayer::new_for_http())
+        // This origin serves author-uploaded bytes (`/api/media/{hash}`) beside
+        // JSON the app trusts. Browser content sniffing can decide those bytes
+        // are a document and execute them HERE, on the API's own origin; this
+        // forbids the guess. A layer, not a per-route header, so no future route
+        // can be added without it.
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        // Negotiated, so it can never break a client: a request without
+        // `Accept-Encoding` is answered exactly as before. The payloads that
+        // matter here are JSON — the frozen quest bundle above all, downloaded
+        // over mobile data by every offline install — and tower-http's default
+        // predicate already leaves already-compressed types (images) and tiny
+        // bodies alone, so content-addressed media is passed through untouched.
+        .layer(tower_http::compression::CompressionLayer::new())
         .layer(build_cors_layer(&state.config.cors_allowed_origins))
         .with_state(state)
 }
@@ -347,7 +363,7 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::auth::MAIL_SEND_LIMIT;
+    use crate::handlers::auth::{LOGIN_ATTEMPT_LIMIT, MAIL_SEND_LIMIT};
     use crate::store::{ConstructorQuest, PublishedMeta};
     use axum::{
         body::Body,
@@ -915,7 +931,7 @@ mod tests {
             .expect("identity");
         state
             .auth
-            .create_session("tok-g", "dev:g")
+            .create_session(&auth::session_hash("tok-g"), "dev:g")
             .await
             .expect("session");
         let (st, me) =
@@ -1243,6 +1259,34 @@ mod tests {
 
     async fn get_json(app: &Router, uri: &str) -> (StatusCode, Value) {
         get_json_h(app, uri, &[]).await
+    }
+
+    /// A raw GET: status, the `content-encoding` the server chose, and the
+    /// number of bytes actually on the wire. Compression is invisible to
+    /// [`get_json_h`] (the body is already decoded by then), so it needs its own
+    /// door.
+    async fn get_raw(
+        app: &Router,
+        uri: &str,
+        extra_headers: &[(&str, &str)],
+    ) -> (StatusCode, Option<String>, usize) {
+        let mut builder = Request::builder().uri(uri);
+        for (name, value) in extra_headers {
+            builder = builder.header(*name, *value);
+        }
+        let resp = app
+            .clone()
+            .oneshot(builder.body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let status = resp.status();
+        let encoding = resp
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let bytes = resp.into_body().collect().await.expect("body").to_bytes();
+        (status, encoding, bytes.len())
     }
 
     fn fact_json(kind: FactKind, step: i32, delta: i32, device: &str) -> Value {
@@ -4155,6 +4199,87 @@ mod tests {
         assert!(first >= last, "newest first across pages");
     }
 
+    /// The quest bundle is the biggest thing this API sends and the one every
+    /// offline install downloads — a frozen snapshot of highly repetitive JSON.
+    /// Shipping it raw wastes the player's mobile data on the street, which is
+    /// exactly where they are standing. A client that says it can take gzip gets
+    /// gzip; one that says nothing still gets plain JSON, so no cached PWA
+    /// client can be broken by this.
+    #[tokio::test]
+    async fn json_responses_are_compressed_when_the_client_asks() {
+        let app = test_app();
+        let ids = Ids::new("gzip");
+        // Repetitive step text — what a real quest body looks like, and what
+        // makes an uncompressed transfer wasteful rather than merely large.
+        let steps: Vec<Value> = (0..40)
+            .map(|i| {
+                json!({
+                    "position": i,
+                    "template": "riddle",
+                    "title": "Найдите следующую точку маршрута",
+                    "body": "Идите вдоль набережной до старого маяка и найдите табличку.",
+                })
+            })
+            .collect();
+        let (_, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1,
+                   "snapshot": {"golden_id": ids.snap1, "steps": steps}}),
+        )
+        .await;
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let uri = format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player);
+        let (st, encoding, plain) = get_raw(&app, &uri, &[]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(encoding, None, "a client that never asked gets plain JSON");
+
+        let (st, encoding, compressed) = get_raw(&app, &uri, &[("accept-encoding", "gzip")]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(encoding.as_deref(), Some("gzip"));
+        assert!(
+            compressed * 4 < plain,
+            "repetitive quest JSON must compress hard: {compressed} vs {plain} bytes"
+        );
+    }
+
+    /// This origin serves bytes an author uploaded (`/api/media/{hash}`) next to
+    /// JSON the app trusts. A browser that is allowed to guess a content type can
+    /// decide an "image" is a document and run it here, on the API's own origin.
+    /// `nosniff` is what forbids the guess, and it belongs on every response —
+    /// one layer, not a header a future route can forget.
+    #[tokio::test]
+    async fn every_response_forbids_content_type_sniffing() {
+        let app = test_app();
+        for uri in ["/health", "/api/quests", "/api/features"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(
+                resp.headers()
+                    .get("x-content-type-options")
+                    .and_then(|v| v.to_str().ok()),
+                Some("nosniff"),
+                "{uri}"
+            );
+        }
+    }
+
     /// §6.1 — identify is rate-limited per email (fixed window).
     #[tokio::test]
     async fn identify_rate_limited() {
@@ -4169,6 +4294,55 @@ mod tests {
             st,
             StatusCode::TOO_MANY_REQUESTS,
             "11th probe in the window"
+        );
+    }
+
+    /// Login is the one endpoint an attacker can call with a guess. Without a
+    /// bound it is an unlimited password oracle, and every call also buys a full
+    /// argon2 hash of the server's CPU. The budget is per email and is spent by
+    /// FAILURES only — a person who signs in successfully has theirs handed back,
+    /// so no amount of ordinary use can lock an account out.
+    #[tokio::test]
+    async fn login_failures_are_rate_limited_and_success_clears_the_budget() {
+        let app = test_app();
+        let ids = Ids::new("loginlimit");
+        let (email, _) = register(&app, &ids.player).await;
+        let guess = |password: &'static str| {
+            let body = json!({ "email": email, "password": password });
+            async { post_json(&app, "/api/auth/login", body).await.0 }
+        };
+
+        // Spend the budget down to its last unit, then cash it in with the real
+        // password: the счётчик resets, so the next wrong guess starts over.
+        for i in 1..LOGIN_ATTEMPT_LIMIT {
+            assert_eq!(
+                guess("wrongwrongwrong").await,
+                StatusCode::UNAUTHORIZED,
+                "guess #{i}"
+            );
+        }
+        assert_eq!(
+            guess("hunter2hunter2").await,
+            StatusCode::OK,
+            "the owner still gets in"
+        );
+
+        for i in 1..=LOGIN_ATTEMPT_LIMIT {
+            assert_eq!(
+                guess("wrongwrongwrong").await,
+                StatusCode::UNAUTHORIZED,
+                "post-reset guess #{i}"
+            );
+        }
+        assert_eq!(
+            guess("wrongwrongwrong").await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "the budget runs out"
+        );
+        assert_eq!(
+            guess("hunter2hunter2").await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "exhausted means exhausted — the right password does not step past the gate"
         );
     }
 
@@ -4214,6 +4388,88 @@ mod tests {
     /// is email-scoped, dies after MAX_CODE_ATTEMPTS verify attempts, and a
     /// fresh recover invalidates BOTH prior credentials (latest mail wins —
     /// with codes in play, N outstanding credentials would be N× guessable).
+    /// Changing the password is the move a person makes when they think someone
+    /// else is in their account, and a password reset is the move they make when
+    /// they have already lost it. Both must actually END the other sessions —
+    /// otherwise the stolen bearer token outlives the credential it came from,
+    /// and sessions never expire, so it outlives it forever.
+    ///
+    /// The device doing the change keeps ITS session: signing the owner out of
+    /// the tab they are standing in is not security, it is a bug report.
+    async fn scenario_credential_change_revokes_sessions(
+        app: &Router,
+        mails: &Mutex<Vec<mailer::OutgoingMail>>,
+        ids: &Ids,
+    ) {
+        let me = |token: &str| {
+            let bearer = format!("Bearer {token}");
+            async move {
+                get_json_h(app, "/api/users/me", &[("authorization", &bearer)])
+                    .await
+                    .0
+            }
+        };
+
+        // Two devices on one account: the phone registered, the laptop logged in.
+        let (email, phone) = register(app, &ids.player).await;
+        let (st, v) = post_json(
+            app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "hunter2hunter2" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let laptop = v["token"].as_str().expect("token").to_string();
+        assert_eq!(me(&phone).await, StatusCode::OK);
+        assert_eq!(me(&laptop).await, StatusCode::OK);
+
+        // The laptop changes the password: the phone's session dies, the laptop's lives.
+        let (st, _) = post_json_h(
+            app,
+            "/api/auth/change-password",
+            json!({ "current_password": "hunter2hunter2", "new_password": "hunter3hunter3" }),
+            &[("authorization", &format!("Bearer {laptop}"))],
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            me(&phone).await,
+            StatusCode::UNAUTHORIZED,
+            "the other device is signed out by the password change"
+        );
+        assert_eq!(
+            me(&laptop).await,
+            StatusCode::OK,
+            "the device that changed the password stays signed in"
+        );
+
+        // A reset is recovery from loss: every session goes, including the one
+        // that asked, and the reset's own response is the only way back in.
+        let confirm_token = mailed_token(mails, &email);
+        let (st, _) = post_json(app, "/api/auth/confirm", json!({ "token": confirm_token })).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json(app, "/api/auth/recover", json!({ "email": email })).await;
+        assert_eq!(st, StatusCode::OK);
+        let reset_token = mailed_token(mails, &email);
+        let (st, v) = post_json(
+            app,
+            "/api/auth/reset",
+            json!({ "token": reset_token, "password": "hunter4hunter4" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            me(&laptop).await,
+            StatusCode::UNAUTHORIZED,
+            "a reset ends every session that existed before it"
+        );
+        assert_eq!(
+            me(v["token"].as_str().expect("token")).await,
+            StatusCode::OK,
+            "the reset hands back a working session"
+        );
+    }
+
     async fn scenario_reset_by_code(
         app: &Router,
         mails: &Mutex<Vec<mailer::OutgoingMail>>,
@@ -5479,6 +5735,9 @@ mod tests {
         app: Router,
         mails: std::sync::Arc<Mutex<Vec<mailer::OutgoingMail>>>,
         run: u64,
+        /// The same pool the router runs on — for the few assertions that are
+        /// about what is IN the database, not about what the API answers.
+        pool: sqlx::PgPool,
     }
 
     async fn pg_harness(test: &str) -> Option<PgHarness> {
@@ -5499,9 +5758,14 @@ mod tests {
             .run(&pool)
             .await
             .expect("run migrations");
-        let (app, mails) = pg_app(pool).await;
+        let (app, mails) = pg_app(pool.clone()).await;
         let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
-        Some(PgHarness { app, mails, run })
+        Some(PgHarness {
+            app,
+            mails,
+            run,
+            pool,
+        })
     }
 
     /// ONE scenario list, BOTH backends. Each row expands to an in-memory
@@ -5597,6 +5861,7 @@ mod tests {
         product_page_payload = ids scenario_product_page / "product";
         auth_v2_full_flow = mails scenario_auth_v2 / "authv2";
         reset_by_code_alongside_link = mails scenario_reset_by_code / "resetcode";
+        credential_change_revokes_other_sessions = mails scenario_credential_change_revokes_sessions / "revoke";
         change_email_confirms_on_the_new_address = mails scenario_change_email / "chmail";
         bad_payload_rejected_with_4xx = ids scenario_bad_payload / "bad";
         migration_idempotent = key scenario_migration_idempotent / "mig";
@@ -5604,6 +5869,57 @@ mod tests {
         auth_enforcement_two_tier = ids scenario_auth_enforcement / "enforce";
         player_stats_cross_attempt_fold = ids scenario_player_stats / "stats";
         payment_ref_audited_on_grants = ids scenario_payment_ref_audit / "pay";
+    }
+
+    /// A database leak must not hand out working logins. `auth_tokens` already
+    /// stores only sha256 of the mailed reset link and code; a session token is
+    /// the SAME kind of secret — a bearer credential — so the `sessions` row
+    /// keys on sha256(token) too. The token the client holds appears nowhere in
+    /// storage, and nothing about that is visible to the client.
+    #[tokio::test]
+    async fn pg_sessions_are_stored_hashed() {
+        let Some(h) = pg_harness("pg_sessions_are_stored_hashed").await else {
+            return;
+        };
+        let user = format!("dev:sesshash-{}", h.run);
+        let (st, v) = post_json(
+            &h.app,
+            "/api/auth/register",
+            json!({
+                "user_id": user,
+                "email": format!("{user}@example.com"),
+                "password": "hunter2hunter2",
+            }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let raw = v["token"].as_str().expect("token").to_string();
+
+        let count = |key: String| {
+            let pool = h.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sessions WHERE token_hash = $1")
+                    .bind(key)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("count sessions")
+            }
+        };
+        assert_eq!(
+            count(raw.clone()).await,
+            0,
+            "the raw token must not be stored"
+        );
+        assert_eq!(
+            count(media::sha256_hex(raw.as_bytes())).await,
+            1,
+            "the stored key is sha256(token)"
+        );
+
+        let bearer = format!("Bearer {raw}");
+        let (st, me) = get_json_h(&h.app, "/api/users/me", &[("authorization", &bearer)]).await;
+        assert_eq!(st, StatusCode::OK, "the client's token still authenticates");
+        assert_eq!(me["user_id"], user.as_str());
     }
 
     /// Restart survival: a brand-new pool + router (process restart equivalent)

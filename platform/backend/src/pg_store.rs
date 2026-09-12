@@ -1246,13 +1246,13 @@ impl AuthStore for PgAuthStore {
     /// `get_user` — two serial round-trips on the front of every authenticated
     /// request). An anonymous session (no `users` row) yields `None` via the inner
     /// join, exactly like the two-step path.
-    async fn account_for_session(&self, token: &str) -> Result<Option<UserAccount>, AppError> {
+    async fn account_for_session(&self, token_hash: &str) -> Result<Option<UserAccount>, AppError> {
         let row = sqlx::query(
             "SELECT u.user_id, u.email, u.display_name, u.role, u.created_at, u.email_confirmed_at \
              FROM sessions s JOIN users u ON u.user_id = s.user_id \
-             WHERE s.token = $1",
+             WHERE s.token_hash = $1",
         )
-        .bind(token)
+        .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
         .map_err(internal)?;
@@ -1340,9 +1340,9 @@ impl AuthStore for PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::create_session`].
-    async fn create_session(&self, token: &str, user_id: &str) -> Result<(), AppError> {
-        sqlx::query("INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, $3)")
-            .bind(token)
+    async fn create_session(&self, token_hash: &str, user_id: &str) -> Result<(), AppError> {
+        sqlx::query("INSERT INTO sessions (token_hash, user_id, created_at) VALUES ($1, $2, $3)")
+            .bind(token_hash)
             .bind(user_id)
             .bind(now_secs() as i64)
             .execute(&self.pool)
@@ -1525,6 +1525,23 @@ impl AuthStore for PgAuthStore {
             .transpose()
     }
 
+    /// See [`crate::store::InMemoryAuthStore::delete_sessions_for_user`].
+    async fn delete_sessions_for_user(
+        &self,
+        user_id: &str,
+        keep: Option<&str>,
+    ) -> Result<usize, AppError> {
+        let res = sqlx::query(
+            "DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2",
+        )
+        .bind(user_id)
+        .bind(keep)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(res.rows_affected() as usize)
+    }
+
     /// See [`crate::store::InMemoryAuthStore::delete_user`] — user row,
     /// sessions and tokens in one transaction.
     async fn delete_user(&self, user_id: &str) -> Result<bool, AppError> {
@@ -1549,9 +1566,9 @@ impl AuthStore for PgAuthStore {
     }
 
     /// See [`crate::store::InMemoryAuthStore::get_session`].
-    async fn get_session(&self, token: &str) -> Result<Option<String>, AppError> {
-        let row = sqlx::query("SELECT user_id FROM sessions WHERE token = $1")
-            .bind(token)
+    async fn get_session(&self, token_hash: &str) -> Result<Option<String>, AppError> {
+        let row = sqlx::query("SELECT user_id FROM sessions WHERE token_hash = $1")
+            .bind(token_hash)
             .fetch_optional(&self.pool)
             .await
             .map_err(internal)?;

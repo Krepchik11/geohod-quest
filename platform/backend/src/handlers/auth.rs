@@ -76,13 +76,12 @@ async fn register_handler(
     if req.user_id.is_empty() {
         return Err(AppError::BadRequest("user_id is required".into()));
     }
-    let password_hash = auth::hash_password(&req.password)?;
+    let password_hash = auth::hash_password(&req.password).await?;
     let account = state
         .auth
         .register_user(&req.user_id, &email, &password_hash, req.display_name)
         .await?;
-    let token = auth::generate_token();
-    state.auth.create_session(&token, &account.user_id).await?;
+    let token = open_session(&state, &account.user_id).await?;
     // §6.3 soft confirmation: the account works immediately; the mail is
     // best-effort and the Profile banner offers a resend.
     send_confirm_email(&state, &account.user_id, &email).await?;
@@ -101,24 +100,27 @@ async fn login_handler(
 ) -> Result<Json<AuthResponse>, AppError> {
     // One message for both unknown email and wrong password (no oracle).
     let bad = || AppError::Unauthorized("invalid email or password".into());
-    let record = state
-        .auth
-        .find_by_email(&auth::normalize_email(&req.email))
-        .await?
-        .ok_or_else(bad)?;
+    let email = auth::normalize_email(&req.email);
+    // Charged before the guess is checked, so an unknown email costs the same
+    // budget as a known one and the limit leaks nothing the login does not.
+    let budget = format!("login:{email}");
+    fixed_window_allow(
+        &state,
+        budget.clone(),
+        LOGIN_ATTEMPT_WINDOW_SECS,
+        LOGIN_ATTEMPT_LIMIT,
+    )?;
+    let record = state.auth.find_by_email(&email).await?.ok_or_else(bad)?;
     // A social-only account (no password set) rejects like a wrong password.
-    let password_ok = record
-        .password_hash
-        .as_deref()
-        .is_some_and(|hash| auth::verify_password(hash, &req.password));
+    let password_ok = match record.password_hash.as_deref() {
+        Some(hash) => auth::verify_password(hash, &req.password).await,
+        None => false,
+    };
     if !password_ok {
         return Err(bad());
     }
-    let token = auth::generate_token();
-    state
-        .auth
-        .create_session(&token, &record.account.user_id)
-        .await?;
+    fixed_window_clear(&state, &budget);
+    let token = open_session(&state, &record.account.user_id).await?;
     Ok(Json(AuthResponse {
         user_id: record.account.user_id,
         email: record.account.email,
@@ -359,6 +361,15 @@ async fn create_social_on_claimed(
     }
 }
 
+/// THE one way a session is opened. Mints the token, stores only its hash
+/// ([`auth::new_session_token`]) and hands the raw token back for the response
+/// body — so no route can persist a bearer secret by taking a shortcut.
+pub(crate) async fn open_session(state: &AppState, user_id: &str) -> Result<String, AppError> {
+    let (token, token_hash) = auth::new_session_token();
+    state.auth.create_session(&token_hash, user_id).await?;
+    Ok(token)
+}
+
 /// Mint a session for an existing account and shape the standard `AuthResponse`.
 async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthResponse, AppError> {
     let account = state
@@ -366,8 +377,7 @@ async fn issue_session_for(state: &AppState, user_id: &str) -> Result<AuthRespon
         .get_user(user_id)
         .await?
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("account not found after link")))?;
-    let token = auth::generate_token();
-    state.auth.create_session(&token, user_id).await?;
+    let token = open_session(state, user_id).await?;
     Ok(AuthResponse {
         user_id: account.user_id,
         email: account.email,
@@ -458,6 +468,14 @@ pub(crate) const MAIL_SEND_LIMIT: u32 = 5;
 
 const MAIL_SEND_WINDOW_SECS: u64 = 3600;
 
+/// Failed sign-ins allowed per email per [`LOGIN_ATTEMPT_WINDOW_SECS`]. Only
+/// failures are charged and a success refunds the whole budget
+/// ([`fixed_window_clear`]), so this bounds guessing without ever standing
+/// between a person and their own account.
+pub(crate) const LOGIN_ATTEMPT_LIMIT: u32 = 10;
+
+const LOGIN_ATTEMPT_WINDOW_SECS: u64 = 15 * 60;
+
 /// Above this many limiter keys, expired windows are evicted before insert so
 /// an attacker spraying unique emails cannot grow memory without bound.
 const RATE_LIMITER_MAX_KEYS: usize = 100_000;
@@ -489,6 +507,15 @@ fn fixed_window_allow(
         ));
     }
     Ok(())
+}
+
+/// Hand a budget back. Used where a successful outcome proves the caller was
+/// never the attacker the limit is for, so ordinary use can never accumulate
+/// into a lockout.
+fn fixed_window_clear(state: &AppState, key: &str) {
+    if let Ok(mut lim) = state.rate_limiter.lock() {
+        lim.remove(key);
+    }
 }
 
 /// Mint a single-use (token, 6-digit code) pair sharing ONE store row —
@@ -759,12 +786,14 @@ async fn reset_password_handler(
     })?;
     state
         .auth
-        .set_password(&user_id, &auth::hash_password(&password)?)
+        .set_password(&user_id, &auth::hash_password(&password).await?)
         .await?;
+    // Recovery means the account may already be in someone else's hands, and a
+    // session outlives the password it was minted from. Everything open goes.
+    state.auth.delete_sessions_for_user(&user_id, None).await?;
     // Using a valid reset credential also proves mailbox ownership (§6.3).
     let account = state.auth.confirm_email(&user_id, now).await?;
-    let token = auth::generate_token();
-    state.auth.create_session(&token, &user_id).await?;
+    let token = open_session(&state, &user_id).await?;
     Ok(Json(AuthResponse {
         user_id: account.user_id,
         email: account.email,
@@ -857,10 +886,10 @@ async fn change_email_handler(
         .await?
         .ok_or_else(|| crate::store::no_account(&account.user_id))?;
     if let Some(hash) = record.password_hash.as_deref() {
-        let ok = req
-            .current_password
-            .as_deref()
-            .is_some_and(|p| auth::verify_password(hash, p));
+        let ok = match req.current_password.as_deref() {
+            Some(p) => auth::verify_password(hash, p).await,
+            None => false,
+        };
         if !ok {
             return Err(AppError::Unauthorized("неверный текущий пароль".into()));
         }
@@ -984,7 +1013,7 @@ async fn change_password_handler(
             "этот аккаунт входит через провайдера — пароль не задан".into(),
         ));
     };
-    if !auth::verify_password(hash, &req.current_password) {
+    if !auth::verify_password(hash, &req.current_password).await {
         return Err(AppError::Unauthorized("неверный текущий пароль".into()));
     }
     if !auth::password_valid(&req.new_password) {
@@ -992,7 +1021,21 @@ async fn change_password_handler(
     }
     state
         .auth
-        .set_password(&account.user_id, &auth::hash_password(&req.new_password)?)
+        .set_password(
+            &account.user_id,
+            &auth::hash_password(&req.new_password).await?,
+        )
+        .await?;
+    // Every OTHER device is signed out: the old password is what those sessions
+    // were minted from, and this is the move someone makes when they suspect one
+    // of them is not theirs. The caller's own session is spared — the response
+    // carries no replacement token, so revoking it would sign the owner out of
+    // the device they are standing in (and out of any older client that has no
+    // idea a token could be returned here).
+    let keep = crate::authz::bearer_token(&headers).map(|t| auth::session_hash(&t));
+    state
+        .auth
+        .delete_sessions_for_user(&account.user_id, keep.as_deref())
         .await?;
     Ok(Json(serde_json::json!({ "status": "changed" })))
 }

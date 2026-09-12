@@ -37,7 +37,7 @@ pub async fn resolve_user(
             .ok_or_else(|| AppError::Unauthorized("expected a bearer token".into()))?;
         let user_id = state
             .auth
-            .get_session(token)
+            .get_session(&auth::session_hash(token))
             .await?
             .ok_or_else(|| AppError::Unauthorized("invalid session".into()))?;
         if !claimed.is_empty() && claimed != user_id {
@@ -80,7 +80,7 @@ pub fn require_ops_token(state: &AppState, headers: &HeaderMap) -> Result<(), Ap
         .get("x-admin-token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if provided.is_empty() || provided != expected {
+    if provided.is_empty() || !auth::secret_eq(provided, expected) {
         return Err(AppError::Unauthorized("invalid admin token".into()));
     }
     Ok(())
@@ -109,7 +109,7 @@ pub fn ops_token_ok(state: &AppState, headers: &HeaderMap) -> bool {
         .get("x-admin-token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    !provided.is_empty() && provided == expected
+    !provided.is_empty() && auth::secret_eq(provided, expected)
 }
 
 /// The registered account behind a valid `Bearer` session, if any. A missing or
@@ -124,7 +124,10 @@ pub async fn session_account(
     };
     // One round-trip (session⋈users), not get_session then get_user — this runs on
     // the front of nearly every authenticated request.
-    state.auth.account_for_session(&token).await
+    state
+        .auth
+        .account_for_session(&auth::session_hash(&token))
+        .await
 }
 
 /// Who the caller is, resolved once (one ops-token check, at most one session

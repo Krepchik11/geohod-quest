@@ -180,25 +180,53 @@ pub fn reachable_ways(account: &UserAccount, identities: &[crate::store::AuthIde
     social + usize::from(account.email.is_some())
 }
 
+/// Argon2id is deliberately expensive: the default parameters cost ~19 MiB and
+/// tens of milliseconds of pure CPU per call. Run on an async worker that is a
+/// stall of the whole thread — with N workers, N concurrent sign-ins stop the
+/// server answering anything at all, `/health` included, and sign-in is the one
+/// endpoint an anonymous caller can aim at. Both password operations therefore
+/// go to the blocking pool, which is sized for exactly this and cannot starve
+/// the request loop no matter how many arrive.
+///
+/// Same reasoning and same idiom as `yookassa.rs` and `social.rs`.
+async fn on_blocking_pool<T, F>(what: &'static str, f: F) -> Result<T, AppError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{what} task failed: {e}")))
+}
+
 /// Hash a password with argon2id (default params, random salt).
-pub fn hash_password(password: &str) -> Result<String, AppError> {
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("password hashing failed: {e}")))
+pub async fn hash_password(password: &str) -> Result<String, AppError> {
+    let password = password.to_string();
+    on_blocking_pool("password hashing", move || {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("password hashing failed: {e}")))
+    })
+    .await?
 }
 
 /// Verify a password against a stored argon2 hash. A malformed stored hash
 /// verifies false (treated as bad credentials, logged upstream as 401).
-pub fn verify_password(stored_hash: &str, password: &str) -> bool {
-    PasswordHash::new(stored_hash)
-        .map(|parsed| {
-            Argon2::default()
-                .verify_password(password.as_bytes(), &parsed)
-                .is_ok()
-        })
-        .unwrap_or(false)
+pub async fn verify_password(stored_hash: &str, password: &str) -> bool {
+    let (stored_hash, password) = (stored_hash.to_string(), password.to_string());
+    on_blocking_pool("password verification", move || {
+        PasswordHash::new(&stored_hash)
+            .map(|parsed| {
+                Argon2::default()
+                    .verify_password(password.as_bytes(), &parsed)
+                    .is_ok()
+            })
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Opaque session token: 32 random bytes, hex-encoded (revocable server-side).
@@ -213,6 +241,38 @@ pub fn generate_token() -> String {
         out.push(HEX[(b & 0x0f) as usize] as char);
     }
     out
+}
+
+/// Compare two secrets without an early exit. `==` on a shared secret stops at
+/// the first differing byte, so how long the answer takes is a measurement of
+/// how much of the secret the caller already has (CWE-208). The fold has no
+/// branch to short-circuit; only the length is observable, which a shared
+/// operator token does not hide anyway.
+pub fn secret_eq(provided: &str, expected: &str) -> bool {
+    let (provided, expected) = (provided.as_bytes(), expected.as_bytes());
+    provided.len() == expected.len()
+        && provided
+            .iter()
+            .zip(expected)
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+/// The STORED form of a session token. A session token is a bearer secret, so
+/// it is kept exactly like the mailed reset link and code: only sha256 of it is
+/// persisted, and a leaked database yields no working login. 32 random bytes
+/// need no salt or stretching — there is nothing to guess offline.
+pub fn session_hash(token: &str) -> String {
+    crate::media::sha256_hex(token.as_bytes())
+}
+
+/// Mint a session: the RAW token (the client's only copy) paired with the hash
+/// the store keeps. They only ever come together, so a caller cannot persist
+/// the raw token by forgetting a step.
+pub fn new_session_token() -> (String, String) {
+    let raw = generate_token();
+    let hash = session_hash(&raw);
+    (raw, hash)
 }
 
 /// §6.2 R2: emailed password-reset code — 6 digits, crypto-random, uniform
@@ -272,12 +332,21 @@ pub fn validate_credentials(email: &str, password: &str) -> Result<(), AppError>
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn hash_then_verify_roundtrip_and_wrong_password_fails() {
+        let hash = hash_password("correct horse battery").await.expect("hash");
+        assert!(verify_password(&hash, "correct horse battery").await);
+        assert!(!verify_password(&hash, "wrong password").await);
+        assert!(!verify_password("not-a-phc-hash", "anything").await);
+    }
+
     #[test]
-    fn hash_then_verify_roundtrip_and_wrong_password_fails() {
-        let hash = hash_password("correct horse battery").expect("hash");
-        assert!(verify_password(&hash, "correct horse battery"));
-        assert!(!verify_password(&hash, "wrong password"));
-        assert!(!verify_password("not-a-phc-hash", "anything"));
+    fn secret_eq_matches_string_equality() {
+        assert!(secret_eq("s3cret", "s3cret"));
+        assert!(!secret_eq("s3cret", "s3crey"), "last byte differs");
+        assert!(!secret_eq("s3cre", "s3cret"), "prefix is not a match");
+        assert!(!secret_eq("s3crett", "s3cret"), "extension is not a match");
+        assert!(secret_eq("", ""));
     }
 
     #[test]
