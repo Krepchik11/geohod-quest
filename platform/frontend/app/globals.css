@@ -119,6 +119,15 @@ h1,h2,h3,p { margin:0; }
 
 .card { background:var(--white); border-radius:var(--r-card); box-shadow:var(--shadow-card); }
 
+/* Switch primitive (components/ui.tsx Toggle). Lived as .adm-toggle/.tk inside
+   the constructor's sheet while the admin flags page used it too — the same
+   §0 consolidation .btn and .input already went through. */
+.toggle { display:inline-flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; background:none; border:0; padding:0; color:inherit; font-family:inherit; }
+.toggle__knob { width:44px; height:26px; border-radius:13px; background:var(--border); position:relative; transition:background .15s ease; flex:none; }
+.toggle__knob::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:left .15s ease; }
+.toggle.is-on .toggle__knob { background:var(--blue); }
+.toggle.is-on .toggle__knob::after { left:21px; }
+
 /* harmonization parity (Phase 0): link primitive replacing .s-link */
 .link { background:none; border:0; padding:0; color:var(--blue); font:inherit; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
 .link:hover { color:var(--blue-hover); }

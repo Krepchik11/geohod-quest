@@ -9,6 +9,16 @@ import { isAdmin } from '../../lib/roles';
 import { fetchMe } from '../../lib/use-me';
 import SpaceHeader from '../components/SpaceHeader';
 
+// The admin desk's own stylesheets, mounted with the desk. Nobody outside
+// /admin renders these classes, so nobody outside /admin downloads them.
+import '../styles/admin-shell.css';
+import '../styles/admin-page.css';
+import '../styles/admin-users.css';
+import '../styles/admin-coupons.css';
+import '../styles/admin-features.css';
+import '../styles/admin-stats.css';
+import '../styles/admin-moderation.css';
+
 /**
  * The ONE mount of the admin chrome (Admin Coupons.dc.html, «единый шелл»):
  * the SpaceHeader (site logo lockup + «АДМИНКА» + Jost tabs + user menu) over

@@ -34,7 +34,8 @@ import { plural } from '../../lib/ru';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, PREVIEW_HANDLERS, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
-import { GateNote, QuestCoverZone, WspBlock, WspToggle, gateAnchor, useGateHighlight } from './controls';
+import { GateNote, QuestCoverZone, WspBlock, gateAnchor, useGateHighlight } from './controls';
+import { Toggle } from '../components/ui';
 import { PageEditor } from './PageEditor';
 import { PublishPanel } from './PublishPanel';
 import { WspHeader } from './QuestList';
@@ -137,7 +138,7 @@ function ThemeBlock({ meta, onMeta }: { meta: CtorQuestMeta; onMeta: (meta: Ctor
   return (
     <WspBlock title="Цвета квеста" aside="как выглядит квест у игрока" gateField="theme">
       <div>
-        <WspToggle
+        <Toggle
           on={!!theme}
           onClick={() => onMeta({ ...meta, theme: theme ? null : PAPER_THEME })}
           label="Свои цвета"
@@ -449,8 +450,8 @@ function PreviewBody({ quest, designStep, pos, total, onTestFrom }: {
           />
         </PlayerFrame>
       </div>
-      {designStep.hint ? <WspToggle on={hintOn} onClick={() => setHintOn(!hintOn)} label="С купленной подсказкой" /> : null}
-      {designStep.template === 'task_answer' ? <WspToggle on={wrongOn} onClick={() => setWrongOn(!wrongOn)} label="С ошибкой ответа" /> : null}
+      {designStep.hint ? <Toggle on={hintOn} onClick={() => setHintOn(!hintOn)} label="С купленной подсказкой" /> : null}
+      {designStep.template === 'task_answer' ? <Toggle on={wrongOn} onClick={() => setWrongOn(!wrongOn)} label="С ошибкой ответа" /> : null}
       <button className="btn btn--secondary btn--sm" type="button" style={{ width: '100%' }} onClick={() => onTestFrom(pos)}>▶ Тест с этой страницы</button>
     </>
   );

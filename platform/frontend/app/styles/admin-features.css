@@ -86,9 +86,9 @@
   cursor: default;
 }
 
-/* Switch: the shared .adm-toggle (WspToggle, admin-ctor.css) — only the
- * disabled state is added here, as no other surface toggles while busy. */
-.af-row .adm-toggle:disabled {
+/* Switch: the shared .toggle primitive (globals.css) — only the disabled
+ * state is added here, as no other surface toggles while busy. */
+.af-row .toggle:disabled {
   opacity: 0.55;
   cursor: default;
 }

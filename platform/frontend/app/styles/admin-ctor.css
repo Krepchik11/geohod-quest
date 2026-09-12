@@ -90,11 +90,6 @@
 .freeze-note { font-size: 12px; color: var(--amber); background: rgba(183,121,31,.08); border-radius: 8px; padding: 8px 12px; }
 
 /* Тумблер */
-.adm-toggle { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
-.adm-toggle .tk { width: 44px; height: 26px; border-radius: 13px; background: var(--border); position: relative; transition: background .15s ease; }
-.adm-toggle .tk::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left .15s ease; }
-.adm-toggle.on .tk { background: var(--blue); }
-.adm-toggle.on .tk::after { left: 21px; }
 
 /* Превью телефона */
 .ed-preview { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px; }

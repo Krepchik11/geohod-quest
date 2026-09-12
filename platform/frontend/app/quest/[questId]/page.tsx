@@ -3,6 +3,11 @@ import BundleGate from '../BundleGate';
 import { API_BASE, type ProductPageWire } from '../../../lib/api';
 import { parseTheme, themeVars, type QuestTheme } from '../../../lib/quest-theme';
 
+// The paper frame is 30 KB of CSS that only the player renders. Imported on the
+// player route itself — not in a `app/quest/layout.tsx`, which would also hand
+// it to the product page at /quest/[questId]/about, which draws none of it.
+import '../../styles/player-paper.css';
+
 // Scoped to the player route. The frame fills the dynamic viewport, so ask the
 // browser to RESIZE the layout (not just the visual viewport) when the on-screen
 // keyboard opens — a focused answer field then scrolls into view above the

@@ -31,23 +31,6 @@ export function useEscape(onClose: () => void, enabled = true): void {
   }, [enabled]);
 }
 
-export function WspToggle({ on, onClick, label, ariaLabel, disabled }: { on: boolean; onClick: () => void; label?: string; ariaLabel?: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={'adm-toggle' + (on ? ' on' : '')}
-      style={{ background: 'none', border: 'none', padding: 0 }}
-      role="switch"
-      aria-checked={on}
-      aria-label={ariaLabel}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      <span className="tk" />{label}
-    </button>
-  );
-}
-
 /**
  * Атрибут-якорь для §9.2 «Исправить →». Единственный способ объявить якорь:
  * поле проходит через {@link GateField}, поэтому переименование в union ломает

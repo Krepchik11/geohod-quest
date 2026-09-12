@@ -41,7 +41,7 @@
 .wsp-center { overflow-y: auto; padding: 22px 28px 72px; }
 .wsp-preview { border-left: 1px solid #E7E9EE; background: #fff; overflow-y: auto; padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .wsp-preview .cap { font-size: 12px; color: var(--muted); text-align: center; margin: 0; }
-.wsp-preview .adm-toggle { font-size: 13px; }
+.wsp-preview .toggle { font-size: 13px; }
 
 /* Левая панель */
 .wsp-rail h5 { margin: 18px 16px 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }

@@ -9,7 +9,7 @@ import {
   type AdminFeature,
   type FeatureSetting,
 } from '../../../lib/admin-features';
-import { WspToggle } from '../../quest-editor/controls';
+import { Toggle } from '../../components/ui';
 import { AdminPageHead, AdminToast } from '../ui';
 
 /**
@@ -204,7 +204,7 @@ function FeatureRow({
             сбросить
           </button>
         )}
-        <WspToggle
+        <Toggle
           on={f.effective}
           onClick={onToggle}
           disabled={busy}

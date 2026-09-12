@@ -8,20 +8,15 @@ import "./globals.css"; // canonical design system (primitives live here)
 // (.btn + variants/sizes, .input/.textarea, .link, .panel, .card). The legacy
 // duplicate primitive families (.s-*, .adm-*, .btn-ui, .field-ui, .textarea-ui)
 // are deleted; `npm run lint:ds` fails if any of them reappears.
-import "./styles/player-paper.css";
+//
+// ONLY the sheets every visitor actually needs are imported here. A stylesheet
+// imported in the root layout is downloaded by everyone, on the first paint of
+// every route — so the admin desk, the constructor and the player paper are
+// imported by the layout of the subtree that owns them instead (see
+// `npm run lint:css-scope`, which fails if a class escapes its subtree).
 import "./styles/commerce.css";
 import "./styles/store-toolbar.css";
 import "./styles/myquests.css";
-import "./styles/admin-ctor.css";
-import "./styles/ctor-workspace.css";
-import "./styles/ctor-dashboard.css";
-import "./styles/admin-users.css";
-import "./styles/admin-shell.css";
-import "./styles/admin-page.css";
-import "./styles/admin-coupons.css";
-import "./styles/admin-features.css";
-import "./styles/admin-stats.css";
-import "./styles/admin-moderation.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

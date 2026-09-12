@@ -63,3 +63,36 @@ type TextareaProps = Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'cl
 export function Textarea({ error, className, ...rest }: TextareaProps) {
   return <textarea {...rest} className={['textarea', error ? 'input--error' : '', className].filter(Boolean).join(' ')} />;
 }
+
+type ToggleProps = {
+  on: boolean;
+  onClick: () => void;
+  label?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
+};
+
+/**
+ * The switch. It lived in the constructor's own controls module while the
+ * admin feature flags imported it from there — one space reaching into
+ * another's internals, and the reason the flags page rendered a switch whose
+ * stylesheet the admin route does not load. It is a §0 primitive like Button
+ * and Input, so it lives with them and wears the canonical `.toggle` classes
+ * from globals.css.
+ */
+export function Toggle({ on, onClick, label, ariaLabel, disabled }: ToggleProps) {
+  return (
+    <button
+      type="button"
+      className={on ? 'toggle is-on' : 'toggle'}
+      role="switch"
+      aria-checked={on}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="toggle__knob" />
+      {label}
+    </button>
+  );
+}

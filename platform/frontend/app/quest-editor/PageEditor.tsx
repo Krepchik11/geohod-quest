@@ -15,7 +15,8 @@ import { plural } from '../../lib/ru';
 import { byteBudgetLabel, STEP_IMAGE_MAX_BYTES } from '../../lib/image-crop';
 import { isAnswerCorrect } from '../../lib/shared-model';
 import { PPlay } from '../player/PlayerComponents';
-import { GateNote, ImageZone, QuestCoverZone, WspBlock, WspDanger, WspToggle, useGateHighlight } from './controls';
+import { GateNote, ImageZone, QuestCoverZone, WspBlock, WspDanger, useGateHighlight } from './controls';
+import { Toggle } from '../components/ui';
 
 type StepPatch = Partial<CtorStep>;
 type Patcher = (patch: StepPatch) => void;
@@ -145,7 +146,7 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const set = (patch: Partial<typeof h>) => onPatch({ hint: { ...h, ...patch } });
   return (
     <WspBlock title="Подсказка" gateField="hint" aside="попап после 2-й ошибки ответа">
-      <WspToggle on={h.on} onClick={() => set({ on: !h.on })} label="Подсказка на этом шаге" />
+      <Toggle on={h.on} onClick={() => set({ on: !h.on })} label="Подсказка на этом шаге" />
       {h.on ? (
         <>
           <div className="wsp-trow">
@@ -183,7 +184,7 @@ function AddressBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const badName = a.on && !a.name.trim();
   return (
     <WspBlock title="Адрес и расстояние" gateField="address" aside="строка с булавкой; клик открывает системные карты">
-      <WspToggle on={a.on} onClick={() => set({ on: !a.on })} label="Адрес на странице" />
+      <Toggle on={a.on} onClick={() => set({ on: !a.on })} label="Адрес на странице" />
       {a.on ? (
         <>
           <div className="wsp-trow">
