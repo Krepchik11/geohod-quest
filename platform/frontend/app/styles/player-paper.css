@@ -109,12 +109,6 @@
   animation: none !important;
   transition: none !important;
 }
-@media (prefers-reduced-motion: reduce) {
-  .pframe *, .pframe *::before, .pframe *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
 
 /* ---------- Верхняя панель ---------- */
 .p-top {

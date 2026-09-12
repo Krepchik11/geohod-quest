@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
 import { Button } from '../components/ui';
+import { useDialog } from '../components/useDialog';
 
 /**
  * §9.1 status control — a status chip opening a menu of NAMED transitions,
@@ -59,6 +60,7 @@ export function actionsFor(status: CtorStatus, hasSnapshot: boolean): Action[] {
 export default function StatusControl({ quest, onStatusChange, onOpenPublish }: StatusControlProps) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const dialog = useDialog(() => setConfirming(false), confirming);
   const chip = CHIP[quest.status];
   const hasSnapshot = quest.published_version != null;
 
@@ -117,7 +119,7 @@ export default function StatusControl({ quest, onStatusChange, onOpenPublish }: 
 
       {confirming && (
         <div className="status-confirm__ovl" onClick={() => setConfirming(false)}>
-          <div className="status-confirm" role="alertdialog" onClick={(e) => e.stopPropagation()}>
+          <div ref={dialog} tabIndex={-1} className="status-confirm" role="alertdialog" aria-modal="true" aria-label={`Снять «${quest.name}» с публикации?`} onClick={(e) => e.stopPropagation()}>
             <b className="status-confirm__title">Снять «{quest.name}» с публикации?</b>
             <div className="status-confirm__list">
               <span><i className="is-bad">✕</i>Квест исчезнет из магазина</span>

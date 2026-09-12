@@ -29,7 +29,7 @@ import {
   type DesignStep,
 } from '../player/PlayerComponents';
 import { coinChime, spendChime } from '../quest/sound';
-import { useEscape } from './controls';
+import { useEscape } from '../components/useDialog';
 
 /**
  * Тест-игрок конструктора: играет ЧЕРНОВИК настоящими компонентами плеера и

@@ -1,5 +1,6 @@
 'use client';
 
+import { useDialog } from '../components/useDialog';
 import React, { useEffect, useRef, useState } from 'react';
 
 /**
@@ -64,6 +65,8 @@ export function AdminConfirmSheet({
   onCancel: () => void;
   onApply: () => void;
 }) {
+  // The backdrop already refuses to close mid-action; Escape obeys the same rule.
+  const dialog = useDialog(() => !busy && onCancel());
   return (
     <div
       className="ap-sheet-backdrop"
@@ -71,6 +74,8 @@ export function AdminConfirmSheet({
       onClick={() => !busy && onCancel()}
     >
       <div
+        ref={dialog}
+        tabIndex={-1}
         className="ap-sheet"
         role="dialog"
         aria-modal="true"

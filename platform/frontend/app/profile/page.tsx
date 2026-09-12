@@ -23,6 +23,7 @@ import {
 } from '../../lib/player-stats';
 import { plural } from '../../lib/ru';
 import { questPlural } from '../../lib/storefront';
+import { useDialog } from '../components/useDialog';
 
 /**
  * Профиль v2 (SPEC §7 / Profile v2.dc.html).
@@ -399,6 +400,7 @@ function LoginMethods({
 function NameSheet({ current, onClose, onSaved }: { current: string | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(current ?? '');
   const [busy, setBusy] = useState(false);
+  const dialog = useDialog(onClose);
   const save = async () => {
     setBusy(true);
     try {
@@ -412,7 +414,7 @@ function NameSheet({ current, onClose, onSaved }: { current: string | null; onCl
   };
   return (
     <div className="sheet__ovl" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label="Изменить имя" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-label="Изменить имя" onClick={(e) => e.stopPropagation()}>
         <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Изменить имя</b>
         <input className="input" aria-label="Имя" placeholder="Как вас называть?" value={name} onChange={(e) => setName(e.target.value)} />
@@ -432,6 +434,7 @@ function EmailSheet({ current, hasPassword, onClose }: {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialog = useDialog(onClose);
   const save = async () => {
     const normalized = normalizeEmail(email);
     if (!emailValid(normalized)) {
@@ -460,7 +463,7 @@ function EmailSheet({ current, hasPassword, onClose }: {
   };
   return (
     <div className="sheet__ovl" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label="Изменить почту" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-label="Изменить почту" onClick={(e) => e.stopPropagation()}>
         <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">{current ? 'Изменить почту' : 'Привязать почту'}</b>
         {current && <p className="pf-note">Сейчас: {current}. Адрес сменится только после подтверждения по письму.</p>}
@@ -505,6 +508,7 @@ function PasswordSheet({ email, onClose }: { email: string | null; onClose: () =
   const [showNew, setShowNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialog = useDialog(onClose);
   const save = async () => {
     if (!passwordValid(next)) {
       setError('Новый пароль — минимум 8 символов');
@@ -523,7 +527,7 @@ function PasswordSheet({ email, onClose }: { email: string | null; onClose: () =
   };
   return (
     <div className="sheet__ovl" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label="Сменить пароль" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-label="Сменить пароль" onClick={(e) => e.stopPropagation()}>
         <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Сменить пароль</b>
         <span className="af-field__wrap">
@@ -554,6 +558,7 @@ function DeleteSheet({ purchases, balance, onClose, onDeleted }: {
 }) {
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const dialog = useDialog(onClose);
   const [blocked, setBlocked] = useState<string | null>(null);
   const run = async () => {
     setBusy(true);
@@ -580,7 +585,7 @@ function DeleteSheet({ purchases, balance, onClose, onDeleted }: {
   };
   return (
     <div className="sheet__ovl" onClick={onClose}>
-      <div className="sheet" role="alertdialog" aria-label="Удаление аккаунта" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} className="sheet" role="alertdialog" aria-modal="true" aria-label="Удаление аккаунта" onClick={(e) => e.stopPropagation()}>
         <span className="sheet__grip" aria-hidden />
         <b className="pf-sheet__title">Удалить аккаунт навсегда?</b>
         <div className="pf-delete__list">

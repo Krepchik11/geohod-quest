@@ -42,6 +42,7 @@ import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
 import { useStepHistory } from './useStepHistory';
 import { useKeyboardInset } from './useKeyboardInset';
+import { useDialog } from '../components/useDialog';
 import {
   PlayerFrame, StepView, TopBar, CoinToast,
   HintPopup, HintRevealPopup, MenuOverlay, FeedbackSheet,
@@ -267,6 +268,11 @@ export default function QuestPlayerClient({
     resetConfirm: false,
     soundOn: readSoundOn(),
   }));
+
+  const resetDialog = useDialog(
+    () => setUi((u) => ({ ...u, resetConfirm: false })),
+    ui.resetConfirm,
+  );
 
   const toggleSound = useCallback(() => {
     setUi((u) => {
@@ -694,7 +700,7 @@ export default function QuestPlayerClient({
       )}
       {ui.resetConfirm && (
         <div className="p-reset__ovl" onClick={() => setUi((u) => ({ ...u, resetConfirm: false }))}>
-          <div className="p-reset" role="alertdialog" onClick={(e) => e.stopPropagation()}>
+          <div ref={resetDialog} tabIndex={-1} className="p-reset" role="alertdialog" aria-modal="true" aria-label="Начать заново?" onClick={(e) => e.stopPropagation()}>
             <p className="p-reset__title">Начать заново?</p>
             <p className="p-reset__text">Прогресс попытки исчезнет — вернётесь к шагу 1. Заработанные монеты останутся при вас.</p>
             <button

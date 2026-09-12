@@ -1,35 +1,17 @@
 'use client';
 
-import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { beginCropFromFile, beginCropFromValue, commitCrop, sessionRect, type CropSession } from '../../lib/image-authoring';
 import type { DecodedImage } from '../../lib/image-file';
 import { COVER_IMAGE_MAX_BYTES, byteBudgetLabel, clampCropRect, type CropRect } from '../../lib/image-crop';
 import type { CtorImageValue, CtorQuestMeta, GateField } from '../../lib/constructor-model';
+import { useDialog } from '../components/useDialog';
 
 /**
  * Shared workspace controls: сначала оформительские примитивы
  * (design/ctor2/page-editor.jsx), ниже — контролы, знающие про модель квеста
  * (см. «Контролы, привязанные к модели»).
  */
-
-/**
- * Escape закрывает наложение. Хук общий, потому что иначе каждое новое
- * наложение заново выбирает цель слушателя, зависимости и условие — а расходятся
- * они молча. `enabled` для наложений, живущих в DOM и в закрытом виде.
- */
-export function useEscape(onClose: () => void, enabled = true): void {
-  // Слушатель не должен переподписываться из-за новой идентичности onClose:
-  // она меняется на каждом рендере родителя (§8.3 agents/react.md).
-  const close = useEffectEvent(onClose);
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [enabled]);
-}
 
 /**
  * Атрибут-якорь для §9.2 «Исправить →». Единственный способ объявить якорь:
@@ -137,8 +119,8 @@ function CropModal({ dec, initialRect, onConfirm, onCancel }: {
   }, []);
 
   // Кадрирование открывается кликом по ЛЮБОМУ изображению — выход должен быть
-  // один и всегда доступный, модалка при этом ничего не фокусирует.
-  useEscape(onCancel);
+  // один и всегда доступный.
+  const dialog = useDialog(onCancel);
 
   // view px → source px: the frame always shows the full crop rect width.
   const scale = (viewW || 400) / rect.width;
@@ -160,7 +142,7 @@ function CropModal({ dec, initialRect, onConfirm, onCancel }: {
   return (
     // stopPropagation: модалка живёт внутри кликабельной зоны — клики не должны
     // повторно открывать выбор файла.
-    <div className="crop-overlay" role="dialog" aria-modal="true" aria-label="Кадрирование изображения 4:3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <div ref={dialog} tabIndex={-1} className="crop-overlay" role="dialog" aria-modal="true" aria-label="Кадрирование изображения 4:3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="crop-card">
         <h4>Кадрирование 4:3</h4>
         <p className="crop-note">Рамка 4:3 — ровно так изображение увидят в квесте и в магазине. Потяните его внутри рамки, лишнее будет обрезано.</p>

@@ -566,3 +566,20 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .pf-methods__unlink { flex:none; background:none; border:0; padding:0; font-size:13px; color:var(--muted); font-weight:500; cursor:pointer; }
 .pf-methods__unlink:hover:not(:disabled) { color:var(--red); }
 .pf-methods__unlink:disabled { opacity:.5; cursor:default; }
+
+/* Уважение к системной настройке «меньше движения» — одно правило на весь
+   продукт. Раньше его знали ровно две таблицы из пятнадцати (бумага плеера и
+   панель магазина), а остальные 100+ переходов и анимаций продолжали ехать:
+   витрина, шторки, админка, конструктор. Для людей с вестибулярными
+   расстройствами это не украшение, а причина закрыть страницу.
+
+   Не `none`, а «почти мгновенно»: анимация всё равно доигрывает и сообщает о
+   завершении, поэтому ничего, что ждёт её конца, не зависает. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

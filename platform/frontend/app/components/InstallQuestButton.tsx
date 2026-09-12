@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useInstall } from './useInstall';
+import { useDialog } from './useDialog';
 
 /**
  * §5 per-quest install button — rendered on quest-scoped pages (the product
@@ -13,6 +14,7 @@ import { useInstall } from './useInstall';
 export default function InstallQuestButton({ cover }: { cover: string | null }) {
   const { state, prompt } = useInstall();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const dialog = useDialog(() => setSheetOpen(false), sheetOpen);
 
   if (state !== 'installable' && state !== 'ios-instructions') return null;
 
@@ -30,7 +32,7 @@ export default function InstallQuestButton({ cover }: { cover: string | null }) 
 
       {sheetOpen && (
         <div className="sheet__ovl" onClick={() => setSheetOpen(false)}>
-          <div className="sheet qp-ios-sheet" role="dialog" aria-label="Установка квеста" onClick={(e) => e.stopPropagation()}>
+          <div ref={dialog} tabIndex={-1} className="sheet qp-ios-sheet" role="dialog" aria-modal="true" aria-label="Установка квеста" onClick={(e) => e.stopPropagation()}>
             <span className="sheet__grip" aria-hidden />
             <div className="qp-ios-sheet__head">
               {cover && <span className="qp-ios-sheet__thumb" style={{ backgroundImage: `url(${cover})` }} />}

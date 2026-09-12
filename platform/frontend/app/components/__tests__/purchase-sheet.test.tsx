@@ -254,7 +254,14 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
       });
     const hosts = setup();
     fireEvent.click(await screen.findByRole('button', { name: 'Оплатить 890 ₽' }));
-    await waitFor(() => expect(assign).toHaveBeenCalled());
+    // Wait for the sheet to SAY it is redirecting, not for location.assign.
+    // `confirm` calls assign in the same microtask as setState('redirect'), so
+    // the spy fires while React has yet to commit — and it is that commit which
+    // installs the pageshow listener the dispatch below needs. Waiting on the
+    // spy therefore raced the listener into existence and lost on a loaded
+    // runner; waiting on the rendered state cannot.
+    await screen.findByText('Переходим к оплате…');
+    expect(assign).toHaveBeenCalled();
     const pageshow = new Event('pageshow');
     Object.defineProperty(pageshow, 'persisted', { value: true });
     // Inside act: the return handler asks the server for the payment and

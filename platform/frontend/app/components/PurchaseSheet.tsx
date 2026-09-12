@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { useDialog } from './useDialog';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
@@ -166,6 +167,7 @@ export default function PurchaseSheet({
   // The sheet locks while a charge, a gateway hand-off or a return-settlement
   // check is in flight.
   const busy = state === 'pending' || state === 'redirect' || state === 'settling';
+  const dialog = useDialog(() => !busy && onClose());
 
   // Every provider switched off (admin feature toggles) and something to
   // charge: paying is impossible, say so instead of a doomed checkout. A free
@@ -177,7 +179,7 @@ export default function PurchaseSheet({
   // overlay (clipping the sheet into the card and flickering with hover).
   return createPortal(
     <div className="sheet__ovl" onClick={busy ? undefined : onClose}>
-      <div className="sheet" role="dialog" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialog} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-label="Подтвердите покупку" onClick={(e) => e.stopPropagation()}>
         <span className="sheet__grip" aria-hidden />
         <h3 className="psheet__title">Подтвердите покупку</h3>
 

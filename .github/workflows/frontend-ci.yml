@@ -19,7 +19,7 @@ on:
 
 defaults:
   run:
-    working-directory: platform/frontend
+    working-directory: platform
 
 jobs:
   verify:
@@ -31,19 +31,31 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: platform/frontend/package-lock.json
+          # ONE lockfile for the repository — the workspace root's. A second
+          # lockfile inside frontend/ made CI install a tree no developer ran:
+          # `npm install` at platform/ resolves against the root lock, and the
+          # two disagreed on 300+ packages (react-is 17 vs 16, minimatch 10 vs
+          # 3, resolve 1.x vs 2.0-next). A green CI proved nothing about the
+          # tree the change was written against.
+          cache-dependency-path: platform/package-lock.json
 
       - name: Install (deterministic)
         run: npm ci
 
       - name: Lint
-        run: npm run lint
+        run: npm run lint -w frontend
+
+      - name: Lint — design-system primitives
+        run: npm run lint:ds -w frontend
+
+      - name: Lint — stylesheet scope
+        run: npm run lint:css-scope -w frontend
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npx tsc --noEmit -p frontend
 
       - name: Test
-        run: npm test
+        run: npm test -w frontend
 
       - name: Build
         # A dummy base URL so the production build-time guard in lib/api.ts is
@@ -51,4 +63,4 @@ jobs:
         # value (Vercel injects the real NEXT_PUBLIC_API_URL).
         env:
           NEXT_PUBLIC_API_URL: https://ci.invalid
-        run: npm run build
+        run: npm run build -w frontend
