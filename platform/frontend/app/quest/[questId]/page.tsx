@@ -1,6 +1,6 @@
 import type { Viewport } from 'next';
 import BundleGate from '../BundleGate';
-import { API_BASE, type ProductPageWire } from '../../../lib/api';
+import { fetchQuest, questShareMetadata } from '../share-metadata';
 import { parseTheme, themeVars, type QuestTheme } from '../../../lib/quest-theme';
 
 // The paper frame is 30 KB of CSS that only the player renders. Imported on the
@@ -13,10 +13,11 @@ import '../../styles/player-paper.css';
 // keyboard opens — a focused answer field then scrolls into view above the
 // keyboard. Honored on Android Chrome; iOS keeps its visual-viewport behavior,
 // which the non-sticky answer action bar (.p-actions--field) already accommodates.
-/** §5: the player links the per-quest manifest so installs scope to this quest. */
+/** §5: the player links the per-quest manifest so installs scope to this quest,
+ *  and wears the quest's own card — an owner shares this URL too. */
 export async function generateMetadata({ params }: { params: Promise<{ questId: string }> }) {
   const { questId } = await params;
-  return { manifest: `/quest/${encodeURIComponent(questId)}/manifest.webmanifest` };
+  return questShareMetadata(questId);
 }
 
 export const viewport: Viewport = {
@@ -52,10 +53,6 @@ export default async function QuestPage({
 
 /** The published quest's colours, or null (unpublished, offline, no colours). */
 async function questTheme(questId: string): Promise<QuestTheme | null> {
-  const res = await fetch(`${API_BASE}/api/quests/${encodeURIComponent(questId)}`, {
-    // Colours change only on publish, so the same short TTL the manifest uses.
-    next: { revalidate: 300 },
-  }).catch(() => null);
-  if (!res || !res.ok) return null;
-  return parseTheme(((await res.json()) as ProductPageWire).theme);
+  const quest = await fetchQuest(questId);
+  return quest ? parseTheme(quest.theme) : null;
 }

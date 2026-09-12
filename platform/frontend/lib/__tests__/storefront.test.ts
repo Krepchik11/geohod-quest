@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { catalogFacts, factsLine, fmtRating, priceLabel, ratingPlural, questPlural, cityPlural } from '../storefront';
+import { shareCard, catalogFacts, factsLine, fmtRating, priceLabel, ratingPlural, questPlural, cityPlural } from '../storefront';
 import type { PublishedQuestWire } from '../api';
 
 /** §2.3 hero facts — computed from the LIVE catalog response, never fabricated. */
@@ -77,5 +77,45 @@ describe('plurals & labels', () => {
   it('rating formatter drops the trailing .0', () => {
     expect(fmtRating(5)).toBe('5');
     expect(fmtRating(4.75)).toBe('4.8');
+  });
+});
+
+describe('shareCard — what a quest link looks like when it is pasted somewhere', () => {
+  const quest = {
+    quest_id: 'q1',
+    name: 'Тайна старой крепости',
+    city: 'Нови Сад',
+    duration: '1.5 часа',
+    description: '  Прогулка по Петроварадину: шифры на стенах, вид на Дунай и один очень упрямый замок.  ',
+    primary_comic: 'https://media.test/cover.png',
+  };
+
+  it('names the quest and its city', () => {
+    const card = shareCard(quest);
+    expect(card.title).toBe('Тайна старой крепости — городской квест, Нови Сад');
+    expect(card.image).toBe('https://media.test/cover.png');
+  });
+
+  it("uses the author's own description, trimmed to what a preview shows", () => {
+    expect(shareCard(quest).description).toBe(
+      'Прогулка по Петроварадину: шифры на стенах, вид на Дунай и один очень упрямый замок.',
+    );
+    const long = shareCard({ ...quest, description: 'Слово '.repeat(60) });
+    expect(long.description.length).toBeLessThanOrEqual(200);
+    expect(long.description.endsWith('…')).toBe(true);
+  });
+
+  it('falls back to the facts it has when the author wrote no description', () => {
+    expect(shareCard({ ...quest, description: null }).description).toBe(
+      'Городской квест. Нови Сад, 1.5 часа. Играйте офлайн — маршрут остаётся с вами.',
+    );
+    expect(shareCard({ ...quest, description: null, city: null, duration: null }).description).toBe(
+      'Городской квест. Играйте офлайн — маршрут остаётся с вами.',
+    );
+  });
+
+  it('never invents a city it does not have', () => {
+    expect(shareCard({ ...quest, city: null }).title).toBe('Тайна старой крепости');
+    expect(shareCard({ ...quest, city: '   ' }).title).toBe('Тайна старой крепости');
   });
 });

@@ -161,6 +161,15 @@ fn build_router(state: AppState) -> Router {
             HeaderName::from_static("x-content-type-options"),
             HeaderValue::from_static("nosniff"),
         ))
+        // Two years of HTTPS-only for this origin. The API carries session tokens
+        // in a header, so one plain-HTTP request is one stolen session; this is
+        // what stops the browser making that request at all. Not
+        // `includeSubDomains` — the API host does not speak for its siblings. A
+        // browser ignores it over plain HTTP, so local development is unaffected.
+        .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=63072000"),
+        ))
         // Negotiated, so it can never break a client: a request without
         // `Accept-Encoding` is answered exactly as before. The payloads that
         // matter here are JSON — the frozen quest bundle above all, downloaded
@@ -4270,11 +4279,20 @@ mod tests {
                 )
                 .await
                 .expect("response");
-            assert_eq!(
+            let header = |name: &str| {
                 resp.headers()
-                    .get("x-content-type-options")
-                    .and_then(|v| v.to_str().ok()),
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
+            assert_eq!(
+                header("x-content-type-options").as_deref(),
                 Some("nosniff"),
+                "{uri}"
+            );
+            assert_eq!(
+                header("strict-transport-security").as_deref(),
+                Some("max-age=63072000"),
                 "{uri}"
             );
         }

@@ -19,6 +19,9 @@ const ORIGIN = 'https://app.test';
 /** Minimal Cache Storage backed by Maps of url -> Response. */
 function makeCaches() {
   const stores = new Map<string, Map<string, Response>>();
+  /** Cache Storage calls made — each one is an async hop to the storage thread,
+   *  and every one of them sits in front of a request the app is waiting on. */
+  const lookups = { count: 0 };
   const cacheFor = (name: string) => {
     if (!stores.has(name)) stores.set(name, new Map());
     const m = stores.get(name)!;
@@ -33,9 +36,17 @@ function makeCaches() {
   };
   return {
     stores,
-    keys: async () => [...stores.keys()],
-    open: async (name: string) => cacheFor(name),
+    lookups,
+    keys: async () => {
+      lookups.count += 1;
+      return [...stores.keys()];
+    },
+    open: async (name: string) => {
+      lookups.count += 1;
+      return cacheFor(name);
+    },
     match: async (req: Request | string) => {
+      lookups.count += 1;
       const url = typeof req === 'string' ? req : req.url;
       for (const m of stores.values()) if (m.has(url)) return m.get(url);
       return undefined;
@@ -95,6 +106,24 @@ describe('sw.js handleFetch routing', () => {
     const sw = loadSw();
     const res = await sw.handleFetch(new Request('https://api.test/api/quests/x/bundle'));
     expect(await body(res)).toBe('network:https://api.test/api/quests/x/bundle');
+  });
+
+  it('costs the same cache lookups with twenty downloaded quests as with one', async () => {
+    // The API lives on another origin, so EVERY api call takes the cross-origin
+    // path — the one that consults the offline bundles. Walking those caches one
+    // by one puts a growing number of storage round-trips in front of every
+    // request the app makes, and the player who downloaded the most quests pays
+    // the most for it.
+    const cost = async (bundles: number) => {
+      const sw = loadSw();
+      for (let i = 0; i < bundles; i += 1) {
+        await sw.caches.open(`quest-bundle-snap-${i}`);
+      }
+      sw.caches.lookups.count = 0;
+      await sw.handleFetch(new Request('https://api.test/api/quests'));
+      return sw.caches.lookups.count;
+    };
+    expect(await cost(20)).toBe(await cost(1));
   });
 
   it('same-origin shell asset uses stale-while-revalidate (serves the shell cache)', async () => {

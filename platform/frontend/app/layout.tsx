@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
+import { SITE_URL } from "../lib/site";
 import TabBar from "./components/TabBar";
 import Toaster from "./components/Toaster";
 import "./globals.css"; // canonical design system (primitives live here)
@@ -43,6 +44,10 @@ const prata = Prata({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for every relative URL in a page's metadata (share cards,
+  // canonical links). Null when the deployment was never told its own address —
+  // absolute URLs still work, relative ones are simply omitted.
+  ...(SITE_URL ? { metadataBase: new URL(SITE_URL) } : {}),
   title: "GEOHOD QUEST — авторские квесты",
   description: "GEOHOD QUEST — авторские городские квесты. Откройте город с новой стороны. Магазин квестов, игрок и конструктор.",
   icons: {

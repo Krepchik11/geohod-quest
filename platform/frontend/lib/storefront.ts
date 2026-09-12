@@ -1,4 +1,4 @@
-import type { PublishedQuestWire } from './api';
+import type { ProductPageWire, PublishedQuestWire } from './api';
 import { plural } from './ru';
 
 /**
@@ -58,5 +58,54 @@ export function factsLine(f: CatalogFacts): { quests: string; cities: string; ra
     quests: `${f.quests} ${questPlural(f.quests)}`,
     cities: `${f.cities} ${cityPlural(f.cities)}`,
     rating: f.avg == null ? null : `${fmtRating(f.avg)} — средняя оценка игроков`,
+  };
+}
+
+/** The preview a pasted quest link produces: the tab title, the card blurb, the picture. */
+export interface ShareCard {
+  title: string;
+  description: string;
+  image: string | null;
+}
+
+/** What `shareCard` reads — the product payload, or a catalog row. */
+type Shareable = Pick<ProductPageWire, 'name' | 'city' | 'duration' | 'description' | 'primary_comic'>;
+
+/** Longest blurb a link preview shows before cutting it off itself. */
+const BLURB_MAX = 200;
+
+const clean = (s: string | null | undefined) => s?.trim() || null;
+
+/** Cut on a word boundary so a preview never ends mid-word. */
+function blurb(text: string): string {
+  if (text.length <= BLURB_MAX) return text;
+  const cut = text.slice(0, BLURB_MAX - 1);
+  return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd() || cut}…`;
+}
+
+/**
+ * A quest link is how this marketplace actually travels — pasted into a chat,
+ * not typed. Every quest used to produce the same «О квесте — GEOHOD QUEST»
+ * with no picture and no text, so the link said nothing about what was behind
+ * it. This builds the preview out of what the author already wrote.
+ *
+ * Facts only: the city and the duration appear when the author filled them in
+ * and are omitted otherwise — the store card follows the same rule. The city is
+ * kept in the nominative (after a comma) rather than declined into a sentence,
+ * because there is no correct way to decline an arbitrary place name and a
+ * wrong case reads worse than a plain list.
+ */
+export function shareCard(quest: Shareable): ShareCard {
+  const city = clean(quest.city);
+  const duration = clean(quest.duration);
+  const written = clean(quest.description);
+  const facts = [city, duration].filter(Boolean).join(', ');
+  return {
+    title: city ? `${quest.name} — городской квест, ${city}` : quest.name,
+    description:
+      written !== null
+        ? blurb(written)
+        : `Городской квест.${facts ? ` ${facts}.` : ''} Играйте офлайн — маршрут остаётся с вами.`,
+    image: clean(quest.primary_comic),
   };
 }
