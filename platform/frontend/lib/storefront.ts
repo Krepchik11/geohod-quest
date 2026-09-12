@@ -95,7 +95,7 @@ function blurb(text: string): string {
  * because there is no correct way to decline an arbitrary place name and a
  * wrong case reads worse than a plain list.
  */
-export function shareCard(quest: Shareable): ShareCard {
+export function shareCard(quest: Shareable, mediaOrigin = ''): ShareCard {
   const city = clean(quest.city);
   const duration = clean(quest.duration);
   const written = clean(quest.description);
@@ -106,6 +106,24 @@ export function shareCard(quest: Shareable): ShareCard {
       written !== null
         ? blurb(written)
         : `Городской квест.${facts ? ` ${facts}.` : ''} Играйте офлайн — маршрут остаётся с вами.`,
-    image: clean(quest.primary_comic),
+    image: shareImage(clean(quest.primary_comic), mediaOrigin),
   };
+}
+
+/**
+ * The cover as something a chat server can actually fetch: an absolute URL on
+ * the host that serves the media.
+ *
+ * A cover ref is usually already absolute, but it can be `/`-rooted — that is
+ * the documented shape when media is served through the API rather than a
+ * bucket domain (`R2_PUBLIC_BASE_URL=https://api…/api/media`). Left relative it
+ * would be resolved against the SITE's address, which serves no media at all,
+ * and the preview would show a broken picture. `data:` and legacy id tokens are
+ * dropped: a crawler cannot fetch either.
+ */
+function shareImage(ref: string | null, mediaOrigin: string): string | null {
+  if (ref === null) return null;
+  if (ref.startsWith('http')) return ref;
+  if (ref.startsWith('/')) return mediaOrigin ? `${mediaOrigin.replace(/\/+$/, '')}${ref}` : null;
+  return null;
 }

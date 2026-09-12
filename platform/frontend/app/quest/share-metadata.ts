@@ -19,7 +19,7 @@ export async function questShareMetadata(questId: string): Promise<Metadata> {
   const manifest = `/quest/${encodeURIComponent(questId)}/manifest.webmanifest`;
   const quest = await fetchQuest(questId);
   if (!quest) return { title: 'Квест — GEOHOD QUEST', manifest };
-  const card = shareCard(quest);
+  const card = shareCard(quest, API_BASE);
   return {
     title: card.title,
     description: card.description,

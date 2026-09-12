@@ -119,3 +119,36 @@ describe('shareCard — what a quest link looks like when it is pasted somewhere
     expect(shareCard({ ...quest, city: '   ' }).title).toBe('Тайна старой крепости');
   });
 });
+
+describe('shareCard — the picture a chat server has to be able to fetch', () => {
+  const quest = {
+    quest_id: 'q1',
+    name: 'Тайна старой крепости',
+    city: null,
+    duration: null,
+    description: null,
+    primary_comic: null as string | null,
+  };
+  const API = 'https://api.quest.example';
+
+  it('passes an absolute cover through untouched', () => {
+    expect(shareCard({ ...quest, primary_comic: 'https://media.test/c.png' }, API).image).toBe(
+      'https://media.test/c.png',
+    );
+  });
+
+  it('puts a /-rooted cover on the media host, not on the site', () => {
+    // The documented shape when media is served through the API rather than a
+    // bucket domain. Left relative, the preview resolves it against the SITE
+    // address — which serves no media — and shows a broken picture.
+    expect(shareCard({ ...quest, primary_comic: '/api/media/abc' }, API).image).toBe(
+      `${API}/api/media/abc`,
+    );
+  });
+
+  it('drops what a crawler cannot fetch', () => {
+    expect(shareCard({ ...quest, primary_comic: 'data:image/png;base64,AAA' }, API).image).toBeNull();
+    expect(shareCard({ ...quest, primary_comic: 'comic-fortress' }, API).image).toBeNull();
+    expect(shareCard({ ...quest, primary_comic: '/api/media/abc' }, '').image).toBeNull();
+  });
+});
