@@ -36,6 +36,12 @@ Or split across two terminals: `npm run dev:backend` / `npm run dev:frontend`.
   green. The integration suite runs the same scenarios against both storage backends;
   the PostgreSQL pass self-skips without `DATABASE_URL` (see `backend/.env.example`).
 - **Frontend**: `npm test`, `npm run build`, `npm run lint` — TypeScript strict, clean.
+  `npm run lint` also runs two mechanical rules: `lint:ds` (no deprecated
+  design-system class) and `lint:css-scope` (no route renders a class whose
+  stylesheet that route does not load — see `frontend/README.md`).
+- **One lockfile**, `platform/package-lock.json`. Install from `platform/`;
+  `npm ci` in CI does the same. A second lockfile inside `frontend/` used to make
+  CI resolve a tree nobody ran.
 - Every edit is held to [`agents/rust.md`](../agents/rust.md) and
   [`agents/react.md`](../agents/react.md) plus KISS/YAGNI: no over-extracted crates, no
   premature client components, no barrel imports.
@@ -90,6 +96,22 @@ platform/
 - **Recovery**: `POST /api/auth/recover` issues a hashed single-use token (mailed as
   both a link and a 6-digit code); `POST /api/auth/reset` consumes it. Email
   confirmation is soft — a banner nudges, nothing blocks.
+- **Sessions are secrets, and they are stored like secrets**: only `sha256(token)`
+  reaches the `sessions` table, exactly as the mailed reset link and code do — a
+  leaked dump yields no working login. The raw token exists in the client's
+  storage and nowhere else, and exactly one function opens a session
+  (`handlers::auth::open_session`), so no route can persist a bearer secret by
+  taking a shortcut.
+- **A session never outlives the password it came from**: a reset closes every
+  session (recovery means the account may already be in other hands); a password
+  change closes every OTHER one and spares the device doing the change. Nothing
+  else expires a session, which is precisely why these two must.
+- **Guessing is bounded**: sign-in allows 10 failed attempts per email per 15
+  minutes, and a success hands the whole budget back — ordinary use can never
+  accumulate into a lockout. Argon2 runs on the blocking pool, so a burst of
+  sign-ins cannot stall the request loop. What is NOT bounded is per-IP: that
+  needs a trusted proxy-header contract this deployment does not yet state, and
+  a limiter keyed on a spoofable header is worse than none.
 - **Two-tier enforcement**: a registered player id requires `Authorization: Bearer
   <token>` on player-scoped endpoints; anonymous ids are credentialed by device
   possession (`X-User-Id`, sent automatically by `frontend/lib/identity.ts`).

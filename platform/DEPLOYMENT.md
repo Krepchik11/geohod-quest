@@ -217,6 +217,14 @@ Leave `payments_mock` OFF in production: it grants access without charging.
 2. **Root Directory:** set to `platform/frontend`. Vercel auto-detects Next.js.
    (`platform/frontend/vercel.json` already pins framework, `npm ci`, and the
    monorepo ignore step — no manual build/install overrides needed.)
+
+   ⚠️ Leave **«Include files outside of the Root Directory in the Build Step»**
+   ON (Vercel's default). There is exactly one lockfile in this repository and it
+   lives at `platform/package-lock.json`, one level above the Root Directory:
+   `npm ci` run in `platform/frontend` walks up to the workspace root and
+   installs from it. With that setting off, the lockfile is not in the build
+   container and install fails outright — loudly, at deploy time, which the
+   release pipeline reports rather than shipping a half-built frontend.
 3. **Node version:** Project Settings → set to **22.x** (matches CI; Next 16 needs ≥20).
 4. **Environment Variables** — add `NEXT_PUBLIC_API_URL` for **each** environment:
    - **Production** → `https://api.your-domain.com` (your VPS backend, HTTPS).
@@ -226,6 +234,14 @@ Leave `payments_mock` OFF in production: it grants access without charging.
    ⚠️ `NEXT_PUBLIC_*` is **baked into the bundle at build time**. Changing it
    requires a **redeploy** to take effect. If it is missing in prod, the build
    **fails by design** (see `lib/api.ts`) instead of silently shipping localhost.
+
+   Add `NEXT_PUBLIC_SITE_URL` too — the site's **own** address
+   (`https://app.quest.geohod.ru`), the custom domain rather than the
+   `*.vercel.app` host. It is what `sitemap.xml`, `robots.txt` and the canonical
+   half of a share card are written against. Unlike the API base it never fails
+   a build: unset, the app behaves identically and simply cannot hand a crawler
+   an absolute link, so the sitemap is empty and `robots.txt` drops its
+   `Sitemap:` line instead of naming a host nobody confirmed.
 5. **Release credentials.** Production deploys are driven by CI, not by Git, so
    put `VERCEL_TOKEN` (Vercel → Settings → Tokens) as a **secret**, and
    `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` as **variables**, on the GitHub
@@ -291,6 +307,41 @@ Leave `payments_mock` OFF in production: it grants access without charging.
   `Authorization`/`X-User-Id` **headers, not cookies**, so credentials are not
   enabled. Note: `https://*.vercel.app` allows *any* Vercel app's origin; scope it
   to your project (e.g. `https://geohod-quest-*.vercel.app`) if you want it tighter.
+- **Response compression is negotiated, not forced** (`CompressionLayer`, br/gzip).
+  A client that sends no `Accept-Encoding` is answered exactly as before, so no
+  cached PWA client can be broken by it. Measured on the real golden quests, the
+  frozen snapshot a player downloads over mobile data drops ~66–71%; the
+  catalogue drops far more. Already-compressed types (images) and tiny bodies are
+  skipped by the default predicate, so content-addressed media is untouched.
+- **Every API response carries `X-Content-Type-Options: nosniff` and HSTS**
+  (`max-age=63072000`, no `includeSubDomains` — the API host does not speak for
+  its siblings). HSTS matters here specifically: the API carries session tokens
+  in a header, so one plain-HTTP request is one stolen session.
+
+## Browser-side headers, and the one that is deliberately missing
+
+`frontend/next.config.ts` sets `nosniff`, `Referrer-Policy`,
+`X-Frame-Options: DENY`, HSTS, a `Permissions-Policy` denying the device APIs the
+app never calls, and a CSP of `base-uri 'self'; object-src 'none'; frame-ancestors
+'none'`. Each of those is provable for this app: it has no `<base>`, no
+`<object>`/`<embed>`, and is never framed.
+
+There is **no `script-src`**, and that is a decision, not an oversight:
+
+- Next inlines its own bootstrap script, so a `script-src` without
+  `'unsafe-inline'` needs a per-request nonce — which means middleware on every
+  request, and middleware is the one thing this deployment has deliberately
+  avoided (see **Topology**: no BFF, no proxy).
+- The media host is a backend runtime value (`R2_PUBLIC_BASE_URL`), unknown to
+  the frontend build, so `connect-src`/`img-src` cannot be enumerated at build
+  time. A guessed allowlist would break offline media downloads.
+- Both sign-in providers load a first-party script from their own host, and both
+  ship behind feature flags that are **off** by default — so a wrong `script-src`
+  would break a flow nobody exercises in CI and nobody notices until a user does.
+
+If the nonce route is taken later, the two provider hosts are
+`https://accounts.google.com/gsi/client` and `https://oauth.telegram.org`, and
+they are loaded from exactly one place (`app/components/SocialAuthButtons.tsx`).
 
 ---
 

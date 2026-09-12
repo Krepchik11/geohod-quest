@@ -11,15 +11,23 @@ local persistence demands them.
 ## Commands
 
 ```bash
-npm run dev        # dev server (http://localhost:3000)
-npm run build      # production build
-npm test           # vitest run (the pure model + projector suite)
-npm run lint       # eslint (next config)
+npm run dev            # dev server (http://localhost:3000)
+npm run build          # production build
+npm test               # vitest run (the pure model + projector suite)
+npm run lint           # eslint (next config)
+npm run lint:ds        # no deprecated design-system class
+npm run lint:css-scope # no route renders a class whose stylesheet it doesn't load
 ```
 
 The backend base URL is `NEXT_PUBLIC_API_URL` (inlined into the bundle at build
 time; falls back to `http://localhost:8080` only in dev — a production build with
 it unset throws, see `lib/api.ts`).
+
+`NEXT_PUBLIC_SITE_URL` is this deployment's own address (`https://app.quest.geohod.ru`).
+Unlike the API base it never fails a build: without it the app works exactly the
+same, it just cannot hand a crawler or a chat preview an absolute link, so the
+sitemap comes back empty and `robots.txt` omits its `Sitemap:` line rather than
+pointing at a guessed host (`lib/site.ts`).
 
 ## Layout
 
@@ -34,9 +42,13 @@ app/
   admin/              user/role management (admin-gated, search + pagination)
   auth/ profile/ my-quests/   account + library (email-first auth; auth/reset + auth/confirm)
   privacy/ terms/     legal pages
-  components/         shared UI: ui.tsx (Button/Input), Toaster, TabBar, SiteFooter,
-                      QuestCard, PurchaseSheet, InstallQuestButton (+useInstall)
+  components/         shared UI: ui.tsx (Button/Input/Toggle), Toaster, TabBar, SiteFooter,
+                      QuestCard, PurchaseSheet, InstallQuestButton (+useInstall),
+                      useDialog.ts (Escape + focus for every overlay)
   SiteHeader.tsx      role-aware nav
+  error.tsx not-found.tsx   the two pages Next would otherwise serve in English
+  sitemap.ts robots.ts      what a crawler may find
+  quest/share-metadata.ts   the <head> of one quest (title, blurb, cover, manifest)
 lib/
   shared-model.ts     wire types + pure projectors (projectState/projectBalance) — MUST match the Rust fold
   constructor-model.ts editor model + publish gates
@@ -51,6 +63,7 @@ lib/
   identity.ts         anonymous-first device id + session (who is playing)
   api.ts              the single API client (attaches identity, normalizes errors)
   roles.ts            capability predicates (admin ⊃ editor ⊃ player)
+  site.ts             this deployment's own address (optional; degrades, never throws)
 ```
 
 ## How it fits together
@@ -75,6 +88,22 @@ lib/
   exactly. The shared fixtures in `../goldens/parity/` are executed by both this
   suite (`lib/__tests__/parity.test.ts`) and the backend's — one-sided drift fails a
   suite.
+- **Stylesheets belong to a route, not to everybody.** The root layout imports
+  only what every visitor renders (`globals.css` plus commerce/store/my-quests);
+  the admin desk, the constructor and the player paper are imported by the layout
+  of the subtree that owns them. That is ~50% of the CSS a public page used to
+  download. `npm run lint:css-scope` builds the import graph, works out what each
+  route actually renders, and fails if a class appears on a route whose
+  stylesheet is not loaded there — the one silent failure this split allows.
+- **Overlays** (`app/components/useDialog.ts`): Escape closes, focus enters on
+  open, Tab cycles inside, focus returns to whatever opened it. One rule for
+  every sheet, dialog and confirm — the alternative is twelve of them each
+  deciding separately, which is how eleven ended up without Escape.
+- **Share cards** (`app/quest/share-metadata.ts` + `lib/storefront.ts`
+  `shareCard`): a quest link carries that quest's title, blurb and cover. Facts
+  only — city and duration appear when the author filled them in — and the cover
+  is made absolute against the API origin, because a relative one would resolve
+  against the site, which serves no media.
 
 See [`../README.md`](../README.md) for the monorepo and
 [`../DEPLOYMENT.md`](../DEPLOYMENT.md) for how it ships.
