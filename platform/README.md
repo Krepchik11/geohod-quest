@@ -32,13 +32,29 @@ Or split across two terminals: `npm run dev:backend` / `npm run dev:frontend`.
 
 ## Quality gates (every change)
 
-- **Backend**: `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test` — all
-  green. The integration suite runs the same scenarios against both storage backends;
-  the PostgreSQL pass self-skips without `DATABASE_URL` (see `backend/.env.example`).
+- **Backend**: `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo doc --no-deps` with `RUSTDOCFLAGS=-D warnings`, `cargo test` — all green,
+  and all four run in `backend-ci.yml`. (Until recently only `cargo test` did; the
+  other three were documented here and enforced nowhere.) The integration suite
+  runs the same scenarios against both storage backends.
+- **The PostgreSQL half needs a server, and `.env` decides that** — not the
+  absence of a variable. The `pg_*` tests skip only when `DATABASE_URL` is unset,
+  the harness calls `dotenv().ok()` first, and `backend/.env.example:5` ships
+  `DATABASE_URL` **uncommented** — so copying the example as instructed makes
+  those 32 tests run, and fail with `PoolTimedOut` if nothing is listening. Start
+  Postgres (`docker compose up -d postgres`) or comment the line out.
 - **Frontend**: `npm test`, `npm run build`, `npm run lint` — TypeScript strict, clean.
-  `npm run lint` also runs two mechanical rules: `lint:ds` (no deprecated
-  design-system class) and `lint:css-scope` (no route renders a class whose
-  stylesheet that route does not load — see `frontend/README.md`).
+  `npm run lint` also runs three mechanical rules: `lint:ds` (no deprecated
+  design-system class), `lint:css-scope` (no route renders a class whose
+  stylesheet that route does not load — see `frontend/README.md`) and
+  `lint:doc-paths` (every repository path a document names is one git tracks or
+  deliberately ignores, and the frontend origin in the docs is the one the deploy
+  unit sets).
+- **The HTTP surface is generated, not written.** `backend/API.md` — 70 endpoints
+  over 67 paths — is produced from the `router()` functions and the `///` on each
+  handler by `cargo test api_reference_is_committed`, which is also the gate that
+  it still matches. Regenerate with `UPDATE_API=1`. A new route whose handler
+  carries no doc fails that test.
 - **One lockfile**, `platform/package-lock.json`. Install from `platform/`;
   `npm ci` in CI does the same. A second lockfile inside `frontend/` used to make
   CI resolve a tree nobody ran.
