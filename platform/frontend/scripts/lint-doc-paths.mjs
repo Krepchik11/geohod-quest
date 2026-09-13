@@ -1,22 +1,10 @@
 /**
- * Every repository path a document names must exist.
+ * Every repository path a document names must be one git tracks or deliberately
+ * ignores — plus one value that is not a path: the frontend origin, which must
+ * match the deploy unit.
  *
- * This is the check that was missing. The old DEPLOYMENT.md told an operator to keep
- * `platform/frontend/package-lock.json` "authoritative and regenerated" for
- * three commits after that file was deleted — the docs commit that was supposed
- * to record the change edited a different section and left this one standing.
- * Nothing failed, because nothing was looking.
- *
- * It is deliberately NOT a link checker. A link checker answers "does this URL
- * resolve", which says nothing about a sentence naming a file that no longer
- * exists. This answers the question that actually goes stale here: this repo's
- * documentation is dense with concrete paths, and a path is the one claim in
- * prose a machine can check exactly.
- *
- * Truth comes from git, not the working tree, so build output and ignored
- * scratch files can never satisfy a documented path. It also checks one value
- * that is not a path: the frontend origin, which the docs and the deploy unit
- * had been disagreeing about.
+ * Not a link checker: a link checker asks whether a URL resolves, which says
+ * nothing about a sentence naming a file that no longer exists.
  *
  * Run: npm run lint:doc-paths
  */
@@ -29,8 +17,7 @@ const ROOT = resolve(process.cwd(), '../..');
 
 function markdownFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {
-    // Dot-directories and build output hold nobody's documentation, and a
-    // broken symlink inside one (a stale .venv) must not abort the check.
+    // A broken symlink in a dot-dir (a stale .venv) must not abort the check.
     if (name.startsWith('.') || name === 'node_modules' || name === 'target') continue;
     const full = join(dir, name);
     const stat = statSync(full, { throwIfNoEntry: false });
@@ -42,11 +29,8 @@ function markdownFiles(dir, out = []) {
 }
 
 /**
- * Every path this repository owns — tracked, plus not-yet-committed additions —
- * and every directory on the way to one. Additions count because otherwise a new
- * file could neither satisfy a reference nor have its own references checked
- * until the commit AFTER the one that introduced it, which is exactly when
- * nobody looks again.
+ * Paths this repo owns — tracked plus staged additions — and their directories.
+ * Additions count, or a new file would go unchecked until the NEXT commit.
  */
 function ownedPaths() {
   const listed = execSync('git ls-files --cached --others --exclude-standard', {
@@ -73,9 +57,8 @@ const SOURCE_EXT =
   /\.(rs|ts|tsx|js|mjs|jsx|css|json|toml|sql|yml|yaml|md|sh|html|container|snippet|example)$/;
 
 /**
- * Things that look like paths but are not repository paths. Every entry earned
- * its place against the real documents — a check that cries wolf is a check
- * somebody deletes.
+ * Path-shaped things that are not repository paths. Every entry earned its
+ * place against the real documents.
  */
 function notAPath(text) {
   return (
@@ -86,12 +69,10 @@ function notAPath(text) {
     /^[A-Z][A-Z0-9_]*$/.test(text) || // env var names
     /^\d/.test(text) || // versions, sizes
     /^[a-z0-9.-]+\.(io|com|ru|org|net|dev|app)\//.test(text) || // ghcr.io/…, github.com/…
-    // An absolute path in these docs is an HTTP route; the few that name real
-    // machine locations are outside the repository either way.
+    // An absolute path here is an HTTP route, or a machine location.
     text.startsWith('/') ||
     text.startsWith('~') ||
-    // Installed dependencies and per-machine artifacts: real on disk, never in
-    // git, so "is it tracked" is the wrong question to ask of them.
+    // Real on disk, never in git.
     text.startsWith('node_modules/') ||
     text.startsWith('.')
   );
@@ -116,10 +97,8 @@ function pathsIn(markdown) {
 }
 
 /**
- * A documented path is satisfied when git tracks something it identifies: a
- * fragment must be the tail of a tracked path (so `src/handlers` resolves from
- * any document), and a bare filename must match a tracked basename — the docs
- * legitimately write `features.rs` with no directory.
+ * A fragment must be the tail of an owned path; a bare filename must match an
+ * owned basename, since the docs legitimately write `features.rs` alone.
  */
 function isTracked(candidate, docDir) {
   // A `../`-style link is relative to the document, so resolve it there first.
@@ -135,10 +114,8 @@ function isTracked(candidate, docDir) {
 }
 
 /**
- * Paths git deliberately ignores are not drift. `platform/tools/bubble-import/`
- * is a gitignored 286 MB one-off importer, and `load.sql` is something it
- * generates — the deploy docs are right to name both. Asking git which paths it
- * ignores is exact, so this needs no hand-kept exception list.
+ * Ignored paths are not drift: platform/tools/bubble-import/ and what it
+ * generates are gitignored on purpose. Asking git beats a hand-kept list.
  */
 function ignoredByGit(candidates) {
   if (candidates.length === 0) return new Set();
@@ -150,9 +127,8 @@ function ignoredByGit(candidates) {
     });
     return new Set(answer.split('\n').filter(Boolean));
   } catch {
-    // check-ignore exits 1 when nothing matched, and prints the matches it did
-    // find on stdout — which execSync discards on a non-zero exit. Fall back to
-    // asking one path at a time so a single miss cannot blind the whole run.
+    // check-ignore exits 1 when nothing matched, and execSync then discards the
+    // matches it DID print. Ask one at a time so a miss cannot blind the run.
     const ignored = new Set();
     for (const candidate of candidates) {
       try {
@@ -169,10 +145,8 @@ function ignoredByGit(candidates) {
 const problems = [];
 const unresolved = [];
 for (const doc of markdownFiles(ROOT)) {
-  // Only repository documents are judged. `platform/tools/bubble-import/` is
-  // gitignored on purpose (a 286 MB one-off importer), and its README correctly
-  // names its own untracked sources and generated outputs, so ignored trees are
-  // out of scope on both sides of the check.
+  // Ignored trees are out of scope on both sides: their READMEs correctly name
+  // their own untracked sources.
   if (!TRACKED.has(relative(ROOT, doc))) continue;
   const markdown = readFileSync(doc, 'utf8');
   const lines = markdown.split('\n');
@@ -190,14 +164,9 @@ for (const { candidate, where } of unresolved) {
 }
 
 /**
- * The frontend origin the docs name must be the one the deploy unit sets.
- *
- * These disagreed: every document said `app.quest.geohod.ru` while the
- * committed `geohod-quest-api.container` sets CORS and `FRONTEND_BASE` to
- * `quest.geohod.ru`. An operator who installed the unit as committed and then
- * followed the runbook got a CORS rejection on every API call and password-reset
- * links pointing at a host that does not serve the app — and the runbook was the
- * wrong half. The unit is the artifact that actually runs, so it is the oracle.
+ * The origin the docs name must be the one the deploy unit sets. These once
+ * disagreed, so the runbook produced a CORS rejection on every API call. The
+ * unit is the oracle — it is what runs.
  */
 function originDrift() {
   const unit = join(ROOT, 'platform/deploy/geohod-quest-api.container');

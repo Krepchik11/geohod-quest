@@ -262,21 +262,11 @@ pub(crate) struct CatalogQuest {
     tags: Vec<String>,
 }
 
-/// Freshness for the three identity-free storefront reads. The landing page
-/// fetches the catalogue again on every mount — a back navigation included —
-/// and the bytes are the same for every visitor, so without this the browser
-/// has no choice but to download the whole thing each time.
+/// Freshness for the identity-free storefront reads. A minute, not an hour: a
+/// publish or delist is an editorial action someone is watching for.
 ///
-/// A minute, not an hour: a publish or a delist is an editorial action someone
-/// is watching for, and a minute is the longest a stale shelf is tolerable. The
-/// stale-while-revalidate window then keeps the shelf instant while the refresh
-/// happens behind it.
-///
-/// Deliberately NOT on the gated reads. The bundle is grant-checked per player
-/// and a stored copy would be one player's purchase sitting in another's cache;
-/// `/api/grants` and the attempt routes are per-caller for the same reason.
-/// Stating it once here is what keeps a future public read from having to
-/// remember — and what keeps a gated one from picking it up by accident.
+/// Deliberately NOT on gated reads — a cached bundle would be one player's
+/// purchase in another's cache. Stated once so a gated read cannot pick it up.
 const PUBLIC_READ_CACHE: (axum::http::HeaderName, &str) = (
     header::CACHE_CONTROL,
     "public, max-age=60, stale-while-revalidate=300",

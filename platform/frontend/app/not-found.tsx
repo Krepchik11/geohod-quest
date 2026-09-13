@@ -1,12 +1,7 @@
 import Link from 'next/link';
 import SiteShell from './components/SiteShell';
 
-/**
- * A wrong address used to land on Next's built-in 404: an unstyled English
- * page with no header, no way back and no sign it belonged to this site. This
- * is the same page as every other, in the same language, with the two links
- * someone who mistyped a quest address actually wants.
- */
+/** Next's built-in 404 is unstyled, English, and offers no way back. */
 export default function NotFound() {
   return (
     <SiteShell>

@@ -152,40 +152,26 @@ fn build_router(state: AppState) -> Router {
         .merge(handlers::admin::router())
         .merge(handlers::auth::router())
         .layer(TraceLayer::new_for_http())
-        // This origin serves author-uploaded bytes (`/api/media/{hash}`) beside
-        // JSON the app trusts. Browser content sniffing can decide those bytes
-        // are a document and execute them HERE, on the API's own origin; this
-        // forbids the guess. A layer, not a per-route header, so no future route
-        // can be added without it.
+        // Author-uploaded bytes are served beside JSON the app trusts. A layer,
+        // not a per-route header, so no future route can be added without it.
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             HeaderName::from_static("x-content-type-options"),
             HeaderValue::from_static("nosniff"),
         ))
-        // Two years of HTTPS-only for this origin. The API carries session tokens
-        // in a header, so one plain-HTTP request is one stolen session; this is
-        // what stops the browser making that request at all. Not
-        // `includeSubDomains` — the API host does not speak for its siblings. A
-        // browser ignores it over plain HTTP, so local development is unaffected.
+        // Session tokens ride in a header, so one plain-HTTP request is one
+        // stolen session. No includeSubDomains: this host has no siblings to
+        // speak for. Ignored over plain HTTP, so dev is unaffected.
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             header::STRICT_TRANSPORT_SECURITY,
             HeaderValue::from_static("max-age=63072000"),
         ))
-        // Negotiated, so it can never break a client: a request without
-        // `Accept-Encoding` is answered exactly as before. The payloads that
-        // matter here are JSON — the frozen quest bundle above all, downloaded
-        // over mobile data by every offline install — and tower-http's default
-        // predicate already leaves already-compressed types (images) and tiny
-        // bodies alone, so content-addressed media is passed through untouched.
+        // Negotiated: a request without `Accept-Encoding` is answered as before.
         .layer(
             tower_http::compression::CompressionLayer::new().compress_when(
                 tower_http::compression::predicate::DefaultPredicate::new()
-                    // The default predicate skips images, gRPC, SSE and tiny
-                    // bodies — but not zip, and the quest export IS a zip that
-                    // `export.rs` already wrote with Deflate. Compressing it a
-                    // second time saves nothing on a body that is mostly
-                    // deflated JPEG and PNG, and it does that pass inline on a
-                    // runtime thread — the very cost `export.rs` spends a
-                    // `spawn_blocking` to keep off it.
+                    // The default predicate skips images but not zip, and the
+                    // quest export is already Deflate — a second pass saves
+                    // nothing and runs inline on a runtime thread.
                     .and(
                         tower_http::compression::predicate::NotForContentType::const_new(
                             "application/zip",
@@ -4224,12 +4210,8 @@ mod tests {
         assert!(first >= last, "newest first across pages");
     }
 
-    /// The quest bundle is the biggest thing this API sends and the one every
-    /// offline install downloads — a frozen snapshot of highly repetitive JSON.
-    /// Shipping it raw wastes the player's mobile data on the street, which is
-    /// exactly where they are standing. A client that says it can take gzip gets
-    /// gzip; one that says nothing still gets plain JSON, so no cached PWA
-    /// client can be broken by this.
+    /// The bundle is the biggest payload and every offline install downloads it.
+    /// Negotiated, so a client that asks for nothing still gets plain JSON.
     #[tokio::test]
     async fn json_responses_are_compressed_when_the_client_asks() {
         let app = test_app();
@@ -4276,14 +4258,8 @@ mod tests {
         );
     }
 
-    /// The storefront reads are the same bytes for every visitor and are fetched
-    /// again on every mount of the landing page — a plain back navigation
-    /// included. With no freshness header the browser has no choice but to
-    /// re-download the whole catalogue each time.
-    ///
-    /// The three that get one are exactly the identity-free public reads. The
-    /// gated ones must NOT: a bundle is grant-checked per player, and a stored
-    /// copy would be one player's purchase sitting in another's cache.
+    /// Public reads get a freshness header; gated ones must not — a cached
+    /// bundle would be one player's purchase in another's cache.
     #[tokio::test]
     async fn public_reads_are_briefly_cacheable_and_gated_ones_are_not() {
         let app = test_app();
@@ -4347,11 +4323,8 @@ mod tests {
         );
     }
 
-    /// This origin serves bytes an author uploaded (`/api/media/{hash}`) next to
-    /// JSON the app trusts. A browser that is allowed to guess a content type can
-    /// decide an "image" is a document and run it here, on the API's own origin.
-    /// `nosniff` is what forbids the guess, and it belongs on every response —
-    /// one layer, not a header a future route can forget.
+    /// This origin serves author-uploaded bytes beside JSON the app trusts, so a
+    /// sniffed "image" could execute here. One layer, not a per-route header.
     #[tokio::test]
     async fn every_response_forbids_content_type_sniffing() {
         let app = test_app();
@@ -4402,11 +4375,8 @@ mod tests {
         );
     }
 
-    /// Login is the one endpoint an attacker can call with a guess. Without a
-    /// bound it is an unlimited password oracle, and every call also buys a full
-    /// argon2 hash of the server's CPU. The budget is per email and is spent by
-    /// FAILURES only — a person who signs in successfully has theirs handed back,
-    /// so no amount of ordinary use can lock an account out.
+    /// Per email, spent by FAILURES only — a success refunds the budget, so
+    /// ordinary use can never lock an account out.
     #[tokio::test]
     async fn login_failures_are_rate_limited_and_success_clears_the_budget() {
         let app = test_app();
@@ -4493,14 +4463,8 @@ mod tests {
     /// is email-scoped, dies after MAX_CODE_ATTEMPTS verify attempts, and a
     /// fresh recover invalidates BOTH prior credentials (latest mail wins —
     /// with codes in play, N outstanding credentials would be N× guessable).
-    /// Changing the password is the move a person makes when they think someone
-    /// else is in their account, and a password reset is the move they make when
-    /// they have already lost it. Both must actually END the other sessions —
-    /// otherwise the stolen bearer token outlives the credential it came from,
-    /// and sessions never expire, so it outlives it forever.
-    ///
-    /// The device doing the change keeps ITS session: signing the owner out of
-    /// the tab they are standing in is not security, it is a bug report.
+    /// A stolen token must not outlive the password it came from — and nothing
+    /// else expires a session. The device doing the change keeps its own.
     async fn scenario_credential_change_revokes_sessions(
         app: &Router,
         mails: &Mutex<Vec<mailer::OutgoingMail>>,
@@ -5988,11 +5952,8 @@ mod tests {
         payment_ref_audited_on_grants = ids scenario_payment_ref_audit / "pay";
     }
 
-    /// A database leak must not hand out working logins. `auth_tokens` already
-    /// stores only sha256 of the mailed reset link and code; a session token is
-    /// the SAME kind of secret — a bearer credential — so the `sessions` row
-    /// keys on sha256(token) too. The token the client holds appears nowhere in
-    /// storage, and nothing about that is visible to the client.
+    /// A session token is the same kind of secret as a mailed reset link, so it
+    /// is stored the same way: only sha256 reaches the table.
     #[tokio::test]
     async fn pg_sessions_are_stored_hashed() {
         let Some(h) = pg_harness("pg_sessions_are_stored_hashed").await else {
@@ -6039,9 +6000,7 @@ mod tests {
         assert_eq!(me["user_id"], user.as_str());
     }
 
-    /// Collapse a Rust source file to one line for structural matching, with
-    /// comment lines dropped so a `.route(` inside prose is never mistaken for a
-    /// registration.
+    /// One line, comments dropped — so a `.route(` in prose is not a match.
     fn route_source(src: &str) -> String {
         src.lines()
             .filter(|l| !l.trim_start().starts_with("//"))
@@ -6053,8 +6012,7 @@ mod tests {
     }
 
     /// Every `(path, [(METHOD, handler)])` a module's `router()` registers.
-    /// Handles both rustfmt shapes (one line, or split across four) and a path
-    /// carrying two methods (`get(a).post(b)`), which two admin routes do.
+    /// Handles both rustfmt shapes and `get(a).post(b)` on one path.
     fn extract_routes(src: &str) -> Vec<(String, Vec<(String, String)>)> {
         const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
         let flat = route_source(src);
@@ -6072,8 +6030,7 @@ mod tests {
             };
             let path = flat[path_start..path_start + q2].to_string();
 
-            // Walk to the `)` that closes `.route(` so a nested call (a `.layer`
-            // on the media upload, say) cannot end the registration early.
+            // Match parens, or a nested `.layer` ends the registration early.
             let mut depth = 1i32;
             let mut end = open;
             while end < bytes.len() && depth > 0 {
@@ -6148,26 +6105,11 @@ mod tests {
             .to_string()
     }
 
-    /// Handlers registered on a route but carrying no `///` doc. This number may
-    /// only ever go DOWN — see [`api_reference_is_committed`].
+    /// Routed handlers with no `///`. May only go DOWN.
     const UNDOCUMENTED_ROUTE_BUDGET: usize = 32;
 
-    /// The HTTP surface, generated from the routers themselves.
-    ///
-    /// 67 paths across six `handlers::*::router()` functions were documented
-    /// nowhere in this repository: there is no OpenAPI file, and the markdown
-    /// names endpoints only in passing. Hand-writing that list would create one
-    /// more artifact to keep in sync — and the repository's hand-maintained
-    /// module map had already drifted, omitting `authz.rs` and all of
-    /// `handlers/`. So the reference is EXTRACTED: the paths are already source
-    /// literals and most handlers already carry a `///`, and this test is both
-    /// the generator and the gate that the committed file still matches.
-    ///
-    /// Regenerate with:
-    ///   UPDATE_API=1 cargo test api_reference_is_committed
-    ///
-    /// The budget is a ratchet, not a target: a new route with no doc fails
-    /// here, while the 32 that predate the gate can be paid down over time.
+    /// Generates API.md from the routers and gates that it still matches.
+    /// Regenerate: UPDATE_API=1 cargo test api_reference_is_committed
     #[test]
     fn api_reference_is_committed() {
         let handlers =

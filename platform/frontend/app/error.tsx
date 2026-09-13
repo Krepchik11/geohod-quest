@@ -4,13 +4,8 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 
 /**
- * The last line before a blank screen. Without this file a render error
- * anywhere in the app fell through to Next's built-in page — unstyled, in
- * English, and with no way out but the browser's Back button.
- *
- * «Попробовать снова» is `reset()`, which re-renders the failed subtree: for
- * the common cause, a request that lost the network mid-flight, that IS the
- * fix, and the offline player keeps everything it queued either way.
+ * Root error boundary — it also catches /admin and /quest-editor, so the chrome
+ * here is deliberately bare. `reset()` re-renders the failed subtree.
  */
 export default function Error({
   error,
@@ -20,8 +15,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // The digest is the only handle on the server-side cause; without printing
-    // it, a production report says nothing a developer can act on.
+    // The digest is the only handle on the server-side cause.
     console.error('Необработанная ошибка на странице', error.digest ?? '', error);
   }, [error]);
 

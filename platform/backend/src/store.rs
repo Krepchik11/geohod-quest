@@ -1006,9 +1006,8 @@ impl InMemoryAuthStore {
         self.users.get(user_id).cloned()
     }
 
-    /// Sign the account out everywhere, optionally sparing ONE session (the
-    /// device performing the change). Every credential change calls this: a
-    /// password the owner just replaced must not leave a stolen session alive.
+    /// Sign out everywhere, optionally sparing ONE session (the device making
+    /// the change). Every credential change calls this.
     pub fn delete_sessions_for_user(&mut self, user_id: &str, keep: Option<&str>) {
         self.sessions
             .retain(|hash, owner| owner != user_id || keep == Some(hash.as_str()));

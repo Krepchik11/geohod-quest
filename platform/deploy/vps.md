@@ -30,7 +30,7 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
 
 1. **Build & publish the image** (recommended: via CI). Any push to `main` runs the
    [release pipeline](#releases), which calls `backend-image.yml` and produces
-   `ghcr.io/naborka/geohod-quest-api:latest`. Make the package **public**, or
+   `ghcr.io/krepchik11/geohod-quest-api:latest`. Make the package **public**, or
    `podman login ghcr.io` on the VPS once.
    *Fallback (build on VPS):* the context is `platform/` (the crate embeds
    `../goldens` at compile time), so build from there:
@@ -139,7 +139,7 @@ podman auto-update                 # pulls changed images, restarts, rolls back 
 **Manual (auto-update disabled).** Explicit pull + restart — note a bare `restart`
 does NOT re-pull (Quadlet `Pull=missing`), so the pull is required:
 ```sh
-podman pull ghcr.io/naborka/geohod-quest-api:latest
+podman pull ghcr.io/krepchik11/geohod-quest-api:latest
 systemctl --user restart geohod-quest-api.service
 ```
 
@@ -162,7 +162,7 @@ reports `build_id=dev`.
 
 **Rollback.** Prefer `git revert` + push: the pipeline re-points `:latest` at the
 older image and auto-update follows it, keeping the frontend in step. To pin by
-hand instead, set `Image=ghcr.io/naborka/geohod-quest-api:sha-<commit>` in the unit
+hand instead, set `Image=ghcr.io/krepchik11/geohod-quest-api:sha-<commit>` in the unit
 (or `:build-<id>`), then `daemon-reload` + restart — but note that a pinned unit no
 longer tracks `:latest`, so the next release's gate will time out until you unpin.
 

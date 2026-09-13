@@ -3,15 +3,9 @@ import { API_BASE, type PublishedQuestWire } from '../lib/api';
 import { SITE_URL, siteUrl } from '../lib/site';
 
 /**
- * Every page a search engine should know about: the landing page, the two legal
- * pages, and one product page per quest ON SALE.
- *
- * The quest list comes from the same public catalogue the storefront renders,
- * so a delisted quest leaves the sitemap the moment it leaves the store — there
- * is no second list of "what is published" to fall out of date.
- *
- * A sitemap is never worth a failed deploy: an unreachable API yields the
- * static pages alone rather than an error.
+ * The quest list comes from the same public catalogue the storefront renders, so
+ * a delisted quest leaves the sitemap by itself. An unreachable API yields the
+ * static pages rather than failing the build.
  */
 export const revalidate = 3600;
 

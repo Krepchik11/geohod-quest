@@ -1,17 +1,9 @@
 /**
- * Where this deployment lives, as an absolute origin.
+ * This deployment's own origin, for sitemap/robots/share links.
+ * `NEXT_PUBLIC_SITE_URL` is the custom domain (https://quest.geohod.ru).
  *
- * Needed by everything that must name the site to someone else: the canonical
- * URL a share card resolves against, the sitemap, robots.txt. Unlike
- * `API_BASE`, a missing value here does NOT fail the build — the app works
- * perfectly without knowing its own address, it just cannot hand search engines
- * or a chat preview an absolute link, so those degrade instead of breaking a
- * deploy over a metadata concern.
- *
- * Set `NEXT_PUBLIC_SITE_URL` to the custom domain (https://quest.geohod.ru).
- * On Vercel, `VERCEL_PROJECT_PRODUCTION_URL` is the fallback — it names the
- * *.vercel.app host, which is a worse canonical than the custom domain but a
- * better one than nothing.
+ * Unlike `API_BASE` a missing value must NOT fail the build: the app works
+ * without knowing its address, it just cannot emit absolute links.
  */
 function resolveSiteUrl(): string | null {
   const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();

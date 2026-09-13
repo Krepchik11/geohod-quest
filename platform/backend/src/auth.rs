@@ -180,15 +180,9 @@ pub fn reachable_ways(account: &UserAccount, identities: &[crate::store::AuthIde
     social + usize::from(account.email.is_some())
 }
 
-/// Argon2id is deliberately expensive: the default parameters cost ~19 MiB and
-/// tens of milliseconds of pure CPU per call. Run on an async worker that is a
-/// stall of the whole thread — with N workers, N concurrent sign-ins stop the
-/// server answering anything at all, `/health` included, and sign-in is the one
-/// endpoint an anonymous caller can aim at. Both password operations therefore
-/// go to the blocking pool, which is sized for exactly this and cannot starve
-/// the request loop no matter how many arrive.
-///
-/// Same reasoning and same idiom as `yookassa.rs` and `social.rs`.
+/// Argon2id costs ~19 MiB and tens of ms of CPU per call. On an async worker
+/// that stalls the whole thread, so N concurrent sign-ins stop the server
+/// answering anything — `/health` included. Same idiom as `yookassa.rs`.
 async fn on_blocking_pool<T, F>(what: &'static str, f: F) -> Result<T, AppError>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -243,11 +237,8 @@ pub fn generate_token() -> String {
     out
 }
 
-/// Compare two secrets without an early exit. `==` on a shared secret stops at
-/// the first differing byte, so how long the answer takes is a measurement of
-/// how much of the secret the caller already has (CWE-208). The fold has no
-/// branch to short-circuit; only the length is observable, which a shared
-/// operator token does not hide anyway.
+/// Constant-time compare: `==` stops at the first differing byte, which leaks
+/// how much of the secret the caller already has (CWE-208).
 pub fn secret_eq(provided: &str, expected: &str) -> bool {
     let (provided, expected) = (provided.as_bytes(), expected.as_bytes());
     provided.len() == expected.len()
@@ -258,17 +249,14 @@ pub fn secret_eq(provided: &str, expected: &str) -> bool {
             == 0
 }
 
-/// The STORED form of a session token. A session token is a bearer secret, so
-/// it is kept exactly like the mailed reset link and code: only sha256 of it is
-/// persisted, and a leaked database yields no working login. 32 random bytes
-/// need no salt or stretching — there is nothing to guess offline.
+/// The STORED form of a session token. 32 random bytes need no salt or
+/// stretching — there is nothing to guess offline.
 pub fn session_hash(token: &str) -> String {
     crate::media::sha256_hex(token.as_bytes())
 }
 
-/// Mint a session: the RAW token (the client's only copy) paired with the hash
-/// the store keeps. They only ever come together, so a caller cannot persist
-/// the raw token by forgetting a step.
+/// The raw token and its hash only come together, so a caller cannot persist
+/// the raw one by forgetting a step.
 pub fn new_session_token() -> (String, String) {
     let raw = generate_token();
     let hash = session_hash(&raw);

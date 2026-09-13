@@ -199,7 +199,7 @@ Leave `payments_mock` OFF in production: it grants access without charging.
 
 ## Vercel setup (one-time)
 
-1. **Import** `github.com/naborka/geohod-quest` into Vercel (New Project → import the repo).
+1. **Import** `github.com/Krepchik11/geohod-quest` into Vercel (New Project → import the repo).
 2. **Root Directory:** set to `platform/frontend`. Vercel auto-detects Next.js.
    (`platform/frontend/vercel.json` already pins framework, `npm ci`, and the
    monorepo ignore step — no manual build/install overrides needed.)

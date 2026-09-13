@@ -1,19 +1,11 @@
 /**
- * A stylesheet imported outside the root layout is only downloaded on the
- * routes beneath the file that imports it. That is the point — the marketplace
- * should not ship the admin desk's CSS — but it makes one silent failure
- * possible: a route renders a component that writes a class from a sheet that
- * route does not load, and the component draws unstyled with nothing failing.
+ * Scoping CSS per route makes one silent failure possible: a route renders a
+ * class whose stylesheet it does not load, and draws unstyled with nothing
+ * failing. This asserts the opposite for every route.
  *
- * This is the check that makes that loud, stated as the property itself: for
- * every route, every class its components write is either defined in a
- * stylesheet that route loads, or defined in no project stylesheet at all
- * (a utility, or a hook for JS/tests). Ownership is read from the imports —
- * there is no second list to keep in sync — and "what a route renders" follows
- * the import graph, not the directory tree, because `app/components/` and
- * `app/player/` are rendered by routes that do not contain them.
- *
- * Same shape as `lint:ds`: a rule the build enforces, not prose.
+ * Ownership is read from the imports, and "what a route renders" follows the
+ * import graph — not the directory tree, since `app/components/` is rendered by
+ * routes that do not contain it.
  *
  * Run: npm run lint:css-scope
  */
@@ -78,12 +70,10 @@ const sheetClasses = new Map(
   [...new Set([...sheetsOf.values()].flatMap((s) => [...s]))].map((s) => [s, classesIn(s)]),
 );
 /**
- * Only NAMESPACED classes are checked: `ash-bar`, `p-title`, `wsp-panel`. A
- * bare word (`on`, `chip`, `row`, `tk`) is a state or an element modifier that
- * sheets qualify from the left (`.adm-toggle.on`, `.adm-modal .row`); it is
- * owned by whatever it hangs off, not by the sheet that mentions it, and
- * treating it as owned would report a leak for every such pair. The prefix
- * convention is what makes ownership decidable, so it is what is enforced.
+ * Only NAMESPACED classes are checked. A bare word (`on`, `chip`, `row`) is a
+ * modifier sheets qualify from the left (`.adm-toggle.on`) — owned by whatever
+ * it hangs off, not by the sheet mentioning it, so treating it as owned would
+ * report a leak for every such pair.
  */
 const NAMESPACED = /^[a-z][a-z0-9]*-/;
 for (const [, classes] of sheetClasses) {
@@ -93,11 +83,9 @@ for (const [, classes] of sheetClasses) {
 const known = new Set([...sheetClasses.values()].flatMap((s) => [...s]));
 
 /**
- * Class names a module writes. Every `className` form this codebase uses is a
- * literal somewhere — a plain string, a template, a concatenation, a lookup
- * table — so the words are read out of the string literals and the rest of the
- * expression (identifiers, calls) is ignored. A name that no stylesheet defines
- * is dropped, which is what keeps utilities and JS hooks out of the report.
+ * Class names a module writes. Every `className` form here is a literal
+ * somewhere, so only string literals are read; identifiers and calls are
+ * ignored, and a name no stylesheet defines is dropped.
  */
 function classesUsed(src) {
   const used = new Set();

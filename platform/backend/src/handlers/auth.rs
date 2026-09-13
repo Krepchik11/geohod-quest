@@ -101,8 +101,8 @@ async fn login_handler(
     // One message for both unknown email and wrong password (no oracle).
     let bad = || AppError::Unauthorized("invalid email or password".into());
     let email = auth::normalize_email(&req.email);
-    // Charged before the guess is checked, so an unknown email costs the same
-    // budget as a known one and the limit leaks nothing the login does not.
+    // Charged before the check, so an unknown email costs the same as a known
+    // one and the limit leaks nothing the login does not.
     let budget = format!("login:{email}");
     fixed_window_allow(
         &state,
@@ -361,9 +361,8 @@ async fn create_social_on_claimed(
     }
 }
 
-/// THE one way a session is opened. Mints the token, stores only its hash
-/// ([`auth::new_session_token`]) and hands the raw token back for the response
-/// body — so no route can persist a bearer secret by taking a shortcut.
+/// THE one way a session is opened: stores only the hash, returns the raw
+/// token, so no route can persist a bearer secret by taking a shortcut.
 pub(crate) async fn open_session(state: &AppState, user_id: &str) -> Result<String, AppError> {
     let (token, token_hash) = auth::new_session_token();
     state.auth.create_session(&token_hash, user_id).await?;
@@ -509,9 +508,7 @@ fn fixed_window_allow(
     Ok(())
 }
 
-/// Hand a budget back. Used where a successful outcome proves the caller was
-/// never the attacker the limit is for, so ordinary use can never accumulate
-/// into a lockout.
+/// Refund a budget where success proves the caller was not the attacker.
 fn fixed_window_clear(state: &AppState, key: &str) {
     if let Ok(mut lim) = state.rate_limiter.lock() {
         lim.remove(key);
@@ -788,8 +785,7 @@ async fn reset_password_handler(
         .auth
         .set_password(&user_id, &auth::hash_password(&password).await?)
         .await?;
-    // Recovery means the account may already be in someone else's hands, and a
-    // session outlives the password it was minted from. Everything open goes.
+    // Recovery means the account may already be in someone else's hands.
     state.auth.delete_sessions_for_user(&user_id, None).await?;
     // Using a valid reset credential also proves mailbox ownership (§6.3).
     let account = state.auth.confirm_email(&user_id, now).await?;
@@ -1026,12 +1022,8 @@ async fn change_password_handler(
             &auth::hash_password(&req.new_password).await?,
         )
         .await?;
-    // Every OTHER device is signed out: the old password is what those sessions
-    // were minted from, and this is the move someone makes when they suspect one
-    // of them is not theirs. The caller's own session is spared — the response
-    // carries no replacement token, so revoking it would sign the owner out of
-    // the device they are standing in (and out of any older client that has no
-    // idea a token could be returned here).
+    // The caller's own session is spared: the response carries no replacement
+    // token, so revoking it would sign the owner out of this very device.
     let keep = crate::authz::bearer_token(&headers).map(|t| auth::session_hash(&t));
     state
         .auth

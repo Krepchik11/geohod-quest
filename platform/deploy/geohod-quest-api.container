@@ -16,7 +16,7 @@ Description=GeoQuest API
 ContainerName=geohod-quest-api
 # GHCR image built by .github/workflows/backend-image.yml.
 # For a build-on-VPS fallback, replace with: localhost/geohod-quest-api:latest
-Image=ghcr.io/naborka/geohod-quest-api:latest
+Image=ghcr.io/krepchik11/geohod-quest-api:latest
 # Enables `podman auto-update`: the timer re-pulls this tag when its registry
 # digest changes, restarts the unit, and rolls back to the previous image if the
 # new container fails to start. This is how a release reaches the VPS — pull-based,
