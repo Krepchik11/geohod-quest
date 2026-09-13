@@ -97,8 +97,8 @@ lib/
   stylesheet is not loaded there — the one silent failure this split allows.
 - **Overlays** (`app/components/useDialog.ts`): Escape closes, focus enters on
   open, Tab cycles inside, focus returns to whatever opened it. One rule for
-  every sheet, dialog and confirm — the alternative is twelve of them each
-  deciding separately, which is how eleven ended up without Escape.
+  every sheet, dialog and confirm — the alternative is thirteen of them each
+  deciding separately, which is how nine ended up without Escape.
 - **Share cards** (`app/quest/share-metadata.ts` + `lib/storefront.ts`
   `shareCard`): a quest link carries that quest's title, blurb and cover. Facts
   only — city and duration appear when the author filled them in — and the cover

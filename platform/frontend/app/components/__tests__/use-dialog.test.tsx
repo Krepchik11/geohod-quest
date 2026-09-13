@@ -2,12 +2,12 @@
 /**
  * What a dialog owes the keyboard.
  *
- * The app opens a dozen sheets — buy a quest, rename yourself, delete the
+ * The app opens thirteen sheets — buy a quest, rename yourself, delete the
  * account, confirm a publish — and each one used to decide for itself whether
  * Escape closed it (most did not) and where the focus went (nowhere: it stayed
  * on the page behind, so Tab walked straight out of the sheet into the content
- * it was covering). Three of the twelve had a hand-rolled Escape listener; the
- * rest had none.
+ * it was covering). Four of the thirteen had a hand-rolled Escape listener, one
+ * of them restored focus, and none trapped it. The rest had nothing.
  *
  * These are the rules, once, for all of them.
  */

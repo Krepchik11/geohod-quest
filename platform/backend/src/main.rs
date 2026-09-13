@@ -4260,6 +4260,77 @@ mod tests {
         );
     }
 
+    /// The storefront reads are the same bytes for every visitor and are fetched
+    /// again on every mount of the landing page — a plain back navigation
+    /// included. With no freshness header the browser has no choice but to
+    /// re-download the whole catalogue each time.
+    ///
+    /// The three that get one are exactly the identity-free public reads. The
+    /// gated ones must NOT: a bundle is grant-checked per player, and a stored
+    /// copy would be one player's purchase sitting in another's cache.
+    #[tokio::test]
+    async fn public_reads_are_briefly_cacheable_and_gated_ones_are_not() {
+        let app = test_app();
+        let ids = Ids::new("cacheable");
+        let (_, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1,
+                   "snapshot": {"golden_id": ids.snap1, "steps": []}}),
+        )
+        .await;
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": ids.player, "quest_id": ids.quest}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let cache_control = |uri: String| {
+            let app = app.clone();
+            async move {
+                let resp = app
+                    .oneshot(
+                        Request::builder()
+                            .uri(&uri)
+                            .body(Body::empty())
+                            .expect("request"),
+                    )
+                    .await
+                    .expect("response");
+                assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+                resp.headers()
+                    .get(header::CACHE_CONTROL)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            }
+        };
+
+        for uri in [
+            "/api/quests".to_string(),
+            format!("/api/quests/{}", ids.quest),
+            format!("/api/quests/{}/reviews", ids.quest),
+        ] {
+            let value = cache_control(uri.clone()).await.unwrap_or_default();
+            assert!(
+                value.contains("public") && value.contains("max-age=60"),
+                "{uri} should be briefly cacheable, got {value:?}"
+            );
+        }
+
+        assert_eq!(
+            cache_control(format!(
+                "/api/quests/{}/bundle?user_id={}",
+                ids.quest, ids.player
+            ))
+            .await,
+            None,
+            "a grant-gated bundle must never be stored by a shared cache"
+        );
+    }
+
     /// This origin serves bytes an author uploaded (`/api/media/{hash}`) next to
     /// JSON the app trusts. A browser that is allowed to guess a content type can
     /// decide an "image" is a document and run it here, on the API's own origin.

@@ -262,9 +262,34 @@ pub(crate) struct CatalogQuest {
     tags: Vec<String>,
 }
 
-async fn list_quests_handler(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<CatalogQuest>>, AppError> {
+/// Freshness for the three identity-free storefront reads. The landing page
+/// fetches the catalogue again on every mount — a back navigation included —
+/// and the bytes are the same for every visitor, so without this the browser
+/// has no choice but to download the whole thing each time.
+///
+/// A minute, not an hour: a publish or a delist is an editorial action someone
+/// is watching for, and a minute is the longest a stale shelf is tolerable. The
+/// stale-while-revalidate window then keeps the shelf instant while the refresh
+/// happens behind it.
+///
+/// Deliberately NOT on the gated reads. The bundle is grant-checked per player
+/// and a stored copy would be one player's purchase sitting in another's cache;
+/// `/api/grants` and the attempt routes are per-caller for the same reason.
+/// Stating it once here is what keeps a future public read from having to
+/// remember — and what keeps a gated one from picking it up by accident.
+const PUBLIC_READ_CACHE: (axum::http::HeaderName, &str) = (
+    header::CACHE_CONTROL,
+    "public, max-age=60, stale-while-revalidate=300",
+);
+
+/// A public storefront read: the payload plus [`PUBLIC_READ_CACHE`].
+fn public_read<T: serde::Serialize>(
+    value: T,
+) -> ([(axum::http::HeaderName, &'static str); 1], Json<T>) {
+    ([PUBLIC_READ_CACHE], Json(value))
+}
+
+async fn list_quests_handler(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     // Store visibility is governed by the AUTHORITATIVE lifecycle status
     // (constructor_quests.status) — the single source of truth — NOT by the mere
     // presence of a frozen snapshot. The marketplace lists ONLY `published` quests:
@@ -344,7 +369,7 @@ async fn list_quests_handler(
             }
         })
         .collect();
-    Ok(Json(out))
+    Ok(public_read(out))
 }
 
 /// Product page payload (§3.1/§12.9): ONLY model data — the published card, the
@@ -423,7 +448,7 @@ async fn get_quest_reviews_handler(
     State(state): State<AppState>,
     axum::extract::Path(quest_id): axum::extract::Path<String>,
     axum::extract::Query(q): axum::extract::Query<ReviewsQuery>,
-) -> Result<Json<ReviewsPageWire>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     state
         .grants
         .get_published(&quest_id)
@@ -442,7 +467,7 @@ async fn get_quest_reviews_handler(
         q.limit.unwrap_or(REVIEWS_PAGE).min(REVIEWS_PAGE_MAX),
     );
     let reviews = review_wires(&state, page).await?;
-    Ok(Json(ReviewsPageWire { reviews, total }))
+    Ok(public_read(ReviewsPageWire { reviews, total }))
 }
 
 /// Author display names in ONE round-trip (one get_user per review would be an
@@ -482,7 +507,7 @@ fn review_author_label(display_name: Option<&str>) -> String {
 async fn get_quest_product_handler(
     State(state): State<AppState>,
     Path(quest_id): Path<String>,
-) -> Result<Json<ProductPageWire>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     let not_found = || AppError::NotFound(format!("quest '{quest_id}' not found"));
     let meta = state
         .grants
@@ -545,7 +570,7 @@ async fn get_quest_product_handler(
     let snapshot = snapshot?;
     let start_point = snapshot::snapshot_start_point(snapshot.as_ref());
     let theme = snapshot::snapshot_theme(snapshot.as_ref());
-    Ok(Json(ProductPageWire {
+    Ok(public_read(ProductPageWire {
         meta,
         rating_avg,
         rating_count,
