@@ -88,6 +88,29 @@ but do it off-peak.
   build id, `backend-image.yml` re-points `:latest` at that existing image, and
   auto-update rolls the VPS back to it.
 
+  ⚠️ **This does not work for a release that added a migration, and it fails
+  loudly — it takes the API down rather than back.** sqlx records what it applied
+  and refuses to start against a database holding a migration the binary does not
+  know about. Reproduced by removing `0006_hash_session_tokens.sql` and running
+  the suite against a database that already had it:
+
+  ```
+  run migrations: VersionMissing(6)
+  ```
+
+  `main()` propagates that (`.context("failed to run database migrations")?`), so
+  the reverted image exits non-zero and podman restarts it forever. Production
+  loses the API — a strictly worse outcome than the bug being rolled back.
+
+  So for a release containing a migration, **roll forward**: fix, push, let the
+  pipeline run. If the release must truly be undone, the revert has to ship the
+  compensating migration in the same commit (migrations are append-only, so
+  undoing `0006` means a new `0007` that renames the column back), and then the
+  binary and the schema move together again.
+
+  Check before relying on a rollback: `git diff --name-only <old>..<new> --
+  platform/backend/migrations/`. Empty means the plain revert above is safe.
+
 ## The invariant this pipeline does not enforce
 
 **The API must stay backward compatible with the previous frontend.** Ordering
