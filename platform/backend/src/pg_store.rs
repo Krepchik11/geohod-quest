@@ -1530,16 +1530,14 @@ impl AuthStore for PgAuthStore {
         &self,
         user_id: &str,
         keep: Option<&str>,
-    ) -> Result<usize, AppError> {
-        let res = sqlx::query(
-            "DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2",
-        )
-        .bind(user_id)
-        .bind(keep)
-        .execute(&self.pool)
-        .await
-        .map_err(internal)?;
-        Ok(res.rows_affected() as usize)
+    ) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2")
+            .bind(user_id)
+            .bind(keep)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(())
     }
 
     /// See [`crate::store::InMemoryAuthStore::delete_user`] — user row,

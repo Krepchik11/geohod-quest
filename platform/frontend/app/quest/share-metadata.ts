@@ -20,6 +20,12 @@ export async function questShareMetadata(questId: string): Promise<Metadata> {
   const quest = await fetchQuest(questId);
   if (!quest) return { title: 'Квест — GEOHOD QUEST', manifest };
   const card = shareCard(quest, API_BASE);
+  // The title, the blurb and the picture are stated ONCE. Next fills the
+  // Open Graph tags from the page's own title/description, then fills the
+  // Twitter tags from Open Graph — including `summary_large_image` vs
+  // `summary`, which it picks from whether there is an image. Repeating any of
+  // it here would put the same two strings in three places and hard-code a
+  // framework default that could then drift from it.
   return {
     title: card.title,
     description: card.description,
@@ -28,14 +34,6 @@ export async function questShareMetadata(questId: string): Promise<Metadata> {
       type: 'article',
       siteName: 'GEOHOD QUEST',
       locale: 'ru_RU',
-      title: card.title,
-      description: card.description,
-      images: card.image ? [card.image] : undefined,
-    },
-    twitter: {
-      card: card.image ? 'summary_large_image' : 'summary',
-      title: card.title,
-      description: card.description,
       images: card.image ? [card.image] : undefined,
     },
   };

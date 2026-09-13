@@ -11,20 +11,24 @@
 import { describe, it, expect } from 'vitest';
 import nextConfig from '../../next.config';
 
-async function headersFor(path: string): Promise<Map<string, string>> {
+/** Every header the config sets, flattened. */
+async function siteWideHeaders(): Promise<Map<string, string>> {
   const rules = (await nextConfig.headers?.()) ?? [];
   const found = new Map<string, string>();
   for (const rule of rules) {
-    if (rule.source !== '/:path*') continue;
     for (const { key, value } of rule.headers) found.set(key.toLowerCase(), value);
   }
-  expect(path).toBe('/:path*'); // every rule here is site-wide by design
   return found;
 }
 
 describe('site-wide security headers', () => {
+  it('applies every header to every path — there are no per-route exceptions', async () => {
+    const rules = (await nextConfig.headers?.()) ?? [];
+    expect(rules.map((r) => r.source)).toEqual(['/:path*']);
+  });
+
   it('forbids framing, base-URL rewriting, plugins and content sniffing', async () => {
-    const h = await headersFor('/:path*');
+    const h = await siteWideHeaders();
     expect(h.get('x-content-type-options')).toBe('nosniff');
     expect(h.get('x-frame-options')).toBe('DENY');
     expect(h.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
@@ -37,19 +41,19 @@ describe('site-wide security headers', () => {
 
   it('keeps the Telegram login popup working', async () => {
     // A bare `same-origin` COOP severs window.opener and breaks the login.
-    const h = await headersFor('/:path*');
+    const h = await siteWideHeaders();
     expect(h.get('cross-origin-opener-policy')).toBe('same-origin-allow-popups');
   });
 
   it('denies the device APIs this app never asks for', async () => {
-    const policy = (await headersFor('/:path*')).get('permissions-policy') ?? '';
+    const policy = (await siteWideHeaders()).get('permissions-policy') ?? '';
     for (const feature of ['camera', 'microphone', 'geolocation', 'payment', 'usb']) {
       expect(policy).toContain(`${feature}=()`);
     }
   });
 
   it('pins HTTPS for return visits', async () => {
-    const hsts = (await headersFor('/:path*')).get('strict-transport-security') ?? '';
+    const hsts = (await siteWideHeaders()).get('strict-transport-security') ?? '';
     expect(hsts).toMatch(/max-age=\d{7,}/);
   });
 });

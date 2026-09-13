@@ -1009,12 +1009,9 @@ impl InMemoryAuthStore {
     /// Sign the account out everywhere, optionally sparing ONE session (the
     /// device performing the change). Every credential change calls this: a
     /// password the owner just replaced must not leave a stolen session alive.
-    /// Returns how many sessions were dropped.
-    pub fn delete_sessions_for_user(&mut self, user_id: &str, keep: Option<&str>) -> usize {
-        let before = self.sessions.len();
+    pub fn delete_sessions_for_user(&mut self, user_id: &str, keep: Option<&str>) {
         self.sessions
             .retain(|hash, owner| owner != user_id || keep == Some(hash.as_str()));
-        before - self.sessions.len()
     }
 
     /// §7.3 «Изменить имя» — set/clear the display name.
@@ -1596,7 +1593,7 @@ pub trait AuthStore: Send + Sync {
         &self,
         user_id: &str,
         keep: Option<&str>,
-    ) -> Result<usize, AppError>;
+    ) -> Result<(), AppError>;
 
     /// See [`InMemoryAuthStore::set_display_name`].
     async fn set_display_name(
@@ -1754,8 +1751,9 @@ impl AuthStore for std::sync::Mutex<InMemoryAuthStore> {
         &self,
         user_id: &str,
         keep: Option<&str>,
-    ) -> Result<usize, AppError> {
-        Ok(lock(self, "auth")?.delete_sessions_for_user(user_id, keep))
+    ) -> Result<(), AppError> {
+        lock(self, "auth")?.delete_sessions_for_user(user_id, keep);
+        Ok(())
     }
 
     async fn set_display_name(

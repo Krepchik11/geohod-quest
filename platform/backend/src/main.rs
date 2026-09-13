@@ -21,7 +21,7 @@ use axum::{
 use dotenvy::dotenv;
 
 use tokio::net::TcpListener;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{compression::Predicate as _, cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod admin_stats;
@@ -176,7 +176,23 @@ fn build_router(state: AppState) -> Router {
         // over mobile data by every offline install — and tower-http's default
         // predicate already leaves already-compressed types (images) and tiny
         // bodies alone, so content-addressed media is passed through untouched.
-        .layer(tower_http::compression::CompressionLayer::new())
+        .layer(
+            tower_http::compression::CompressionLayer::new().compress_when(
+                tower_http::compression::predicate::DefaultPredicate::new()
+                    // The default predicate skips images, gRPC, SSE and tiny
+                    // bodies — but not zip, and the quest export IS a zip that
+                    // `export.rs` already wrote with Deflate. Compressing it a
+                    // second time saves nothing on a body that is mostly
+                    // deflated JPEG and PNG, and it does that pass inline on a
+                    // runtime thread — the very cost `export.rs` spends a
+                    // `spawn_blocking` to keep off it.
+                    .and(
+                        tower_http::compression::predicate::NotForContentType::const_new(
+                            "application/zip",
+                        ),
+                    ),
+            ),
+        )
         .layer(build_cors_layer(&state.config.cors_allowed_origins))
         .with_state(state)
 }
@@ -4890,6 +4906,9 @@ mod tests {
                     .uri("/api/constructor/quests/q-export/export")
                     .header("x-admin-token", TEST_ADMIN_TOKEN)
                     .header("x-user-id", "dev-owner")
+                    // Every real browser asks for compression; the archive must
+                    // still come back as itself.
+                    .header("accept-encoding", "gzip, br")
                     .body(Body::empty())
                     .expect("request"),
             )
@@ -4899,6 +4918,15 @@ mod tests {
         assert_eq!(
             res.headers().get("content-type").unwrap(),
             "application/zip"
+        );
+        // The archive is already Deflate. Compressing it again saves nothing on
+        // a body that is mostly deflated JPEG and PNG, and the pass would run
+        // inline on a runtime thread — the cost `export.rs` spends a
+        // `spawn_blocking` to keep off it.
+        assert_eq!(
+            res.headers().get("content-encoding"),
+            None,
+            "an already-compressed archive must not be compressed a second time"
         );
         assert_eq!(
             res.headers().get("content-disposition").unwrap(),
