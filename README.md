@@ -53,4 +53,5 @@ with the previous frontend — cached PWA clients outlive any deploy.
 The database schema lives in [`platform/backend/migrations/`](./platform/backend/migrations/),
 applied by sqlx at startup. Every feature flag ships **off**; a fresh deployment
 enables what it needs from the admin panel. See
-[`platform/DEPLOYMENT.md`](./platform/DEPLOYMENT.md) for the full first-boot procedure.
+[`platform/deploy/`](./platform/deploy/) for the topology, the release pipeline and
+the host runbooks.

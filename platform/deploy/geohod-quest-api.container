@@ -22,7 +22,7 @@ Image=ghcr.io/naborka/geohod-quest-api:latest
 # new container fails to start. This is how a release reaches the VPS — pull-based,
 # so nothing inbound is needed here. The stock timer fires DAILY, which would stall
 # every release: install deploy/podman-auto-update.timer.d/override.conf to
-# reconcile every minute (DEPLOYMENT.md → Releases → One-time setup).
+# reconcile every minute (deploy/releases.md → One-time setup).
 #
 # Do NOT pin this to a :sha-/:build- tag except to hold a rollback: a pinned unit
 # stops tracking :latest, so the release gate would time out on every deploy.
@@ -39,12 +39,12 @@ Environment=DB_MAX_CONNECTIONS=5
 Environment=CORS_ALLOWED_ORIGINS=https://quest.geohod.ru,https://*.vercel.app
 # Full Supabase connection string (incl. password) lives in a podman secret. Use
 # the SESSION-mode pooler host with sslmode=require — NOT the IPv6-only direct
-# host and NOT the :6543 transaction pooler (see DEPLOYMENT.md):
+# host and NOT the :6543 transaction pooler (see deploy/vps.md):
 #   postgres://postgres.<ref>:<enc-pw>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
 Secret=geohod-quest-database-url,type=env,target=DATABASE_URL
 # Shared secret enabling the admin telemetry endpoints (fail-closed if unset).
 Secret=geohod-quest-admin-token,type=env,target=ADMIN_TOKEN
-# Media storage → Cloudflare R2 (see the R2 runbook in DEPLOYMENT.md). The
+# Media storage → Cloudflare R2 (see the R2 runbook in deploy/vps.md). The
 # identifiers are plain config; the two S3 API-token keys are podman secrets. All
 # five must be present for production R2 — otherwise the API falls back to
 # in-process media (uploads would not survive a restart).

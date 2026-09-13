@@ -8,7 +8,7 @@
  * or a chat preview an absolute link, so those degrade instead of breaking a
  * deploy over a metadata concern.
  *
- * Set `NEXT_PUBLIC_SITE_URL` to the custom domain (https://app.quest.geohod.ru).
+ * Set `NEXT_PUBLIC_SITE_URL` to the custom domain (https://quest.geohod.ru).
  * On Vercel, `VERCEL_PROJECT_PRODUCTION_URL` is the fallback — it names the
  * *.vercel.app host, which is a worse canonical than the custom domain but a
  * better one than nothing.

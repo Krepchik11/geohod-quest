@@ -23,7 +23,7 @@ The backend base URL is `NEXT_PUBLIC_API_URL` (inlined into the bundle at build
 time; falls back to `http://localhost:8080` only in dev — a production build with
 it unset throws, see `lib/api.ts`).
 
-`NEXT_PUBLIC_SITE_URL` is this deployment's own address (`https://app.quest.geohod.ru`).
+`NEXT_PUBLIC_SITE_URL` is this deployment's own address (`https://quest.geohod.ru`).
 Unlike the API base it never fails a build: without it the app works exactly the
 same, it just cannot hand a crawler or a chat preview an absolute link, so the
 sitemap comes back empty and `robots.txt` omits its `Sitemap:` line rather than
@@ -106,4 +106,4 @@ lib/
   against the site, which serves no media.
 
 See [`../README.md`](../README.md) for the monorepo and
-[`../DEPLOYMENT.md`](../DEPLOYMENT.md) for how it ships.
+[`../deploy/`](../deploy/) for how it ships.

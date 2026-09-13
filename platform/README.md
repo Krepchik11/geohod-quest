@@ -53,7 +53,7 @@ Or split across two terminals: `npm run dev:backend` / `npm run dev:frontend`.
 ```
 platform/
 ├── package.json          # npm workspaces root + orchestration scripts
-├── DEPLOYMENT.md         # build, deploy, first-boot procedure
+├── deploy/               # deploy artifacts + their docs (README/releases/vps)
 ├── goldens/              # frozen demo snapshots + shared parity fixtures (parity/)
 ├── backend/
 │   ├── Cargo.toml · rust-toolchain.toml

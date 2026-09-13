@@ -28,7 +28,7 @@ const nextConfig: NextConfig = {
           // middleware on every request) and the media host is a backend runtime
           // value the build cannot know — a guessed allowlist would silently
           // break offline media or a sign-in provider instead of protecting
-          // anything. See platform/DEPLOYMENT.md for what locking scripts down
+          // anything. See platform/deploy/README.md for what locking scripts down
           // would take.
           {
             key: 'Content-Security-Policy',
