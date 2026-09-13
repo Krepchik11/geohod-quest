@@ -9,7 +9,7 @@ import { useEffect, useEffectEvent, useRef } from 'react';
  */
 export function useEscape(onClose: () => void, enabled = true): void {
   // Слушатель не должен переподписываться из-за новой идентичности onClose:
-  // она меняется на каждом рендере родителя (§8.3 agents/react.md).
+  // она меняется на каждом рендере родителя.
   const close = useEffectEvent(onClose);
   useEffect(() => {
     if (!enabled) return undefined;

@@ -59,5 +59,25 @@ jobs:
         with:
           workspaces: platform/backend
 
+      # The three gates platform/README.md has always claimed, two of which had
+      # never actually run here: this job was `cargo test` alone, so formatting
+      # and every clippy lint were enforced by prose in a repository whose stated
+      # property is that its rules are enforced mechanically. Ordered cheapest
+      # first, so a formatting slip fails in seconds rather than after the suite.
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # 10.7% of this crate's source lines are doc comments, written in rustdoc
+      # idiom with `[`Item`]` links — and nothing had ever rendered them, so five
+      # of those links pointed at nothing (one at a function renamed long ago).
+      # This is the gate for the largest documentation surface in the repository.
+      - name: Docs
+        run: cargo doc --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: Test (in-memory + Postgres parity)
         run: cargo test --locked

@@ -399,9 +399,9 @@ pub(crate) struct ProductPageWire {
     /// Total ratings that carry text («{M} с отзывом»).
     #[cfg_attr(test, ts(type = "number"))]
     reviews_total: usize,
-    /// «Место старта» — see [`snapshot_start_point`]; None hides the button.
+    /// «Место старта» — see [`crate::snapshot::snapshot_start_point`]; None hides the button.
     start_point: Option<snapshot::StartPointWire>,
-    /// The quest's own colours — see [`snapshot_theme`]. Read by the per-quest
+    /// The quest's own colours — see [`crate::snapshot::snapshot_theme`]. Read by the per-quest
     /// PWA manifest so an installed quest opens on its own background.
     theme: Option<snapshot::ThemeWire>,
 }

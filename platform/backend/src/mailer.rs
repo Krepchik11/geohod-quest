@@ -1,7 +1,7 @@
 //! §6.2/§6.3 — transactional email (password reset links, email confirmation).
 //!
 //! One trait-like enum, three transports:
-//! - `Smtp` — real delivery via `SMTP_URL` (smtps://user:pass@host[:port]);
+//! - `Smtp` — real delivery via `SMTP_URL` (`smtps://user:pass@host[:port]`);
 //! - `Log` — no SMTP configured: the full mail (incl. the action link) goes to
 //!   the server log, so a dev/staging operator can still complete the flow;
 //! - `Recorder` — tests capture outgoing mail to extract tokens.

@@ -1,4 +1,4 @@
-//! YooKassa gateway (redirect + webhook flow, https://yookassa.ru/developers/api).
+//! YooKassa gateway (redirect + webhook flow, <https://yookassa.ru/developers/api>).
 //!
 //! Split per the repo convention: PURE helpers (request bodies, response and
 //! notification parsing, amount formatting) carry all the decisions and are

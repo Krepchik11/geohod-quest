@@ -14,7 +14,6 @@ npm run dev        # backend (:8080) + frontend (:3000)
 | Path | What it is |
 |---|---|
 | [`platform/`](./platform/) | **The product** — backend, frontend, goldens, deploy. See [`platform/README.md`](./platform/README.md). |
-| [`agents/`](./agents/) | Code-quality rules: [`rust.md`](./agents/rust.md), [`react.md`](./agents/react.md). Followed to the letter. |
 
 ## Core model in one paragraph
 

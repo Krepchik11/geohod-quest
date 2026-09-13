@@ -42,9 +42,11 @@ Or split across two terminals: `npm run dev:backend` / `npm run dev:frontend`.
 - **One lockfile**, `platform/package-lock.json`. Install from `platform/`;
   `npm ci` in CI does the same. A second lockfile inside `frontend/` used to make
   CI resolve a tree nobody ran.
-- Every edit is held to [`agents/rust.md`](../agents/rust.md) and
-  [`agents/react.md`](../agents/react.md) plus KISS/YAGNI: no over-extracted crates, no
-  premature client components, no barrel imports.
+- Every edit is held to KISS/YAGNI: no over-extracted crates, no premature client
+  components, no barrel imports. The rules that carry weight here are the ones a
+  gate enforces (above) — prose rules that nothing checks are how the two
+  vendored `agents/*.md` rule books ended up mandating crates this workspace does
+  not have and database mocking this codebase deliberately rejects.
 
 ## Layout
 

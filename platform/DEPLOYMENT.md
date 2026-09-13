@@ -680,13 +680,8 @@ pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
   must stay within the Supabase pooler's pool size — raise both together if you
   add instances or traffic.
 
-## Frontend cleanup (recommended, not blocking)
+## Frontend notes
 
-- **Two lockfiles**: `platform/package-lock.json` (workspace) and
-  `platform/frontend/package-lock.json`. Vercel + CI use the **frontend** one, so
-  keep it authoritative and regenerated (`cd platform/frontend && rm -rf node_modules && npm install`).
-  Since the backend is Rust, the npm workspace shares no JS — consider dropping the
-  `workspaces` field in `platform/package.json` later so there is a single lockfile.
 - **PWA caching**: the service worker serves the app shell stale-while-revalidate, so
   a returning user runs the previous frontend for one navigation after a deploy (and
   an unopened installed PWA for far longer). The release pipeline cannot fix this —

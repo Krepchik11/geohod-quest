@@ -265,7 +265,7 @@ pub async fn require_editor_actor(
 /// indistinguishable from one that does not exist — the same opaque 404, never a
 /// signal that another author's quest exists. This is the single chokepoint every
 /// per-quest constructor handler routes through — including
-/// [`require_owned_constructor_quest`] and [`require_admin_constructor_summary`] —
+/// [`require_owned_constructor_quest`] and [`require_constructor_admin`] —
 /// so the owner-or-admin rule exists in exactly one place and cannot be re-derived
 /// (and forgotten) per call site.
 ///

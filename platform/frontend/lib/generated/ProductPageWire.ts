@@ -33,11 +33,11 @@ reviews: Array<ReviewWire>,
  */
 reviews_total: number, 
 /**
- * «Место старта» — see [`snapshot_start_point`]; None hides the button.
+ * «Место старта» — see [`crate::snapshot::snapshot_start_point`]; None hides the button.
  */
 start_point: StartPointWire | null, 
 /**
- * The quest's own colours — see [`snapshot_theme`]. Read by the per-quest
+ * The quest's own colours — see [`crate::snapshot::snapshot_theme`]. Read by the per-quest
  * PWA manifest so an installed quest opens on its own background.
  */
 theme: ThemeWire | null, quest_id: string, name: string, primary_comic: string | null, template_summary: string, snapshot_version: number, 

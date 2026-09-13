@@ -73,7 +73,7 @@ pub struct AppState {
     /// In-flight redirect payments (YooKassa): checkout writes, settlement flips.
     pub payment_rows: PaymentStores,
     /// Admin-set feature-toggle overrides (registry in `features.rs`; evaluation
-    /// in [`feature_enabled`] — code default unless overridden).
+    /// in [`crate::features::feature_enabled`] — code default unless overridden).
     pub flags: FlagStores,
     /// Admin-set runtime string settings (registry in `settings.rs`; no row =
     /// unset — settings have no compiled-in default values).
@@ -89,7 +89,7 @@ pub struct AppState {
     pub mailer: mailer::Mailer,
     /// Fixed-window rate limiter for abusable auth endpoints (§6.1 identify,
     /// §6.2 recover, §6.3 resend). Keyed by `"<scope>:<email>"`; the value is
-    /// `(resets_at, count)`. See [`fixed_window_allow`].
+    /// `(resets_at, count)`. See `handlers::auth::fixed_window_allow` (private).
     pub rate_limiter: Arc<Mutex<std::collections::HashMap<String, (u64, u32)>>>,
     /// Google ID-token verifier (holds the cached JWKS). `Some` only when
     /// `GOOGLE_CLIENT_ID` is configured; `None` disables `/api/auth/google` (501).
@@ -6037,6 +6037,237 @@ mod tests {
         let (st, me) = get_json_h(&h.app, "/api/users/me", &[("authorization", &bearer)]).await;
         assert_eq!(st, StatusCode::OK, "the client's token still authenticates");
         assert_eq!(me["user_id"], user.as_str());
+    }
+
+    /// Collapse a Rust source file to one line for structural matching, with
+    /// comment lines dropped so a `.route(` inside prose is never mistaken for a
+    /// registration.
+    fn route_source(src: &str) -> String {
+        src.lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Every `(path, [(METHOD, handler)])` a module's `router()` registers.
+    /// Handles both rustfmt shapes (one line, or split across four) and a path
+    /// carrying two methods (`get(a).post(b)`), which two admin routes do.
+    fn extract_routes(src: &str) -> Vec<(String, Vec<(String, String)>)> {
+        const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+        let flat = route_source(src);
+        let bytes = flat.as_bytes();
+        let mut out = Vec::new();
+        let mut cursor = 0usize;
+        while let Some(rel) = flat[cursor..].find(".route(") {
+            let open = cursor + rel + ".route(".len();
+            let Some(q1) = flat[open..].find('"') else {
+                break;
+            };
+            let path_start = open + q1 + 1;
+            let Some(q2) = flat[path_start..].find('"') else {
+                break;
+            };
+            let path = flat[path_start..path_start + q2].to_string();
+
+            // Walk to the `)` that closes `.route(` so a nested call (a `.layer`
+            // on the media upload, say) cannot end the registration early.
+            let mut depth = 1i32;
+            let mut end = open;
+            while end < bytes.len() && depth > 0 {
+                match bytes[end] {
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    _ => {}
+                }
+                end += 1;
+            }
+            let body = &flat[path_start + q2 + 1..end.saturating_sub(1)];
+
+            let mut methods: Vec<(String, String)> = Vec::new();
+            for method in METHODS {
+                let call = format!("{method}(");
+                let mut at = 0usize;
+                while let Some(rel) = body[at..].find(&call) {
+                    let start = at + rel;
+                    let standalone = start == 0
+                        || !matches!(body.as_bytes()[start - 1], b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9');
+                    let name_start = start + call.len();
+                    let name_len = body[name_start..]
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .unwrap_or(body.len() - name_start);
+                    if standalone && name_len > 0 {
+                        methods.push((
+                            method.to_uppercase(),
+                            body[name_start..name_start + name_len].to_string(),
+                        ));
+                    }
+                    at = start + call.len();
+                }
+            }
+            methods.sort();
+            out.push((path, methods));
+            cursor = end;
+        }
+        out
+    }
+
+    /// The `///` block above `async fn {handler}`, or None when it has none.
+    fn handler_doc(src: &str, handler: &str) -> Option<String> {
+        let lines: Vec<&str> = src.lines().collect();
+        let signature = format!("async fn {handler}(");
+        let at = lines
+            .iter()
+            .position(|l| l.trim_start().starts_with(&signature))?;
+        let mut doc: Vec<String> = Vec::new();
+        for line in lines[..at].iter().rev() {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("///") {
+                doc.push(rest.trim().to_string());
+            } else if trimmed.starts_with("#[") {
+                continue;
+            } else {
+                break;
+            }
+        }
+        doc.reverse();
+        (!doc.is_empty()).then(|| doc.join("\n"))
+    }
+
+    /// The `//!` block at the top of a module.
+    fn module_doc(src: &str) -> String {
+        src.lines()
+            .take_while(|l| l.trim_start().starts_with("//!") || l.trim().is_empty())
+            .filter_map(|l| l.trim_start().strip_prefix("//!"))
+            .map(|l| l.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    }
+
+    /// Handlers registered on a route but carrying no `///` doc. This number may
+    /// only ever go DOWN — see [`api_reference_is_committed`].
+    const UNDOCUMENTED_ROUTE_BUDGET: usize = 32;
+
+    /// The HTTP surface, generated from the routers themselves.
+    ///
+    /// 67 paths across six `handlers::*::router()` functions were documented
+    /// nowhere in this repository: there is no OpenAPI file, and the markdown
+    /// names endpoints only in passing. Hand-writing that list would create one
+    /// more artifact to keep in sync — and the repository's hand-maintained
+    /// module map had already drifted, omitting `authz.rs` and all of
+    /// `handlers/`. So the reference is EXTRACTED: the paths are already source
+    /// literals and most handlers already carry a `///`, and this test is both
+    /// the generator and the gate that the committed file still matches.
+    ///
+    /// Regenerate with:
+    ///   UPDATE_API=1 cargo test api_reference_is_committed
+    ///
+    /// The budget is a ratchet, not a target: a new route with no doc fails
+    /// here, while the 32 that predate the gate can be paid down over time.
+    #[test]
+    fn api_reference_is_committed() {
+        let handlers =
+            std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/handlers"));
+        let committed = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/API.md"));
+
+        let mut modules: Vec<std::path::PathBuf> = std::fs::read_dir(&handlers)
+            .expect("read src/handlers")
+            .filter_map(|entry| {
+                let path = entry.expect("dir entry").path();
+                let is_module = path.extension().is_some_and(|e| e == "rs")
+                    && path.file_stem().is_some_and(|s| s != "mod");
+                is_module.then_some(path)
+            })
+            .collect();
+        modules.sort();
+
+        let mut index: Vec<(String, String, String)> = Vec::new();
+        let mut sections = String::new();
+        let mut undocumented: Vec<String> = Vec::new();
+
+        for path in &modules {
+            let name = path
+                .file_stem()
+                .expect("stem")
+                .to_string_lossy()
+                .to_string();
+            let src = std::fs::read_to_string(path).expect("read module");
+            let routes = extract_routes(&src);
+            assert!(!routes.is_empty(), "handlers/{name}.rs registers no route");
+
+            sections.push_str(&format!("\n## `handlers::{name}`\n\n"));
+            let doc = module_doc(&src);
+            if !doc.is_empty() {
+                sections.push_str(&format!("{doc}\n"));
+            }
+            for (route, methods) in routes {
+                for (method, handler) in methods {
+                    index.push((method.clone(), route.clone(), name.clone()));
+                    sections.push_str(&format!("\n### `{method} {route}`\n\n"));
+                    match handler_doc(&src, &handler) {
+                        Some(doc) => sections.push_str(&format!("{doc}\n")),
+                        None => {
+                            undocumented.push(format!("{method} {route} ({name}.rs)"));
+                            sections.push_str(
+                                "_No `///` on the handler — see the budget in `API.md`._\n",
+                            );
+                        }
+                    }
+                    sections.push_str(&format!("\nHandler: `handlers::{name}::{handler}`\n"));
+                }
+            }
+        }
+
+        index.sort_by(|a, b| (&a.1, &a.0).cmp(&(&b.1, &b.0)));
+        let mut generated = String::new();
+        generated.push_str(
+            "<!-- GENERATED by `cargo test api_reference_is_committed`. Do not edit by hand.\n     \
+             Regenerate: UPDATE_API=1 cargo test api_reference_is_committed -->\n\n\
+             # HTTP API\n\n\
+             Extracted from the `router()` functions in `src/handlers/`, with each\n\
+             endpoint's prose taken from the `///` on its handler. Nothing here is\n\
+             hand-maintained, so it cannot drift from the routers it describes.\n\n\
+             Error bodies are the one shape in `src/errors.rs`; status codes are stated\n\
+             in each handler's doc where they are part of the contract.\n\n",
+        );
+        generated.push_str(&format!(
+            "{} endpoints over {} paths. {} handlers carry no doc (budget {}).\n\n",
+            index.len(),
+            index
+                .iter()
+                .map(|(_, path, _)| path)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            undocumented.len(),
+            UNDOCUMENTED_ROUTE_BUDGET,
+        ));
+        generated.push_str("| Method | Path | Module |\n|---|---|---|\n");
+        for (method, path, module) in &index {
+            generated.push_str(&format!("| {method} | `{path}` | `{module}` |\n"));
+        }
+        generated.push_str(&sections);
+
+        assert!(
+            undocumented.len() <= UNDOCUMENTED_ROUTE_BUDGET,
+            "a route was added without a `///` on its handler. \
+             UNDOCUMENTED_ROUTE_BUDGET is {UNDOCUMENTED_ROUTE_BUDGET}, found {}:\n{}",
+            undocumented.len(),
+            undocumented.join("\n"),
+        );
+
+        if std::env::var("UPDATE_API").is_ok() {
+            std::fs::write(&committed, &generated).expect("write API.md");
+            return;
+        }
+        let on_disk = std::fs::read_to_string(&committed).unwrap_or_default();
+        assert_eq!(
+            on_disk, generated,
+            "API.md no longer matches the routers — rerun with UPDATE_API=1"
+        );
     }
 
     /// Restart survival: a brand-new pool + router (process restart equivalent)
