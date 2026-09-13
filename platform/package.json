@@ -16,7 +16,7 @@
     "test:backend": "cd backend && cargo test",
     "test:frontend": "cd frontend && npm test",
     "lint": "npm run lint:frontend && npm run lint:backend",
-    "lint:frontend": "npm run lint -w frontend && npm run lint:ds -w frontend && npm run lint:css-scope -w frontend",
+    "lint:frontend": "npm run lint -w frontend && npm run lint:ds -w frontend && npm run lint:css-scope -w frontend && npm run lint:doc-paths -w frontend",
     "lint:backend": "cd backend && cargo clippy -- -D warnings",
     "fmt": "cd backend && cargo fmt",
     "fmt:check": "cd backend && cargo fmt -- --check && echo 'rust fmt ok'",

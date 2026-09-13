@@ -171,8 +171,9 @@ consistency rules thread through it:
    workflow**; a Git push no longer deploys `main`). No media env is needed (R2 URLs
    are self-contained in the quest JSON).
 5. **Import the legacy quests** — `npm run upload` (the SAME `R2_PUBLIC_BASE_URL`) →
-   `npm run build` → psql `load.sql` into Supabase. The importer lives at
-   `platform/tools/bubble-import/` **on disk only** — it is gitignored, because its
+   `npm run build` → psql the generated
+   `platform/tools/bubble-import/generated/load.sql` into Supabase. The importer
+   lives at `platform/tools/bubble-import/` **on disk only** — it is gitignored, because its
    raw dumps carry real user PII and it is run by hand against a live source, never
    built or deployed with the platform. See its own README there.
 6. **Enable the features you need** — a fresh database stores no overrides, and every
@@ -669,11 +670,12 @@ pooler, e.g. `pg_dump "$DATABASE_URL" | gzip > dump-$(date +%F).sql.gz`.
      the `geohod-quest-r2-*` podman secrets and restart.
   3. Delete the local `platform/tools/bubble-import/.env` (the import is one-shot;
      it carries both plaintext secrets and is gitignored but not encrypted).
-  4. **Bubble API token** — `BUBBLE_API_TOKEN` was committed to git history in
-     `old-knowledgebase/discovery/config/app.env` and was readable in every clone
-     and on GitHub. The history rewrite removed the blob, but anything already
-     cloned or indexed still has it: **treat the token as compromised and roll it
-     in the Bubble dashboard.**
+  4. **Bubble API token** — `BUBBLE_API_TOKEN` was committed to git history in a
+     SEPARATE repository (old-knowledgebase, at discovery/config/app.env — not a
+     path in this repo) and was readable in every clone and on GitHub. The
+     history rewrite removed the blob, but anything already cloned or indexed
+     still has it: **treat the token as compromised and roll it in the Bubble
+     dashboard.**
 - **Secret rotation (ongoing)**: rotate the Supabase DB password (then refresh the
   `geohod-quest-database-url` secret) and the `ADMIN_TOKEN` periodically.
 - **Connection budget**: `DB_MAX_CONNECTIONS` (default 5, set in the API unit)

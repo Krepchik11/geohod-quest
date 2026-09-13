@@ -9,6 +9,7 @@
     "lint": "eslint",
     "lint:ds": "! grep -rEn \"className=\\\"[^\\\"]*\\b(s-btn|s-input|s-link|s-card|s-head|s-nav|s-avatar|adm-btn|adm-input|adm-select|adm-textarea|adm-card|adm-head|adm-nav|btn-ui|field-ui|textarea-ui)\\b\" app || (echo 'Deprecated DS class used — use canonical primitive (globals.css §0)'; exit 1)",
     "lint:css-scope": "node scripts/lint-css-scope.mjs",
+    "lint:doc-paths": "node scripts/lint-doc-paths.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",

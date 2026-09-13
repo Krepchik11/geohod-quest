@@ -51,6 +51,14 @@ jobs:
       - name: Lint — stylesheet scope
         run: npm run lint:css-scope -w frontend
 
+      # Documentation drift, caught the one way a machine can catch it. This is
+      # not a link checker: it asserts that every repository path a document
+      # NAMES is one git tracks or deliberately ignores. DEPLOYMENT.md spent
+      # three commits telling an operator to regenerate a lockfile that had
+      # already been deleted, and nothing failed because nothing was looking.
+      - name: Lint — paths named in documentation
+        run: npm run lint:doc-paths -w frontend
+
       - name: Typecheck
         run: npx tsc --noEmit -p frontend
 

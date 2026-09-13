@@ -146,6 +146,7 @@ code default).
 
 ## Adding packages
 
-When a genuinely shared concern appears (e.g. `packages/contract` for API types), create
-`packages/<name>/`, add it to the root `workspaces` array, and keep it framework-agnostic.
+When a genuinely shared concern appears (a shared `contract` package for API types,
+say), create it under `packages/`, add it to the root `workspaces` array, and keep
+it framework-agnostic.
 Do **not** create packages "just in case".
