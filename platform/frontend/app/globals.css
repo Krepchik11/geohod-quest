@@ -211,12 +211,6 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .hero__title { font-size:52px; font-weight:700; line-height:1.02; letter-spacing:.02em; }
 .hero__subtitle { margin-top:14px; font-size:17px; color:var(--text); }
 .hero__inner .btn { margin-top:30px; width:272px; }
-/* §2.3 hero facts row — live catalog aggregates */
-.hero__facts { margin-top:26px; padding:0; list-style:none; display:flex; align-items:center; flex-wrap:wrap; gap:14px 30px; color:var(--navy); }
-.hero__fact { display:flex; align-items:center; gap:9px; }
-.hero__fact .ic { width:20px; height:20px; }
-.hero__fact-value { font-size:16px; font-weight:600; line-height:20px; }
-.hero__fact-caption { display:block; font-size:12px; font-weight:400; line-height:15px; color:var(--muted-2); }
 
 .section-title { font-size:20px; line-height:28px; text-align:center; }
 .features { display:grid; grid-template-columns:repeat(2,360px); gap:48px; justify-content:center; }
@@ -332,7 +326,6 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .hero__inner { justify-content:flex-start; }
   .hero__title { font-size:30px; line-height:1.08; }
   .hero__subtitle { margin-top:10px; font-size:15px; }
-  .hero__facts { margin-top:20px; gap:12px 20px; }
   .hero__inner .btn { margin-top:24px; width:100%; }
   .section-title { font-size:16px; }
   .quest-grid { gap:20px; grid-template-columns:minmax(0, 360px); }

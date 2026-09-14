@@ -6,7 +6,6 @@ import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { useOwned } from '../lib/collection';
-import { catalogFacts, factsLine, fmtRating } from '../lib/storefront';
 import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
 import { sortQuests } from '../lib/store-query';
 import { useStoreQuery } from '../lib/useStoreQuery';
@@ -14,9 +13,8 @@ import { useStoreQuery } from '../lib/useStoreQuery';
 /**
  * Landing v2 (SPEC §2 / Landing v2.dc.html). The store grid is 100% live: every
  * card is a real published quest from GET /api/quests and every field is the
- * author's real data. The hero facts row derives from the same response —
- * nothing on this page is fabricated. Purchase status lives in the cards
- * (QuestCard), never under the grid.
+ * author's real data — nothing on this page is fabricated. Purchase status
+ * lives in the cards (QuestCard), never under the grid.
  */
 
 /** §2.4 feature cards: full-phrase headlines, four DISTINCT photo slots.
@@ -77,40 +75,14 @@ export default function GeoQuestHome() {
     return () => { cancelled = true; };
   }, []);
 
-  // The hero shows the aggregate twice over: factsLine for the counted phrases,
-  // the raw average for the rating tile's own number + caption.
-  const catalog = market && market.length > 0 ? catalogFacts(market) : null;
-  const facts = catalog ? factsLine(catalog) : null;
-
   return (
     <SiteShell>
 
-      {/* HERO — §2.3: headline + CTA stay; the facts row is live catalog data. */}
+      {/* HERO — §2.3: headline + CTA. */}
       <section className="hero" style={{ backgroundImage: "url('/assets/img/hero-main.png')" }} data-screen-label="Главная — хиро">
         <div className="hero__inner container">
           <h1 className="hero__title display">авторские<br />квесты</h1>
           <p className="hero__subtitle">Смотри на город по-новому!</p>
-          {facts && (
-            <ul className="hero__facts">
-              <li className="hero__fact">
-                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-map-20--navy.svg')" } as React.CSSProperties} />
-                <span className="hero__fact-value">{facts.quests}</span>
-              </li>
-              <li className="hero__fact">
-                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} />
-                <span className="hero__fact-value">{facts.cities}</span>
-              </li>
-              {catalog?.avg != null && (
-                <li className="hero__fact">
-                  <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-star-20--navy.svg')" } as React.CSSProperties} />
-                  <span>
-                    <span className="hero__fact-value">{fmtRating(catalog.avg)}</span>
-                    <span className="hero__fact-caption">оценка игроков</span>
-                  </span>
-                </li>
-              )}
-            </ul>
-          )}
           <a className="btn" href="#shop">Выбрать квест</a>
         </div>
       </section>
