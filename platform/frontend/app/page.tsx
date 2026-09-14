@@ -6,7 +6,7 @@ import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { useOwned } from '../lib/collection';
-import { catalogFacts, factsLine } from '../lib/storefront';
+import { catalogFacts, factsLine, fmtRating } from '../lib/storefront';
 import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
 import { sortQuests } from '../lib/store-query';
 import { useStoreQuery } from '../lib/useStoreQuery';
@@ -77,7 +77,10 @@ export default function GeoQuestHome() {
     return () => { cancelled = true; };
   }, []);
 
-  const facts = market && market.length > 0 ? factsLine(catalogFacts(market)) : null;
+  // The hero shows the aggregate twice over: factsLine for the counted phrases,
+  // the raw average for the rating tile's own number + caption.
+  const catalog = market && market.length > 0 ? catalogFacts(market) : null;
+  const facts = catalog ? factsLine(catalog) : null;
 
   return (
     <SiteShell>
@@ -85,20 +88,28 @@ export default function GeoQuestHome() {
       {/* HERO — §2.3: headline + CTA stay; the facts row is live catalog data. */}
       <section className="hero" style={{ backgroundImage: "url('/assets/img/hero-main.png')" }} data-screen-label="Главная — хиро">
         <div className="hero__inner container">
-          <h1 className="hero__title display">авторские квесты</h1>
-          <p className="hero__subtitle">откройте город с новой стороны</p>
+          <h1 className="hero__title display">авторские<br />квесты</h1>
+          <p className="hero__subtitle">Смотри на город по-новому!</p>
           {facts && (
-            <p className="hero__facts">
-              <span>{facts.quests}</span>
-              <span className="hero__facts-dot">·</span>
-              <span>{facts.cities}</span>
-              {facts.rating && (
-                <>
-                  <span className="hero__facts-dot">·</span>
-                  <span className="hero__facts-rating"><span className="ic" aria-hidden />{facts.rating}</span>
-                </>
+            <ul className="hero__facts">
+              <li className="hero__fact">
+                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-flag--navy.svg')" } as React.CSSProperties} />
+                <span className="hero__fact-value">{facts.quests}</span>
+              </li>
+              <li className="hero__fact">
+                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} />
+                <span className="hero__fact-value">{facts.cities}</span>
+              </li>
+              {catalog?.avg != null && (
+                <li className="hero__fact">
+                  <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-star-18--gold.svg')" } as React.CSSProperties} />
+                  <span>
+                    <span className="hero__fact-value">{fmtRating(catalog.avg)}</span>
+                    <span className="hero__fact-caption">оценка игроков</span>
+                  </span>
+                </li>
               )}
-            </p>
+            </ul>
           )}
           <a className="btn" href="#shop">Выбрать квест</a>
         </div>
