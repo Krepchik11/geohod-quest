@@ -93,7 +93,7 @@ export default function GeoQuestHome() {
           {facts && (
             <ul className="hero__facts">
               <li className="hero__fact">
-                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-flag--navy.svg')" } as React.CSSProperties} />
+                <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-map-20--navy.svg')" } as React.CSSProperties} />
                 <span className="hero__fact-value">{facts.quests}</span>
               </li>
               <li className="hero__fact">
