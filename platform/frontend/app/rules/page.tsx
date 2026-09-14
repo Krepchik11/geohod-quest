@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import SiteShell from '../components/SiteShell';
 
 export const metadata: Metadata = { title: 'Правила игры — GEOHOD QUEST' };
@@ -33,6 +34,9 @@ export default function RulesPage() {
               </div>
             </article>
           ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 48 }}>
+          <Link className="btn" href="/#shop" style={{ width: 272 }}>Выбрать квест</Link>
         </div>
       </section>
     </SiteShell>
