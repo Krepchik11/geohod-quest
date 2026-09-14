@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 480" width="1440" height="480" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <pattern id="streets" width="160" height="160" patternUnits="userSpaceOnUse">
+      <path d="M0 42h160M0 104h160M36 0v160M98 0v160M132 0v160"
+            fill="none" stroke="#C9B392" stroke-width="1.2" opacity=".6"/>
+      <path d="M0 0l160 160M160 0L0 160" fill="none" stroke="#C9B392" stroke-width=".8" opacity=".3"/>
+      <circle cx="36" cy="42" r="3" fill="#C9B392" opacity=".45"/>
+      <circle cx="98" cy="104" r="2.4" fill="#C9B392" opacity=".35"/>
+    </pattern>
+  </defs>
+  <rect width="1440" height="480" fill="#F6EEDD"/>
+  <rect width="1440" height="480" fill="url(#streets)"/>
+  <g fill="none" stroke="#DCC9A6" stroke-width="1.4" opacity=".8">
+    <path d="M-10 402c120-40 210 18 330-22s230 10 350-30 250 6 380-34 200 8 400-26"/>
+    <path d="M-10 428c120-40 210 18 330-22s230 10 350-30 250 6 380-34 200 8 400-26"/>
+    <path d="M-10 454c120-40 210 18 330-22s230 10 350-30 250 6 380-34 200 8 400-26"/>
+  </g>
+  <g fill="#122947" opacity=".14">
+    <path d="M120 480V372h44v108zM186 480V330h34v150zM236 480V392h58v88zM312 480V352h30v128zM356 480V408h64v72z"/>
+    <path d="M1040 480V392h50v88zM1104 480V338h36v142zM1156 480V400h62v80zM1236 480V360h32v120z"/>
+    <path d="M203 306l10 24h-20z"/>
+  </g>
+</svg>

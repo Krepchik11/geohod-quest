@@ -54,6 +54,7 @@ body {
   --muted: #83858C;
   --muted-2: #5B6373;
   --bg-subtle: #F7F8FA;
+  --sand: #FAF7F1;         /* тёплый фон публичных страниц */
   --star: #E7A934;
   --green: #1F8A5B;
   --red: #C0395C;          /* single danger token (replaces --pink) */
@@ -89,7 +90,7 @@ h1,h2,h3,p { margin:0; }
 
 /* The public-page wrapper (components/SiteShell): full-viewport flex column so
    a flex:1 content region (e.g. .co-wrap) pins the footer to the bottom. */
-.site { min-height:100vh; display:flex; flex-direction:column; background:var(--white); }
+.site { min-height:100vh; display:flex; flex-direction:column; background:var(--sand); }
 .site--subtle { background:var(--bg-subtle); }
 
 .display { font-family:var(--font-display); font-weight:400; text-transform:uppercase; letter-spacing:.14em; color:var(--navy); }
@@ -202,16 +203,14 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .user-menu__role { font-size:11.5px; color:var(--muted); }
 
 .hero { position:relative; height:480px; background:center/cover no-repeat; }
-.hero::before { content:""; position:absolute; inset:0; background:rgba(26,43,72,.05); }
-.hero__inner { position:relative; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; text-align:center; }
-.hero__title { font-size:40px; line-height:1; white-space:nowrap; }
-.hero__subtitle { margin-top:32px; font-size:14px; color:var(--text); }
-.hero__inner .btn { margin-top:32px; width:272px; }
-/* §2.3 hero facts row — live catalog aggregates */
-.hero__facts { margin-top:22px; display:flex; align-items:center; flex-wrap:wrap; justify-content:center; gap:6px 12px; font-size:14.5px; font-weight:500; color:var(--navy); }
-.hero__facts-dot { opacity:.4; }
-.hero__facts-rating { display:inline-flex; align-items:center; gap:6px; }
-.hero__facts-rating .ic { --ic:url("/assets/icons/c/ic-star-18--gold.svg"); width:16px; height:15px; }
+/* The copy sits on the photo's left half, so the scrim fades out before the
+   people on the right — a flat tint over the whole frame would grey them out. */
+.hero::before { content:""; position:absolute; inset:0;
+  background:linear-gradient(90deg, rgba(250,247,241,.96) 0%, rgba(250,247,241,.88) 28%, rgba(250,247,241,.5) 46%, rgba(250,247,241,0) 64%); }
+.hero__inner { position:relative; height:100%; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:0; text-align:left; }
+.hero__title { font-size:52px; font-weight:700; line-height:1.02; letter-spacing:.02em; }
+.hero__subtitle { margin-top:14px; font-size:17px; color:var(--text); }
+.hero__inner .btn { margin-top:30px; width:272px; }
 
 .section-title { font-size:20px; line-height:28px; text-align:center; }
 .features { display:grid; grid-template-columns:repeat(2,360px); gap:48px; justify-content:center; }
@@ -319,9 +318,14 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   /* header: logo + auth slot only; nav lives in the tab bar (§1.2) */
   .site-header { height:64px; justify-content:space-between; }
   .site-nav { display:none; }
-  .hero { height:350px; }
-  .hero__title { font-size:24px; white-space:normal; line-height:1.2; }
-  .hero__subtitle { margin-top:12px; }
+  /* Phone: the photo is cropped too tight for a side-by-side, so the scrim
+     turns vertical and the whole block sits on the readable top half. */
+  /* cover crops hard at phone width: bias right so the people stay in frame */
+  .hero { height:auto; min-height:430px; padding-block:34px; background-position:78% center; }
+  .hero::before { background:linear-gradient(180deg, rgba(250,247,241,.95) 0%, rgba(250,247,241,.86) 46%, rgba(250,247,241,.3) 100%); }
+  .hero__inner { justify-content:flex-start; }
+  .hero__title { font-size:30px; line-height:1.08; }
+  .hero__subtitle { margin-top:10px; font-size:15px; }
   .hero__inner .btn { margin-top:24px; width:100%; }
   .section-title { font-size:16px; }
   .quest-grid { gap:20px; grid-template-columns:minmax(0, 360px); }
@@ -330,7 +334,8 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .site-footer__links { justify-self:start; }
 }
 @media (max-width: 420px) {
-  .hero { height:340px; }
+  .hero { min-height:410px; }
+  .hero__title { font-size:27px; }
   .quest-card { max-width:none; }
 }
 

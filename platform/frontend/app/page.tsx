@@ -6,7 +6,6 @@ import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { useOwned } from '../lib/collection';
-import { catalogFacts, factsLine } from '../lib/storefront';
 import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
 import { sortQuests } from '../lib/store-query';
 import { useStoreQuery } from '../lib/useStoreQuery';
@@ -14,19 +13,9 @@ import { useStoreQuery } from '../lib/useStoreQuery';
 /**
  * Landing v2 (SPEC §2 / Landing v2.dc.html). The store grid is 100% live: every
  * card is a real published quest from GET /api/quests and every field is the
- * author's real data. The hero facts row derives from the same response —
- * nothing on this page is fabricated. Purchase status lives in the cards
- * (QuestCard), never under the grid.
+ * author's real data — nothing on this page is fabricated. Purchase status
+ * lives in the cards (QuestCard), never under the grid.
  */
-
-/** §2.4 feature cards: full-phrase headlines, four DISTINCT photo slots.
- *  Real photos are pending — labeled placeholders ship until the assets exist. */
-const FEATURES = [
-  { label: 'фото: экран квеста в руке', title: 'Все задания — в смартфоне', text: 'Начать и продолжить можно в любое время, число попыток не ограничено.' },
-  { label: 'фото: компания на прогулке', title: 'Любое число участников', text: 'Проходите в одиночку или дружной компанией — вместе веселее.' },
-  { label: 'фото: деталь старого города', title: 'Игра со смыслом', text: 'Квест знакомит с городскими легендами и историческими персонажами.' },
-  { label: 'фото: скрытый двор / место', title: 'Маршруты к необычным местам', text: 'Ведём туда, мимо чего проходят даже местные.' },
-];
 
 /** Facet option lists are the values the catalog actually has, ru-collated. */
 const uniqRu = (values: string[]) =>
@@ -77,52 +66,15 @@ export default function GeoQuestHome() {
     return () => { cancelled = true; };
   }, []);
 
-  const facts = market && market.length > 0 ? factsLine(catalogFacts(market)) : null;
-
   return (
     <SiteShell>
 
-      {/* HERO — §2.3: headline + CTA stay; the facts row is live catalog data. */}
+      {/* HERO — §2.3: headline + CTA. */}
       <section className="hero" style={{ backgroundImage: "url('/assets/img/hero-main.png')" }} data-screen-label="Главная — хиро">
         <div className="hero__inner container">
-          <h1 className="hero__title display">авторские квесты</h1>
-          <p className="hero__subtitle">откройте город с новой стороны</p>
-          {facts && (
-            <p className="hero__facts">
-              <span>{facts.quests}</span>
-              <span className="hero__facts-dot">·</span>
-              <span>{facts.cities}</span>
-              {facts.rating && (
-                <>
-                  <span className="hero__facts-dot">·</span>
-                  <span className="hero__facts-rating"><span className="ic" aria-hidden />{facts.rating}</span>
-                </>
-              )}
-            </p>
-          )}
+          <h1 className="hero__title display">авторские<br />квесты</h1>
+          <p className="hero__subtitle">Смотри на город по-новому!</p>
           <a className="btn" href="#shop">Выбрать квест</a>
-        </div>
-      </section>
-
-      {/* §2.4 features: full phrases, four distinct (placeholder) photos */}
-      <section className="container" style={{ paddingTop: 90 }} data-screen-label="Главная — коротко о квестах">
-        <h2 className="section-title display">коротко о квестах</h2>
-        <p style={{ maxWidth: 700, margin: '48px auto 0', textAlign: 'center' }}>
-          GEOquest&nbsp;— это игра-экскурсия: участники выполняют задания в&nbsp;городе&nbsp;—
-          находят на&nbsp;местности ответ на&nbsp;вопрос или отгадывают логическую загадку.
-        </p>
-        <div className="features" style={{ marginTop: 48 }}>
-          {FEATURES.map((f) => (
-            <article className="feature card" key={f.title}>
-              <span className="feature__photo-slot" role="img" aria-label={f.label}>
-                <span>{f.label}</span>
-              </span>
-              <div>
-                <h3>{f.title}</h3>
-                <p>{f.text}</p>
-              </div>
-            </article>
-          ))}
         </div>
       </section>
 
