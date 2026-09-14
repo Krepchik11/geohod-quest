@@ -17,15 +17,6 @@ import { useStoreQuery } from '../lib/useStoreQuery';
  * lives in the cards (QuestCard), never under the grid.
  */
 
-/** §2.4 feature cards: full-phrase headlines, four DISTINCT photo slots.
- *  Real photos are pending — labeled placeholders ship until the assets exist. */
-const FEATURES = [
-  { label: 'фото: экран квеста в руке', title: 'Все задания — в смартфоне', text: 'Начать и продолжить можно в любое время, число попыток не ограничено.' },
-  { label: 'фото: компания на прогулке', title: 'Любое число участников', text: 'Проходите в одиночку или дружной компанией — вместе веселее.' },
-  { label: 'фото: деталь старого города', title: 'Игра со смыслом', text: 'Квест знакомит с городскими легендами и историческими персонажами.' },
-  { label: 'фото: скрытый двор / место', title: 'Маршруты к необычным местам', text: 'Ведём туда, мимо чего проходят даже местные.' },
-];
-
 /** Facet option lists are the values the catalog actually has, ru-collated. */
 const uniqRu = (values: string[]) =>
   Array.from(new Set(values)).sort((a, b) => a.localeCompare(b, 'ru'));
@@ -84,28 +75,6 @@ export default function GeoQuestHome() {
           <h1 className="hero__title display">авторские<br />квесты</h1>
           <p className="hero__subtitle">Смотри на город по-новому!</p>
           <a className="btn" href="#shop">Выбрать квест</a>
-        </div>
-      </section>
-
-      {/* §2.4 features: full phrases, four distinct (placeholder) photos */}
-      <section className="container" style={{ paddingTop: 90 }} data-screen-label="Главная — коротко о квестах">
-        <h2 className="section-title display">коротко о квестах</h2>
-        <p style={{ maxWidth: 700, margin: '48px auto 0', textAlign: 'center' }}>
-          GEOquest&nbsp;— это игра-экскурсия: участники выполняют задания в&nbsp;городе&nbsp;—
-          находят на&nbsp;местности ответ на&nbsp;вопрос или отгадывают логическую загадку.
-        </p>
-        <div className="features" style={{ marginTop: 48 }}>
-          {FEATURES.map((f) => (
-            <article className="feature card" key={f.title}>
-              <span className="feature__photo-slot" role="img" aria-label={f.label}>
-                <span>{f.label}</span>
-              </span>
-              <div>
-                <h3>{f.title}</h3>
-                <p>{f.text}</p>
-              </div>
-            </article>
-          ))}
         </div>
       </section>
 

@@ -39,6 +39,8 @@ export default function SiteFooter() {
             </a>
           </div>
           <div className="site-footer__links">
+            {/* The header nav is hidden below 768px, so the footer is how a phone reaches this page. */}
+            <Link href="/rules">Правила игры</Link>
             <Link href="/privacy">Политика конфиденциальности</Link>
             <Link href="/terms">Пользовательское соглашение</Link>
             <span className="site-footer__copy">© 2026 GEOHOD QUEST</span>
