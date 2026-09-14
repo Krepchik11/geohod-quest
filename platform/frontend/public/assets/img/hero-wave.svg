@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 480" width="1440" height="480" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <pattern id="streets2" width="160" height="160" patternUnits="userSpaceOnUse">
+      <path d="M0 42h160M0 104h160M36 0v160M98 0v160" fill="none" stroke="#C9B392" stroke-width="1.1" opacity=".5"/>
+      <path d="M0 0l160 160" fill="none" stroke="#C9B392" stroke-width=".7" opacity=".28"/>
+    </pattern>
+  </defs>
+  <rect width="1440" height="480" fill="#F6EEDD"/>
+  <rect width="1440" height="480" fill="url(#streets2)"/>
+  <g fill="none" stroke="#DCC9A6" stroke-width="1.4" opacity=".75">
+    <path d="M-10 150c140-44 236 22 372-20s246 14 372-28 260 10 396-30 190 6 320-22"/>
+    <path d="M-10 178c140-44 236 22 372-20s246 14 372-28 260 10 396-30 190 6 320-22"/>
+  </g>
+  <path d="M0 424c150-34 260 16 420-8s280 20 470-12 330 6 550-30v106H0Z" fill="#3B71FE"/>
+  <g fill="#122947" opacity=".92">
+    <path d="M96 480v-62h30v62zM136 480v-84h24v84zM170 480v-52h40v52zM222 480v-72h22v72zM254 480v-44h44v44z"/>
+    <path d="M148 382l7 16h-14z"/>
+    <path d="M1136 480v-56h32v56zM1178 480v-82h24v82zM1212 480v-48h44v48zM1268 480v-68h22v68zM1300 480v-40h42v40z"/>
+    <path d="M1190 384l7 16h-14z"/>
+  </g>
+</svg>
