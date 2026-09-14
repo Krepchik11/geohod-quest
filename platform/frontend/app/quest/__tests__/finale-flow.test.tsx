@@ -230,8 +230,10 @@ describe.each([
     run.priorLogs = [...priorLogs];
     const user = await openFinale([...paid]);
 
-    // The attempt is recorded again; the once-per-quest bonus is not.
-    expect(appended.map((f) => f.type)).toEqual(['attempt_completed']);
+    // The attempt is recorded again; the once-per-quest bonus is not. The append
+    // is queued from an effect, so it lands a tick after the finale renders —
+    // asserting on the spot passes locally and races on a loaded CI runner.
+    await waitFor(() => expect(appended.map((f) => f.type)).toEqual(['attempt_completed']));
     expect(document.querySelector('.p-toast')).toBeNull();
     expect(stat('монет собрано').textContent).toContain('0');
 
