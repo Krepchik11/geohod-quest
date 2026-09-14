@@ -1,5 +1,7 @@
 # GeoQuest — правила для Claude
 
+Отвечай пользователю по-русски.
+
 Полное описание архитектуры — в [`README.md`](./README.md) и [`platform/README.md`](./platform/README.md).
 Здесь — то, что нельзя случайно упустить при правках.
 
@@ -15,12 +17,42 @@
 `snapshot.rs` или их TS-аналогов во фронтенде — обязательно прогони
 `platform/goldens/parity/` до и после изменения.
 
+## Запуск
+
+- Всё сразу: `cd platform && npm run dev` — бэкенд :8080, фронтенд :3000.
+- Только фронтенд: `cd platform/frontend && npx next dev --port 3100`
+  (порт 3000 часто занят залипшим процессом).
+- Бэкенду нужен Postgres и `.env` — процедура целиком описана в скилле `platform:verify`.
+
 ## Перед тем как считать задачу готовой
 
 - Backend: `cargo fmt -- --check && cargo clippy -- -D warnings && cargo test` (из `platform/backend`)
-- Frontend: `npm run lint && npx tsc --noEmit && npm test && npm run build` (из `platform/frontend`)
+- Frontend: `npm run lint && npm run lint:ds && npx tsc --noEmit && npm test && npm run build`
+  (из `platform/frontend`)
 - Следуй правилам [`agents/rust.md`](./agents/rust.md) и [`agents/react.md`](./agents/react.md) буквально.
 - UI-изменения — проверяй в реальном браузере (скилл `platform:verify`), не только тестами.
+
+## Фронтенд: Next.js 16 и дизайн-система
+
+- Это **не** тот Next.js, который ты помнишь по обучению: App Router, React 19, RSC-first.
+  Перед использованием незнакомого API читай `node_modules/next/dist/docs/` —
+  см. [`platform/frontend/AGENTS.md`](./platform/frontend/AGENTS.md).
+- Цвета, радиусы, тени, шрифты — только токены из `platform/frontend/app/globals.css` (§0 TOKENS).
+  Не хардкодь hex-значения и не заводи новые токены без необходимости.
+- Устаревшие классы дизайн-системы (`s-btn`, `s-input`, `adm-btn`, `btn-ui`, `field-ui` и др.)
+  запрещены — их ловит `npm run lint:ds`. Используй примитивы из `app/components/ui.tsx`.
+- Компоненты можно смотреть изолированно: `npm run storybook`.
+- Клиентские компоненты — только там, где нужна интерактивность или локальное хранение.
+
+## Ключевые файлы
+
+- `platform/frontend/lib/shared-model.ts` — проекторы, обязаны совпадать с Rust-фолдом.
+- `platform/frontend/lib/api.ts` — единственный API-клиент (идентичность, нормализация ошибок).
+- `platform/frontend/lib/identity.ts` — анонимная идентичность устройства и сессия.
+- `platform/frontend/lib/snapshot.ts` — единственный читатель опубликованного снапшота.
+- `platform/frontend/lib/quest-theme.ts` — три авторских цвета → полная палитра плеера.
+- `platform/frontend/app/page.tsx` — главная страница (лендинг + витрина).
+- `platform/backend/src/main.rs` — роутер Axum, обработчики и интеграционные тесты.
 
 ## Деплой и совместимость
 
@@ -28,12 +60,26 @@
   см. [`.github/workflows/release.yml`](./.github/workflows/release.yml).
 - PWA-клиенты живут офлайн и могут долго не обновляться: API должен оставаться
   обратно совместимым как минимум с предыдущей версией фронтенда.
-- Миграции в `platform/backend/migrations/` — только аддитивные, не ломающие.
 - Новая нетривиальная функциональность — за feature-флагом (`platform/backend/src/features.rs`),
   флаги по умолчанию выключены.
+
+## Что не трогать без явного запроса
+
+- Уже применённые миграции в `platform/backend/migrations/` — sqlx проверяет их контрольные
+  суммы при старте. Нужна правка схемы — добавляй новый пронумерованный файл, старые не редактируй.
+- Фикстуры `platform/goldens/parity/*.json` — общие для обоих наборов тестов. Правка фикстуры
+  обязана менять оба набора одновременно, в одну сторону.
+- `.env`-файлы и токены (`ADMIN_TOKEN`, ключи провайдеров) — они в `.gitignore`, не коммить.
+
+## Коммиты и ветки
+
+- Формат сообщения: `тип(скоуп): описание по-русски` — например
+  `fix(player): бонус считается один раз на квест, а не на попытку`.
+  Типы: `feat`, `fix`, `test`, `docs`, `refactor`. Номер issue/PR в конце, если есть.
+- Работай в отдельной ветке под задачу; в `main` не пушить.
+- Не мержи и не создавай Pull Request без явного запроса пользователя.
 
 ## Общие правила
 
 - Не рефактори и не расширяй код за пределы того, что просит задача.
 - Не создавай пакеты/абстракции "на будущее" — см. `platform/README.md` → "Adding packages".
-- Не мержи и не пуш в `main` и не создавай Pull Request без явного запроса пользователя.
