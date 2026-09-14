@@ -102,7 +102,7 @@ export default function GeoQuestHome() {
               </li>
               {catalog?.avg != null && (
                 <li className="hero__fact">
-                  <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-star-18--gold.svg')" } as React.CSSProperties} />
+                  <span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-star-20--navy.svg')" } as React.CSSProperties} />
                   <span>
                     <span className="hero__fact-value">{fmtRating(catalog.avg)}</span>
                     <span className="hero__fact-caption">оценка игроков</span>
