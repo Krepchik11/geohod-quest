@@ -54,6 +54,7 @@ body {
   --muted: #83858C;
   --muted-2: #5B6373;
   --bg-subtle: #F7F8FA;
+  --sand: #FAF7F1;         /* тёплый фон публичных страниц */
   --star: #E7A934;
   --green: #1F8A5B;
   --red: #C0395C;          /* single danger token (replaces --pink) */
@@ -89,7 +90,7 @@ h1,h2,h3,p { margin:0; }
 
 /* The public-page wrapper (components/SiteShell): full-viewport flex column so
    a flex:1 content region (e.g. .co-wrap) pins the footer to the bottom. */
-.site { min-height:100vh; display:flex; flex-direction:column; background:var(--white); }
+.site { min-height:100vh; display:flex; flex-direction:column; background:var(--sand); }
 .site--subtle { background:var(--bg-subtle); }
 
 .display { font-family:var(--font-display); font-weight:400; text-transform:uppercase; letter-spacing:.14em; color:var(--navy); }
