@@ -49,7 +49,7 @@ describe('TabBar', () => {
 
   // The store lives below the hero + features on `/`; the tab must land the
   // player on the quest grid (#shop), not the top of the marketing page —
-  // mirroring the desktop header's «магазин квестов» link.
+  // mirroring the desktop header's «квесты» link.
   it('store tab links to the shop grid and stays active on the home route', () => {
     renderAt('/');
     const store = screen.getByRole('link', { name: 'Магазин' });
