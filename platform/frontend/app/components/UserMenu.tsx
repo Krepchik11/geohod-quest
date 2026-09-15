@@ -27,11 +27,16 @@ import { useMe } from '../../lib/use-me';
 export default function UserMenu({
   siteLink = false,
   loginLink = false,
+  inline = false,
 }: {
   /** Add «на сайт» — for surfaces outside the main site chrome. */
   siteLink?: boolean;
   /** Anonymous visitors get the «Войти» pill instead of the menu. */
   loginLink?: boolean;
+  /** Render the entries as a flat list, without the avatar button and the
+   *  dropdown — for hosts that already own the opening (the phone's burger
+   *  panel), so «выйти» keeps living in exactly one place. */
+  inline?: boolean;
 }) {
   const { session, role, displayName } = useMe();
   const [open, setOpen] = useState(false);
@@ -60,6 +65,26 @@ export default function UserMenu({
 
   const headName = displayName ?? session?.email ?? null;
 
+  const entries = (
+    <>
+      {session && headName && (
+        <div className="user-menu__head">
+          <div className="user-menu__name">{headName}</div>
+          <div className="user-menu__role">{roleWord(role)}</div>
+        </div>
+      )}
+      <Link href="/profile" role="menuitem">профиль</Link>
+      {siteLink && <Link href="/" role="menuitem">на сайт</Link>}
+      {session && (
+        <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
+      )}
+    </>
+  );
+
+  if (inline) {
+    return <div className="user-menu__inline" role="menu">{entries}</div>;
+  }
+
   return (
     <div className={`user-menu ${open ? 'is-open' : ''}`}>
       <button
@@ -79,19 +104,7 @@ export default function UserMenu({
         </span>
         {session && <span className="user-menu__dot" aria-hidden />}
       </button>
-      <div className="user-menu__dropdown" role="menu">
-        {session && headName && (
-          <div className="user-menu__head">
-            <div className="user-menu__name">{headName}</div>
-            <div className="user-menu__role">{roleWord(role)}</div>
-          </div>
-        )}
-        <Link href="/profile" role="menuitem">профиль</Link>
-        {siteLink && <Link href="/" role="menuitem">на сайт</Link>}
-        {session && (
-          <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
-        )}
-      </div>
+      <div className="user-menu__dropdown" role="menu">{entries}</div>
     </div>
   );
 }

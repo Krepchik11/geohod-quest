@@ -28,7 +28,7 @@ import { useMe } from '../lib/use-me';
  * the bottom tab bar was removed.
  */
 export default function SiteHeader() {
-  const { role } = useMe();
+  const { role, session } = useMe();
   const [navOpen, setNavOpen] = useState(false);
 
   // Click-outside closes the panel, as in UserMenu.
@@ -78,6 +78,13 @@ export default function SiteHeader() {
         )}
         {(isAdmin(role) || hasAdminToken()) && (
           <Link href="/admin">админка</Link>
+        )}
+        {/* Phone only (CSS): the avatar's own popup is hidden there, so its
+            entries ride along at the bottom of this panel. */}
+        {session && (
+          <div className="site-nav__account">
+            <UserMenu inline />
+          </div>
         )}
       </nav>
 
