@@ -180,8 +180,10 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .logo--white .logo-mark { --ic:url("/assets/icons/c/logo-mark--white.svg"); }
 .logo--white .logo-text { --ic:url("/assets/icons/c/logo-text--white.svg"); }
 
-/* Burger: mobile only — the desktop header shows the nav inline. */
+/* Burger and the profile block inside its panel: mobile only — the desktop
+   header shows the nav inline and keeps the avatar popup of its own. */
 .nav-toggle { display:none; }
+.site-nav__account { display:none; }
 .site-nav { display:flex; gap:48px; margin:0 auto; padding-left:90px; }
 .site-nav a { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; color:var(--text); padding:4px 0; border-bottom:1px solid transparent; transition:color .15s ease,border-color .15s ease; }
 .site-nav a:hover { color:var(--blue); }
@@ -313,6 +315,13 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .site-nav.is-open { display:flex; flex-direction:column; gap:0; position:absolute; left:0; right:0; top:64px; z-index:30; margin:0; padding:4px 0 8px; background:var(--white); border-radius:0 0 var(--r-card) var(--r-card); box-shadow:0 14px 28px rgba(18,41,71,.14); }
   .site-nav.is-open a { font-size:14px; letter-spacing:.1em; padding:15px 4px; border-bottom:1px solid rgba(18,41,71,.08); }
   .site-nav.is-open a:last-child { border-bottom:0; }
+  /* Profile and logout ride inside this panel — no avatar button on a phone. */
+  .user-menu { display:none; }
+  .site-nav.is-open .site-nav__account { display:block; margin-top:6px; padding-top:2px; border-top:1px solid rgba(18,41,71,.16); }
+  .site-nav.is-open .user-menu__inline { display:flex; flex-direction:column; }
+  .site-nav.is-open .user-menu__head { padding:12px 4px 8px; border-bottom:1px solid rgba(18,41,71,.08); }
+  .site-nav.is-open .user-menu__name { font-size:14px; max-width:none; }
+  .site-nav.is-open .user-menu__inline button { font-family:var(--font-display); font-size:14px; letter-spacing:.1em; text-transform:uppercase; color:var(--text); background:none; border:0; padding:15px 4px; text-align:left; cursor:pointer; }
   /* Phone: the photo is cropped too tight for a side-by-side, so the scrim
      turns vertical and the whole block sits on the readable top half. */
   /* cover crops hard at phone width: bias right so the people stay in frame */
