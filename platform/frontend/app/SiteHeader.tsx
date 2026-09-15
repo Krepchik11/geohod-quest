@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import UserMenu from './components/UserMenu';
 import { hasAdminToken } from '../lib/api';
@@ -23,11 +23,21 @@ import { useMe } from '../lib/use-me';
  * «Войти» (the bare icon button never shows for them); signed-in users see
  * the avatar circle with the presence dot and the profile dropdown.
  *
- * Mobile (<768px): the inline nav is hidden — navigation moves to the bottom
- * tab bar (components/TabBar), which carries the same role-gated sections.
+ * Mobile (<768px): the inline nav collapses behind the burger button and drops
+ * down as a panel with the same sections — the only navigation on a phone since
+ * the bottom tab bar was removed.
  */
 export default function SiteHeader() {
   const { role } = useMe();
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Click-outside closes the panel, as in UserMenu.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onDoc = () => setNavOpen(false);
+    document.addEventListener('click', onDoc);
+    return () => document.removeEventListener('click', onDoc);
+  }, [navOpen]);
 
   return (
     <header className="site-header container">
@@ -36,10 +46,31 @@ export default function SiteHeader() {
         <span className="ic logo-text" />
       </Link>
 
-      <nav className="site-nav" aria-label="Основная навигация">
+      <button
+        className="nav-toggle"
+        type="button"
+        aria-label="Меню"
+        aria-expanded={navOpen}
+        aria-controls="site-nav"
+        onClick={(e) => {
+          e.stopPropagation();
+          setNavOpen((v) => !v);
+        }}
+      >
+        <svg width="22" height="16" viewBox="0 0 22 16" fill="none" aria-hidden>
+          <path d="M1 1h20M1 8h20M1 15h20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      <nav
+        id="site-nav"
+        className={`site-nav ${navOpen ? 'is-open' : ''}`}
+        aria-label="Основная навигация"
+        onClick={() => setNavOpen(false)}
+      >
         <Link href="/">главная</Link>
-        <Link href="/#shop">магазин квестов</Link>
-        <Link href="/rules">правила игры</Link>
+        <Link href="/#shop">квесты</Link>
+        <Link href="/rules">как играть</Link>
         {/* §1.3: absolute anchor so «контакты» works from every page, not just /. */}
         <Link href="/#contacts">контакты</Link>
         {(canEditQuests(role) || hasAdminToken()) && (

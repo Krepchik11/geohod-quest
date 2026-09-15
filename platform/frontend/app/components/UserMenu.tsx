@@ -10,7 +10,7 @@ import { useMe } from '../../lib/use-me';
  * THE profile button + dropdown — one component for every surface (storefront
  * header, admin shell, constructor dashboard) so the control always has the
  * same look and the same behavior: avatar button with the presence dot, a
- * dropdown with the account head (name · role), «мой профиль», an optional
+ * dropdown with the account head (name · role), «профиль», an optional
  * «на сайт» (for the admin/constructor surfaces that live outside the main
  * site chrome) and a REAL «выйти» (clears the session and rotates the device
  * id — lib/session-actions).
@@ -86,7 +86,7 @@ export default function UserMenu({
             <div className="user-menu__role">{roleWord(role)}</div>
           </div>
         )}
-        <Link href="/profile" role="menuitem">мой профиль</Link>
+        <Link href="/profile" role="menuitem">профиль</Link>
         {siteLink && <Link href="/" role="menuitem">на сайт</Link>}
         {session && (
           <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>

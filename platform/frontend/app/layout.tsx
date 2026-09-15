@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
-import TabBar from "./components/TabBar";
 import Toaster from "./components/Toaster";
 import "./globals.css"; // canonical design system (primitives live here)
 // §0 (v2): one token layer + canonical primitives live in globals.css
@@ -74,8 +73,6 @@ export default function RootLayout({
           Per react.md: RSC shell thin, no shared mutable state, lang=ru from design. */}
       <body className="min-h-full flex flex-col">
         {children}
-        {/* §1.2: mobile bottom tab bar — self-gates to the three top-level pages */}
-        <TabBar />
         <Toaster />
         <SwRegister />
       </body>
