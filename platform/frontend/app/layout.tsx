@@ -50,11 +50,24 @@ export const metadata: Metadata = {
   title: "GEOHOD QUEST — авторские квесты",
   description: "GEOHOD QUEST — авторские городские квесты. Откройте город с новой стороны. Магазин квестов, игрок и конструктор.",
   icons: {
-    // Logo mark only (no wordmark). SVG for crisp modern browsers; .ico fallback.
+    // Logo mark only (no wordmark), on a transparent ground. Transparency costs
+    // the white plate that used to lift the navy mark off a dark tab strip, so
+    // the scheme-matched pair pays it back: the white mark is served in dark
+    // mode.
+    //
+    // /favicon.ico is deliberately NOT listed here. app/favicon.ico is a file
+    // convention — Next emits its <link> ahead of these, which is exactly where
+    // a catch-all belongs, because browsers take the LAST matching entry.
+    // Repeating it below would have made the .ico win over both SVGs (it
+    // matches every scheme) and the dark variant would never be served.
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/icon.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: dark)" },
     ],
+    // iOS renders alpha as black and rounds the corners itself, so this one is
+    // an opaque square. Without it a home-screen shortcut gets a page
+    // screenshot instead of the mark.
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
   },
 };
 
