@@ -180,6 +180,8 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .logo--white .logo-mark { --ic:url("/assets/icons/c/logo-mark--white.svg"); }
 .logo--white .logo-text { --ic:url("/assets/icons/c/logo-text--white.svg"); }
 
+/* Burger: mobile only — the desktop header shows the nav inline. */
+.nav-toggle { display:none; }
 .site-nav { display:flex; gap:48px; margin:0 auto; padding-left:90px; }
 .site-nav a { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; color:var(--text); padding:4px 0; border-bottom:1px solid transparent; transition:color .15s ease,border-color .15s ease; }
 .site-nav a:hover { color:var(--blue); }
@@ -316,8 +318,18 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 }
 @media (max-width: 767px) {
   /* header: logo + auth slot only; nav lives in the tab bar (§1.2) */
-  .site-header { height:64px; justify-content:space-between; }
+  .site-header { height:64px; justify-content:space-between; gap:8px; }
+  /* Logo pushes the trailing controls together, so the auth slot and the
+     burger sit side by side instead of drifting apart under space-between. */
+  .site-header .logo { margin-right:auto; }
+  /* 44px is the touch-target floor; the icon itself stays 22×16. */
+  .nav-toggle { order:3; display:grid; place-items:center; width:44px; height:44px; margin-left:4px; border-radius:var(--r-ui); background:none; color:var(--navy); }
+  .nav-toggle:active { background:rgba(18,41,71,.06); }
   .site-nav { display:none; }
+  /* Panel drops under the header, aligned to the container's gutters. */
+  .site-nav.is-open { display:flex; flex-direction:column; gap:0; position:absolute; left:0; right:0; top:64px; z-index:30; margin:0; padding:4px 0 8px; background:var(--white); border-radius:0 0 var(--r-card) var(--r-card); box-shadow:0 14px 28px rgba(18,41,71,.14); }
+  .site-nav.is-open a { font-size:14px; letter-spacing:.1em; padding:15px 4px; border-bottom:1px solid rgba(18,41,71,.08); }
+  .site-nav.is-open a:last-child { border-bottom:0; }
   /* Phone: the photo is cropped too tight for a side-by-side, so the scrim
      turns vertical and the whole block sits on the readable top half. */
   /* cover crops hard at phone width: bias right so the people stay in frame */
