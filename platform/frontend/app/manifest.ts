@@ -18,8 +18,13 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'standalone',
     background_color: '#ffffff',
     theme_color: '#3B71FE',
+    // The maskable pair carries an opaque ground on purpose: the launcher fills
+    // its mask from the image, so a transparent one is punched through to
+    // nothing. Both sizes are listed because a device that only needs 192 would
+    // otherwise downscale the 512 and smear the strokes.
     icons: [
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icon-192-maskable.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
       { src: '/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
       { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
     ],
