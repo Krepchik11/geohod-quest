@@ -157,7 +157,7 @@ export default function ProfilePage() {
   return (
     <SiteShell>
       <main className="co-wrap">
-        <h2 className="co-title">Мой профиль</h2>
+        <h2 className="co-title">Профиль</h2>
         {errorNote && <p className="pf-note" style={{ color: 'var(--amber)' }}>{errorNote}</p>}
 
         {/* §6.3 soft email confirmation — dismissable amber banner */}

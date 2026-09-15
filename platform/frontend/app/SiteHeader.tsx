@@ -24,8 +24,8 @@ import { useMe } from '../lib/use-me';
  * the avatar circle with the presence dot and the profile dropdown.
  *
  * Mobile (<768px): the inline nav collapses behind the burger button and drops
- * down as a panel with the same sections; the bottom tab bar (components/TabBar)
- * keeps the two it carries within thumb reach.
+ * down as a panel with the same sections — the only navigation on a phone since
+ * the bottom tab bar was removed.
  */
 export default function SiteHeader() {
   const { role } = useMe();
