@@ -15,8 +15,16 @@ Description=GeoQuest API
 [Container]
 ContainerName=geohod-quest-api
 # GHCR image built by .github/workflows/backend-image.yml.
+#
+# The owner here is HARDCODED while CI derives it (`ghcr.io/${{ github.repository_owner }}/
+# geohod-quest-api`), so the two drift apart the moment the repository changes hands —
+# and silently: auto-update keeps reconciling the OLD path, finds its digest unchanged
+# and exits clean, so nothing appears in the journal while every release stalls. If the
+# backend stops picking releases up, compare this line against the image name printed by
+# the backend-image job FIRST.
+#
 # For a build-on-VPS fallback, replace with: localhost/geohod-quest-api:latest
-Image=ghcr.io/naborka/geohod-quest-api:latest
+Image=ghcr.io/krepchik11/geohod-quest-api:latest
 # Enables `podman auto-update`: the timer re-pulls this tag when its registry
 # digest changes, restarts the unit, and rolls back to the previous image if the
 # new container fails to start. This is how a release reaches the VPS — pull-based,
