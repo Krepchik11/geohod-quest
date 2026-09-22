@@ -77,7 +77,9 @@ restart" is a guarantee, not a build-cache accident.
    ```
    Deployment stays **pull-based**: the VPS needs no inbound SSH key and no
    webhook listener, and a host that was offline during a release converges by
-   itself when it comes back.
+   itself when it comes back. [Nudging the VPS from
+   CI](#optional-nudging-the-vps-from-ci) can shorten the wait on top of this,
+   but it is an accelerator — this step is what actually delivers.
 
 2. **GitHub — a `Production` environment** (Settings → Environments → New
    environment, named exactly `Production`) carrying:
@@ -103,6 +105,70 @@ restart" is a guarantee, not a build-cache accident.
    reports none, so the gate waits for the new image. That is the normal path
    (≤ 1 min); `podman auto-update` on the host forces it immediately.
 
+## Optional: nudging the VPS from CI
+
+Delivery is pull-based and stays that way — the host reconciles itself every
+minute and needs nothing inbound. The cost is that every release waits out the
+next tick, and a host whose timer has *stopped* only announces it by making the
+gate time out 15 minutes later.
+
+The `backend-nudge` job closes both gaps by telling the host to reconcile the
+moment the image is pushed. It is **opt-in and inert when unset**: with no
+credentials it logs a notice and the release proceeds exactly as before, and if
+SSH fails it warns and the gate still decides the release. Nothing here becomes
+a dependency of shipping.
+
+It cannot rescue a host that is failing to **pull** (an expired `podman login
+ghcr.io`, a revoked package token): it runs the same reconcile, which fails the
+same way. That is a host problem, diagnosed per [When a release
+fails](#when-a-release-fails).
+
+**1. On the VPS**, as the rootless user that owns the containers:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C 'github-release-nudge' -f ~/.ssh/release_nudge
+```
+
+Authorize it **for one command only**. The forced command is what makes an
+inbound key acceptable here: the host runs its own `podman auto-update` and
+ignores whatever CI sends, so a leaked key reconciles this host and can do
+nothing else — no shell, no file access, no port forwarding.
+
+```sh
+printf '%s %s\n' \
+  'command="podman auto-update",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,restrict' \
+  "$(cat ~/.ssh/release_nudge.pub)" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+Then read the two values CI needs:
+
+```sh
+cat ~/.ssh/release_nudge          # the PRIVATE key → secret VPS_SSH_KEY
+ssh-keyscan -t ed25519 <host>     # the HOST key    → variable VPS_SSH_KNOWN_HOSTS
+```
+
+Run `ssh-keyscan` **on the VPS itself or over a connection you already trust**,
+and compare it against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the
+host. Scanning from the runner instead would trust whatever answers, which is
+not host verification at all.
+
+**2. In GitHub** → Settings → Environments → `Production`:
+
+| Name | Kind | Value |
+|---|---|---|
+| `VPS_SSH_KEY` | secret | the private key, whole file including the BEGIN/END lines |
+| `VPS_SSH_HOST` | variable | the host or IP |
+| `VPS_SSH_USER` | variable | the rootless user that owns the containers — **not** `root` |
+| `VPS_SSH_KNOWN_HOSTS` | variable | the `ssh-keyscan` line |
+
+The host, user and host key are identifiers, not credentials: masking them would
+only make a failed connection harder to read.
+
+**3. Verify** on the next release — the job's summary reads `VPS asked to
+reconcile now.` and the gate passes on its first or second poll. To undo, delete
+the secret: the job returns to logging a notice, and nothing else changes.
+
 ## Base-image security updates
 
 "Identical sources are never rebuilt" means an unchanged backend keeps running the
@@ -118,8 +184,20 @@ but do it off-peak.
 - **Preflight fails** → nothing was built, pushed or deployed. The error names the
   `Production` environment credentials that are unset; set them and re-run.
 - **Gate times out** → the frontend was **not** promoted; production stays on the
-  previous, self-consistent pair. Diagnose on the host with
-  `journalctl --user -u podman-auto-update.service -n 50`, then re-run the workflow.
+  previous, self-consistent pair. Diagnose on the host, in this order — the first
+  answer that is "no" is the cause:
+  ```sh
+  systemctl --user list-timers | grep auto-update   # armed, next fire ≤ 1 min?
+  journalctl --user -u podman-auto-update.service -n 50   # pulling, or erroring?
+  podman auto-update --dry-run                      # does it even see a new digest?
+  podman inspect --format '{{ index .Config.Labels "io.containers.autoupdate" }}' \
+    geohod-quest-api                                # must print `registry`
+  ```
+  A timer that never fires, an expired `podman login ghcr.io`, and a unit that
+  lost `AutoUpdate=registry` all present identically as this timeout. Fix, then
+  re-run the workflow. If [`backend-nudge`](#optional-nudging-the-vps-from-ci) is
+  configured, its warning in the same run already says whether the host was even
+  reachable, which separates "host down" from the three above.
 - **Frontend job fails** → the backend is already live and serving the *old*
   frontend. Safe by construction (see the invariant below), but fix forward.
 - **Rollback** → revert the commit and push. The revert restores an earlier backend

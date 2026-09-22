@@ -36,6 +36,10 @@ name: release
 #            them must name the environment — an environment's values are
 #            invisible otherwise.
 #   Variable API_BASE_URL (optional; defaults to https://api.quest.geohod.ru)
+#   Optional  VPS_SSH_KEY (secret) + VPS_SSH_HOST / VPS_SSH_USER /
+#            VPS_SSH_KNOWN_HOSTS (variables) let `backend-nudge` tell the host to
+#            reconcile immediately instead of within its next minute. Purely an
+#            accelerator: unset, or broken, the release behaves exactly as before.
 
 on:
   push:
@@ -199,10 +203,91 @@ jobs:
       # `inputs` is empty on a push, so this is false for every ordinary release.
       force_rebuild: ${{ inputs.force_rebuild == true }}
 
+  # Optional accelerator — NOT the delivery mechanism. Delivery stays the
+  # pull-based reconcile on the host (`podman-auto-update.timer` with the
+  # one-minute drop-in), for the reasons spelled out in deploy/…/override.conf:
+  # no inbound key is required, nothing is exposed, and a host that was offline
+  # during a release converges by itself when it returns. This job only says
+  # "reconcile NOW", so the gate below does not spend the next tick waiting —
+  # and on a host whose timer has stopped, it is also what gets the image across.
+  #
+  # Every failure here is deliberately inert: no key configured, host down, SSH
+  # refused — the job warns, `continue-on-error` keeps the release going, and the
+  # gate below is unchanged. A release never DEPENDS on inbound SSH; it only
+  # finishes sooner when it happens to work. That is the whole point of adding
+  # this as a second path rather than replacing the first.
+  #
+  # It also cannot fix a host that is failing to PULL (an expired `podman login
+  # ghcr.io`, say): the same reconcile runs either way, and fails the same way.
+  # Setup is opt-in — platform/DEPLOYMENT.md → "Optional: nudging the VPS from
+  # CI". Two things there are not optional once you enable it:
+  #   - the key is pinned to ONE command in the host's ~/.ssh/authorized_keys
+  #     (`command="podman auto-update",no-pty,…`), so a leaked deploy key can
+  #     reconcile that host and do nothing else;
+  #   - VPS_SSH_KNOWN_HOSTS pins the host key. `ssh-keyscan` on a runner trusts
+  #     whatever answers it, which is not host verification at all.
+  backend-nudge:
+    needs: [backend-image]
+    runs-on: ubuntu-latest
+    # An environment's values are invisible to a job that does not name it — they
+    # expand to the empty string with no warning, which here would look exactly
+    # like "not configured" and silently disable the accelerator forever.
+    environment: Production
+    continue-on-error: true
+    timeout-minutes: 3
+    steps:
+      - name: Ask the VPS to reconcile now
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          # Host, user and host-key are identifiers, not credentials: masking
+          # them would only make a failed connection harder to read.
+          SSH_HOST: ${{ vars.VPS_SSH_HOST }}
+          SSH_USER: ${{ vars.VPS_SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ vars.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -uo pipefail
+          missing=()
+          for name in SSH_KEY SSH_HOST SSH_USER SSH_KNOWN_HOSTS; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice::Not nudging the VPS: ${missing[*]} unset on the «Production» environment. The release is unaffected — the host reconciles on its own timer, which is the supported path. To enable the accelerator see platform/DEPLOYMENT.md → «Optional: nudging the VPS from CI»."
+            exit 0
+          fi
+
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          # The command sent here is what an UNRESTRICTED key would run. With the
+          # documented forced command in authorized_keys the host ignores it and
+          # runs its own — which is the configuration to prefer.
+          out="$(ssh -i "$HOME/.ssh/deploy_key" \
+                     -o BatchMode=yes \
+                     -o StrictHostKeyChecking=yes \
+                     -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+                     -o ConnectTimeout=10 \
+                     "$SSH_USER@$SSH_HOST" 'podman auto-update' 2>&1)"
+          rc=$?
+          rm -f "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$out"
+
+          if [ "$rc" -eq 0 ]; then
+            echo "VPS asked to reconcile now." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Could not nudge the VPS (ssh exited ${rc}); falling back to its own reconcile timer. The gate below is unchanged and still decides the release. If it now times out, the host is not picking the image up on its own either — diagnose it per platform/DEPLOYMENT.md → «When a release fails»."
+          fi
+
   # The gate. Everything above this line is preparation; this is what makes the
   # release ordered.
   backend-live:
-    needs: [identity, backend-image]
+    # `backend-nudge` is in `needs` only for ORDER — it runs with
+    # continue-on-error, so whatever it concludes, the gate below still runs and
+    # still decides. Without the edge the nudge would race the first poll.
+    needs: [identity, backend-image, backend-nudge]
     runs-on: ubuntu-latest
     steps:
       - name: Wait until the VPS serves this backend
