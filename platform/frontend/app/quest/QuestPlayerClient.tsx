@@ -41,7 +41,9 @@ import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
 import { shareQuest } from '../../lib/share';
-import { toast } from '../components/Toaster';
+// Aliased twice over: this file already has a `toast` (coin-toast UI state)
+// AND a `showToast` (the coin-toast callback).
+import { toast as notify } from '../components/Toaster';
 import { useStepHistory } from './useStepHistory';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
@@ -641,8 +643,8 @@ export default function QuestPlayerClient({
         // sheet still has its transient user activation.
         share: () => {
           void shareQuest({ questId, name: snapshot.name, city: snapshot.city }).then((r) => {
-            if (r === 'copied') toast('Ссылка на квест скопирована');
-            if (r === 'failed') toast('Не удалось поделиться — проверьте разрешения браузера');
+            if (r === 'copied') notify('Ссылка на квест скопирована');
+            if (r === 'failed') notify('Не удалось поделиться — проверьте разрешения браузера');
           });
         },
       }}
