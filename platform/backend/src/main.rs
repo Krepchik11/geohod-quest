@@ -6174,7 +6174,11 @@ mod tests {
         let (_, v) = get_json(&app, "/api/features").await;
         assert_eq!(
             v["flags"],
-            json!({ "player_back_button": true, "player_universal_answer": false })
+            json!({
+                "player_back_button": true,
+                "player_universal_answer": false,
+                "quest_share": false,
+            })
         );
     }
 

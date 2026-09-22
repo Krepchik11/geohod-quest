@@ -33,6 +33,10 @@ vi.mock('../../lib/identity', () => ({
   subscribeSession: () => () => {},
 }));
 vi.mock('../../lib/download', () => ({ downloadBundle: vi.fn(async () => {}) }));
+vi.mock('../../lib/client-features', () => ({
+  useClientFeature: () => false,
+  useUniversalAnswer: () => null,
+}));
 
 import GeoQuestHome from '../page';
 import type { PublishedQuestWire } from '../../lib/api';

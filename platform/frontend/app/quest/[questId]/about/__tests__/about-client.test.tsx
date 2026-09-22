@@ -81,16 +81,21 @@ describe('productChips', () => {
 describe('AboutClient — «Поделиться»', () => {
   const name = 'Поделиться';
 
+  /** The <h1> is the one unambiguous «page is up» signal: the quest name also
+   *  renders in the breadcrumb, and «Купить» in the sticky mobile bar. */
+  const loaded = () =>
+    screen.findByRole('heading', { level: 1, name: 'Тайны старого Белграда' });
+
   it('is absent while the flag is off', async () => {
     render(<AboutClient questId="q1" />);
-    await screen.findByText('Тайны старого Белграда');
+    await loaded();
     expect(screen.queryByRole('button', { name })).toBeNull();
   });
 
   it('is offered to a visitor who has NOT bought the quest', async () => {
     shareFlag.on = true;
     render(<AboutClient questId="q1" />);
-    await screen.findByRole('button', { name: /Купить/ });
+    await loaded();
     expect(screen.getByRole('button', { name })).toBeTruthy();
   });
 
