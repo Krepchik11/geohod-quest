@@ -185,19 +185,27 @@ but do it off-peak.
   `Production` environment credentials that are unset; set them and re-run.
 - **Gate times out** → the frontend was **not** promoted; production stays on the
   previous, self-consistent pair. Diagnose on the host, in this order — the first
-  answer that is "no" is the cause:
+  answer that is "no" is the cause. **Start with the image NAME**, because that
+  failure is the one that looks exactly like a healthy VPS:
   ```sh
+  grep ^Image= ~/.config/containers/systemd/geohod-quest-api.container
   systemctl --user list-timers | grep auto-update   # armed, next fire ≤ 1 min?
-  journalctl --user -u podman-auto-update.service -n 50   # pulling, or erroring?
   podman auto-update --dry-run                      # does it even see a new digest?
   podman inspect --format '{{ index .Config.Labels "io.containers.autoupdate" }}' \
     geohod-quest-api                                # must print `registry`
+  journalctl --user -u podman-auto-update.service -n 50   # pulling, or erroring?
   ```
-  A timer that never fires, an expired `podman login ghcr.io`, and a unit that
-  lost `AutoUpdate=registry` all present identically as this timeout. Fix, then
-  re-run the workflow. If [`backend-nudge`](#optional-nudging-the-vps-from-ci) is
-  configured, its warning in the same run already says whether the host was even
-  reachable, which separates "host down" from the three above.
+  The `Image=` line must match the image the `backend-image` job printed. CI
+  derives the owner from the repository; the unit hardcodes it, so a change of
+  hands silently splits them — and the old path usually still exists, so
+  auto-update reconciles it happily, logs nothing and updates nothing. Nothing
+  else on this list leaves the journal that clean, which is why it goes first.
+  After it, a timer that never fires, an expired `podman login ghcr.io` and a
+  unit that lost `AutoUpdate=registry` all present identically as this timeout.
+  Fix, confirm `/health` reports the expected build id, then re-run the workflow.
+  If [`backend-nudge`](#optional-nudging-the-vps-from-ci) is configured, its
+  warning in the same run already says whether the host was even reachable, which
+  separates "host down" from everything above.
 - **Frontend job fails** → the backend is already live and serving the *old*
   frontend. Safe by construction (see the invariant below), but fix forward.
 - **Rollback** → revert the commit and push. The revert restores an earlier backend
@@ -291,7 +299,7 @@ Leave `payments_mock` OFF in production: it grants access without charging.
 
 ## Vercel setup (one-time)
 
-1. **Import** `github.com/naborka/geohod-quest` into Vercel (New Project → import the repo).
+1. **Import** `github.com/Krepchik11/geohod-quest` into Vercel (New Project → import the repo).
 2. **Root Directory:** set to `platform/frontend`. Vercel auto-detects Next.js.
    (`platform/frontend/vercel.json` already pins framework, `npm ci`, and the
    monorepo ignore step — no manual build/install overrides needed.)
@@ -420,7 +428,7 @@ Browser ──HTTPS──> Caddy (host) ──HTTP──> 127.0.0.1:8082  (API c
 
 1. **Build & publish the image** (recommended: via CI). Any push to `main` runs the
    [release pipeline](#releases), which calls `backend-image.yml` and produces
-   `ghcr.io/naborka/geohod-quest-api:latest`. Make the package **public**, or
+   `ghcr.io/krepchik11/geohod-quest-api:latest`. Make the package **public**, or
    `podman login ghcr.io` on the VPS once.
    *Fallback (build on VPS):* the context is `platform/` (the crate embeds
    `../goldens` at compile time), so build from there:
@@ -529,7 +537,7 @@ podman auto-update                 # pulls changed images, restarts, rolls back 
 **Manual (auto-update disabled).** Explicit pull + restart — note a bare `restart`
 does NOT re-pull (Quadlet `Pull=missing`), so the pull is required:
 ```sh
-podman pull ghcr.io/naborka/geohod-quest-api:latest
+podman pull ghcr.io/krepchik11/geohod-quest-api:latest
 systemctl --user restart geohod-quest-api.service
 ```
 
@@ -552,7 +560,7 @@ reports `build_id=dev`.
 
 **Rollback.** Prefer `git revert` + push: the pipeline re-points `:latest` at the
 older image and auto-update follows it, keeping the frontend in step. To pin by
-hand instead, set `Image=ghcr.io/naborka/geohod-quest-api:sha-<commit>` in the unit
+hand instead, set `Image=ghcr.io/krepchik11/geohod-quest-api:sha-<commit>` in the unit
 (or `:build-<id>`), then `daemon-reload` + restart — but note that a pinned unit no
 longer tracks `:latest`, so the next release's gate will time out until you unpin.
 
