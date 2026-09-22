@@ -172,6 +172,8 @@ export interface StepCopy {
   skipRated?: string;
   rateLead?: string;
   rateThanks?: string;
+  /** «Поделиться квестом» — ссылка на витрину квеста. */
+  share?: string;
   /* Меню игрока. */
   menuTitle?: string;
   feedback?: string;
@@ -227,6 +229,10 @@ export interface StepHandlers {
   onward?: () => void;
   /** Step back through history to reread earlier content (real player only). */
   back?: () => void;
+  /** §share: hand the quest's link to the OS share sheet (real player only).
+   *  Deliberately NOT flag-gated by the caller: `/api/features` is unreachable
+   *  offline, and the finale is exactly where the player usually is. */
+  share?: () => void;
 }
 
 const noop = () => {};
@@ -237,10 +243,10 @@ const noop = () => {};
  *
  * `Required<Omit<…>>` is load-bearing — adding a handler to `StepHandlers` without
  * listing it here is a compile error, so previews can never silently lose a control.
- * `back` is omitted: it is a real-player-only affordance whose
+ * `back` and `share` are omitted: they are real-player-only affordances whose
  * absence is itself the intended rendering.
  */
-export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back'>> = {
+export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back' | 'share'>> = {
   next: noop,
   confirm: noop,
   submit: noop,
@@ -628,6 +634,13 @@ export function FinalScreen({ quest, copy, st, on }: {
             {rated
               ? (copy?.skipRated || "Отправить без отзыва")
               : (copy?.skipRating || "Пропустить оценку")}
+          </button>
+        )}
+        {/* §share: the ONLY action here that neither commits nor leaves — the
+            player stays on the finale and keeps their stars and review text. */}
+        {h.share && (
+          <button className="p-btn p-btn--ghost" type="button" onClick={h.share}>
+            {copy?.share || "Поделиться квестом"}
           </button>
         )}
       </div>

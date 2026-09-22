@@ -11,6 +11,8 @@ import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } f
 import { downloadBundle, type DownloadStage } from '../../lib/download';
 import { coverSrc } from '../../lib/cover';
 import { currentUserId } from '../../lib/identity';
+import { useClientFeature } from '../../lib/client-features';
+import ShareQuestButton from '../components/ShareQuestButton';
 
 /**
  * «Мои квесты» v2 (SPEC §4 / My Quests v2.dc.html) — live collection:
@@ -162,6 +164,7 @@ async function loadCollection(): Promise<Collection> {
 
 export default function MyQuestsPage() {
   const [collection, setCollection] = useState<Collection>({ source: 'loading' });
+  const shareOn = useClientFeature('quest_share');
   const [downloads, setDownloads] = useState<Record<string, DownloadStage | null>>({});
 
   const reload = useCallback(() => {
@@ -272,6 +275,14 @@ export default function MyQuestsPage() {
                     <Link className={`btn ${cta.variant === 'secondary' ? 'btn--secondary' : ''}`} href={cta.restart ? `${open}?restart=1` : open}>
                       {cta.label}
                     </Link>
+                    {/* §4.1 keeps ONE honest CTA per row, so sharing is an icon, not a
+                        second button. */}
+                    {shareOn && (
+                      <ShareQuestButton
+                        variant="icon"
+                        quest={{ questId: q.quest_id, name: q.title, city: q.city }}
+                      />
+                    )}
                   </div>
                 </div>
               );

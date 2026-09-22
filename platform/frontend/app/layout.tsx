@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
+import { siteUrl } from "../lib/share";
 import Toaster from "./components/Toaster";
 import "./globals.css"; // canonical design system (primitives live here)
 // §0 (v2): one token layer + canonical primitives live in globals.css
@@ -47,6 +48,9 @@ const prata = Prata({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for every relative metadata URL — notably the per-quest
+  // Open Graph image, which crawlers only accept fully qualified.
+  metadataBase: new URL(siteUrl()),
   title: "GEOHOD QUEST — авторские квесты",
   description: "GEOHOD QUEST — авторские городские квесты. Откройте город с новой стороны. Магазин квестов, игрок и конструктор.",
   icons: {

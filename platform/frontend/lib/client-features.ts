@@ -66,7 +66,11 @@ function usePublicFeatures(): PublicFeatures | null {
  * (goldens/wire/features-registry.json pins it). A typo in a screen's flag
  * name is a compile error, not a silently-off feature.
  */
-export const CLIENT_FEATURE_KEYS = ['player_back_button', 'player_universal_answer'] as const;
+export const CLIENT_FEATURE_KEYS = [
+  'player_back_button',
+  'player_universal_answer',
+  'quest_share',
+] as const;
 export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];
 
 /** Effective verdict of one client-visible flag; `false` until loaded. */

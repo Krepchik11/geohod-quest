@@ -54,4 +54,38 @@ describe('FinalScreen', () => {
   it('never renders a replay affordance', () => {
     expect(render({ coinsEarned: 5 })).not.toContain('пройти заново');
   });
+
+  /* §share: the finale's share button is handler-driven, like `back`. The
+     constructor test-player and the editor previews pass PREVIEW_HANDLERS,
+     which deliberately omits it, so only the real player shows it. */
+  describe('«Поделиться квестом»', () => {
+    const share = () => {};
+
+    it('is absent for previews and the constructor test-player', () => {
+      expect(render({ coinsEarned: 5 })).not.toContain('Поделиться квестом');
+      expect(PREVIEW_HANDLERS).not.toHaveProperty('share');
+    });
+
+    it('appears for the real player, which passes the handler', () => {
+      const html = render({ coinsEarned: 5 }, { ...PREVIEW_HANDLERS, share });
+      expect(html).toMatch(/<button[^>]*>Поделиться квестом<\/button>/);
+    });
+
+    it('stays put once the rating submit unlocks — it is not an exit', () => {
+      const html = render(
+        { coinsEarned: 5, rating: 5, reviewText: 'Отлично!' },
+        { ...PREVIEW_HANDLERS, share },
+      );
+      // The «skip» exit is gone at this point; sharing is not an exit, so it stays.
+      expect(html).not.toContain('Отправить без отзыва');
+      expect(html).toContain('Поделиться квестом');
+    });
+
+    it('stands alongside the two commit-and-leave buttons, not instead of them', () => {
+      const html = render({ coinsEarned: 5 }, { ...PREVIEW_HANDLERS, share });
+      expect(html).toContain('ОТПРАВИТЬ ОЦЕНКУ');
+      expect(html).toContain('Пропустить оценку');
+      expect(html).toMatch(/<button[^>]*>Поделиться квестом<\/button>/);
+    });
+  });
 });

@@ -6137,6 +6137,7 @@ mod tests {
                 ("payments_yookassa", false),
                 ("player_back_button", true),
                 ("player_universal_answer", true),
+                ("quest_share", true),
             ]
         );
     }
@@ -6152,7 +6153,11 @@ mod tests {
         assert_eq!(
             v,
             json!({
-                "flags": { "player_back_button": false, "player_universal_answer": false },
+                "flags": {
+                    "player_back_button": false,
+                    "player_universal_answer": false,
+                    "quest_share": false,
+                },
                 "universal_answer": null,
             })
         );
@@ -6169,7 +6174,11 @@ mod tests {
         let (_, v) = get_json(&app, "/api/features").await;
         assert_eq!(
             v["flags"],
-            json!({ "player_back_button": true, "player_universal_answer": false })
+            json!({
+                "player_back_button": true,
+                "player_universal_answer": false,
+                "quest_share": false,
+            })
         );
     }
 

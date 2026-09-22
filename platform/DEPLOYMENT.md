@@ -226,6 +226,23 @@ Leave `payments_mock` OFF in production: it grants access without charging.
    ⚠️ `NEXT_PUBLIC_*` is **baked into the bundle at build time**. Changing it
    requires a **redeploy** to take effect. If it is missing in prod, the build
    **fails by design** (see `lib/api.ts`) instead of silently shipping localhost.
+
+   Also add `NEXT_PUBLIC_SITE_URL` for **Production** → `https://quest.geohod.ru`
+   (the site's own origin, no trailing slash). It is the base for links that
+   LEAVE the app: the «Поделиться» URL and the Open Graph tags on a quest's
+   product page (`metadataBase` in `app/layout.tsx`).
+
+   Unlike the API base this one does **not** fail the build when missing — a
+   wrong API base breaks everything, a wrong site origin only costs an ugly
+   preview (`lib/share.ts`). That makes it the more dangerous of the two to
+   forget: in the browser it falls back to the live origin and share links keep
+   working, but a **server-rendered** OG tag falls back to `http://localhost:3000`
+   and every messenger preview ships pointing at localhost — silently, in a
+   green build. Messengers cache an OG card hard and by URL, so fixing it after
+   the fact needs both a redeploy and a new `?v=`.
+
+   Leave **Preview** and **Development** unset: share links there resolve from
+   the browser's own origin, and nobody shares a preview link.
 5. **Release credentials.** Production deploys are driven by CI, not by Git, so
    put `VERCEL_TOKEN` (Vercel → Settings → Tokens) as a **secret**, and
    `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` as **variables**, on the GitHub
