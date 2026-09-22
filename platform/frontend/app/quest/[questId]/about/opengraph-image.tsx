@@ -62,20 +62,39 @@ export default async function Image({ params }: { params: Promise<{ questId: str
             alt=""
             width={size.width}
             height={size.height}
-            style={{ position: 'absolute', inset: 0, objectFit: 'cover' }}
+            // Explicit edges, not the `inset` shorthand: Satori (what renders
+            // this) does not expand every CSS shorthand, and a box that silently
+            // collapses here is a card with no picture.
+            style={{ position: 'absolute', top: 0, left: 0, width: size.width, height: size.height, objectFit: 'cover' }}
           />
         )}
-        {/* Scrim: the author's photo may be bright anywhere, so the text needs
-            its own guaranteed contrast rather than luck. */}
+        {/* Scrim over the WHOLE frame: the author's photo can be bright
+            anywhere, so contrast has to be built, not hoped for. */}
         <div
           style={{
             position: 'absolute',
-            inset: 0,
-            background: 'linear-gradient(to bottom, rgba(18,41,71,0.15), rgba(18,41,71,0.92))',
+            top: 0,
+            left: 0,
+            width: size.width,
+            height: size.height,
+            background: 'linear-gradient(to bottom, rgba(18,41,71,0.20) 0%, rgba(18,41,71,0.55) 45%, rgba(18,41,71,0.95) 100%)',
+          }}
+        />
+        {/* A second, SOLID plate behind the text. The gradient above carries the
+            look; this carries the guarantee — if a gradient ever fails to render,
+            white-on-photo is unreadable, and an OG card gets exactly one chance. */}
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: size.height - 300,
+            width: size.width,
+            height: 300,
+            background: 'rgba(18,41,71,0.62)',
           }}
         />
         <div style={{ display: 'flex', flexDirection: 'column', padding: '0 64px 56px', position: 'relative' }}>
-          <div style={{ display: 'flex', fontSize: 26, letterSpacing: 4, color: '#9DB6F8' }}>
+          <div style={{ display: 'flex', fontSize: 26, letterSpacing: 4, color: '#C9D8FB' }}>
             GEOHOD QUEST
           </div>
           <div
@@ -100,6 +119,16 @@ export default async function Image({ params }: { params: Promise<{ questId: str
         </div>
       </div>
     ),
-    size,
+    {
+      ...size,
+      headers: {
+        // The card is addressed with `?v={snapshot_version}` (see the page's
+        // generateMetadata), so a given URL's pixels never change — publishing
+        // a new version mints a new URL. Without this every crawler hit paid
+        // for a fresh ~4s render (`X-Vercel-Cache: MISS` on back-to-back
+        // requests), which is how an OG fetch times out and a link goes bare.
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    },
   );
 }
