@@ -13,6 +13,8 @@ import { pollPaymentSettlement } from '../../../../lib/payment-return';
 import { mapsSearchUrl } from '../../../../lib/maps';
 import PurchaseSheet from '../../../components/PurchaseSheet';
 import InstallQuestButton from '../../../components/InstallQuestButton';
+import ShareQuestButton from '../../../components/ShareQuestButton';
+import { useClientFeature } from '../../../../lib/client-features';
 
 /**
  * §3 product page body: model data only (cover, meta, description, author,
@@ -54,6 +56,7 @@ export default function AboutClient({ questId }: { questId: string }) {
   const [product, setProduct] = useState<ProductPageWire | null>(null);
   const [failed, setFailed] = useState<'load' | 'notfound' | null>(null);
   const owned = useOwns(questId);
+  const shareOn = useClientFeature('quest_share');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
@@ -182,6 +185,7 @@ export default function AboutClient({ questId }: { questId: string }) {
       {dl === 'done' && <span className="qp-dl-done">⭳ Квест скачан — играйте офлайн</span>}
       {/* §5: quest-scoped manifest is linked on this page — install prompts for THIS quest */}
       <InstallQuestButton cover={coverSrcForSheet(p.primary_comic)} />
+      {shareOn && <ShareQuestButton quest={{ questId, name: p.name, city: p.city }} className="btn--block" />}
     </div>
   ) : (
     <div className="qp-order card">
@@ -225,6 +229,9 @@ export default function AboutClient({ questId }: { questId: string }) {
         Дальше — шаг подтверждения. Покупка привяжется к этому устройству;{' '}
         <Link href="/auth">войдите</Link>, чтобы сохранить её в аккаунте.
       </p>
+      {/* §share: anyone may pass the quest on, bought or not — the link opens
+          this same page, where the recipient buys it themselves. */}
+      {shareOn && <ShareQuestButton quest={{ questId, name: p.name, city: p.city }} className="btn--block" />}
     </div>
   );
 

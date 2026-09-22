@@ -9,6 +9,8 @@ import { coverCss } from '../../lib/cover';
 import { downloadBundle } from '../../lib/download';
 import { fmtRating, priceLabel, ratingPlural, playersPlural } from '../../lib/storefront';
 import PurchaseSheet from './PurchaseSheet';
+import ShareQuestButton from './ShareQuestButton';
+import { useClientFeature } from '../../lib/client-features';
 
 /**
  * §2.1/§2.2 shop card v2. The whole card is a single block link to the product
@@ -27,6 +29,7 @@ export default function QuestCard({
   owned: boolean;
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
+  const shareOn = useClientFeature('quest_share');
   const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle');
   // «куплен только что»: the card flips in place after a grant (§3.4).
   const [justBought, setJustBought] = useState(false);
@@ -103,6 +106,7 @@ export default function QuestCard({
                 {justBought ? '✓ Квест в «Моих квестах»' : 'Куплен'}
               </span>
               <Link className="btn quest-card__cta" href={playUrl}>Играть</Link>
+              {shareOn && <ShareQuestButton variant="icon" quest={{ questId: quest.quest_id, name: quest.name, city: quest.city }} />}
             </>
           ) : (
             <>
@@ -121,6 +125,9 @@ export default function QuestCard({
                   {free ? 'Получить' : 'Купить'}
                 </button>
               )}
+              {/* Above the card's stretched title overlay (z-index in .share-ico),
+                  and the handler stops the click from reaching it. */}
+              {shareOn && <ShareQuestButton variant="icon" quest={{ questId: quest.quest_id, name: quest.name, city: quest.city }} />}
             </>
           )}
         </div>

@@ -7,7 +7,8 @@
     "payments_mock",
     "payments_yookassa",
     "player_back_button",
-    "player_universal_answer"
+    "player_universal_answer",
+    "quest_share"
   ],
-  "client_visible": ["player_back_button", "player_universal_answer"]
+  "client_visible": ["player_back_button", "player_universal_answer", "quest_share"]
 }

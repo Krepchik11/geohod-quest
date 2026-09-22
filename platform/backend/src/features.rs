@@ -36,17 +36,22 @@ pub enum Feature {
     /// `universal_answer` runtime setting — `crate::settings`) is accepted on
     /// every answer step of every quest.
     PlayerUniversalAnswer,
+    /// Storefront: the «Share» button on the product page, My Quests and
+    /// the shop cards. The quest finale carries its own button that this flag
+    /// does NOT gate — see [`Self::client_visible`].
+    QuestShare,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
         Self::PaymentsYookassa,
         Self::PlayerBackButton,
         Self::PlayerUniversalAnswer,
+        Self::QuestShare,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -59,6 +64,7 @@ impl Feature {
             Self::PaymentsYookassa => "payments_yookassa",
             Self::PlayerBackButton => "player_back_button",
             Self::PlayerUniversalAnswer => "player_universal_answer",
+            Self::QuestShare => "quest_share",
         }
     }
 
@@ -67,7 +73,10 @@ impl Feature {
     /// behavior off belong here — server-enforced flags (auth, payments)
     /// already reach the client through their provider capability endpoints.
     pub fn client_visible(self) -> bool {
-        matches!(self, Self::PlayerBackButton | Self::PlayerUniversalAnswer)
+        matches!(
+            self,
+            Self::PlayerBackButton | Self::PlayerUniversalAnswer | Self::QuestShare
+        )
     }
 
     /// Compiled-in default, used when no override is stored. Every flag ships
@@ -113,6 +122,8 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         // Client-side matching; the answer value is a runtime setting, so
         // there is no deployment capability to check.
         Feature::PlayerUniversalAnswer => true,
+        // A button that builds a public URL client-side — nothing to configure.
+        Feature::QuestShare => true,
     }
 }
 
@@ -190,7 +201,11 @@ mod tests {
     /// through the provider capability endpoints.
     #[test]
     fn only_player_runtime_flags_are_client_visible() {
-        for key in ["player_back_button", "player_universal_answer"] {
+        for key in [
+            "player_back_button",
+            "player_universal_answer",
+            "quest_share",
+        ] {
             let f = Feature::parse(key).expect("registered");
             assert!(f.client_visible(), "{key} must be client visible");
         }

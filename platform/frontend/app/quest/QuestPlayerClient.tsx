@@ -40,6 +40,8 @@ import { useClientFeature, useUniversalAnswer } from '../../lib/client-features'
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
+import { shareQuest } from '../../lib/share';
+import { toast } from '../components/Toaster';
 import { useStepHistory } from './useStepHistory';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
@@ -633,6 +635,16 @@ export default function QuestPlayerClient({
         // the last steps (view-only rewind; completion facts stay guarded).
         // No replay affordance here (§11) — restarting lives in the menu.
         back: stepIdx > 0 ? doBack : undefined,
+        // §share: NOT behind the quest_share flag. Flags are fetched from
+        // /api/features and read false offline — and the finale is where the
+        // player most often is. Called straight from the click so the OS
+        // sheet still has its transient user activation.
+        share: () => {
+          void shareQuest({ questId, name: snapshot.name, city: snapshot.city }).then((r) => {
+            if (r === 'copied') toast('Ссылка на квест скопирована');
+            if (r === 'failed') toast('Не удалось поделиться — проверьте разрешения браузера');
+          });
+        },
       }}
     />
   );

@@ -39,6 +39,7 @@ export const FEATURE_KEYS = [
   'payments_yookassa',
   'player_back_button',
   'player_universal_answer',
+  'quest_share',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -75,6 +76,13 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
       label: 'Значение универсального ответа',
       hint: 'Пусто — ответ не действует, даже когда переключатель включён.',
     },
+  },
+  quest_share: {
+    label: 'Поделиться квестом',
+    description:
+      'Кнопка «Поделиться» на витрине квеста, в «Моих квестах» и на карточках магазина. ' +
+      'На финале квеста кнопка есть всегда, независимо от этого переключателя — ' +
+      'флаги читаются по сети, а финал игрок часто открывает офлайн.',
   },
 };
 

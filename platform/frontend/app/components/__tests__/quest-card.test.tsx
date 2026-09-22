@@ -12,9 +12,10 @@ import React from 'react';
  * - free «Получить» grants instantly, success state lives IN the card;
  * - pending/error status lives in the card, never under the grid.
  */
-const { checkoutMock, downloadMock } = vi.hoisted(() => ({
+const { checkoutMock, downloadMock, shareFlag } = vi.hoisted(() => ({
   checkoutMock: vi.fn(),
   downloadMock: vi.fn(async () => ({})),
+  shareFlag: { on: false },
 }));
 vi.mock('../../../lib/api', () => ({
   api: {
@@ -29,6 +30,10 @@ vi.mock('../../../lib/identity', () => ({
   subscribeSession: () => () => {},
 }));
 vi.mock('../../../lib/download', () => ({ downloadBundle: downloadMock }));
+vi.mock('../../../lib/client-features', () => ({
+  useClientFeature: (key: string) => (key === 'quest_share' ? shareFlag.on : false),
+  useUniversalAnswer: () => null,
+}));
 
 import QuestCard from '../QuestCard';
 import type { PublishedQuestWire } from '../../../lib/api';
@@ -44,8 +49,31 @@ function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
 }
 
 beforeEach(() => {
+  shareFlag.on = false;
   checkoutMock.mockReset();
   downloadMock.mockClear();
+});
+
+/* §share: the card carries the icon variant, gated by quest_share. */
+describe('QuestCard — «Поделиться»', () => {
+  const name = 'Поделиться квестом';
+
+  it('is absent while the flag is off', () => {
+    render(<QuestCard quest={quest({})} owned={false} />);
+    expect(screen.queryByRole('button', { name })).toBeNull();
+  });
+
+  it('is offered on a card the visitor has NOT bought', () => {
+    shareFlag.on = true;
+    render(<QuestCard quest={quest({})} owned={false} />);
+    expect(screen.getByRole('button', { name })).toBeTruthy();
+  });
+
+  it('is offered on an owned card too', () => {
+    shareFlag.on = true;
+    render(<QuestCard quest={quest({})} owned />);
+    expect(screen.getByRole('button', { name })).toBeTruthy();
+  });
 });
 
 describe('QuestCard', () => {

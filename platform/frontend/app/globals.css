@@ -566,3 +566,19 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .pf-methods__unlink { flex:none; background:none; border:0; padding:0; font-size:13px; color:var(--muted); font-weight:500; cursor:pointer; }
 .pf-methods__unlink:hover:not(:disabled) { color:var(--red); }
 .pf-methods__unlink:disabled { opacity:.5; cursor:default; }
+
+/* ---------- «Поделиться квестом» (§share) ---------- */
+/* The icon variant, for dense rows where the design allows only ONE full CTA
+   (My Quests, shop cards). The text variant is a plain .btn--secondary and
+   needs no rules of its own. On a shop card this sits above the stretched
+   title overlay, which is what keeps the click on the button. */
+.share-ico { display:inline-flex; align-items:center; justify-content:center; flex:none; position:relative; z-index:2; width:40px; height:40px; border-radius:var(--r-pill); background:var(--white); box-shadow:inset 0 0 0 1px var(--border); cursor:pointer; transition:background .15s ease, box-shadow .15s ease; }
+.share-ico:hover { background:var(--blue-tint); box-shadow:inset 0 0 0 1px var(--blue); }
+.share-ico:active { transform:translateY(1px); }
+.share-ico__gl { width:16px; height:16px; --ic:url("/assets/icons/c/ic-share--navy.svg"); }
+/* Shop card: the price keeps the left edge, CTA + share group on the right
+   (the footer is space-between, so margin-right:auto does the grouping). */
+.quest-card__footer .quest-card__price { margin-right:auto; }
+.quest-card__footer .share-ico { margin-left:10px; }
+/* My Quests: the column of actions stretches its children; the icon must not. */
+.mq-actions .share-ico { align-self:center; }

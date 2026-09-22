@@ -9,8 +9,9 @@ import React from 'react';
  * place (no redirect), free instant grant, delisted quest 404 state, chips
  * hidden when unknown, §11 reviews list + «Показать ещё» paging.
  */
-const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock, reviewsMock } =
+const { getProductMock, listGrantsMock, checkoutMock, downloadMock, pollMock, reviewsMock, shareFlag } =
   vi.hoisted(() => ({
+    shareFlag: { on: false },
     getProductMock: vi.fn(),
     listGrantsMock: vi.fn(),
     checkoutMock: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock('../../../../../lib/identity', () => ({
 }));
 vi.mock('../../../../../lib/download', () => ({ downloadBundle: downloadMock }));
 vi.mock('../../../../../lib/payment-return', () => ({ pollPaymentSettlement: pollMock }));
+vi.mock('../../../../../lib/client-features', () => ({
+  useClientFeature: (key: string) => (key === 'quest_share' ? shareFlag.on : false),
+  useUniversalAnswer: () => null,
+}));
 
 import AboutClient, { productChips } from '../AboutClient';
 import { ApiError } from '../../../../../lib/api';
@@ -52,6 +57,7 @@ const PRODUCT = {
 };
 
 beforeEach(() => {
+  shareFlag.on = false;
   resetCollectionForTests();
   getProductMock.mockReset().mockResolvedValue(PRODUCT);
   listGrantsMock.mockReset().mockResolvedValue([]);
@@ -67,6 +73,33 @@ describe('productChips', () => {
       '12 страниц', '4 задания', 'подсказки за монеты', 'работает офлайн',
     ]);
     expect(productChips({ pages: null, tasks: null, paid_hints: null })).toEqual(['работает офлайн']);
+  });
+});
+
+/* §share: the product page IS what a shared link opens, so the button is
+   offered to every visitor — the recipient of a link has not bought it yet. */
+describe('AboutClient — «Поделиться»', () => {
+  const name = 'Поделиться';
+
+  it('is absent while the flag is off', async () => {
+    render(<AboutClient questId="q1" />);
+    await screen.findByText('Тайны старого Белграда');
+    expect(screen.queryByRole('button', { name })).toBeNull();
+  });
+
+  it('is offered to a visitor who has NOT bought the quest', async () => {
+    shareFlag.on = true;
+    render(<AboutClient questId="q1" />);
+    await screen.findByRole('button', { name: /Купить/ });
+    expect(screen.getByRole('button', { name })).toBeTruthy();
+  });
+
+  it('is offered in the owned order card as well', async () => {
+    shareFlag.on = true;
+    listGrantsMock.mockResolvedValue([{ quest_id: 'q1', user_id: 'dev:test' }]);
+    render(<AboutClient questId="q1" />);
+    await screen.findByText('✓ Квест куплен');
+    expect(screen.getByRole('button', { name })).toBeTruthy();
   });
 });
 
