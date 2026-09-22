@@ -1,0 +1,221 @@
+name: vps-fix-unit
+
+# Repairs the ONE thing on the VPS that CI cannot reach: the image name in the
+# Quadlet unit. Run it by hand from the Actions tab.
+#
+# Why this exists. `backend-image.yml` derives the image from
+# `ghcr.io/${{ github.repository_owner }}/geohod-quest-api`, so it follows the
+# repository when it changes hands. The unit on the host hardcodes that owner,
+# so it does not. When the two split, `podman auto-update` keeps reconciling the
+# OLD path — which usually still exists — finds its digest unchanged and exits
+# clean. Nothing is logged, the timer looks healthy, and every release stalls at
+# the `backend-live` gate. That is the failure this workflow undoes.
+#
+# It is NOT part of a release. Delivery stays the pull-based reconcile on the
+# host; this is a one-off repair you invoke deliberately.
+#
+# SAFETY, in the order it matters:
+#   - `apply` defaults to FALSE. The first run only reports: what the unit says,
+#     what it should say, what the timer is doing, which build is live. Nothing
+#     is written until you re-run with apply=true.
+#   - the unit is copied to a timestamped backup before it is touched, and the
+#     path is printed, so the change is one `cp` away from being undone.
+#   - only a line beginning `Image=` that already names geohod-quest-api is
+#     rewritten. A unit that looks unfamiliar is left alone and reported.
+#
+# SETUP (Settings → Environments → Production):
+#   secret    VPS_SSH_KEY          private key whose PUBLIC half is in the host's
+#                                  ~/.ssh/authorized_keys
+#   variable  VPS_SSH_HOST         hostname or IP
+#   variable  VPS_SSH_USER         the user that owns the podman units (NOT root —
+#                                  these are `systemctl --user` services)
+#   variable  VPS_SSH_KNOWN_HOSTS  output of `ssh-keyscan <host>`, pasted whole
+#   secret    GHCR_PULL_TOKEN      OPTIONAL. A PAT with read:packages, used to
+#                                  `podman login` into a PERSISTENT authfile. Only
+#                                  needed while the package is private.
+#
+# The key this workflow needs can edit a file, so it cannot be pinned to a single
+# command the way a nudge key is. Treat it as what it is — shell access to
+# production. Remove the line from authorized_keys once the repair is done.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write the change (leave false for a read-only report)"
+        type: boolean
+        default: false
+      reconcile:
+        description: "Run `podman auto-update` after writing, so the image lands now"
+        type: boolean
+        default: true
+
+concurrency:
+  # One repair at a time. Two runs editing the same unit is a corrupted unit.
+  group: vps-fix-unit
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    environment: Production
+    steps:
+      - name: Required VPS credentials are configured
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_HOST: ${{ vars.VPS_SSH_HOST }}
+          VPS_SSH_USER: ${{ vars.VPS_SSH_USER }}
+          VPS_SSH_KNOWN_HOSTS: ${{ vars.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -uo pipefail
+          missing=()
+          for name in VPS_SSH_KEY VPS_SSH_HOST VPS_SSH_USER VPS_SSH_KNOWN_HOSTS; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Nothing was done: ${missing[*]} are unset on the «Production» environment. VPS_SSH_KEY and GHCR_PULL_TOKEN are secrets; VPS_SSH_HOST, VPS_SSH_USER and VPS_SSH_KNOWN_HOSTS are variables. See the header of .github/workflows/vps-fix-unit.yml."
+            exit 1
+          fi
+
+      - name: Set up SSH
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_KNOWN_HOSTS: ${{ vars.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          # The key never leaves this file; nothing below echoes it.
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_vps
+          chmod 600 ~/.ssh/id_vps
+          # Host identity is PINNED from the stored value. `ssh-keyscan` here
+          # would trust whatever answers the runner, which is not verification.
+          printf '%s\n' "$VPS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Inspect and (optionally) repair the unit
+        shell: bash
+        env:
+          VPS_SSH_HOST: ${{ vars.VPS_SSH_HOST }}
+          VPS_SSH_USER: ${{ vars.VPS_SSH_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          APPLY: ${{ inputs.apply }}
+          RECONCILE: ${{ inputs.reconcile }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          # GHCR paths are lowercase; the GitHub owner may not be.
+          expected="ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/geohod-quest-api:latest"
+          echo "Expected image: $expected"
+
+          ssh -i ~/.ssh/id_vps \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              "${VPS_SSH_USER}@${VPS_SSH_HOST}" \
+              bash -s -- "$expected" "$APPLY" "$RECONCILE" "$GHCR_PULL_TOKEN" <<'REMOTE' | tee /tmp/remote.log
+          set -euo pipefail
+          expected="$1"; apply="$2"; reconcile="$3"; ghcr_token="${4:-}"
+
+          # `systemctl --user` over a non-interactive SSH session has no bus
+          # address of its own. Without this every call below fails with
+          # "Failed to connect to bus" and the run looks like a broken host.
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
+          unit="$HOME/.config/containers/systemd/geohod-quest-api.container"
+
+          echo "### Host"
+          echo "  user:     $(id -un)"
+          echo "  unit:     $unit"
+          [ -f "$unit" ] || { echo "::error::No unit at $unit — wrong user, or the unit lives elsewhere. Nothing was changed."; exit 1; }
+
+          current="$(grep -m1 '^Image=' "$unit" || true)"
+          echo "  Image now: ${current:-<no Image= line>}"
+          echo "  Image want: Image=$expected"
+
+          echo "### Auto-update timer"
+          systemctl --user list-timers --no-pager 2>/dev/null | grep -i auto-update || echo "  (no auto-update timer listed)"
+          echo "### Last auto-update log"
+          journalctl --user -u podman-auto-update.service -n 15 --no-pager 2>/dev/null || echo "  (no journal)"
+
+          if [ "$current" = "Image=$expected" ]; then
+            echo "### Verdict"
+            echo "  The unit already names the right image. Nothing to repair here —"
+            echo "  if releases still stall, the cause is the PULL, not the name."
+            exit 0
+          fi
+
+          case "$current" in
+            Image=*geohod-quest-api*) ;;
+            *)
+              echo "::error::The Image= line does not name geohod-quest-api (${current:-absent}). Refusing to rewrite a unit this workflow does not recognise. Nothing was changed."
+              exit 1 ;;
+          esac
+
+          if [ "$apply" != "true" ]; then
+            echo "### Verdict (read-only run)"
+            echo "  WOULD rewrite:  $current"
+            echo "              ->  Image=$expected"
+            echo "  Re-run this workflow with apply=true to write it."
+            exit 0
+          fi
+
+          backup="${unit}.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$unit" "$backup"
+          echo "### Applying"
+          echo "  backup: $backup"
+          # Only the first Image= line, and only the whole line.
+          tmp="$(mktemp)"
+          awk -v repl="Image=$expected" 'BEGIN{done=0} /^Image=/ && !done {print repl; done=1; next} {print}' "$unit" > "$tmp"
+          mv "$tmp" "$unit"
+          echo "  now:    $(grep -m1 '^Image=' "$unit")"
+
+          systemctl --user daemon-reload
+          echo "  daemon-reload done"
+
+          if [ -n "$ghcr_token" ]; then
+            # PERSISTENT authfile on purpose: the default lives under
+            # $XDG_RUNTIME_DIR, which is cleared with the session and on reboot,
+            # so a login stored there works by hand and dies before the timer's
+            # next run.
+            mkdir -p "$HOME/.config/containers"
+            printf '%s' "$ghcr_token" | podman login ghcr.io \
+              -u "$(id -un)" --password-stdin \
+              --authfile "$HOME/.config/containers/auth.json" >/dev/null 2>&1 \
+              && echo "  ghcr login: ok (persistent authfile)" \
+              || echo "  ghcr login: FAILED — if the package is private the pull below will fail too"
+          fi
+
+          if [ "$reconcile" = "true" ]; then
+            echo "### Reconciling now"
+            podman auto-update || echo "::warning::podman auto-update returned non-zero — see the output above."
+          fi
+
+          echo "### Result"
+          systemctl --user is-active geohod-quest-api.service || true
+          curl -fsS --max-time 10 http://127.0.0.1:8082/health || echo "  (local /health unreachable — the container may still be restarting)"
+          echo
+          REMOTE
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          {
+            echo "## VPS unit repair"
+            echo
+            echo "apply: \`${{ inputs.apply }}\` · reconcile: \`${{ inputs.reconcile }}\`"
+            echo
+            echo '```'
+            cat /tmp/remote.log 2>/dev/null || echo "(no output — the run failed before SSH)"
+            echo '```'
+            echo
+            echo "Public check, from anywhere:"
+            echo '```sh'
+            echo "curl -s https://api.quest.geohod.ru/health"
+            echo "curl -s https://api.quest.geohod.ru/api/features   # quest_share present = new build"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
