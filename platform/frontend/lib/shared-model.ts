@@ -122,6 +122,21 @@ export interface QuestSnapshot {
    *  `lib/quest-theme`. Отсутствуют (или не разбираются) — плеер играет квест в
    *  бумажной палитре, как все квесты до появления поля. */
   theme?: QuestTheme | null;
+  /** Цена пропуска задания (кнопка в попапе неверного ответа), замороженная при
+   *  публикации. Конструктор пишет ключ всегда; в снапшотах старее поля его нет.
+   *  Читать только через `lib/snapshot.skipCost` — он же подставляет дефолт. */
+  skip_cost?: number;
+}
+
+/** Цена пропуска задания по умолчанию: новые квесты и снапшоты без поля. */
+export const SKIP_COST_DEFAULT = 10;
+/** Верхняя граница цены пропуска, включительно. */
+export const SKIP_COST_MAX = 99;
+
+/** Цена пропуска, которую может задать автор: целое от 0 до {@link SKIP_COST_MAX}.
+ *  Одно правило для гейта публикации и для читателя снапшота. */
+export function isSkipCost(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= SKIP_COST_MAX;
 }
 
 /**
@@ -140,7 +155,7 @@ export function isOncePerQuest(type: string): type is OncePerQuestType {
 }
 
 export interface Fact {
-  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated' | 'rating_bonus' | 'comment_bonus';
+  type: 'physical_confirmed' | 'answer_submitted' | 'gift_claimed' | 'attempt_completed' | 'hint_purchased' | 'completion_bonus' | 'feedback_reported' | 'navigator_used' | 'quest_rated' | 'rating_bonus' | 'comment_bonus' | 'task_skipped';
   step_position: number;
   submitted_value?: string | null;
   local_is_correct: boolean;
@@ -270,10 +285,23 @@ export function projectBalance(facts: Fact[]): number {
 }
 
 /**
- * Deterministic projectState: fold facts to completed steps, revealed hints, balance.
- * A step is completed by physical_confirmed, attempt_completed, or a CORRECT answer_submitted —
- * wrong answers never complete a step (otherwise the attempt-advance offer would fire off a miss).
- * Must match the Rust project_state exactly (parity goldens enforce).
+ * The ONE step-completion rule: physical_confirmed, attempt_completed, task_skipped
+ * (a step skipped for coins), or a CORRECT answer_submitted — wrong answers never
+ * complete a step (otherwise the attempt-advance offer would fire off a miss).
+ */
+function completesStep(f: Fact): boolean {
+  return (
+    f.type === 'physical_confirmed' ||
+    f.type === 'attempt_completed' ||
+    f.type === 'task_skipped' ||
+    (f.type === 'answer_submitted' && f.local_is_correct)
+  );
+}
+
+/**
+ * Deterministic projectState: fold facts to completed steps (see `completesStep`),
+ * revealed hints, balance. Must match the Rust project_state exactly (parity
+ * goldens enforce).
  */
 export function projectState(facts: Fact[]): ProjectedState {
   const completedSteps: number[] = [];
@@ -281,11 +309,7 @@ export function projectState(facts: Fact[]): ProjectedState {
   let balance = 0;
   facts.forEach(f => {
     balance += f.coins_delta || 0;
-    if (
-      f.type === 'physical_confirmed' ||
-      f.type === 'attempt_completed' ||
-      (f.type === 'answer_submitted' && f.local_is_correct)
-    ) {
+    if (completesStep(f)) {
       completedSteps.push(f.step_position);
     } else if (f.type === 'hint_purchased') {
       revealedHints.push(f.step_position);
@@ -324,39 +348,56 @@ export function latestRating(facts: Fact[]): number {
   return rating;
 }
 
-/** The state a step is in as far as the hint offer is concerned. Named fields, not
- *  positional args: `hasHint` and `purchased` are adjacent booleans and a
+/** The state a step is in as far as the wrong-answer popup is concerned. Named
+ *  fields, not positional args: four adjacent inputs, three of them booleans — a
  *  transposition would silently invert the rule. */
-export interface HintOfferState {
+export interface WrongPopupState {
   wrongs: number;
   hasHint: boolean;
   purchased: boolean;
+  /** The step is already completed — answered or skipped earlier; the player came
+   *  back to it with «Назад». */
+  completed: boolean;
+}
+
+/** What the wrong-answer popup holds. */
+export interface WrongPopup {
+  /** 'offer' — the hint is for sale; 'reveal' — already bought, shown for free;
+   *  'none' — the author set no hint. */
+  hint: 'offer' | 'reveal' | 'none';
+  /** The skip only moves on: no fact, no charge. An answer step has no «Далее»,
+   *  so on a step already completed this is the way forward — without it a player
+   *  back on a skipped step (answer unknown) would be stuck. */
+  freeSkip: boolean;
 }
 
 /**
- * SPEC §Wrong-Answer / Hint Flow: the hint popup is offered only from the SECOND
- * wrong answer on a step, only while the step carries a hint that has not been
- * purchased yet.
+ * SPEC §Wrong-Answer / Hint Flow: the popup opens after EVERY wrong answer on an
+ * answer step, next to the inline error. The skip is always on offer, so there is
+ * always something to show; the hint part follows the hint's state.
  *
- * This is the ONE place the threshold lives. The production player derives its
- * inputs from the fact log (`shouldOfferHint`) and the constructor's test player
- * from its ephemeral draft-run state; both must agree, so neither restates «>= 2».
+ * This is the ONE place the threshold, the composition and the free-skip rule
+ * live. The production player, the constructor's test player and the engine's
+ * `skip_task` all read it; none restates the conditions.
  */
-export function offersHintAfterWrongs({ wrongs, hasHint, purchased }: HintOfferState): boolean {
-  return hasHint && !purchased && wrongs >= 2;
+export function wrongPopupFor({ wrongs, hasHint, purchased, completed }: WrongPopupState): WrongPopup | null {
+  if (wrongs < 1) return null;
+  return {
+    hint: !hasHint ? 'none' : purchased ? 'reveal' : 'offer',
+    freeSkip: completed,
+  };
 }
 
-/** `offersHintAfterWrongs` fed from the fact log alone — no parallel counter state. */
-export function shouldOfferHint(facts: Fact[], pos: number, step: GameStep): boolean {
-  const hasHint = !!step.supporting?.hint;
-  // Cheap gate first: both inputs below are O(n) walks of the log, and a step that
-  // sells no hint can never offer one.
-  if (!hasHint) return false;
-  return offersHintAfterWrongs({
-    wrongs: wrongAnswersAt(facts, pos),
-    hasHint,
-    // The one membership question projectState would answer, asked directly.
-    purchased: facts.some((f) => f.type === 'hint_purchased' && f.step_position === pos),
+/** `wrongPopupFor` fed from the fact log alone — no parallel counter state. Null
+ *  for a step that takes no answer: there is nothing to get wrong or to skip. */
+export function wrongPopupAt(facts: Fact[], pos: number, step: GameStep): WrongPopup | null {
+  if (step.completion.mode !== 'answer') return null;
+  const atPos = facts.filter((f) => f.step_position === pos);
+  return wrongPopupFor({
+    wrongs: wrongAnswersAt(atPos, pos),
+    hasHint: !!step.supporting?.hint,
+    purchased: atPos.some((f) => f.type === 'hint_purchased'),
+    completed: atPos.some(completesStep),
   });
 }
 

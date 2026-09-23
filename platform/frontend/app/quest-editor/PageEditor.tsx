@@ -144,7 +144,7 @@ function HintBlock({ step, onPatch }: { step: CtorStep; onPatch: Patcher }) {
   const h = step.hint;
   const set = (patch: Partial<typeof h>) => onPatch({ hint: { ...h, ...patch } });
   return (
-    <WspBlock title="Подсказка" gateField="hint" aside="попап после 2-й ошибки ответа">
+    <WspBlock title="Подсказка" gateField="hint" aside="попап после каждой ошибки ответа">
       <WspToggle on={h.on} onClick={() => set({ on: !h.on })} label="Подсказка на этом шаге" />
       {h.on ? (
         <>

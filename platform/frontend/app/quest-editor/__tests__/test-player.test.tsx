@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
  * Конструкторский тест-игрок (TestOverlay/DraftRun) обязан вести себя как
- * настоящий плеер: те же аффордансы, тот же порог показа подсказки, тот же
- * инлайн-бокс. Автор проверяет черновик именно здесь — расхождение означает,
- * что он тестирует не то, что увидит игрок.
+ * настоящий плеер: те же аффордансы, тот же попап неверного ответа, тот же
+ * инлайн-бокс, та же цена пропуска. Автор проверяет черновик именно здесь —
+ * расхождение означает, что он тестирует не то, что увидит игрок.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -15,8 +15,8 @@ import { TestOverlay } from '../TestPlayer';
 vi.mock('../../quest/sound', () => ({ coinChime: vi.fn(), spendChime: vi.fn() }));
 
 /** Черновик: старт → шаг с ответом и подсказкой → поздравление. */
-function draftWithHint(): CtorQuest {
-  const quest = newQuest({ title: 'Тестовый квест' });
+function draftWithHint(skipCost?: number): CtorQuest {
+  const quest = newQuest({ title: 'Тестовый квест', skipCost });
   const task = newStep('task_answer');
   task.name = 'Год';
   task.text = 'Найдите год на табличке';
@@ -27,8 +27,8 @@ function draftWithHint(): CtorQuest {
 }
 
 /** Тест-игрок открывается сразу на шаге с ответом (startPos = 1). */
-function openTestPlayer() {
-  render(<TestOverlay quest={draftWithHint()} startPos={1} onClose={vi.fn()} />);
+function openTestPlayer(skipCost?: number) {
+  render(<TestOverlay quest={draftWithHint(skipCost)} startPos={1} onClose={vi.fn()} />);
   return userEvent.setup();
 }
 
@@ -53,23 +53,39 @@ describe('конструкторский тест-игрок: подсказка
     expect(document.querySelector('.p-hintbox')?.textContent).toContain(HINT.text);
   });
 
-  it('вторая ошибка показывает И инлайн-ошибку, И попап (как в плеере)', async () => {
+  it('каждая ошибка показывает И инлайн-ошибку, И попап (как в плеере)', async () => {
     const user = openTestPlayer();
     await answerStep(user, '1700');
+    expect(await screen.findByText('Ответ неверный')).toBeTruthy();
     expect(screen.getByText('Неверно. Попробуйте ещё раз.')).toBeTruthy();
-    expect(screen.queryByText('Нужна подсказка?')).toBeNull();
 
+    await user.click(screen.getByRole('button', { name: 'Попробую сам' }));
+    await waitFor(() => expect(screen.queryByText('Ответ неверный')).toBeNull());
     await answerStep(user, '1701');
-    expect(await screen.findByText('Нужна подсказка?')).toBeTruthy();
+    expect(await screen.findByText('Ответ неверный')).toBeTruthy();
     expect(screen.getByText('Неверно. Попробуйте ещё раз.')).toBeTruthy();
   });
 
-  it('после покупки попап больше не предлагается', async () => {
+  it('после покупки попап показывает подсказку бесплатно — продавать её снова нечего', async () => {
     const user = openTestPlayer();
     await buyHintFromChip(user);
     await answerStep(user, '1700');
-    await answerStep(user, '1701');
-    expect(screen.queryByText('Нужна подсказка?')).toBeNull();
+    const popup = (await screen.findByText('Ответ неверный')).closest('.p-popup')!;
+    expect(popup.textContent).toContain(HINT.text);
+    expect(screen.queryByRole('button', { name: /Потратить/ })).toBeNull();
+  });
+});
+
+describe('конструкторский тест-игрок: пропуск задания', () => {
+  it('цена пропуска — из настроек черновика; пропуск ведёт дальше', async () => {
+    const user = openTestPlayer(3);
+    await answerStep(user, '1700');
+    expect(
+      await screen.findByText('Попробуйте ещё раз, возьмите подсказку за 5 монет или пропустите задание за 3 монеты.'),
+    ).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Пропустить задание — 3 монеты' }));
+    // Следующая страница черновика — поздравление.
+    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
   });
 });
 

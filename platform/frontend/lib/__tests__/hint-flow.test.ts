@@ -1,12 +1,13 @@
 /**
- * Wrong-answer / hint flow helpers (SPEC §Wrong-Answer / Hint Flow):
- * inline error on the 1st wrong, popup only from the 2nd wrong, never after
- * the hint is purchased, never without a hint. The decision is derived from
- * the fact log alone — no parallel counter state exists to drift.
+ * Wrong-answer popup rule (SPEC §Wrong-Answer / Hint Flow): the popup opens after
+ * EVERY wrong answer on an answer step, next to the inline error. It always
+ * offers the skip; the hint part follows the hint's state (for sale / bought /
+ * absent); on a step already completed the skip is free. The decision is derived
+ * from the fact log alone — no parallel counter state exists to drift.
  */
 import { describe, expect, it } from 'vitest';
 import type { Fact, GameStep } from '../shared-model';
-import { wrongAnswersAt, shouldOfferHint } from '../shared-model';
+import { projectState, wrongAnswersAt, wrongPopupAt, wrongPopupFor } from '../shared-model';
 
 const DEVICE = 'dev-test';
 
@@ -38,6 +39,18 @@ function hintPurchase(pos: number): Fact {
   };
 }
 
+function skipped(pos: number): Fact {
+  return {
+    type: 'task_skipped',
+    step_position: pos,
+    submitted_value: '1730',
+    local_is_correct: true,
+    coins_delta: -10,
+    note: null,
+    device_id: DEVICE,
+  };
+}
+
 const hintStep: GameStep = {
   position: 4,
   template: 'task_answer',
@@ -49,6 +62,8 @@ const hintStep: GameStep = {
 
 const hintlessStep: GameStep = { ...hintStep, supporting: {} };
 
+const physicalStep: GameStep = { ...hintStep, template: 'task_no', completion: { mode: 'physical' } };
+
 describe('wrongAnswersAt', () => {
   it('counts only incorrect answer_submitted facts at the position', () => {
     const facts = [wrong(4, '1700'), correct(4, '1730'), wrong(3, 'x'), hintPurchase(4)];
@@ -58,26 +73,63 @@ describe('wrongAnswersAt', () => {
   });
 });
 
-describe('shouldOfferHint', () => {
-  it('does NOT offer on the first wrong answer (inline error only)', () => {
-    expect(shouldOfferHint([wrong(4, '1700')], 4, hintStep)).toBe(false);
+describe('wrongPopupFor — the one table', () => {
+  const base = { wrongs: 1, hasHint: true, purchased: false, completed: false };
+
+  it('no popup before the first wrong answer', () => {
+    expect(wrongPopupFor({ ...base, wrongs: 0 })).toBeNull();
   });
 
-  it('offers from the second wrong answer on a hint-bearing step', () => {
-    expect(shouldOfferHint([wrong(4, '1700'), wrong(4, '1731')], 4, hintStep)).toBe(true);
-    expect(shouldOfferHint([wrong(4, 'a'), wrong(4, 'b'), wrong(4, 'c')], 4, hintStep)).toBe(true);
+  it('hint for sale → offer; bought → reveal for free; absent → none', () => {
+    expect(wrongPopupFor(base)).toEqual({ hint: 'offer', freeSkip: false });
+    expect(wrongPopupFor({ ...base, purchased: true })).toEqual({ hint: 'reveal', freeSkip: false });
+    expect(wrongPopupFor({ ...base, hasHint: false })).toEqual({ hint: 'none', freeSkip: false });
   });
 
-  it('never offers when the step has no hint', () => {
-    expect(shouldOfferHint([wrong(4, 'a'), wrong(4, 'b')], 4, hintlessStep)).toBe(false);
+  it('a step already completed skips for free', () => {
+    expect(wrongPopupFor({ ...base, completed: true })).toEqual({ hint: 'offer', freeSkip: true });
+  });
+});
+
+describe('wrongPopupAt (fed from the fact log)', () => {
+  it('opens on the FIRST wrong answer, and on every one after it', () => {
+    expect(wrongPopupAt([], 4, hintStep)).toBeNull();
+    expect(wrongPopupAt([wrong(4, '1700')], 4, hintStep)).toEqual({ hint: 'offer', freeSkip: false });
+    expect(wrongPopupAt([wrong(4, 'a'), wrong(4, 'b')], 4, hintStep)).not.toBeNull();
+    expect(wrongPopupAt([wrong(4, 'a'), wrong(4, 'b'), wrong(4, 'c')], 4, hintStep)).not.toBeNull();
   });
 
-  it('never re-offers after the hint is purchased', () => {
-    const facts = [wrong(4, 'a'), wrong(4, 'b'), hintPurchase(4), wrong(4, 'c')];
-    expect(shouldOfferHint(facts, 4, hintStep)).toBe(false);
+  it('shows the bought hint for free instead of selling it again', () => {
+    const facts = [wrong(4, 'a'), hintPurchase(4), wrong(4, 'c')];
+    expect(wrongPopupAt(facts, 4, hintStep)).toEqual({ hint: 'reveal', freeSkip: false });
+  });
+
+  it('still opens on a step without a hint — the skip is always on offer', () => {
+    expect(wrongPopupAt([wrong(4, 'a')], 4, hintlessStep)).toEqual({ hint: 'none', freeSkip: false });
   });
 
   it('counts wrongs per step, not globally', () => {
-    expect(shouldOfferHint([wrong(1, 'a'), wrong(4, 'b')], 4, hintStep)).toBe(false);
+    expect(wrongPopupAt([wrong(1, 'a')], 4, hintStep)).toBeNull();
+    expect(wrongPopupAt([hintPurchase(1), wrong(4, 'b')], 4, hintStep)).toEqual({ hint: 'offer', freeSkip: false });
+  });
+
+  it('back on a completed step — answered or skipped — the skip is free', () => {
+    expect(wrongPopupAt([correct(4, '1730'), wrong(4, 'x')], 4, hintStep)?.freeSkip).toBe(true);
+    expect(wrongPopupAt([wrong(4, 'a'), skipped(4), wrong(4, 'x')], 4, hintStep)?.freeSkip).toBe(true);
+    // A skip elsewhere does not make this step free.
+    expect(wrongPopupAt([skipped(3), wrong(4, 'x')], 4, hintStep)?.freeSkip).toBe(false);
+  });
+
+  it('never opens on a step that takes no answer', () => {
+    expect(wrongPopupAt([wrong(4, 'a')], 4, physicalStep)).toBeNull();
+  });
+});
+
+describe('task_skipped in the fold', () => {
+  it('completes its step and charges the skip', () => {
+    const state = projectState([wrong(4, 'a'), hintPurchase(4), skipped(4)]);
+    expect(state.completedSteps).toEqual([4]);
+    expect(state.balance).toBe(-15);
+    expect(state.revealedHints).toEqual([4]);
   });
 });

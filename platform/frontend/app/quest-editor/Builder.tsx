@@ -3,8 +3,10 @@
 import React, { useMemo, useState } from 'react';
 import {
   AGE_TARGET_OPTIONS,
+  BAD_SKIP_COST_TEXT,
   BAD_START_COORDS_TEXT,
   BAD_THEME_CONTRAST_TEXT,
+  badSkipCost,
   badThemeContrast,
   COMPLEXITY_OPTIONS,
   CTOR_TEMPLATES,
@@ -31,6 +33,7 @@ import { PAPER_THEME, type QuestTheme } from '../../lib/quest-theme';
 import { ROLE_LABELS } from '../../lib/admin-users';
 import type { ConstructorAuthorWire } from '../../lib/api';
 import { plural } from '../../lib/ru';
+import { SKIP_COST_MAX } from '../../lib/shared-model';
 import { toDesignStep } from '../../lib/design-step';
 import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, PREVIEW_HANDLERS, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
@@ -416,6 +419,25 @@ export function QuestSettings({ quest, onMeta, highlight, transfer }: {
           />
           <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
             Принимается как правильный ответ на любом вопросе любого шага этого квеста — не нужно добавлять его в каждый список ответов. Оставьте пустым, чтобы выключить.
+          </p>
+        </div>
+        <div {...gateAnchor('skip')}>
+          <label className="adm-label" htmlFor="qs-skip">Цена пропуска задания, монет</label>
+          {/* Без обрезки сверху: число вне 0…99 остаётся видимым, и гейт публикации
+              показывает ошибку, а не подменяет введённое молча. */}
+          <input
+            id="qs-skip"
+            className="input"
+            type="number"
+            min={0}
+            max={SKIP_COST_MAX}
+            step={1}
+            value={m.skipCost}
+            onChange={(e) => set({ skipCost: Math.floor(+e.target.value || 0) })}
+          />
+          {badSkipCost(m) ? <GateNote>{BAD_SKIP_COST_TEXT}</GateNote> : null}
+          <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: 0 }}>
+            Столько монет спишет кнопка «Пропустить задание» — она появляется в попапе после каждой неверной попытки ответа. 0 — пропуск бесплатный. Подарок за пропущенный шаг не начисляется.
           </p>
         </div>
       </WspBlock>

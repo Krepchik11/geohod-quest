@@ -2,11 +2,11 @@
 /**
  * The ONE game-rules engine (issue #65). Both players run these rules; the
  * suite pins them once: wrong-answer ordinals (the restart-dedup fix), the
- * hint offer threshold, gift-on-completion, the once-per-quest bonus,
- * overdraft-legal hint purchases, and advance clamping.
+ * wrong-answer popup, gift-on-completion, the once-per-quest bonus,
+ * overdraft-legal hint purchases and skips, and advance clamping.
  */
 import { describe, expect, it } from 'vitest';
-import type { GameStep, OncePerQuestType } from '../shared-model';
+import { SKIP_COST_DEFAULT, projectState, type GameStep, type OncePerQuestType } from '../shared-model';
 import {
   COMMENT_BONUS,
   COMPLETION_BONUS,
@@ -58,6 +58,7 @@ const ctx = (steps: GameStep[]): PlayCtx => ({
   deviceId: 'device-t',
   universalAnswers: [],
   earnedBonuses: NO_EARNED_BONUSES,
+  skipCost: SKIP_COST_DEFAULT,
 });
 
 describe('answers and the wrong-answer ordinal', () => {
@@ -91,13 +92,24 @@ describe('answers and the wrong-answer ordinal', () => {
     expect(r.effects.appended[0].note).toBeNull();
   });
 
-  it('offers the hint from the SECOND wrong answer while unbought', () => {
+  it('opens the wrong-answer popup on EVERY wrong answer — before and after the hint is bought', () => {
     const c = ctx([answerStep(), physicalStep()]);
     let s = initialPlayState();
     s = transition(s, { type: 'answer', value: 'фонтан' }, c).state;
-    expect(s.hintOfferPos).toBeNull();
+    expect(s.hintOfferPos).toBe(0);
+    s = transition(s, { type: 'dismiss_hint_offer' }, c).state;
     s = transition(s, { type: 'answer', value: 'фонтан' }, c).state;
     expect(s.hintOfferPos).toBe(0);
+    s = transition(s, { type: 'buy_hint' }, c).state;
+    s = transition(s, { type: 'dismiss_hint_reveal' }, c).state;
+    s = transition(s, { type: 'answer', value: 'колонна' }, c).state;
+    expect(s.hintOfferPos).toBe(0);
+  });
+
+  it('opens it on a step without a hint too — the skip is always on offer', () => {
+    const c = ctx([answerStep({ supporting: { hint: null } }), physicalStep()]);
+    const r = transition(initialPlayState(), { type: 'answer', value: 'нет' }, c);
+    expect(r.state.hintOfferPos).toBe(0);
   });
 
   it('universal answers are accepted', () => {
@@ -129,6 +141,96 @@ describe('hints', () => {
     s = transition(s, { type: 'buy_hint' }, c).state;
     const r = transition(s, { type: 'buy_hint' }, c);
     expect(r.effects.appended).toEqual([]);
+  });
+});
+
+describe('skipping a task', () => {
+  /** An answer step with a step gift, then a physical step. */
+  const giftSteps = (): GameStep[] => [
+    answerStep({
+      completion: { mode: 'answer', acceptable: ['  ', ' Фонтан '] },
+      supporting: { hint: { cost_coins: 5, reveal_text: 'подсказка' }, gift: { coins: 5, narrative_text: 'дар' } },
+    }),
+    physicalStep(),
+  ];
+  const priced = (skipCost: number): PlayCtx => ({ ...ctx(giftSteps()), skipCost });
+
+  /** One wrong answer → the popup is open on step 0. */
+  const afterWrong = (c: PlayCtx): PlayState => transition(initialPlayState(), { type: 'answer', value: 'нет' }, c).state;
+
+  it('charges exactly the quest price, completes the step, moves on — and pays NO gift', () => {
+    const c = priced(7);
+    const r = transition(afterWrong(c), { type: 'skip_task' }, c);
+    expect(r.effects.appended).toEqual([
+      {
+        type: 'task_skipped',
+        step_position: 0,
+        submitted_value: 'Фонтан', // the first non-blank acceptable answer, trimmed
+        local_is_correct: true,
+        coins_delta: -7,
+        note: null,
+        device_id: 'device-t',
+      },
+    ]);
+    expect(r.effects.toast).toEqual({ amount: -7, narrative: 'пропуск задания' });
+    expect(r.state.hintOfferPos).toBeNull();
+    expect(r.state.stepIdx).toBe(1);
+    expect(r.effects.advanced).toBe(true);
+    expect(projectState(r.state.facts).completedSteps).toEqual([0]);
+  });
+
+  it('is never blocked by balance — the wallet goes negative', () => {
+    const c = priced(7);
+    const r = transition(afterWrong(c), { type: 'skip_task' }, c);
+    expect(projectState(r.state.facts).balance).toBe(-7);
+  });
+
+  it('a free skip (price 0) writes a plain 0 and shows no toast', () => {
+    const c = priced(0);
+    const r = transition(afterWrong(c), { type: 'skip_task' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual(['task_skipped']);
+    expect(r.effects.appended[0].coins_delta).toBe(0);
+    expect(r.effects.toast).toBeNull();
+  });
+
+  it('does nothing without an open popup — no mistake, no skip', () => {
+    const c = priced(7);
+    const r = transition(initialPlayState(), { type: 'skip_task' }, c);
+    expect(r.effects.appended).toEqual([]);
+    expect(r.state.stepIdx).toBe(0);
+  });
+
+  it('back on a skipped step: a wrong answer offers a free skip that only moves on', () => {
+    const c = priced(7);
+    let s = transition(afterWrong(c), { type: 'skip_task' }, c).state;
+    s = transition(s, { type: 'back' }, c).state;
+    s = transition(s, { type: 'answer', value: 'снова нет' }, c).state;
+    expect(s.hintOfferPos).toBe(0);
+    const again = transition(s, { type: 'skip_task' }, c);
+    // Idempotent: no second fact, no second charge — just forward.
+    expect(again.effects.appended).toEqual([]);
+    expect(again.effects.toast).toBeNull();
+    expect(again.state.stepIdx).toBe(1);
+    expect(again.state.facts.filter((f) => f.type === 'task_skipped')).toHaveLength(1);
+  });
+
+  it('back on a correctly answered step: the skip is free too', () => {
+    const c = priced(7);
+    let s = transition(initialPlayState(), { type: 'answer', value: 'фонтан' }, c).state;
+    s = transition(s, { type: 'back' }, c).state;
+    s = transition(s, { type: 'answer', value: 'опечатка' }, c).state;
+    const r = transition(s, { type: 'skip_task' }, c);
+    expect(r.effects.appended).toEqual([]);
+    expect(r.state.stepIdx).toBe(1);
+  });
+
+  it('coming back to a skipped step and answering right still pays no gift', () => {
+    const c = priced(7);
+    let s = transition(afterWrong(c), { type: 'skip_task' }, c).state;
+    s = transition(s, { type: 'back' }, c).state;
+    const r = transition(s, { type: 'answer', value: 'фонтан' }, c);
+    expect(r.effects.appended.map((f) => f.type)).toEqual(['answer_submitted']);
+    expect(r.state.stepIdx).toBe(1);
   });
 });
 

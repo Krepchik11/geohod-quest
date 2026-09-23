@@ -77,6 +77,7 @@ const ALL_KINDS = [
   'quest_rated',
   'rating_bonus',
   'comment_bonus',
+  'task_skipped',
 ] as const satisfies readonly Fact['type'][];
 type MissingKind = Exclude<Fact['type'], (typeof ALL_KINDS)[number]>;
 const _everyKindIsListed: MissingKind extends never ? true : MissingKind = true;
