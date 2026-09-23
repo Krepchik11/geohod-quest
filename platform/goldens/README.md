@@ -24,16 +24,17 @@ Editing a fixture must flip both suites together.
 
 Fact wire format: externally tagged via `"type"` in `snake_case`
 (`physical_confirmed`, `answer_submitted`, `gift_claimed`, `hint_purchased`,
-`completion_bonus`, `attempt_completed`, `feedback_reported`, `navigator_used`).
+`completion_bonus`, `attempt_completed`, `feedback_reported`, `navigator_used`,
+`quest_rated`, `rating_bonus`, `comment_bonus`, `task_skipped`).
 All variants carry the same six fields. There are no correction fact types:
 corrections are client-side projection diffs, never stored facts.
 
 Fold rules pinned by these fixtures:
 
 - balance = plain signed sum of `coins_delta`; **may be negative**, never clamped;
-- a step is completed by `physical_confirmed`, `attempt_completed`, or
-  `answer_submitted` **with `local_is_correct: true`** — wrong answers never
-  complete a step;
+- a step is completed by `physical_confirmed`, `attempt_completed`,
+  `task_skipped` (a step skipped for coins), or `answer_submitted` **with
+  `local_is_correct: true`** — wrong answers never complete a step;
 - `hint_purchased` reveals its step's hint permanently;
 - fixtures are post-dedup logs: append-time idempotency (device-agnostic natural
   key; completion bonus once per player+quest) is asserted by facts-sync tests,

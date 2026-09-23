@@ -61,6 +61,18 @@
         "device_id": "device-c"
       },
       "key": "[\"quest_rated\",0,\"5\",0,\"отлично!\"]"
+    },
+    {
+      "fact": {
+        "type": "task_skipped",
+        "step_position": 4,
+        "submitted_value": "1730",
+        "local_is_correct": true,
+        "coins_delta": -10,
+        "note": null,
+        "device_id": "device-b"
+      },
+      "key": "[\"task_skipped\",4,\"1730\",-10,null]"
     }
   ]
 }

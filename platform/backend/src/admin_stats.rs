@@ -418,8 +418,8 @@ pub fn snapshot_steps(snapshot: &serde_json::Value) -> Vec<(String, String)> {
 
 /// How many of `logs` reached each of `steps_len` positions. Position 0 is
 /// reached by starting; position `i` is reached once step `i-1` is completed
-/// (`physical_confirmed` / correct `answer_submitted` / `attempt_completed` —
-/// exactly the `project_state` completion rule).
+/// (`physical_confirmed` / correct `answer_submitted` / `task_skipped` /
+/// `attempt_completed` — exactly the `project_state` completion rule).
 pub fn funnel_counts(steps_len: usize, logs: &[Vec<Fact>]) -> Vec<u64> {
     let mut reached = vec![0u64; steps_len];
     if steps_len == 0 {

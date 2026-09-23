@@ -4,6 +4,10 @@
  * the constructor test player.
  */
 import type { StepCopy } from '../app/player/PlayerComponents';
+import { pluralCount } from './ru';
+
+/** « за 1 монету / 2 монеты / 5 монет» — цена после «за»; при 0 цены нет. */
+const forCoins = (n: number): string => (n ? ` за ${pluralCount(n, 'монету', 'монеты', 'монет')}` : '');
 
 export const PLAYER_COPY: StepCopy = {
   start: 'начать квест',
@@ -11,9 +15,16 @@ export const PLAYER_COPY: StepCopy = {
   onward: 'в путь',
   submit: 'Ответить',
   wrong1: 'Неверно. Попробуйте ещё раз.',
-  hintTitle: 'Нужна подсказка?',
-  hintBody: (cost: number) => `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`,
-  hintYes: (cost: number) => `Потратить ${cost} монет`,
+  // Попап неверного ответа: заголовок уже говорит «неверный», поэтому тело
+  // начинается с «Попробуйте ещё раз…», а не повторяет инлайн-строку.
+  wrongTitle: 'Ответ неверный',
+  wrongBody: (hintCost: number | null, skipCost: number) =>
+    hintCost === null
+      ? `Попробуйте ещё раз или пропустите задание${forCoins(skipCost)}.`
+      : `Попробуйте ещё раз, возьмите подсказку${forCoins(hintCost)} или пропустите задание${forCoins(skipCost)}.`,
+  skipYes: (skipCost: number) =>
+    skipCost ? `Пропустить задание — ${pluralCount(skipCost, 'монета', 'монеты', 'монет')}` : 'Пропустить задание',
+  hintYes: (cost: number) => `Потратить ${pluralCount(cost, 'монету', 'монеты', 'монет')}`,
   hintNo: 'Попробую сам',
   hintRevealTitle: 'Подсказка',
   hintOk: 'Понятно',

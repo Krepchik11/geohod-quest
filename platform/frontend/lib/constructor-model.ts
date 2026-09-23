@@ -11,7 +11,14 @@
  * stays testable in node.
  */
 import type { CropRect } from './image-crop';
-import type { GameStep, QuestSnapshot, Supporting } from './shared-model';
+import {
+  SKIP_COST_DEFAULT,
+  SKIP_COST_MAX,
+  isSkipCost,
+  type GameStep,
+  type QuestSnapshot,
+  type Supporting,
+} from './shared-model';
 import { mediaStats } from './snapshot';
 import { MIN_TEXT_CONTRAST, contrastRatio, parseTheme, type QuestTheme } from './quest-theme';
 
@@ -159,6 +166,9 @@ export interface CtorQuestMeta {
   startCoords: string;
   /** Цвета квеста: фон, текст, кнопка. null — играется в бумажной палитре. */
   theme: QuestTheme | null;
+  /** Цена кнопки «Пропустить задание» в попапе неверного ответа: целое 0…99,
+   *  0 — пропуск бесплатный. */
+  skipCost: number;
 }
 
 export interface CtorVersion {
@@ -191,7 +201,7 @@ export interface GateMessage {
 }
 
 /** Controls a gate failure can point at inside the page editor / settings. */
-export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover' | 'start' | 'theme';
+export type GateField = 'image' | 'answers' | 'address' | 'hint' | 'cover' | 'start' | 'theme' | 'skip';
 
 export interface Gates {
   errors: GateMessage[];
@@ -255,6 +265,14 @@ export function badThemeContrast(theme: QuestTheme | null): boolean {
 
 export const BAD_THEME_CONTRAST_TEXT =
   'Цвета: текст сливается с фоном — на телефоне под солнцем его не прочитать';
+
+/** Цена пропуска не целое 0…99. Один источник правила и текста для гейта
+ *  публикации и для подписи под самим полем — как у точки старта. */
+export function badSkipCost(meta: CtorQuestMeta): boolean {
+  return !isSkipCost(meta.skipCost);
+}
+
+export const BAD_SKIP_COST_TEXT = `Цена пропуска задания: целое число от 0 до ${SKIP_COST_MAX}`;
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -320,6 +338,8 @@ export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
       universalAnswer: meta.universalAnswer || '',
       startCoords: meta.startCoords || '',
       theme: parseTheme(meta.theme),
+      // `??`, не `||`: ноль — законная цена (бесплатный пропуск).
+      skipCost: meta.skipCost ?? SKIP_COST_DEFAULT,
     },
     steps: [newStep('start'), newStep('congrats')],
     versions: [],
@@ -487,6 +507,13 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
       typeof raw.meta.startCoords === 'string'
         ? raw.meta.startCoords
         : firstSnapshotPoint(steps, raw.meta),
+    // Тела до появления пропуска задания поля не имеют — дефолт; им же заменяем
+    // не число и число вне 0…99. Нецелое внутри диапазона оставляем: его покажет
+    // гейт публикации, а не молчаливая подмена.
+    skipCost:
+      typeof raw.meta.skipCost === 'number' && raw.meta.skipCost >= 0 && raw.meta.skipCost <= SKIP_COST_MAX
+        ? raw.meta.skipCost
+        : SKIP_COST_DEFAULT,
   };
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
   return { ...raw, meta, steps, id: serverId };
@@ -532,7 +559,7 @@ export function computeGates(quest: CtorQuest): Gates {
       add(s.id, 'err', `«${s.name}» — адрес включён, координаты не заданы`, 'address');
     }
     if (s.template === 'task_answer' && s.hint.on && !s.hint.text.trim() && !s.hint.image) {
-      add(s.id, 'warn', `«${s.name}» — нет подсказки (текста или изображения): после 2-й ошибки игроку нечего будет купить`, 'hint');
+      add(s.id, 'warn', `«${s.name}» — нет подсказки (текста или изображения): в попапе после ошибки останется только пропуск задания`, 'hint');
     }
   });
 
@@ -546,6 +573,10 @@ export function computeGates(quest: CtorQuest): Gates {
     add(null, 'warn', 'Не задана точка старта — на странице квеста не будет кнопки «Место старта»', 'start');
   } else if (badStartCoords(quest.meta)) {
     add(null, 'err', BAD_START_COORDS_TEXT, 'start');
+  }
+
+  if (badSkipCost(quest.meta)) {
+    add(null, 'err', BAD_SKIP_COST_TEXT, 'skip');
   }
 
   // Цвета — предупреждение, не ошибка: читаемость субъективна, а решение об
@@ -675,7 +706,8 @@ export function nextVersionNumber(quest: CtorQuest): number {
  *  answer freezes alongside them (trimmed; blank = the quest has none).
  *
  *  `start_point` is written on EVERY snapshot (null = the author set none) —
- *  see its declaration on QuestSnapshot for why presence is load-bearing. */
+ *  see its declaration on QuestSnapshot for why presence is load-bearing. So is
+ *  `skip_cost`: absence means «older than the field», read as the default. */
 export function serializeDraft(quest: CtorQuest): QuestSnapshot {
   const steps = quest.steps.map((s, i) => ({ ...stepToGameStep(s, quest.meta), position: i }));
   const city = quest.meta.city.trim();
@@ -690,6 +722,7 @@ export function serializeDraft(quest: CtorQuest): QuestSnapshot {
     // Ключ пишется всегда, как start_point: null — «автор цветов не задал», и
     // плеер играет квест в бумажной палитре.
     theme: quest.meta.theme,
+    skip_cost: quest.meta.skipCost,
     ...(city ? { city } : {}),
     ...(duration ? { duration } : {}),
     ...(universalAnswer ? { universal_answer: universalAnswer } : {}),

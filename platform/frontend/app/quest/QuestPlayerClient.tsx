@@ -3,7 +3,7 @@
 import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, OncePerQuestType, QuestSnapshot } from '../../lib/shared-model';
-import { projectState, latestRating } from '../../lib/shared-model';
+import { projectState, latestRating, wrongPopupAt } from '../../lib/shared-model';
 
 import {
   COMPLETION_BONUS,
@@ -23,7 +23,7 @@ import {
   type AttemptLog,
 } from '../../lib/player-stats';
 import { elapsedLabel, toDesignStep } from '../../lib/design-step';
-import { stepAt, theme as snapshotTheme } from '../../lib/snapshot';
+import { skipCost as snapshotSkipCost, stepAt, theme as snapshotTheme } from '../../lib/snapshot';
 import { api } from '../../lib/api';
 import {
   factNaturalKey,
@@ -206,6 +206,9 @@ export default function QuestPlayerClient({
   // Цвета берутся из ЗАМОРОЖЕННОГО снапшота, поэтому начатое прохождение не
   // перекрашивается новой публикацией — как и всё остальное его содержимое.
   const theme = useMemo(() => snapshotTheme(snapshot), [snapshot]);
+  // Цена «Пропустить задание» — тоже из замороженного снапшота (старый без поля
+  // даёт дефолт).
+  const skipCost = useMemo(() => snapshotSkipCost(snapshot), [snapshot]);
   const [state, dispatch] = useReducer(playerReducer, initialState);
   const { play, attemptKey, attemptCreatedAt, attemptCompletedAt, queueStatus, showStartGate, toast, hydrated } = state;
   const { facts, stepIdx, maxStepIdx, hintOfferPos, hintRevealPos } = play;
@@ -320,8 +323,9 @@ export default function QuestPlayerClient({
       // platform-wide one (admin flag+value).
       universalAnswers: [snapshot.universal_answer, globalUniversalAnswer],
       earnedBonuses,
+      skipCost,
     }),
-    [steps, snapshot.universal_answer, globalUniversalAnswer, earnedBonuses]
+    [steps, snapshot.universal_answer, globalUniversalAnswer, earnedBonuses, skipCost]
   );
 
   const stepHistory = useStepHistory(historyBackOn, {
@@ -388,7 +392,7 @@ export default function QuestPlayerClient({
     (value: string) => {
       const result = runEvent({ type: 'answer', value });
       // SPEC Wrong-Answer flow: the inline error flash derives from the verdict
-      // the engine recorded; the popup state (2nd wrong) lives in PlayState.
+      // the engine recorded; the popup state (every wrong) lives in PlayState.
       const answered = result.effects.answered;
       if (!answered) return;
       setUi((u) =>
@@ -403,6 +407,13 @@ export default function QuestPlayerClient({
   const handleBuyHint = useCallback(() => {
     runEvent({ type: 'buy_hint' });
   }, [runEvent]);
+
+  // «Пропустить задание» из попапа неверного ответа: переход на следующий шаг,
+  // поэтому поле ответа очищается, как при `next`.
+  const handleSkip = useCallback(() => {
+    setUi((u) => ({ ...u, wrong: false, answer: '' }));
+    runEvent({ type: 'skip_task' });
+  }, [runEvent, setUi]);
 
   const handleFeedback = useCallback(
     (note: string) => {
@@ -603,7 +614,10 @@ export default function QuestPlayerClient({
     duration: snapshot.duration,
     completionBonus: COMPLETION_BONUS,
   };
-  const hintStep = hintOfferPos != null ? steps[hintOfferPos] : null;
+  // The wrong-answer popup: open on hintOfferPos; what it holds is the ONE rule
+  // in shared-model (wrongPopupAt), not a condition restated here.
+  const popupStep = hintOfferPos != null ? steps[hintOfferPos] : null;
+  const wrongPopup = popupStep && hintOfferPos != null ? wrongPopupAt(facts, hintOfferPos, popupStep) : null;
 
   // The terminal step renders FinalScreen (via StepView's congrats branch): the
   // rating is local + optional, committed as a quest_rated fact only on «что
@@ -674,11 +688,13 @@ export default function QuestPlayerClient({
       <div className="p-scroll">{stepBody}</div>
       {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
 
-      {hintStep?.supporting?.hint && (
+      {popupStep && wrongPopup && (
         <HintPopup
-          step={{ hint: { cost: hintStep.supporting.hint.cost_coins } }}
+          popup={wrongPopup}
+          hint={toDesignStep(popupStep).hint}
+          skipCost={skipCost}
           copy={COPY}
-          on={{ buy: handleBuyHint, dismiss: () => runEvent({ type: 'dismiss_hint_offer' }) }}
+          on={{ buy: handleBuyHint, skip: handleSkip, dismiss: () => runEvent({ type: 'dismiss_hint_offer' }) }}
         />
       )}
       {hintRevealPos != null && steps[hintRevealPos]?.supporting?.hint && (

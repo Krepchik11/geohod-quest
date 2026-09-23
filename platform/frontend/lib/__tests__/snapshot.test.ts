@@ -5,8 +5,8 @@
  * in platform/goldens/snapshot/ pin the parity; these tests pin the edges).
  */
 import { describe, expect, it } from 'vitest';
-import type { QuestSnapshot } from '../shared-model';
-import { chips, mediaRefs, mediaStats, startPoint, stepAt } from '../snapshot';
+import { SKIP_COST_DEFAULT, type QuestSnapshot } from '../shared-model';
+import { chips, mediaRefs, mediaStats, skipCost, startPoint, stepAt } from '../snapshot';
 
 const snap = (data: unknown): QuestSnapshot => data as QuestSnapshot;
 
@@ -104,6 +104,25 @@ describe('startPoint (mirror of backend snapshot_start_point)', () => {
 
   it('legacy snapshot without any navigator has no point', () => {
     expect(startPoint(snap({ steps: [{ template: 'start' }] }))).toBeNull();
+  });
+});
+
+describe('skipCost (frontend-only reader)', () => {
+  it('reads the frozen price, zero included', () => {
+    expect(skipCost(snap({ skip_cost: 3, steps: [] }))).toBe(3);
+    expect(skipCost(snap({ skip_cost: 0, steps: [] }))).toBe(0);
+    expect(skipCost(snap({ skip_cost: 99, steps: [] }))).toBe(99);
+  });
+
+  it('a snapshot older than the field plays at the default price', () => {
+    expect(SKIP_COST_DEFAULT).toBe(10);
+    expect(skipCost(snap({ steps: [] }))).toBe(SKIP_COST_DEFAULT);
+  });
+
+  it('anything but a whole 0…99 is the default, never a guess', () => {
+    for (const bad of [-1, 100, 2.5, Number.NaN, '5', null]) {
+      expect(skipCost(snap({ skip_cost: bad, steps: [] }))).toBe(SKIP_COST_DEFAULT);
+    }
   });
 });
 

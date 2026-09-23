@@ -10,7 +10,7 @@
 import {
   isAnswerAccepted,
   latestRating,
-  shouldOfferHint,
+  wrongPopupAt,
   type Fact,
   type GameStep,
   type OncePerQuestType,
@@ -34,7 +34,9 @@ export interface PlayState {
   stepIdx: number;
   /** Furthest step ever reached this attempt — resume anchor, back-safe. */
   maxStepIdx: number;
-  /** Step whose hint offer popup is open (from the 2nd wrong answer only). */
+  /** Step whose wrong-answer popup is open (after every wrong answer on an answer
+   *  step; its content is `wrongPopupAt`'s call). Named from the days the popup
+   *  only sold the hint — kept to keep the diff small. */
   hintOfferPos: number | null;
   /** Step whose just-purchased hint content popup is open. */
   hintRevealPos: number | null;
@@ -61,6 +63,8 @@ export interface PlayCtx {
   /** Bonuses this quest already paid on an earlier attempt — see `awardOnce`
    *  (lib/player-stats.earnedQuestBonuses reads them). */
   earnedBonuses: ReadonlySet<OncePerQuestType>;
+  /** What «Пропустить задание» costs in this quest (lib/snapshot.skipCost). */
+  skipCost: number;
 }
 
 export const NO_EARNED_BONUSES: ReadonlySet<OncePerQuestType> = new Set();
@@ -69,6 +73,7 @@ export type PlayEvent =
   | { type: 'physical_confirm' }
   | { type: 'answer'; value: string }
   | { type: 'buy_hint' }
+  | { type: 'skip_task' }
   | { type: 'dismiss_hint_offer' }
   | { type: 'dismiss_hint_reveal' }
   | { type: 'enter_terminal' }
@@ -168,11 +173,13 @@ function awardOnce(
 }
 
 /** Gift is claimed when its step COMPLETES (confirm / correct answer / terminal),
- *  never on reach; idempotent over the whole fact log. */
+ *  never on reach; idempotent over the whole fact log. A skipped step never pays
+ *  it — not even when the player comes back and enters the right answer later:
+ *  the gift rewards an answer found, not one bought. */
 function claimGiftIfNeeded(b: Builder, pos: number): void {
   const gift = b.ctx.steps[pos]?.supporting?.gift;
   if (!gift) return;
-  if (b.state.facts.some((f) => f.type === 'gift_claimed' && f.step_position === pos)) return;
+  if (b.state.facts.some((f) => f.step_position === pos && (f.type === 'gift_claimed' || f.type === 'task_skipped'))) return;
   append(b, {
     type: 'gift_claimed',
     step_position: pos,
@@ -240,8 +247,9 @@ export function transition(
         note: correct ? null : wrongNote(state.facts, state.stepIdx, value),
       });
       if (!correct) {
-        // Inline error on the 1st wrong; the popup only from the 2nd while unbought.
-        if (shouldOfferHint(b.state.facts, state.stepIdx, step)) {
+        // Every wrong answer: the inline error AND the popup — what the popup
+        // holds is wrongPopupAt's call, never restated here.
+        if (wrongPopupAt(b.state.facts, state.stepIdx, step)) {
           b.state = { ...b.state, hintOfferPos: state.stepIdx };
         }
         break;
@@ -272,6 +280,39 @@ export function transition(
       if (hint.cost_coins) {
         b.effects = { ...b.effects, toast: { amount: -hint.cost_coins, narrative: 'подсказка' } };
       }
+      break;
+    }
+
+    case 'skip_task': {
+      // Only from the open wrong-answer popup: no mistake on the step, no skip.
+      const pos = state.hintOfferPos;
+      if (pos == null) break;
+      const popup = wrongPopupAt(state.facts, pos, ctx.steps[pos]);
+      if (!popup) break;
+      b.state = { ...b.state, hintOfferPos: null };
+      // A step already completed (the player came back with «Назад») only moves
+      // on — no fact, no charge — which also makes a repeated skip idempotent.
+      if (!popup.freeSkip) {
+        const cost = ctx.skipCost;
+        const acceptable = ctx.steps[pos].completion.acceptable ?? [];
+        append(b, {
+          type: 'task_skipped',
+          step_position: pos,
+          // The substituted right answer: the first non-blank acceptable one.
+          submitted_value: acceptable.map((a) => a.trim()).find(Boolean) ?? null,
+          local_is_correct: true,
+          // Never −0: a free skip must read as a plain 0 everywhere.
+          coins_delta: cost ? -cost : 0,
+          note: null,
+        });
+        // NO claimGiftIfNeeded: the step gift rewards an answer found, and a
+        // skipped step never earns it — the one difference from a real answer.
+        // Never blocked by balance — overdraft is legal, as with a hint.
+        if (cost) {
+          b.effects = { ...b.effects, toast: { amount: -cost, narrative: 'пропуск задания' } };
+        }
+      }
+      advanceTo(b, pos + 1);
       break;
     }
 

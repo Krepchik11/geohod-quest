@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
  * Play-time hint flow, end to end through the REAL player (QuestPlayerClient):
- * the paper chip and the post-2nd-wrong popup both sell the hint, the purchase
- * opens the reveal popup, and the inline hint box keeps the content for the rest
- * of the step. The component-level pieces are covered by hint-content.test.ts;
+ * the paper chip and the wrong-answer popup (after every wrong answer) both sell
+ * the hint, the purchase opens the reveal popup, the inline hint box keeps the
+ * content for the rest of the step, and the popup's skip moves on for the quest's
+ * price. The component-level pieces are covered by hint-content.test.ts;
  * what is exercised here is the WIRING — fact positions, the projection the
  * StepView reads, and the popup state machine.
  */
@@ -67,7 +68,8 @@ vi.mock('../../../lib/queue', async () => {
 
 import QuestPlayerClient from '../QuestPlayerClient';
 
-/** Two-step quest: a start page and one answer step that sells a hint. */
+/** A start page, one answer step that sells a hint, and a page after it (where a
+ *  skip lands). No `skip_cost` — like every quest published before the skip. */
 const SNAPSHOT: QuestSnapshot = {
   golden_id: 'q-hint',
   name: 'Тестовый квест',
@@ -88,6 +90,14 @@ const SNAPSHOT: QuestSnapshot = {
       media: { hint: HINT.image },
       completion: { mode: 'answer', acceptable: [HINT.answer] },
       supporting: { hint: { cost_coins: HINT.cost, reveal_text: HINT.text } },
+    },
+    {
+      position: 2,
+      template: 'continue',
+      rich_content: { title: 'Дальше', main_text: 'Идём к следующей точке' },
+      media: {},
+      completion: { mode: 'physical' },
+      supporting: {},
     },
   ],
 };
@@ -132,12 +142,60 @@ describe('hint during play', () => {
     expect(appended.some((f) => f.type === 'hint_purchased' && f.coins_delta === -HINT.cost)).toBe(true);
   });
 
-  it('offers the popup from the SECOND wrong answer', async () => {
+  it('opens the wrong-answer popup on the FIRST wrong answer — hint, skip and «Попробую сам»', async () => {
     const user = await openAnswerStep();
     await answerStep(user, '1700');
-    expect(screen.queryByText('Нужна подсказка?')).toBeNull();
+    expect(await screen.findByText('Ответ неверный')).toBeTruthy();
+    // Both messages: the popup AND the inline line under the field.
+    expect(screen.getByText('Неверно. Попробуйте ещё раз.')).toBeTruthy();
+    expect(
+      screen.getByText('Попробуйте ещё раз, возьмите подсказку за 5 монет или пропустите задание за 10 монет.'),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Потратить 5 монет' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Пропустить задание — 10 монет' })).toBeTruthy();
+
+    // «Попробую сам» closes it; the next wrong answer opens it again.
+    await user.click(screen.getByRole('button', { name: 'Попробую сам' }));
+    await waitFor(() => expect(screen.queryByText('Ответ неверный')).toBeNull());
     await answerStep(user, '1701');
-    expect(await screen.findByText('Нужна подсказка?')).toBeTruthy();
+    expect(await screen.findByText('Ответ неверный')).toBeTruthy();
+  });
+
+  it('after the purchase, the next wrong answer shows the hint in the popup for free', async () => {
+    const user = await openAnswerStep();
+    await buyHintFromChip(user);
+    await answerStep(user, '1700');
+    const popup = (await screen.findByText('Ответ неверный')).closest('.p-popup')!;
+    expect(popup.textContent).toContain(HINT.text);
+    expect(popup.querySelector('img')?.getAttribute('src')).toBe(HINT.image);
+    expect(screen.queryByRole('button', { name: /Потратить/ })).toBeNull();
+    expect(screen.getByText('Попробуйте ещё раз или пропустите задание за 10 монет.')).toBeTruthy();
+  });
+
+  it('the skip charges the quest price (10 without a stored one), records the answer, moves on — no gift', async () => {
+    const user = await openAnswerStep();
+    await answerStep(user, '1700');
+    await user.click(await screen.findByRole('button', { name: 'Пропустить задание — 10 монет' }));
+    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    await waitFor(() =>
+      expect(appended.find((f) => f.type === 'task_skipped')).toMatchObject({
+        step_position: 1,
+        submitted_value: HINT.answer,
+        local_is_correct: true,
+        coins_delta: -10,
+      }),
+    );
+    expect(appended.some((f) => f.type === 'gift_claimed')).toBe(false);
+  });
+
+  it('a quest priced at 0 skips for free: no price in the text or on the button', async () => {
+    const user = await openAnswerStep({ ...SNAPSHOT, skip_cost: 0 });
+    await answerStep(user, '1700');
+    expect(
+      await screen.findByText('Попробуйте ещё раз, возьмите подсказку за 5 монет или пропустите задание.'),
+    ).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Пропустить задание' }));
+    await waitFor(() => expect(appended.find((f) => f.type === 'task_skipped')?.coins_delta).toBe(0));
   });
 
   it('shows the purchased hint in the reveal popup, then inline for the rest of the step', async () => {

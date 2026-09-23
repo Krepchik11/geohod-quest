@@ -42,13 +42,18 @@ pub enum FactKind {
     /// part of the natural key, so carrying it here would mint a fresh bonus
     /// on every comment edit.
     CommentBonus,
+    /// Answer step skipped for coins from the wrong-answer popup: completes the
+    /// step, `coins_delta` is minus the quest's skip cost (balance may go
+    /// negative), `submitted_value` is the substituted correct answer. Earns no
+    /// step gift. Bought per step, so NOT once per quest.
+    TaskSkipped,
 }
 
 impl FactKind {
     /// Every kind there is. The `wire_tag` match below is exhaustive, so a new
     /// variant cannot be forgotten there; this list is what lets a test walk
     /// them all, and the compiler will not remind anyone to extend it.
-    pub const ALL: [FactKind; 11] = [
+    pub const ALL: [FactKind; 12] = [
         Self::PhysicalConfirmed,
         Self::AnswerSubmitted,
         Self::GiftClaimed,
@@ -60,6 +65,7 @@ impl FactKind {
         Self::QuestRated,
         Self::RatingBonus,
         Self::CommentBonus,
+        Self::TaskSkipped,
     ];
 
     /// The serde wire tag (snake_case), as a static string — keys the
@@ -78,6 +84,7 @@ impl FactKind {
             Self::QuestRated => "quest_rated",
             Self::RatingBonus => "rating_bonus",
             Self::CommentBonus => "comment_bonus",
+            Self::TaskSkipped => "task_skipped",
         }
     }
 }
@@ -155,16 +162,17 @@ pub struct ProjectedState {
 
 /// Deterministic state projection mirroring the client `projectState` exactly.
 ///
-/// A step is completed by `physical_confirmed`, `attempt_completed`, or a CORRECT
-/// `answer_submitted` — wrong answers never complete a step (otherwise the
-/// attempt-advance offer would fire off a miss). `hint_purchased` reveals its
-/// step permanently. Sets are unique + sorted; fact order does not matter.
+/// A step is completed by `physical_confirmed`, `attempt_completed`,
+/// `task_skipped`, or a CORRECT `answer_submitted` — wrong answers never
+/// complete a step (otherwise the attempt-advance offer would fire off a miss).
+/// `hint_purchased` reveals its step permanently. Sets are unique + sorted;
+/// fact order does not matter.
 pub fn project_state(facts: &[Fact]) -> ProjectedState {
     let mut completed_steps: Vec<i32> = Vec::new();
     let mut revealed_hints: Vec<i32> = Vec::new();
     for f in facts {
         match f.kind {
-            FactKind::PhysicalConfirmed | FactKind::AttemptCompleted => {
+            FactKind::PhysicalConfirmed | FactKind::AttemptCompleted | FactKind::TaskSkipped => {
                 completed_steps.push(f.step_position);
             }
             FactKind::AnswerSubmitted if f.local_is_correct => {
@@ -192,6 +200,8 @@ pub struct Analytics {
     pub wrongs_submitted: usize,
     pub navigator_clicks: usize,
     pub feedback_count: usize,
+    /// Steps skipped for coins — the reason `task_skipped` is its own kind.
+    pub skips_used: usize,
 }
 
 /// Deterministic analytics fold. Wrongs count only `answer_submitted` facts where
@@ -204,6 +214,7 @@ pub fn project_analytics(facts: &[Fact]) -> Analytics {
             FactKind::AnswerSubmitted if !f.local_is_correct => a.wrongs_submitted += 1,
             FactKind::NavigatorUsed => a.navigator_clicks += 1,
             FactKind::FeedbackReported => a.feedback_count += 1,
+            FactKind::TaskSkipped => a.skips_used += 1,
             _ => {}
         }
     }
@@ -275,6 +286,7 @@ pub struct StepStats {
     pub hints: usize,
     pub nav: usize,
     pub feedbacks: usize,
+    pub skips: usize,
 }
 
 /// Per-version (per-snapshot) stats for admin visibility.
@@ -289,6 +301,7 @@ pub struct PerVersionStats {
     pub wrongs_submitted: usize,
     pub navigator_clicks: usize,
     pub feedback_count: usize,
+    pub skips_used: usize,
     /// Number of attempts that left a finale rating (one rating per attempt:
     /// the last `quest_rated` fact wins, matching the client `latestRating`).
     pub rating_count: usize,
@@ -573,6 +586,7 @@ pub fn project_version_stats(
                 FactKind::HintPurchased => entry.hints += 1,
                 FactKind::NavigatorUsed => entry.nav += 1,
                 FactKind::FeedbackReported => entry.feedbacks += 1,
+                FactKind::TaskSkipped => entry.skips += 1,
                 _ => {}
             }
         }
@@ -600,6 +614,7 @@ pub fn project_version_stats(
         wrongs_submitted: analytics.wrongs_submitted,
         navigator_clicks: analytics.navigator_clicks,
         feedback_count: analytics.feedback_count,
+        skips_used: analytics.skips_used,
         rating_count,
         rating_avg,
     }
@@ -1043,6 +1058,47 @@ mod tests {
             project_analytics(&[fact(FactKind::AnswerSubmitted, 2, 0)]).wrongs_submitted,
             0
         );
+    }
+
+    #[test]
+    fn task_skipped_completes_its_step_and_charges_the_skip() {
+        let skipped = Fact {
+            submitted_value: Some("1730".into()),
+            ..fact(FactKind::TaskSkipped, 2, -10)
+        };
+        let facts = vec![fact(FactKind::GiftClaimed, 1, 5), skipped];
+        let state = project_state(&facts);
+        assert_eq!(state.completed_steps, vec![2]);
+        assert_eq!(state.balance, -5);
+        assert!(
+            !once_per_quest(FactKind::TaskSkipped),
+            "a skip is bought per step, never once per quest"
+        );
+    }
+
+    #[test]
+    fn version_stats_count_skips_per_step_and_overall() {
+        let mut logs = std::collections::HashMap::new();
+        let mut snaps = std::collections::HashMap::new();
+        logs.insert(
+            "att-1".to_string(),
+            vec![
+                Fact {
+                    local_is_correct: false,
+                    submitted_value: Some("wrong".into()),
+                    ..fact(FactKind::AnswerSubmitted, 1, 0)
+                },
+                fact(FactKind::TaskSkipped, 1, -10),
+                fact(FactKind::TaskSkipped, 2, -10),
+            ],
+        );
+        snaps.insert("att-1".to_string(), "snap-v1".to_string());
+
+        let stats = project_version_stats("snap-v1", &logs, &snaps, 1);
+        assert_eq!(stats.skips_used, 2);
+        assert_eq!(stats.per_step.get(&1).expect("step 1 stats").skips, 1);
+        assert_eq!(stats.per_step.get(&2).expect("step 2 stats").skips, 1);
+        assert_eq!(project_analytics(&logs["att-1"]).skips_used, 2);
     }
 
     /// Shared wire golden (platform/goldens/wire/natural-key.json) — the SAME

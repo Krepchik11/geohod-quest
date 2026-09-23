@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { plural } from '../../lib/ru';
+import { plural, pluralCount } from '../../lib/ru';
 import { themeVars, type QuestTheme } from '../../lib/quest-theme';
+import type { WrongPopup } from '../../lib/shared-model';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.
@@ -180,8 +181,13 @@ export interface StepCopy {
   exit?: string;
   reset?: string;
   sound?: string;
-  hintTitle?: string;
-  hintBody?: (cost: number) => string;
+  /** Попап неверного ответа — после каждой ошибки на шаге с ответом. */
+  wrongTitle?: string;
+  /** Тело попапа. `hintCost` — цена подсказки на продажу, null — продавать
+   *  нечего (куплена или её нет); `skipCost` — цена пропуска, 0 — бесплатно. */
+  wrongBody?: (hintCost: number | null, skipCost: number) => string;
+  /** Кнопка пропуска: с ценой, а при 0 — без неё. */
+  skipYes?: (skipCost: number) => string;
   hintYes?: (cost: number) => string;
   hintNo?: string;
   /** Заголовок и кнопка попапа с купленной подсказкой (текст и/или изображение). */
@@ -665,19 +671,53 @@ export function CoinToast({ amount, narrative, copy }: { amount: number; narrati
   );
 }
 
-export function HintPopup({ step, copy, on }: {
-  step: { hint?: { cost?: number; cost_coins?: number } };
+/** The purchased hint's content — image, text, or both. ONE markup for both
+ *  popups that show it (the reveal popup and the wrong-answer popup's «reveal»
+ *  state), so the two cannot drift apart. */
+function HintContent({ text, image }: { text?: string; image?: string | null }) {
+  return (
+    <>
+      {image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="p-popup__img" src={image} alt="Изображение-подсказка" />
+      ) : null}
+      {text ? <p className="p-popup__text">{text}</p> : null}
+    </>
+  );
+}
+
+/**
+ * The wrong-answer popup — after EVERY wrong answer on an answer step (the
+ * inline error stays too). What it holds is decided by `popup`
+ * (shared-model `wrongPopupAt`), never by conditions here: the hint for sale,
+ * the bought hint for free, or no hint at all — and always the skip. The name
+ * predates the skip; kept to keep the diff small.
+ */
+export function HintPopup({ popup, hint, skipCost, copy, on }: {
+  popup: WrongPopup;
+  /** The step's hint: its price for «offer», its content for «reveal». */
+  hint?: DesignStep['hint'];
+  /** The quest's skip price; the popup itself makes it 0 when `popup.freeSkip`. */
+  skipCost: number;
   copy?: StepCopy | null;
-  on?: { buy?: () => void; dismiss?: () => void };
+  on?: { buy?: () => void; skip?: () => void; dismiss?: () => void };
 }) {
   const h = on || {};
-  const cost = step?.hint?.cost ?? step?.hint?.cost_coins ?? 0;
+  const offer = popup.hint === 'offer';
+  const hintCost = hint?.cost ?? 0;
+  const skip = popup.freeSkip ? 0 : skipCost;
   return (
     <div className="p-overlay" onClick={h.dismiss}>
       <div className="p-popup" onClick={(e) => e.stopPropagation()}>
-        <p className="p-popup__title"><PCoin size={20} />{copy?.hintTitle || "Нужна подсказка?"}</p>
-        <p className="p-popup__text">{copy && copy.hintBody ? copy.hintBody(cost) : `Обменяйте ${cost} монет на подсказку — она останется с вами до конца шага.`}</p>
-        <button className="p-btn p-btn--solid" type="button" onClick={h.buy}>{copy && copy.hintYes ? copy.hintYes(cost) : `Потратить ${cost} монет`}</button>
+        <p className="p-popup__title"><PWarn size={20} />{copy?.wrongTitle || "Ответ неверный"}</p>
+        <p className="p-popup__text">{copy?.wrongBody ? copy.wrongBody(offer ? hintCost : null, skip) : "Попробуйте ещё раз или пропустите задание."}</p>
+        {popup.hint === 'reveal' && hint ? <HintContent text={hint.text} image={hint.image} /> : null}
+        {offer ? (
+          <button className="p-btn p-btn--solid" type="button" onClick={h.buy}>{copy?.hintYes ? copy.hintYes(hintCost) : `Потратить ${hintCost} монет`}</button>
+        ) : null}
+        <button className={"p-btn" + (offer ? "" : " p-btn--solid")} type="button" onClick={h.skip}>
+          {copy?.skipYes ? copy.skipYes(skip) : skip ? `Пропустить задание — ${pluralCount(skip, 'монета', 'монеты', 'монет')}` : "Пропустить задание"}
+        </button>
         <button className="p-btn p-btn--ghost" type="button" onClick={h.dismiss}>{copy?.hintNo || "Попробую сам"}</button>
       </div>
     </div>
@@ -697,11 +737,7 @@ export function HintRevealPopup({ hint, copy, on }: {
     <div className="p-overlay" onClick={h.dismiss}>
       <div className="p-popup" onClick={(e) => e.stopPropagation()}>
         <p className="p-popup__title"><PCoin size={20} />{copy?.hintRevealTitle || "Подсказка"}</p>
-        {hint.image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img className="p-popup__img" src={hint.image} alt="Изображение-подсказка" />
-        ) : null}
-        {hint.text ? <p className="p-popup__text">{hint.text}</p> : null}
+        <HintContent text={hint.text} image={hint.image} />
         <button className="p-btn p-btn--solid" type="button" onClick={h.dismiss}>{copy?.hintOk || "Понятно"}</button>
       </div>
     </div>

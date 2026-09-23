@@ -6,11 +6,11 @@
  * start point — derives from here, so a new media role or snapshot field is
  * added in exactly one place. `chips`, `startPoint` and `theme` MUST mirror the backend
  * `snapshot` module; the shared goldens in platform/goldens/snapshot/ pin the
- * parity from both suites.
+ * parity from both suites. `skipCost` is frontend-only — the backend never reads it.
  *
  * Pure and total: no IO, no view/draft types — only the snapshot wire types.
  */
-import type { GameStep, QuestSnapshot } from './shared-model';
+import { SKIP_COST_DEFAULT, isSkipCost, type GameStep, type QuestSnapshot } from './shared-model';
 import { parseTheme, type QuestTheme } from './quest-theme';
 
 export interface SnapshotChips {
@@ -133,6 +133,15 @@ export function startPoint(snapshot: QuestSnapshot): StartPoint | null {
  */
 export function theme(snapshot: QuestSnapshot): QuestTheme | null {
   return parseTheme(snapshot.theme);
+}
+
+/**
+ * What «Пропустить задание» costs in this quest, frozen at publish. Absent (a
+ * snapshot older than the field) or not a whole 0…99 — the default: quests
+ * published before the skip existed get it at the default price, no republish.
+ */
+export function skipCost(snapshot: QuestSnapshot): number {
+  return isSkipCost(snapshot.skip_cost) ? snapshot.skip_cost : SKIP_COST_DEFAULT;
 }
 
 /** The step at `idx`, index clamped to [0, steps.length - 1]. */

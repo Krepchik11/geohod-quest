@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BAD_SKIP_COST_TEXT,
   BAD_THEME_CONTRAST_TEXT,
   CTOR_TEMPLATES,
   GIFT_COINS,
@@ -92,6 +93,12 @@ describe('newQuest', () => {
     expect(q.meta.ageTarget).toBe('18plus');
     expect(q.meta.tags).toEqual(['хоррор']);
   });
+
+  it('prices the skip at the default 10, and keeps an explicit 0 (a free skip is legal)', () => {
+    expect(newQuest({}).meta.skipCost).toBe(10);
+    expect(newQuest({ skipCost: 0 }).meta.skipCost).toBe(0);
+    expect(newQuest({ skipCost: 25 }).meta.skipCost).toBe(25);
+  });
 });
 
 describe('questUpsert', () => {
@@ -134,6 +141,20 @@ describe('computeGates', () => {
     expect(g.warnings.map((w) => w.text)).toContain(
       'Нет обложки — карточка в магазине и «Первый экран» будут пустыми',
     );
+  });
+
+  it('blocks publishing a skip price that is not a whole 0…99, pointing at the settings field', () => {
+    for (const bad of [-1, 100, 2.5]) {
+      const q = quest();
+      q.meta.skipCost = bad;
+      const err = computeGates(q).errors.find((e) => e.text === BAD_SKIP_COST_TEXT);
+      expect(err).toMatchObject({ pageId: null, field: 'skip' });
+    }
+    for (const ok of [0, 10, 99]) {
+      const q = quest();
+      q.meta.skipCost = ok;
+      expect(computeGates(q).errors.map((e) => e.text)).not.toContain(BAD_SKIP_COST_TEXT);
+    }
   });
 
   it('warns — but does not block — when the chosen colours make the text unreadable', () => {
@@ -541,6 +562,15 @@ describe('serializeDraft', () => {
     expect(serializeDraft(q).start_point).toEqual({ lat: 45.2651, lng: 19.8656 });
   });
 
+  it('freezes the skip price in — always present, zero included', () => {
+    // Always written: an absent key means «snapshot predates the field» and
+    // the player falls back to the default price.
+    expect(serializeDraft(quest()).skip_cost).toBe(10);
+    const free = quest();
+    free.meta.skipCost = 0;
+    expect(serializeDraft(free).skip_cost).toBe(0);
+  });
+
   it('freezes the quest-wide universal answer in (trimmed; blank = omitted)', () => {
     expect(serializeDraft(quest()).universal_answer).toBeUndefined();
 
@@ -798,6 +828,29 @@ describe('migrateQuest (legacy draft bodies)', () => {
     expect(q.meta.complexity).toBe('high');
     expect(q.meta.ageTarget).toBe('kids');
     expect(q.meta.tags).toEqual(['юмор', 'исторический']);
+  });
+
+  it('gives bodies saved before the skip existed the default skip price', () => {
+    const body = legacyBody() as { meta: Record<string, unknown> };
+    delete body.meta.skipCost;
+    expect(migrateQuest(body, 'q-old')!.meta.skipCost).toBe(10);
+  });
+
+  it('replaces a garbage or out-of-range stored skip price, keeps 0, leaves a fraction to the gate', () => {
+    const skipOf = (v: unknown) => {
+      const body = legacyBody() as { meta: Record<string, unknown> };
+      body.meta.skipCost = v;
+      return migrateQuest(body, 'q-old')!.meta.skipCost;
+    };
+    expect(skipOf('5')).toBe(10);
+    expect(skipOf(null)).toBe(10);
+    expect(skipOf(-3)).toBe(10);
+    expect(skipOf(150)).toBe(10);
+    expect(skipOf(0)).toBe(0);
+    expect(skipOf(7)).toBe(7);
+    // In range but not whole: kept, so the publish gate names it instead of a
+    // silent swap behind the author's back.
+    expect(skipOf(2.5)).toBe(2.5);
   });
 
   it('is idempotent on a current-shape quest', () => {

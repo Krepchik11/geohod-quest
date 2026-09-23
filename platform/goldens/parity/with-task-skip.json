@@ -1,0 +1,14 @@
+{
+  "name": "with-task-skip",
+  "description": "Step 1 is skipped for coins after a wrong answer and a hint purchase: task_skipped completes the step and charges the skip (-10) on top of the hint (-5), and pays no gift. Step 2 is confirmed with its +5 gift. A later wrong answer on the skipped step (the player came back) changes nothing. Balance -10, steps 0-2 completed, hint 1 revealed.",
+  "facts": [
+    { "type": "physical_confirmed", "step_position": 0, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-a" },
+    { "type": "answer_submitted", "step_position": 1, "submitted_value": "1700", "local_is_correct": false, "coins_delta": 0, "note": null, "device_id": "device-a" },
+    { "type": "hint_purchased", "step_position": 1, "submitted_value": null, "local_is_correct": true, "coins_delta": -5, "note": null, "device_id": "device-a" },
+    { "type": "task_skipped", "step_position": 1, "submitted_value": "1730", "local_is_correct": true, "coins_delta": -10, "note": null, "device_id": "device-a" },
+    { "type": "physical_confirmed", "step_position": 2, "submitted_value": null, "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "device-a" },
+    { "type": "gift_claimed", "step_position": 2, "submitted_value": null, "local_is_correct": true, "coins_delta": 5, "note": null, "device_id": "device-a" },
+    { "type": "answer_submitted", "step_position": 1, "submitted_value": "1701", "local_is_correct": false, "coins_delta": 0, "note": null, "device_id": "device-a" }
+  ],
+  "expected": { "balance": -10, "completed_steps": [0, 1, 2], "revealed_hints": [1] }
+}

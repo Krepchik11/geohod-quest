@@ -4,8 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { elapsedLabel, toDesignStep } from '../../lib/design-step';
 import type { QuestTheme } from '../../lib/quest-theme';
-import { theme as snapshotTheme } from '../../lib/snapshot';
-import { latestRating, projectState, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
+import { skipCost as snapshotSkipCost, theme as snapshotTheme } from '../../lib/snapshot';
+import { latestRating, projectState, wrongPopupAt, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
   COMPLETION_BONUS,
   NO_EARNED_BONUSES,
@@ -55,6 +55,8 @@ interface TestQuest {
   universalAnswer: QuestSnapshot['universal_answer'];
   /** Цвета квеста — тест показывает их так же, как их увидит игрок. */
   theme: QuestTheme | null;
+  /** Цена «Пропустить задание» — тем же читателем снапшота, что и у игрока. */
+  skipCost: number;
 }
 
 /** Меты теста («на паузе», «окончен») — состояния самого прогона, а не квеста,
@@ -85,6 +87,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     deviceId: 'test-player',
     universalAnswers: [quest.universalAnswer],
     earnedBonuses: NO_EARNED_BONUSES,
+    skipCost: quest.skipCost,
   };
 
   // ONE rule state — the same engine the real player runs (lib/play-loop).
@@ -170,7 +173,9 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     setFinalTime('0:00');
   };
 
-  const offeredHint = play.hintOfferPos != null ? quest.steps[play.hintOfferPos].supporting?.hint : null;
+  // Попап неверного ответа: состав решает то же правило, что и в плеере.
+  const popupPos = play.hintOfferPos;
+  const wrongPopup = popupPos != null ? wrongPopupAt(play.facts, popupPos, quest.steps[popupPos]) : null;
   const revealedHint = play.hintRevealPos != null ? quest.display[play.hintRevealPos].hint : null;
 
   const handlers = {
@@ -179,7 +184,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
     navigator: () => runEvent({ type: 'navigator' }),
     answer: (value: string) => { setAnswer(value); setWrongFlash(false); },
     /** Единственный путь покупки — и для чипа на странице, и для попапа после
-     *  2-й ошибки (в плеере это тот же buy_hint). */
+     *  ошибки (в плеере это тот же buy_hint). */
     buyHint: () => runEvent({ type: 'buy_hint' }),
     confirm: () => runEvent({ type: 'physical_confirm' }),
     submit: (value: string) => runEvent({ type: 'answer', value }),
@@ -226,11 +231,18 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
 
       {toast ? <CoinToast amount={toast.amount} narrative={toast.narrative} copy={PLAYER_COPY} /> : null}
 
-      {offeredHint ? (
+      {wrongPopup && popupPos != null ? (
         <HintPopup
-          step={{ hint: { cost: offeredHint.cost_coins } }}
+          popup={wrongPopup}
+          hint={quest.display[popupPos].hint}
+          skipCost={quest.skipCost}
           copy={PLAYER_COPY}
-          on={{ dismiss: () => runEvent({ type: 'dismiss_hint_offer' }), buy: () => runEvent({ type: 'buy_hint' }) }}
+          on={{
+            dismiss: () => runEvent({ type: 'dismiss_hint_offer' }),
+            buy: () => runEvent({ type: 'buy_hint' }),
+            // Переход вперёд очищает поле ответа в runEvent (effects.advanced).
+            skip: () => runEvent({ type: 'skip_task' }),
+          }}
         />
       ) : null}
 
@@ -310,6 +322,7 @@ export function TestOverlay({ quest, startPos, onClose }: {
       display: snap.steps.map(toDesignStep),
       universalAnswer: snap.universal_answer,
       theme: snapshotTheme(snap),
+      skipCost: snapshotSkipCost(snap),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
