@@ -14,6 +14,7 @@ export const PLAYER_COPY: StepCopy = {
   next: 'продолжить',
   onward: 'в путь',
   submit: 'Ответить',
+  solvedSubmit: 'Дальше',
   wrong1: 'Неверно. Попробуйте ещё раз.',
   // Попап неверного ответа: заголовок уже говорит «неверный», поэтому тело
   // начинается с «Попробуйте ещё раз…», а не повторяет инлайн-строку.
@@ -24,8 +25,9 @@ export const PLAYER_COPY: StepCopy = {
       : `Попробуйте ещё раз, возьмите подсказку${forCoins(hintCost)} или пропустите задание${forCoins(skipCost)}.`,
   skipYes: (skipCost: number) =>
     skipCost ? `Пропустить задание — ${pluralCount(skipCost, 'монета', 'монеты', 'монет')}` : 'Пропустить задание',
-  hintYes: (cost: number) => `Потратить ${pluralCount(cost, 'монету', 'монеты', 'монет')}`,
-  hintNo: 'Попробую сам',
+  // «Подсказка −5 монет»: минус — типографский (U+2212), как в тосте списания.
+  hintYes: (cost: number) => (cost ? `Подсказка −${pluralCount(cost, 'монета', 'монеты', 'монет')}` : 'Подсказка'),
+  hintNo: 'Решу сам',
   hintRevealTitle: 'Подсказка',
   hintOk: 'Понятно',
   giftToast: (n: number) => `+${n} монет`,

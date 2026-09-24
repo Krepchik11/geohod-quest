@@ -10,6 +10,7 @@
 import {
   isAnswerAccepted,
   latestRating,
+  solvedAnswerAt,
   wrongPopupAt,
   type Fact,
   type GameStep,
@@ -34,8 +35,8 @@ export interface PlayState {
   stepIdx: number;
   /** Furthest step ever reached this attempt — resume anchor, back-safe. */
   maxStepIdx: number;
-  /** Step whose wrong-answer popup is open (after every wrong answer on an answer
-   *  step; its content is `wrongPopupAt`'s call). Named from the days the popup
+  /** Step whose wrong-answer popup is open (after every wrong answer on an unsolved
+   *  answer step; its content is `wrongPopupAt`'s call). Named from the days the popup
    *  only sold the hint — kept to keep the diff small. */
   hintOfferPos: number | null;
   /** Step whose just-purchased hint content popup is open. */
@@ -234,6 +235,13 @@ export function transition(
     }
 
     case 'answer': {
+      // A step already solved (answered or skipped; the player came back with
+      // «Назад»): the arrow only moves on. Whatever the field holds is ignored and
+      // nothing is logged — no answer, no gift, no popup.
+      if (solvedAnswerAt(state.facts, state.stepIdx)) {
+        advanceTo(b, state.stepIdx + 1);
+        break;
+      }
       const value = event.value;
       if (!value.trim()) break;
       const correct = isAnswerAccepted(value, step.completion.acceptable, ctx.universalAnswers);
@@ -285,32 +293,29 @@ export function transition(
 
     case 'skip_task': {
       // Only from the open wrong-answer popup: no mistake on the step, no skip.
+      // wrongPopupAt is null on a solved step too, so a step is never skipped
+      // twice and never skipped after it was answered.
       const pos = state.hintOfferPos;
       if (pos == null) break;
-      const popup = wrongPopupAt(state.facts, pos, ctx.steps[pos]);
-      if (!popup) break;
+      if (!wrongPopupAt(state.facts, pos, ctx.steps[pos])) break;
       b.state = { ...b.state, hintOfferPos: null };
-      // A step already completed (the player came back with «Назад») only moves
-      // on — no fact, no charge — which also makes a repeated skip idempotent.
-      if (!popup.freeSkip) {
-        const cost = ctx.skipCost;
-        const acceptable = ctx.steps[pos].completion.acceptable ?? [];
-        append(b, {
-          type: 'task_skipped',
-          step_position: pos,
-          // The substituted right answer: the first non-blank acceptable one.
-          submitted_value: acceptable.map((a) => a.trim()).find(Boolean) ?? null,
-          local_is_correct: true,
-          // Never −0: a free skip must read as a plain 0 everywhere.
-          coins_delta: cost ? -cost : 0,
-          note: null,
-        });
-        // NO claimGiftIfNeeded: the step gift rewards an answer found, and a
-        // skipped step never earns it — the one difference from a real answer.
-        // Never blocked by balance — overdraft is legal, as with a hint.
-        if (cost) {
-          b.effects = { ...b.effects, toast: { amount: -cost, narrative: 'пропуск задания' } };
-        }
+      const cost = ctx.skipCost;
+      const acceptable = ctx.steps[pos].completion.acceptable ?? [];
+      append(b, {
+        type: 'task_skipped',
+        step_position: pos,
+        // The substituted right answer: the first non-blank acceptable one.
+        submitted_value: acceptable.map((a) => a.trim()).find(Boolean) ?? null,
+        local_is_correct: true,
+        // Never −0: a free skip must read as a plain 0 everywhere.
+        coins_delta: cost ? -cost : 0,
+        note: null,
+      });
+      // NO claimGiftIfNeeded: the step gift rewards an answer found, and a
+      // skipped step never earns it — the one difference from a real answer.
+      // Never blocked by balance — overdraft is legal, as with a hint.
+      if (cost) {
+        b.effects = { ...b.effects, toast: { amount: -cost, narrative: 'пропуск задания' } };
       }
       advanceTo(b, pos + 1);
       break;

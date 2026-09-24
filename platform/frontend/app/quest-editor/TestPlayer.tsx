@@ -5,7 +5,7 @@ import { serializeDraft, type CtorQuest } from '../../lib/constructor-model';
 import { elapsedLabel, toDesignStep } from '../../lib/design-step';
 import type { QuestTheme } from '../../lib/quest-theme';
 import { skipCost as snapshotSkipCost, theme as snapshotTheme } from '../../lib/snapshot';
-import { latestRating, projectState, wrongPopupAt, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
+import { latestRating, projectState, solvedAnswerAt, wrongPopupAt, type GameStep, type QuestSnapshot } from '../../lib/shared-model';
 import {
   COMPLETION_BONUS,
   NO_EARNED_BONUSES,
@@ -203,6 +203,8 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
   const stepState = {
     answer,
     wrong: wrongFlash,
+    // Решённое задание — то же правило, что и у игрока (shared-model).
+    solved: solvedAnswerAt(play.facts, pos),
     hintRevealed: proj.revealedHints.includes(pos),
     coinsEarned: coins,
     time: finalTime,

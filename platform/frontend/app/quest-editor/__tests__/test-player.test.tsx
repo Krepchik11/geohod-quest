@@ -59,7 +59,7 @@ describe('конструкторский тест-игрок: подсказка
     expect(await screen.findByText('Ответ неверный')).toBeTruthy();
     expect(screen.getByText('Неверно. Попробуйте ещё раз.')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Попробую сам' }));
+    await user.click(screen.getByRole('button', { name: 'Решу сам' }));
     await waitFor(() => expect(screen.queryByText('Ответ неверный')).toBeNull());
     await answerStep(user, '1701');
     expect(await screen.findByText('Ответ неверный')).toBeTruthy();
@@ -72,7 +72,21 @@ describe('конструкторский тест-игрок: подсказка
     await answerStep(user, '1700');
     const popup = (await screen.findByText('Ответ неверный')).closest('.p-popup')!;
     expect(popup.textContent).toContain(HINT.text);
-    expect(screen.queryByRole('button', { name: /Потратить/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Подсказка −/ })).toBeNull();
+  });
+
+  it('на решённом задании ответ виден только для чтения, стрелка ведёт дальше (как в плеере)', async () => {
+    const user = openTestPlayer();
+    await answerStep(user, HINT.answer);
+    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Назад' }));
+
+    const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
+    expect(field.readOnly).toBe(true);
+    expect(screen.queryByText(new RegExp(`подсказка · ${HINT.cost}`))).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Дальше' }));
+    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
+    expect(screen.queryByText('Ответ неверный')).toBeNull();
   });
 });
 

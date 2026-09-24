@@ -142,7 +142,7 @@ describe('hint during play', () => {
     expect(appended.some((f) => f.type === 'hint_purchased' && f.coins_delta === -HINT.cost)).toBe(true);
   });
 
-  it('opens the wrong-answer popup on the FIRST wrong answer — hint, skip and «Попробую сам»', async () => {
+  it('opens the wrong-answer popup on the FIRST wrong answer — hint, skip and «Решу сам»', async () => {
     const user = await openAnswerStep();
     await answerStep(user, '1700');
     expect(await screen.findByText('Ответ неверный')).toBeTruthy();
@@ -151,11 +151,18 @@ describe('hint during play', () => {
     expect(
       screen.getByText('Попробуйте ещё раз, возьмите подсказку за 5 монет или пропустите задание за 10 монет.'),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Потратить 5 монет' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Пропустить задание — 10 монет' })).toBeTruthy();
+    // Light outlined hint + skip, the quest's main (solid) button for «Решу сам»;
+    // the popup's own modifier keeps these three in sentence case.
+    const hintBtn = screen.getByRole('button', { name: 'Подсказка −5 монет' });
+    const skipBtn = screen.getByRole('button', { name: 'Пропустить задание — 10 монет' });
+    const selfBtn = screen.getByRole('button', { name: 'Решу сам' });
+    expect(hintBtn.className).toBe('p-btn');
+    expect(skipBtn.className).toBe('p-btn');
+    expect(selfBtn.className).toBe('p-btn p-btn--solid');
+    expect(hintBtn.closest('.p-popup')?.classList.contains('p-popup--wrong')).toBe(true);
 
-    // «Попробую сам» closes it; the next wrong answer opens it again.
-    await user.click(screen.getByRole('button', { name: 'Попробую сам' }));
+    // «Решу сам» closes it; the next wrong answer opens it again.
+    await user.click(selfBtn);
     await waitFor(() => expect(screen.queryByText('Ответ неверный')).toBeNull());
     await answerStep(user, '1701');
     expect(await screen.findByText('Ответ неверный')).toBeTruthy();
@@ -168,7 +175,7 @@ describe('hint during play', () => {
     const popup = (await screen.findByText('Ответ неверный')).closest('.p-popup')!;
     expect(popup.textContent).toContain(HINT.text);
     expect(popup.querySelector('img')?.getAttribute('src')).toBe(HINT.image);
-    expect(screen.queryByRole('button', { name: /Потратить/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Подсказка −/ })).toBeNull();
     expect(screen.getByText('Попробуйте ещё раз или пропустите задание за 10 монет.')).toBeTruthy();
   });
 
@@ -186,6 +193,41 @@ describe('hint during play', () => {
       }),
     );
     expect(appended.some((f) => f.type === 'gift_claimed')).toBe(false);
+  });
+
+  it('back on an answered step: the answer shows read-only and the arrow moves on, logging nothing', async () => {
+    const user = await openAnswerStep();
+    await answerStep(user, HINT.answer);
+    await screen.findByRole('button', { name: 'продолжить' });
+    await user.click(screen.getByRole('button', { name: 'Назад' }));
+
+    const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
+    expect(field.readOnly).toBe(true);
+    // Nothing left to sell on a solved step.
+    expect(screen.queryByText(new RegExp(`подсказка · ${HINT.cost}`))).toBeNull();
+
+    await waitFor(() => expect(appended.some((f) => f.type === 'answer_submitted' && f.local_is_correct)).toBe(true));
+    const logged = appended.length;
+    await user.click(screen.getByRole('button', { name: 'Дальше' }));
+    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    expect(appended).toHaveLength(logged);
+    expect(screen.queryByText('Ответ неверный')).toBeNull();
+  });
+
+  it('back on a skipped step: the substituted answer shows read-only and the arrow moves on', async () => {
+    const user = await openAnswerStep();
+    await answerStep(user, '1700');
+    await user.click(await screen.findByRole('button', { name: 'Пропустить задание — 10 монет' }));
+    await screen.findByRole('button', { name: 'продолжить' });
+    await user.click(screen.getByRole('button', { name: 'Назад' }));
+
+    const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
+    expect(field.readOnly).toBe(true);
+    await waitFor(() => expect(appended.some((f) => f.type === 'task_skipped')).toBe(true));
+    const logged = appended.length;
+    await user.click(screen.getByRole('button', { name: 'Дальше' }));
+    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    expect(appended).toHaveLength(logged);
   });
 
   it('a quest priced at 0 skips for free: no price in the text or on the button', async () => {
