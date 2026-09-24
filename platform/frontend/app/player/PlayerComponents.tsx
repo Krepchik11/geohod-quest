@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { plural, pluralCount } from '../../lib/ru';
+import { plural } from '../../lib/ru';
 import { themeVars, type QuestTheme } from '../../lib/quest-theme';
-import type { WrongPopup } from '../../lib/shared-model';
+import type { SolvedAnswer, WrongPopup } from '../../lib/shared-model';
 
 /**
  * Player components ported from design/player/components.jsx + canvas-screens + SPEC.
@@ -164,6 +164,8 @@ export interface StepCopy {
   next?: string;
   onward?: string;
   submit?: string;
+  /** Подпись стрелки на уже решённом задании: она ведёт дальше, а не отправляет. */
+  solvedSubmit?: string;
   wrong1?: string;
   /* Финал (§11): «ОТПРАВИТЬ ОЦЕНКУ» активна при звёздах + отзыве; выход без
      отзыва — вторая кнопка (её ярлык зависит от того, выбраны ли звёзды). */
@@ -201,6 +203,9 @@ export interface StepCopy {
 export interface StepState {
   answer?: string;
   wrong?: boolean;
+  /** The answer step is already solved — answered or skipped; the player came
+   *  back to it (shared-model `solvedAnswerAt`, never a condition of its own). */
+  solved?: SolvedAnswer | null;
   hintRevealed?: boolean;
   /** §11: optional review text revealed after the star tap. */
   reviewText?: string;
@@ -271,16 +276,49 @@ export const PREVIEW_HANDLERS: Required<Omit<StepHandlers, 'back' | 'share'>> = 
  *  keyboard's own action key («Отпр.») submit, and native form submission (unlike a
  *  manual Enter handler) respects IME composition — it never submits a half-composed
  *  value. The row floats to the step bottom via .p-actions' margin-top:auto (see
- *  player-paper.css). No handler → no form (see `StepHandlers`). */
-function AnswerForm({ value, wrong, fieldLabel, submitLabel, onChange, onSubmit }: {
+ *  player-paper.css). No handler → no form (see `StepHandlers`).
+ *
+ *  On a step already solved (`solved`) the row turns into «done, go on»: the
+ *  field shows the accepted answer read-only — `readOnly`, not `disabled`, so it
+ *  stays legible — and the arrow is always live. The engine ignores the value on
+ *  a solved step and only moves on, so nothing typed could ever be judged. */
+function AnswerForm({ value, wrong, solved, fieldLabel, submitLabel, solvedLabel, onChange, onSubmit }: {
   value: string;
   wrong?: boolean;
+  solved?: SolvedAnswer | null;
   fieldLabel: string;
   submitLabel: string;
+  solvedLabel: string;
   onChange?: (v: string) => void;
   onSubmit?: (v: string) => void;
 }) {
   if (!onSubmit) return null;
+  if (solved) {
+    const accepted = solved.answer ?? "";
+    return (
+      <form
+        className="p-actions p-actions--field"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit(accepted);
+        }}
+      >
+        <span className="p-input-solved">
+          <input
+            className="p-input p-input--solved"
+            name="answer"
+            value={accepted}
+            readOnly
+            aria-label={fieldLabel}
+          />
+          <span className="p-input-solved__mark"><PCheck size={16} /></span>
+        </span>
+        <button className="p-submit" type="submit" aria-label={solvedLabel}>
+          <PArrow />
+        </button>
+      </form>
+    );
+  }
   const canSubmit = value.trim().length > 0;
   return (
     <form
@@ -508,12 +546,13 @@ export function StepView({ step, quest, copy, st, on }: {
             </div>
           </div>
         ) : null}
-        {stateIn.wrong ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
+        {stateIn.wrong && !stateIn.solved ? <p className="p-wrong"><PWarn />{copy?.wrong1 || "Неверно. Попробуйте ещё раз."}</p> : null}
         {/* §8.1 (4.1): the hint is ALWAYS purchasable on steps that sell one —
-            a paper chip above the answer form (the post-2nd-wrong popup stays as
+            a paper chip above the answer form (the wrong-answer popup stays as
             the proactive offer). Cost comes from the step data, never hardcoded.
-            Disappears after purchase — the hint then renders inline above. */}
-        {h.buyHint && step.hint && step.hint.cost != null && !stateIn.hintRevealed ? (
+            Disappears after purchase — the hint then renders inline above — and
+            on a solved step, where there is nothing left to help with. */}
+        {h.buyHint && step.hint && step.hint.cost != null && !stateIn.hintRevealed && !stateIn.solved ? (
           <div className="p-hintchip-row">
             <button className="p-hintchip" type="button" onClick={h.buyHint}>
               <PCoin size={15} />
@@ -524,8 +563,10 @@ export function StepView({ step, quest, copy, st, on }: {
         <AnswerForm
           value={val}
           wrong={stateIn.wrong}
+          solved={stateIn.solved}
           fieldLabel={question || "Введите ответ"}
           submitLabel={copy?.submit || "Ответить"}
+          solvedLabel={copy?.solvedSubmit || "Дальше"}
           onChange={h.answer}
           onSubmit={h.submit}
         />
@@ -692,12 +733,16 @@ function HintContent({ text, image }: { text?: string; image?: string | null }) 
  * (shared-model `wrongPopupAt`), never by conditions here: the hint for sale,
  * the bought hint for free, or no hint at all — and always the skip. The name
  * predates the skip; kept to keep the diff small.
+ *
+ * Buttons: the hint and the skip are light, outlined (`p-btn`); «Решу сам» is
+ * the quest's main button (`p-btn--solid`). `p-popup--wrong` lets these three
+ * read in sentence case — every other player button stays lowercase.
  */
 export function HintPopup({ popup, hint, skipCost, copy, on }: {
   popup: WrongPopup;
   /** The step's hint: its price for «offer», its content for «reveal». */
   hint?: DesignStep['hint'];
-  /** The quest's skip price; the popup itself makes it 0 when `popup.freeSkip`. */
+  /** The quest's skip price; 0 is a free skip. */
   skipCost: number;
   copy?: StepCopy | null;
   on?: { buy?: () => void; skip?: () => void; dismiss?: () => void };
@@ -705,20 +750,17 @@ export function HintPopup({ popup, hint, skipCost, copy, on }: {
   const h = on || {};
   const offer = popup.hint === 'offer';
   const hintCost = hint?.cost ?? 0;
-  const skip = popup.freeSkip ? 0 : skipCost;
   return (
     <div className="p-overlay" onClick={h.dismiss}>
-      <div className="p-popup" onClick={(e) => e.stopPropagation()}>
+      <div className="p-popup p-popup--wrong" onClick={(e) => e.stopPropagation()}>
         <p className="p-popup__title"><PWarn size={20} />{copy?.wrongTitle || "Ответ неверный"}</p>
-        <p className="p-popup__text">{copy?.wrongBody ? copy.wrongBody(offer ? hintCost : null, skip) : "Попробуйте ещё раз или пропустите задание."}</p>
+        <p className="p-popup__text">{copy?.wrongBody ? copy.wrongBody(offer ? hintCost : null, skipCost) : "Попробуйте ещё раз или пропустите задание."}</p>
         {popup.hint === 'reveal' && hint ? <HintContent text={hint.text} image={hint.image} /> : null}
         {offer ? (
-          <button className="p-btn p-btn--solid" type="button" onClick={h.buy}>{copy?.hintYes ? copy.hintYes(hintCost) : `Потратить ${hintCost} монет`}</button>
+          <button className="p-btn" type="button" onClick={h.buy}>{copy?.hintYes ? copy.hintYes(hintCost) : "Подсказка"}</button>
         ) : null}
-        <button className={"p-btn" + (offer ? "" : " p-btn--solid")} type="button" onClick={h.skip}>
-          {copy?.skipYes ? copy.skipYes(skip) : skip ? `Пропустить задание — ${pluralCount(skip, 'монета', 'монеты', 'монет')}` : "Пропустить задание"}
-        </button>
-        <button className="p-btn p-btn--ghost" type="button" onClick={h.dismiss}>{copy?.hintNo || "Попробую сам"}</button>
+        <button className="p-btn" type="button" onClick={h.skip}>{copy?.skipYes ? copy.skipYes(skipCost) : "Пропустить задание"}</button>
+        <button className="p-btn p-btn--solid" type="button" onClick={h.dismiss}>{copy?.hintNo || "Решу сам"}</button>
       </div>
     </div>
   );

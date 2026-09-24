@@ -3,7 +3,7 @@
 import React, { useReducer, useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Fact, GameStep, OncePerQuestType, QuestSnapshot } from '../../lib/shared-model';
-import { projectState, latestRating, wrongPopupAt } from '../../lib/shared-model';
+import { projectState, latestRating, solvedAnswerAt, wrongPopupAt } from '../../lib/shared-model';
 
 import {
   COMPLETION_BONUS,
@@ -394,7 +394,12 @@ export default function QuestPlayerClient({
       // SPEC Wrong-Answer flow: the inline error flash derives from the verdict
       // the engine recorded; the popup state (every wrong) lives in PlayState.
       const answered = result.effects.answered;
-      if (!answered) return;
+      if (!answered) {
+        // A solved step's arrow only moves on (no verdict): clear the field as
+        // `next` does.
+        if (result.effects.advanced) setUi((u) => ({ ...u, wrong: false, answer: '' }));
+        return;
+      }
       setUi((u) =>
         answered.correct
           ? { ...u, wrong: false, answer: '' }
@@ -631,6 +636,7 @@ export default function QuestPlayerClient({
         hintRevealed: proj.revealedHints.includes(stepIdx),
         wrong: ui.wrong,
         answer: ui.answer,
+        solved: solvedAnswerAt(facts, stepIdx),
         rating: shownRating,
         reviewText: ui.reviewText,
         coinsEarned: runEarned,

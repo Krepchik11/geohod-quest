@@ -348,6 +348,28 @@ export function latestRating(facts: Fact[]): number {
   return rating;
 }
 
+/** An answer step already solved — answered right or skipped for coins. `answer`
+ *  is what was accepted: the player's own, or the one substituted on a skip (null
+ *  only when a draft step had nothing to substitute). */
+export interface SolvedAnswer {
+  answer: string | null;
+}
+
+/**
+ * Whether step `pos` is already solved, and with what: the LATEST fact there that
+ * completes it (`completesStep`). A player back on it with «Назад» is not asked
+ * again — the field shows this answer read-only and the arrow only moves on (the
+ * engine ignores whatever is submitted there). Null while the step is unsolved.
+ * The ONE place this is decided: both players and the engine read it.
+ */
+export function solvedAnswerAt(facts: Fact[], pos: number): SolvedAnswer | null {
+  let solved: SolvedAnswer | null = null;
+  for (const f of facts) {
+    if (f.step_position === pos && completesStep(f)) solved = { answer: f.submitted_value ?? null };
+  }
+  return solved;
+}
+
 /** The state a step is in as far as the wrong-answer popup is concerned. Named
  *  fields, not positional args: four adjacent inputs, three of them booleans — a
  *  transposition would silently invert the rule. */
@@ -355,7 +377,7 @@ export interface WrongPopupState {
   wrongs: number;
   hasHint: boolean;
   purchased: boolean;
-  /** The step is already completed — answered or skipped earlier; the player came
+  /** The step is already solved — answered or skipped earlier; the player came
    *  back to it with «Назад». */
   completed: boolean;
 }
@@ -365,27 +387,21 @@ export interface WrongPopup {
   /** 'offer' — the hint is for sale; 'reveal' — already bought, shown for free;
    *  'none' — the author set no hint. */
   hint: 'offer' | 'reveal' | 'none';
-  /** The skip only moves on: no fact, no charge. An answer step has no «Далее»,
-   *  so on a step already completed this is the way forward — without it a player
-   *  back on a skipped step (answer unknown) would be stuck. */
-  freeSkip: boolean;
 }
 
 /**
  * SPEC §Wrong-Answer / Hint Flow: the popup opens after EVERY wrong answer on an
- * answer step, next to the inline error. The skip is always on offer, so there is
- * always something to show; the hint part follows the hint's state.
+ * unsolved answer step, next to the inline error. The skip is always on offer, so
+ * there is always something to show; the hint part follows the hint's state. A
+ * solved step never opens it: there the arrow only moves on (`solvedAnswerAt`).
  *
- * This is the ONE place the threshold, the composition and the free-skip rule
- * live. The production player, the constructor's test player and the engine's
- * `skip_task` all read it; none restates the conditions.
+ * This is the ONE place the threshold and the composition live. The production
+ * player, the constructor's test player and the engine's `skip_task` all read it;
+ * none restates the conditions.
  */
 export function wrongPopupFor({ wrongs, hasHint, purchased, completed }: WrongPopupState): WrongPopup | null {
-  if (wrongs < 1) return null;
-  return {
-    hint: !hasHint ? 'none' : purchased ? 'reveal' : 'offer',
-    freeSkip: completed,
-  };
+  if (wrongs < 1 || completed) return null;
+  return { hint: !hasHint ? 'none' : purchased ? 'reveal' : 'offer' };
 }
 
 /** `wrongPopupFor` fed from the fact log alone — no parallel counter state. Null

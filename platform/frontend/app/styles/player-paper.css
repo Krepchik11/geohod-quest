@@ -420,6 +420,16 @@
 .p-input:focus { border-color: var(--p-accent); }
 .p-input::placeholder { color: var(--p-muted); }
 .p-input--wrong { border-color: var(--p-accent) !important; animation: p-shake .4s ease; }
+/* Уже решённое задание (игрок вернулся «Назад»): принятый ответ только для
+   чтения, галочка у правого края поля, стрелка рядом ведёт дальше. Обёртка
+   занимает место поля в ряду поле+стрелка. */
+.p-input-solved { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+.p-input--solved { padding-right: 44px; border-color: var(--p-line-strong); cursor: default; }
+.p-input--solved:focus { border-color: var(--p-line-strong); }
+.p-input-solved__mark {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  display: flex; color: var(--p-ink); pointer-events: none;
+}
 @keyframes p-shake {
   20%, 60% { transform: translateX(-5px); }
   40%, 80% { transform: translateX(5px); }
@@ -502,6 +512,10 @@
   border: 1px solid var(--p-coin-rim); border-radius: 2px;
 }
 .p-popup .p-btn { height: 50px; font-size: 14px; }
+/* Попап неверного ответа: «Подсказка −5 монет», «Пропустить задание…»,
+   «Решу сам» пишутся как в тексте, с заглавной. Остальные кнопки плеера
+   остаются строчными (.p-btn). */
+.p-popup--wrong .p-btn { text-transform: none; }
 
 /* Меню квеста */
 .p-menu {

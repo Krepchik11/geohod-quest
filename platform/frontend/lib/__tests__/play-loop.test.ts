@@ -200,37 +200,63 @@ describe('skipping a task', () => {
     expect(r.state.stepIdx).toBe(0);
   });
 
-  it('back on a skipped step: a wrong answer offers a free skip that only moves on', () => {
+  it('a solved step is never skipped again, even with a stale popup position', () => {
     const c = priced(7);
     let s = transition(afterWrong(c), { type: 'skip_task' }, c).state;
     s = transition(s, { type: 'back' }, c).state;
-    s = transition(s, { type: 'answer', value: 'снова нет' }, c).state;
-    expect(s.hintOfferPos).toBe(0);
-    const again = transition(s, { type: 'skip_task' }, c);
-    // Idempotent: no second fact, no second charge — just forward.
-    expect(again.effects.appended).toEqual([]);
-    expect(again.effects.toast).toBeNull();
-    expect(again.state.stepIdx).toBe(1);
-    expect(again.state.facts.filter((f) => f.type === 'task_skipped')).toHaveLength(1);
+    const r = transition({ ...s, hintOfferPos: 0 }, { type: 'skip_task' }, c);
+    expect(r.effects.appended).toEqual([]);
+    expect(r.state.facts.filter((f) => f.type === 'task_skipped')).toHaveLength(1);
+  });
+});
+
+describe('back on a solved answer step', () => {
+  const steps = (): GameStep[] => [
+    answerStep({ supporting: { hint: { cost_coins: 5, reveal_text: 'подсказка' }, gift: { coins: 5, narrative_text: 'дар' } } }),
+    physicalStep(),
+  ];
+  const c = (): PlayCtx => ({ ...ctx(steps()), skipCost: 7 });
+
+  it('skipped: the arrow moves on and logs nothing, whatever the field holds — no popup, no verdict', () => {
+    const cc = c();
+    let s = transition(initialPlayState(), { type: 'answer', value: 'нет' }, cc).state;
+    s = transition(s, { type: 'skip_task' }, cc).state;
+    s = transition(s, { type: 'back' }, cc).state;
+    const r = transition(s, { type: 'answer', value: 'снова нет' }, cc);
+    expect(r.effects.appended).toEqual([]);
+    expect(r.effects.answered).toBeNull();
+    expect(r.effects.toast).toBeNull();
+    expect(r.state.hintOfferPos).toBeNull();
+    expect(r.state.stepIdx).toBe(1);
+    expect(r.effects.advanced).toBe(true);
   });
 
-  it('back on a correctly answered step: the skip is free too', () => {
-    const c = priced(7);
-    let s = transition(initialPlayState(), { type: 'answer', value: 'фонтан' }, c).state;
-    s = transition(s, { type: 'back' }, c).state;
-    s = transition(s, { type: 'answer', value: 'опечатка' }, c).state;
-    const r = transition(s, { type: 'skip_task' }, c);
+  it('answered right: the same — even the right answer again logs nothing and pays no second gift', () => {
+    const cc = c();
+    const first = transition(initialPlayState(), { type: 'answer', value: 'да' }, cc);
+    expect(first.effects.appended.map((f) => f.type)).toEqual(['answer_submitted', 'gift_claimed']);
+    const back = transition(first.state, { type: 'back' }, cc).state;
+    const r = transition(back, { type: 'answer', value: 'да' }, cc);
     expect(r.effects.appended).toEqual([]);
     expect(r.state.stepIdx).toBe(1);
   });
 
-  it('coming back to a skipped step and answering right still pays no gift', () => {
-    const c = priced(7);
-    let s = transition(afterWrong(c), { type: 'skip_task' }, c).state;
-    s = transition(s, { type: 'back' }, c).state;
-    const r = transition(s, { type: 'answer', value: 'фонтан' }, c);
-    expect(r.effects.appended.map((f) => f.type)).toEqual(['answer_submitted']);
+  it('an empty field still moves on — the arrow is live on a solved step', () => {
+    const cc = c();
+    let s = transition(initialPlayState(), { type: 'answer', value: 'да' }, cc).state;
+    s = transition(s, { type: 'back' }, cc).state;
+    const r = transition(s, { type: 'answer', value: '' }, cc);
+    expect(r.effects.appended).toEqual([]);
     expect(r.state.stepIdx).toBe(1);
+  });
+
+  it('an unsolved step still judges the answer (regression)', () => {
+    const cc = c();
+    const r = transition(initialPlayState(), { type: 'answer', value: '' }, cc);
+    expect(r.state.stepIdx).toBe(0);
+    const wrong = transition(initialPlayState(), { type: 'answer', value: 'нет' }, cc);
+    expect(wrong.effects.answered).toEqual({ correct: false });
+    expect(wrong.state.hintOfferPos).toBe(0);
   });
 });
 

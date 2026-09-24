@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   CoinToast,
+  HintPopup,
   HintRevealPopup,
   PREVIEW_HANDLERS,
   StepView,
@@ -42,6 +43,33 @@ describe('HintRevealPopup', () => {
     const html = render({ text: 'Смотрите на арку', image: '/hint.jpg' });
     expect(html).toContain('Смотрите на арку');
     expect(html).toContain('src="/hint.jpg"');
+  });
+});
+
+describe('wrong-answer popup buttons', () => {
+  const render = (hintCost: number, skipCost: number): string =>
+    renderToStaticMarkup(
+      createElement(HintPopup, {
+        popup: { hint: 'offer' },
+        hint: { cost: hintCost, text: 'текст' },
+        skipCost,
+        copy: PLAYER_COPY,
+        on: {},
+      })
+    );
+
+  it('«Подсказка −N монет» agrees with the number; a free hint carries no price', () => {
+    expect(render(1, 10)).toContain('>Подсказка −1 монета<');
+    expect(render(2, 10)).toContain('>Подсказка −2 монеты<');
+    expect(render(5, 10)).toContain('>Подсказка −5 монет<');
+    expect(render(0, 10)).toContain('>Подсказка<');
+  });
+
+  it('«Пропустить задание — N монет», no price when free; «Решу сам» closes', () => {
+    expect(render(5, 10)).toContain('>Пропустить задание — 10 монет<');
+    expect(render(5, 3)).toContain('>Пропустить задание — 3 монеты<');
+    expect(render(5, 0)).toContain('>Пропустить задание<');
+    expect(render(5, 10)).toContain('>Решу сам<');
   });
 });
 
