@@ -225,7 +225,6 @@ export default function Dashboard({
         {showList ? (
           <div className="qcd-listcard">
             {filtered.map((q) => {
-              const published = q.status === 'published';
               return (
                 <div className="qcd-row" key={q.quest_id}>
                   {/* Keyed by the cover: a new image gets a fresh tile, so the
@@ -253,7 +252,9 @@ export default function Dashboard({
                     <button
                       className="qcd-btn-run"
                       type="button"
-                      title={published ? 'Запустить опубликованную версию (как видит игрок)' : 'Тестовый прогон черновика в редакторе'}
+                      // Всегда черновик — и у опубликованного квеста тоже: прогон
+                      // берёт текущее тело редактора, а не опубликованную версию.
+                      title="Тестовый прогон черновика в редакторе"
                       onClick={() => actions.onRun(q)}
                     >
                       Запустить
@@ -284,6 +285,14 @@ export default function Dashboard({
               Квест «{deleteTarget.name}» будет удалён без возможности восстановления,
               вместе со всеми его страницами и черновиками.
             </p>
+            {/* Удаление снимает квест и с продажи — автор должен знать это до
+                нажатия, а не узнать от покупателей. */}
+            {deleteTarget.published_version != null ? (
+              <p>
+                <b>Квест пропадёт из магазина.</b>
+                {deleteTarget.buyers > 0 ? ` Купившие (${deleteTarget.buyers}) потеряют к нему доступ.` : null}
+              </p>
+            ) : null}
             <div className="qcd-modal__row">
               <button className="qcd-modal__cancel" type="button" onClick={() => setDeleteTarget(null)}>Отмена</button>
               <button

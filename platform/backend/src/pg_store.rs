@@ -920,6 +920,17 @@ impl GrantStore for PgGrantStore {
         tx.commit().await.map_err(internal)
     }
 
+    /// See [`crate::store::InMemoryGrantStore::unpublish`]. Only the listing row
+    /// goes; `snapshots` (and everything bound to them) stay.
+    async fn unpublish(&self, quest_id: &str) -> Result<bool, AppError> {
+        let res = sqlx::query("DELETE FROM published_quests WHERE quest_id = $1")
+            .bind(quest_id)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
+    }
+
     /// See [`crate::store::InMemoryGrantStore::list_all_grants`].
     async fn list_all_grants(&self) -> Result<Vec<AccessGrant>, AppError> {
         let rows = sqlx::query(
