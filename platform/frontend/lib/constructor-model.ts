@@ -700,6 +700,18 @@ export function nextVersionNumber(quest: CtorQuest): number {
   return (quest.versions.length ? Math.max(...quest.versions.map((v) => v.n)) : 0) + 1;
 }
 
+/**
+ * The version a publish must use: past both the draft's own `versions` and the
+ * version the server already has live (`liveVersion`, null — never published).
+ * The body — and `versions` with it — is saved with a debounce, so a save lost
+ * right after a publish (tab closed, network gone) left the body one version
+ * behind: the next publish reused a frozen snapshot id and the server refused it
+ * on every retry. Taking the server's number too also heals drafts stuck that way.
+ */
+export function publishVersion(quest: CtorQuest, liveVersion: number | null): number {
+  return Math.max(nextVersionNumber(quest), (liveVersion ?? 0) + 1);
+}
+
 /** Frozen snapshot of the draft — deep-cloned, versioned, positions sealed. The
  *  store-card city/duration are frozen in too (when set), so the player renders the
  *  real place/duration instead of a hardcoded default. The quest-wide universal

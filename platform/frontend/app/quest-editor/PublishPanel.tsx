@@ -2,8 +2,8 @@
 
 import React, { useState } from 'react';
 import {
-  nextVersionNumber,
   parseCoords,
+  publishVersion,
   type CtorQuest,
   type GateField,
   type Gates,
@@ -66,8 +66,11 @@ function PublishModal({ nextN, size, onCancel, onConfirm }: {
   );
 }
 
-export function PublishPanel({ quest, gates, justPublished, publishError, publishing, onFix, onPublish }: {
+export function PublishPanel({ quest, liveVersion, gates, justPublished, publishError, publishing, onFix, onPublish }: {
   quest: CtorQuest;
+  /** The version the server already has live (null — never published). The
+   *  label must name the number the publish will really use (`publishVersion`). */
+  liveVersion: number | null;
   gates: Gates;
   justPublished: number | null;
   publishError: string | null;
@@ -85,7 +88,7 @@ export function PublishPanel({ quest, gates, justPublished, publishError, publis
   };
   const errN = gates.errors.length;
   const [modal, setModal] = useState(false);
-  const nextN = nextVersionNumber(quest);
+  const nextN = publishVersion(quest, liveVersion);
   return (
     <div className="ed-form">
       <div className="wsp-edhead">
