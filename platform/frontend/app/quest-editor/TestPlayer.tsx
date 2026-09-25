@@ -231,7 +231,7 @@ function DraftRun({ quest, startPos, onNav }: { quest: TestQuest; startPos: numb
         />
       </div>
 
-      {toast ? <CoinToast amount={toast.amount} narrative={toast.narrative} copy={PLAYER_COPY} /> : null}
+      {toast ? <CoinToast amount={toast.amount} narrative={toast.narrative} copy={PLAYER_COPY} top={isTerminalStep(step)} /> : null}
 
       {wrongPopup && popupPos != null ? (
         <HintPopup

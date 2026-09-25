@@ -697,15 +697,18 @@ export function FinalScreen({ quest, copy, st, on }: {
 
 /* Overlays and toasts per design/player/components.jsx (lifted for full PWA flows) */
 /** Coin toast for BOTH directions: a positive amount is a gain («+N монет», coin
- *  spin), a negative one a spend («−N монет», reverse spin + accent tint). */
-export function CoinToast({ amount, narrative, copy }: { amount: number; narrative?: string; copy?: StepCopy }) {
+ *  spin), a negative one a spend («−N монет», reverse spin + accent tint).
+ *  `top` puts it under the top bar instead of above the step's action bar — for
+ *  the finale, whose buttons fill the bottom of the screen: there the toast used
+ *  to cover «ОТПРАВИТЬ ОЦЕНКУ» for its whole 1.9 s. */
+export function CoinToast({ amount, narrative, copy, top }: { amount: number; narrative?: string; copy?: StepCopy; top?: boolean }) {
   const spend = amount < 0;
   const n = Math.abs(amount);
   const label = spend
     ? (copy?.spendToast ? copy.spendToast(n) : `−${n} монет`)
     : (copy?.giftToast ? copy.giftToast(n) : `+${n} монет`);
   return (
-    <div className={'p-toast' + (spend ? ' p-toast--spend' : '')} role="status">
+    <div className={'p-toast' + (spend ? ' p-toast--spend' : '') + (top ? ' p-toast--top' : '')} role="status">
       <PCoin size={22} />
       <span>{label}{narrative ? <small>{narrative}</small> : null}</span>
     </div>

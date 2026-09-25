@@ -692,7 +692,7 @@ export default function QuestPlayerClient({
         </>
       )}
       <div className="p-scroll">{stepBody}</div>
-      {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} />}
+      {toast && <CoinToast amount={toast.amount} narrative={toast.narrative} copy={COPY} top={onFinale} />}
 
       {popupStep && wrongPopup && (
         <HintPopup

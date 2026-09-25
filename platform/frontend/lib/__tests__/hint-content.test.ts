@@ -126,6 +126,13 @@ describe('CoinToast directions', () => {
     expect(html).not.toContain('p-toast--spend');
   });
 
+  it('sits at the top on request (the finale — its buttons fill the bottom), at the bottom otherwise', () => {
+    const top = renderToStaticMarkup(createElement(CoinToast, { amount: 5, copy: PLAYER_COPY, top: true }));
+    expect(top).toContain('p-toast--top');
+    const bottom = renderToStaticMarkup(createElement(CoinToast, { amount: 5, copy: PLAYER_COPY }));
+    expect(bottom).not.toContain('p-toast--top');
+  });
+
   it('renders a spend as «−N монет» with the accent variant', () => {
     const html = renderToStaticMarkup(
       createElement(CoinToast, { amount: -5, narrative: 'подсказка', copy: PLAYER_COPY })
