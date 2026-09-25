@@ -194,6 +194,22 @@ describe('PurchaseSheet — ЮKassa redirect', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Способ оплаты' })).toBeNull();
   });
 
+  it('a coupon for the whole price reads «Получить бесплатно», never «Оплатить 0 ₽»', async () => {
+    providersMock.mockResolvedValue(BOTH);
+    validateMock.mockResolvedValue({ valid: true, code: 'FREE', price: 890, discount_amount: 890, final_price: 0 });
+    checkoutMock.mockResolvedValue({});
+    const { onPurchased } = setup();
+    await screen.findByRole('button', { name: 'Оплатить 890 ₽' });
+    fireEvent.click(screen.getByText('Есть промокод?'));
+    fireEvent.change(screen.getByPlaceholderText('Промокод'), { target: { value: 'FREE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    const free = await screen.findByRole('button', { name: 'Получить бесплатно' });
+    expect(screen.queryByRole('button', { name: 'Оплатить 0 ₽' })).toBeNull();
+    fireEvent.click(free);
+    await waitFor(() => expect(onPurchased).toHaveBeenCalled());
+    expect(checkoutMock).toHaveBeenCalledWith(expect.objectContaining({ quest_id: 'q1', coupon_code: 'FREE' }));
+  });
+
   it('offers the method choice and defaults to the card when ЮKassa exists', async () => {
     providersMock.mockResolvedValue(BOTH);
     setup();

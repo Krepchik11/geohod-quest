@@ -294,11 +294,17 @@ export default function PurchaseSheet({
             onClick={() => void confirm()}
             disabled={paymentUnavailable}
           >
+            {/* Купон на всю цену: «Оплатить 0 ₽» пугает списанием — при нуле
+                никакой оплаты нет, доступ выдаётся сразу. */}
             {state === 'error'
-              ? `Повторить — ${finalPrice} ₽`
-              : method === 'yookassa'
-                ? `Оплатить ${finalPrice} ₽`
-                : `Подтвердить — ${finalPrice} ₽`}
+              ? finalPrice === 0
+                ? 'Повторить'
+                : `Повторить — ${finalPrice} ₽`
+              : finalPrice === 0
+                ? 'Получить бесплатно'
+                : method === 'yookassa'
+                  ? `Оплатить ${finalPrice} ₽`
+                  : `Подтвердить — ${finalPrice} ₽`}
           </button>
         )}
         <button className="psheet__cancel" type="button" onClick={onClose} disabled={busy}>
