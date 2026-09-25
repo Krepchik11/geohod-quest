@@ -1957,6 +1957,69 @@ mod tests {
         );
     }
 
+    /// Deleting a quest takes it off sale. Before, only the constructor row went,
+    /// and the store — which lists a published quest with NO constructor row as
+    /// published — kept selling it with nothing left in the editor to hide it by.
+    /// Buyers lose access (the owner's call); the played history stays: the
+    /// attempt, its facts and its frozen snapshot binding.
+    async fn scenario_delete_takes_quest_off_sale(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &ids.player).await;
+        let auth = [("authorization", bearer.as_str())];
+        let (st, _) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": ids.quest, "name": "Q", "cover": null, "steps_count": 1,
+                "body": { "id": ids.quest, "meta": { "title": "Q" }, "steps": [1], "versions": [] }
+            }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        // Bought, published and played: a grant, the listing, an attempt with a fact.
+        let attempt = grant_publish_attempt(app, ids).await;
+        let (st, _) = post_json(
+            app,
+            &format!("/api/attempts/{attempt}/facts"),
+            json!({"facts": [fact_json(FactKind::GiftClaimed, 1, 5, "device-a")]}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(store_has(app, &ids.quest).await, "published → on sale");
+
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/constructor/quests/{}/delete", ids.quest),
+            json!({}),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        assert!(
+            !store_has(app, &ids.quest).await,
+            "a deleted quest is off sale"
+        );
+        let (st, _) = get_json(
+            app,
+            &format!("/api/quests/{}/bundle?user_id={}", ids.quest, ids.player),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "no bundle — buyers lose access");
+        let (st, _) = get_json_h(
+            app,
+            &format!("/api/constructor/quests/{}", ids.quest),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "gone from the editor");
+        // Played history intact: the attempt still folds off the same snapshot.
+        let (st, state) = get_json(app, &format!("/api/attempts/{attempt}/state")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(state["projected"]["balance"], 5);
+        assert_eq!(state["snapshot_id"], ids.snap1.as_str());
+    }
+
     async fn scenario_bundle_gated_by_grant(app: &Router, ids: &Ids) {
         let snapshot =
             json!({"golden_id": ids.snap1, "steps": [{"position": 0, "template": "start"}]});
@@ -5472,6 +5535,98 @@ mod tests {
         );
     }
 
+    /// Migration 0007 brings orphans — a published listing whose constructor row
+    /// was deleted («444» in production) — back to the dashboard as drafts: off
+    /// the store (it lists `published` only) and manageable again. Replayed inside
+    /// a transaction that is rolled back, so the pg tests sharing this database
+    /// never see it restore their own API-published quests.
+    #[tokio::test]
+    async fn pg_orphan_restore_migration_brings_orphans_back_as_drafts() {
+        use sqlx::Row as _;
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_orphan_restore_migration: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let grants: store::GrantStores = Arc::new(pg_store::PgGrantStore::new(pool.clone()));
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let qid = format!("q-orphan-{run}");
+        grants
+            .register_published(
+                &qid,
+                PublishedMeta {
+                    quest_id: qid.clone(),
+                    name: "444".into(),
+                    primary_comic: None,
+                    template_summary: "demo".into(),
+                    snapshot_version: 2,
+                    snapshot_id: format!("{qid}-v2"),
+                    city: Some("Нови Сад".into()),
+                    duration: None,
+                    price: Some(1),
+                    description: None,
+                    pages: Some(4),
+                    tasks: Some(0),
+                    paid_hints: Some(false),
+                    players_bonus: 0,
+                },
+                Some(json!({ "steps": [] })),
+            )
+            .await
+            .expect("publish the orphan");
+
+        let migration = include_str!("../migrations/0007_restore_orphaned_quests.sql");
+        let mut tx = pool.begin().await.expect("begin");
+        sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0007");
+        // Idempotent: a second run restores nothing twice.
+        sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0007 again");
+        let rows = sqlx::query(
+            "SELECT author_id, author_name, name, status, steps_count, body
+             FROM constructor_quests WHERE quest_id = $1",
+        )
+        .bind(&qid)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("restored row");
+        tx.rollback().await.expect("rollback");
+        grants.unpublish(&qid).await.expect("clean up the orphan");
+
+        assert_eq!(rows.len(), 1, "restored exactly once");
+        let row = &rows[0];
+        assert_eq!(row.get::<String, _>("status"), "draft", "off the store");
+        assert_eq!(row.get::<String, _>("author_id"), "ops");
+        assert_eq!(row.get::<String, _>("author_name"), "Восстановлен");
+        assert_eq!(row.get::<String, _>("name"), "444");
+        assert_eq!(row.get::<i32, _>("steps_count"), 4);
+        let body: Value = row.get("body");
+        assert_eq!(body["id"], qid.as_str());
+        assert_eq!(body["meta"]["title"], "444");
+        assert_eq!(body["meta"]["city"], "Нови Сад");
+        assert_eq!(body["meta"]["price"], 1);
+        assert_eq!(body["meta"]["skipCost"], 10);
+        assert_eq!(body["steps"], json!([]));
+        assert_eq!(body["versions"][0]["n"], 2, "numbering continues from v2");
+        assert_eq!(
+            body["versions"][0]["live"], false,
+            "off the store — not «текущая в магазине»"
+        );
+    }
+
     /// Everything a per-scenario Postgres test needs: the router over a real
     /// pool (migrations applied) and a run-unique tag so scenarios tolerate a
     /// shared, pre-populated database. `None` means "skip: no DATABASE_URL".
@@ -5581,6 +5736,7 @@ mod tests {
         version_freeze_new_publish_does_not_rebind = ids scenario_version_freeze / "freeze";
         checkout_idempotent_coupon100_and_publish_list = ids scenario_checkout_and_publish_list / "shop";
         store_lists_only_published_quests = ids scenario_store_lists_only_published / "vis";
+        delete_takes_quest_off_sale_keeps_history = ids scenario_delete_takes_quest_off_sale / "delsale";
         bundle_endpoint_gated_by_grant = ids scenario_bundle_gated_by_grant / "bundle";
         publish_rejects_frozen_snapshot_rewrite = ids scenario_snapshot_immutability / "frozen";
         admin_stats_and_feedbacks_per_version = ids scenario_admin_stats / "admin";

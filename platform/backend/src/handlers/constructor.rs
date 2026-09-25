@@ -589,12 +589,21 @@ async fn set_constructor_author_handler(
     Ok(Json(ctor_row(&state, updated).await?))
 }
 
+/// Deleting a quest takes it off sale too. The store lists a published quest with
+/// NO constructor row as published (the path for quests published straight
+/// through the API), so dropping only the constructor row left a deleted quest
+/// on sale for good, with nothing left in the editor to hide it. The listing goes
+/// FIRST: should the row delete then fail, the quest is merely hidden and still
+/// on the dashboard — the reverse order would mint exactly that orphan. Buyers
+/// lose access (the owner's decision); frozen snapshots, grants, attempts and
+/// facts stay, so played history and balances are untouched.
 async fn delete_constructor_quest_handler(
     State(state): State<AppState>,
     Path(quest_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let gated = require_owned_constructor_summary(&state, &headers, &quest_id).await?;
+    state.grants.unpublish(&quest_id).await?;
     if !state
         .constructor
         .delete(&quest_id, store::AuthorGuard::Is(&gated.author_id))

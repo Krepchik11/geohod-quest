@@ -469,11 +469,18 @@
 }
 .p-toast .p-coin-svg { animation: p-coin-spin .8s ease; }
 .p-toast small { display: block; font-weight: 400; font-size: 11.5px; opacity: .75; }
+/* Тост сверху — на финале: низ экрана там занят кнопками оценки, и тост внизу
+   закрывал «ОТПРАВИТЬ ОЦЕНКУ». */
+.p-toast--top { top: 72px; bottom: auto; animation-name: p-toast-in-top; }
 /* Тост списания («−N монет»): акцентная подложка, монета крутится в обратную сторону. */
 .p-toast--spend { background: var(--p-accent); }
 .p-toast--spend .p-coin-svg { animation: p-coin-spin-back .8s ease; }
 @keyframes p-toast-in {
   from { transform: translateX(-50%) translateY(24px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+@keyframes p-toast-in-top {
+  from { transform: translateX(-50%) translateY(-24px); opacity: 0; }
   to   { transform: translateX(-50%) translateY(0); opacity: 1; }
 }
 @keyframes p-coin-spin {

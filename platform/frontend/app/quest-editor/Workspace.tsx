@@ -10,6 +10,7 @@ import {
   migrateQuest,
   newQuest,
   newStep,
+  publishVersion,
   questUpsert,
   removeStep as modelRemove,
   reorderSteps,
@@ -237,11 +238,10 @@ export default function Workspace() {
         return;
       }
       setTest({ quest: q, startPos: 0 });
-      showToast(
-        row.status === 'published'
-          ? `Запуск опубликованной версии: «${row.name}»`
-          : `Тестовый прогон черновика: «${row.name}»`,
-      );
+      // Прогон всегда идёт по текущему черновику — и у опубликованного квеста:
+      // обещать «опубликованную версию» значило бы показывать автору не то, что
+      // видят игроки, если он уже что-то поправил.
+      showToast(`Тестовый прогон черновика: «${row.name}»`);
     } catch (e) {
       showToast(errMessage(e));
     }
@@ -367,7 +367,18 @@ export default function Workspace() {
     setPublishing(true);
     setPublishError(null);
     try {
-      const snapshot = serializeDraft(active);
+      // The number the server already has live, read fresh right before the
+      // publish: the body's own `versions` may be behind (see publishVersion).
+      // Offline for this read → the dashboard row we already hold.
+      const live = await api
+        .listConstructorQuests()
+        .then((rows) => {
+          setList(rows);
+          return rows.find((r) => r.quest_id === active.id)?.published_version ?? null;
+        })
+        .catch(() => activeRow?.published_version ?? null);
+      const version = publishVersion(active, live);
+      const snapshot = { ...serializeDraft(active), snapshot_version: version };
       await api.publishQuest({
         quest_id: active.id,
         name: active.meta.title,
@@ -385,21 +396,22 @@ export default function Workspace() {
         players_bonus: active.meta.playersBonus,
       });
       const sizeLabel = computeGates(active).sizeLabel;
-      patchQuest((q) => ({
+      const date = new Date().toLocaleDateString('ru-RU');
+      const withVersion = (q: CtorQuest): CtorQuest => ({
         ...q,
         versions: [
-          {
-            n: snapshot.snapshot_version,
-            date: new Date().toLocaleDateString('ru-RU'),
-            pages: q.steps.length,
-            size: sizeLabel,
-            live: true,
-            attempts: 0,
-          },
+          { n: version, date, pages: q.steps.length, size: sizeLabel, live: true, attempts: 0 },
           ...q.versions.map((v) => ({ ...v, live: false })),
         ],
-      }));
-      setJustPublished(snapshot.snapshot_version);
+      });
+      patchQuest(withVersion);
+      // Persist the new version list now, not after the autosave debounce: a save
+      // lost here is what used to leave the body behind the server. A failure
+      // falls back to the autosave's own retry.
+      void api
+        .saveConstructorQuest(active.id, questUpsert(withVersion(active)))
+        .catch(() => setSaveOk(false));
+      setJustPublished(version);
     } catch (e) {
       setPublishError((e as Error).message);
     } finally {
@@ -440,6 +452,7 @@ export default function Workspace() {
           <BuilderScreen
             saveFresh={saveFresh}
             quest={builderQuest}
+            liveVersion={activeRow?.published_version ?? null}
             sel={sel}
             saveOk={saveOk}
             justPublished={justPublished}

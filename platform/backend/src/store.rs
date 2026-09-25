@@ -648,6 +648,14 @@ impl InMemoryGrantStore {
         Ok(())
     }
 
+    /// Take a quest off sale: drop its listing, so the store card, the product
+    /// page and the bundle go with it. `true` when it was listed. The frozen
+    /// snapshots stay, and so do the grants, attempts and facts bound to them —
+    /// played history and balances never change (invariant 4); only access ends.
+    pub fn unpublish(&mut self, quest_id: &str) -> bool {
+        self.published.remove(quest_id).is_some()
+    }
+
     /// Replace a frozen snapshot's media references in place — the media
     /// backfill's only writer. `false` when no such snapshot is stored.
     ///
@@ -1883,6 +1891,9 @@ pub trait GrantStore: Send + Sync {
         snapshot: Option<serde_json::Value>,
     ) -> Result<(), AppError>;
 
+    /// See [`InMemoryGrantStore::unpublish`].
+    async fn unpublish(&self, quest_id: &str) -> Result<bool, AppError>;
+
     /// See [`InMemoryGrantStore::stats_purchase_events`].
     async fn stats_purchase_events(
         &self,
@@ -1960,6 +1971,10 @@ impl GrantStore for std::sync::Mutex<InMemoryGrantStore> {
         snapshot: Option<serde_json::Value>,
     ) -> Result<(), AppError> {
         lock(self, "grants")?.register_published(quest_id, meta, snapshot)
+    }
+
+    async fn unpublish(&self, quest_id: &str) -> Result<bool, AppError> {
+        Ok(lock(self, "grants")?.unpublish(quest_id))
     }
 
     async fn stats_purchase_events(

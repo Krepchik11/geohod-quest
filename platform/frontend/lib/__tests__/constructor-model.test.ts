@@ -18,6 +18,7 @@ import {
   newStep,
   nextVersionNumber,
   parseCoords,
+  publishVersion,
   adoptCover,
   questUpsert,
   removeStep,
@@ -638,6 +639,19 @@ describe('versions', () => {
       { n: 1, date: '', pages: 2, size: '', live: true, attempts: 0 },
     ];
     expect(nextVersionNumber(q)).toBe(4);
+  });
+
+  it('publishVersion goes past the server too — a body saved behind the server never reuses a frozen number', () => {
+    const q = quest();
+    q.versions = [{ n: 1, date: '', pages: 2, size: '', live: true, attempts: 0 }];
+    // The save after publishing v2 was lost: the body still says v1.
+    expect(publishVersion(q, 2)).toBe(3);
+    // In step: the body is the higher one.
+    expect(publishVersion(q, 1)).toBe(2);
+    // Never published: the body alone decides.
+    expect(publishVersion(quest(), null)).toBe(1);
+    // A quest brought back with an empty body (orphan restore) continues numbering.
+    expect(publishVersion(quest(), 2)).toBe(3);
   });
 });
 

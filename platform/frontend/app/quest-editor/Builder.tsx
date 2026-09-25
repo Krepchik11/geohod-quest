@@ -552,6 +552,7 @@ export interface BuilderActions {
 
 export function BuilderScreen({
   quest,
+  liveVersion,
   sel,
   saveOk,
   saveFresh,
@@ -563,6 +564,8 @@ export function BuilderScreen({
   actions,
 }: {
   quest: CtorQuest;
+  /** Версия, опубликованная на сервере (null — ещё не публиковался). */
+  liveVersion: number | null;
   sel: CtorSelection | null;
   saveOk: boolean;
   /** True once a save completed in THIS session — «Сохранено · только что». */
@@ -681,6 +684,7 @@ export function BuilderScreen({
           {view === 'publish' ? (
             <PublishPanel
               quest={quest}
+              liveVersion={liveVersion}
               gates={gates}
               justPublished={justPublished}
               publishError={publishError}
