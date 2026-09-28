@@ -113,6 +113,87 @@
   color: #83858c;
   font-size: 14px;
 }
+.amod-more {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+/* ---- search (the au-search box from Пользователи, sized to the filter row) ---- */
+.amod-search {
+  min-width: 240px;
+}
+.amod-search .au-search-input {
+  height: 44px;
+  font-size: 14px;
+}
+
+/* ---- quest summary (a quest is picked) ---- */
+.amod-summary {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow:
+    0 1px 2px rgba(20, 30, 50, 0.04),
+    0 8px 20px rgba(20, 30, 50, 0.05);
+}
+.amod-summary__avg {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+}
+.amod-summary__label {
+  font-family: 'Jost', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: #83858c;
+}
+.amod-summary__value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: #1a2b48;
+}
+.amod-summary__note {
+  font-size: 12.5px;
+  color: #83858c;
+}
+.amod-summary__bars {
+  flex: 1;
+  min-width: 220px;
+  display: grid;
+  gap: 5px;
+}
+.amod-bar {
+  display: grid;
+  grid-template-columns: 26px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: #5b6373;
+}
+.amod-bar__track {
+  height: 8px;
+  border-radius: 4px;
+  background: #eef0f4;
+  overflow: hidden;
+}
+.amod-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #e7a934;
+}
+.amod-bar__n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---- review card ---- */
 .amod-card {
@@ -143,10 +224,6 @@
   font-weight: 600;
   font-size: 15px;
   color: #000f08;
-}
-.amod-card__pid {
-  font-size: 12px;
-  color: #9a9ca3;
 }
 .amod-card__rating {
   display: flex;
@@ -212,6 +289,7 @@
   font: inherit;
   font-size: 12px;
   color: #3b71fe;
+  text-decoration: none;
   cursor: pointer;
 }
 .amod-jump:hover {

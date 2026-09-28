@@ -72,8 +72,23 @@ export default function AdminUsersPage() {
       try {
         const wire = await api.adminListUsers();
         if (!cancelled) {
-          setUsers(wire.map(toAdminUser));
+          const list = wire.map(toAdminUser);
+          setUsers(list);
           setListError('none');
+          // A jump from Отзывы (`/admin?user=<id>`): open that profile with the
+          // list narrowed to it, then drop the parameter so a reload starts clean.
+          const wanted = new URLSearchParams(window.location.search).get('user');
+          if (wanted) {
+            const u = list.find((x) => x.id === wanted);
+            if (u) {
+              setQuery(u.email || u.displayName || '');
+              setSelectedId(u.id);
+              setDraftRole(u.role);
+            } else {
+              showToast('Пользователь не найден', true);
+            }
+            window.history.replaceState(null, '', window.location.pathname);
+          }
         }
       } catch (err) {
         if (!cancelled) setListError(errorKind(err) === 'auth' ? 'auth' : 'network');
@@ -82,7 +97,7 @@ export default function AdminUsersPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showToast]);
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
