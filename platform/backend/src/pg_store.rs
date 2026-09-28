@@ -26,7 +26,7 @@ use crate::store::{
     AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, ConstructorQuest,
     ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore, GrantStore,
     KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
-    now_rfc3339, now_secs,
+    ReviewCheck, now_rfc3339, now_secs,
 };
 
 /// The `AND author_id = $n` half of a guarded per-quest statement, or nothing.
@@ -2818,8 +2818,8 @@ impl KvStore<String> for PgSettingsStore {
 }
 
 /// PostgreSQL moderation overlay — the durable mirror of
-/// [`crate::store::InMemoryModerationStore`] (content-moderation). Two tables that are
-/// entirely separate from the immutable `facts` log.
+/// [`crate::store::InMemoryModerationStore`] (content-moderation). Three tables that
+/// are entirely separate from the immutable `facts` log.
 #[derive(Clone, Debug)]
 pub struct PgModerationStore {
     pool: PgPool,
@@ -2881,6 +2881,96 @@ impl ModerationStore for PgModerationStore {
                 Ok((
                     r.try_get("user_id").map_err(internal)?,
                     r.try_get("quest_id").map_err(internal)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::review_hides`].
+    async fn review_hides(
+        &self,
+    ) -> Result<std::collections::HashMap<(String, String), (u64, String)>, AppError> {
+        let rows =
+            sqlx::query("SELECT user_id, quest_id, hidden_at, hidden_by FROM hidden_reviews")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let at: i64 = r.try_get("hidden_at").map_err(internal)?;
+                Ok((
+                    (
+                        r.try_get("user_id").map_err(internal)?,
+                        r.try_get("quest_id").map_err(internal)?,
+                    ),
+                    (at.max(0) as u64, r.try_get("hidden_by").map_err(internal)?),
+                ))
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::check_reviews`] — one upsert for
+    /// the whole batch; the `WHERE` keeps a newer mark over a stale re-check. The
+    /// caller passes each pair once (a repeated key in one statement is an error).
+    async fn check_reviews(
+        &self,
+        items: &[(String, String, u64)],
+        at: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let users: Vec<&str> = items.iter().map(|(u, _, _)| u.as_str()).collect();
+        let quests: Vec<&str> = items.iter().map(|(_, q, _)| q.as_str()).collect();
+        let throughs: Vec<i64> = items.iter().map(|(_, _, t)| *t as i64).collect();
+        sqlx::query(
+            "INSERT INTO checked_reviews
+                 (user_id, quest_id, checked_through, checked_at, checked_by)
+             SELECT u, q, t, $4, $5
+             FROM UNNEST($1::text[], $2::text[], $3::bigint[]) AS batch(u, q, t)
+             ON CONFLICT (user_id, quest_id) DO UPDATE
+             SET checked_through = EXCLUDED.checked_through,
+                 checked_at = EXCLUDED.checked_at,
+                 checked_by = EXCLUDED.checked_by
+             WHERE checked_reviews.checked_through <= EXCLUDED.checked_through",
+        )
+        .bind(&users)
+        .bind(&quests)
+        .bind(&throughs)
+        .bind(at as i64)
+        .bind(by)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryModerationStore::review_checks`].
+    async fn review_checks(
+        &self,
+    ) -> Result<std::collections::HashMap<(String, String), ReviewCheck>, AppError> {
+        let rows = sqlx::query(
+            "SELECT user_id, quest_id, checked_through, checked_at, checked_by
+             FROM checked_reviews",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                let through: i64 = r.try_get("checked_through").map_err(internal)?;
+                let at: i64 = r.try_get("checked_at").map_err(internal)?;
+                Ok((
+                    (
+                        r.try_get("user_id").map_err(internal)?,
+                        r.try_get("quest_id").map_err(internal)?,
+                    ),
+                    ReviewCheck {
+                        through: through.max(0) as u64,
+                        at: at.max(0) as u64,
+                        by: r.try_get("checked_by").map_err(internal)?,
+                    },
                 ))
             })
             .collect()

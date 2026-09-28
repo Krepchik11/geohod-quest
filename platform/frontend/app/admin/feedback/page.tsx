@@ -9,6 +9,7 @@ import {
   relativeTime,
   templateLabel,
 } from '../../../lib/admin-moderation';
+import { refreshModerationCounts } from '../../../lib/moderation-counts';
 import { plural } from '../../../lib/ru';
 import { AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
@@ -72,6 +73,7 @@ export default function AdminFeedbackPage() {
       if (next) await api.adminResolveFeedback(body);
       else await api.adminReopenFeedback(body);
       setResolved(g, next);
+      refreshModerationCounts();
       showToast(next ? 'Группа отмечена решённой' : 'Группа снова открыта');
     } catch {
       showToast('Не удалось изменить статус');

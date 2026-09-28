@@ -11,18 +11,23 @@ import {
   formatAverage,
   identityBadge,
   identityName,
+  markWho,
   moderationDate,
   parseReviewsQuery,
   questAverage,
   questSummary,
   reviewFacets,
   reviewQuestOptions,
+  reviewStatus,
   serializeReviewsQuery,
   type QuestSummary,
   type ReviewSort,
+  type ReviewStatus,
   type ReviewsQuery,
 } from '../../../lib/admin-moderation';
+import { refreshModerationCounts } from '../../../lib/moderation-counts';
 import { plural, pluralCount } from '../../../lib/ru';
+import { useMe } from '../../../lib/use-me';
 import { AdminConfirmSheet, AdminPageHead, AdminToast, useToast } from '../ui';
 import { ContactRow } from '../moderation-ui';
 
@@ -36,6 +41,11 @@ import { ContactRow } from '../moderation-ui';
  * Filters, search and sort live in the URL (replaceState — a filter click is not
  * a history step), so a reload or a shared link opens the same list. The list
  * renders a page at a time; any change of what is listed starts from the top.
+ *
+ * «Проверено» is shared by all admins: a review is new until one of them checks
+ * it, and new again once the player changes it. Hiding or showing a review checks
+ * it too. With nothing in the link saying which view, the page opens on «Новые»
+ * while anything waits; every action refreshes the menu counters.
  */
 
 const PAGE = 50;
@@ -48,6 +58,15 @@ const RATING_CHIPS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 2, label: '2★' },
   { value: 1, label: '1★' },
 ];
+
+/** This admin's own mark, stamped now — until the next load names them server-side. */
+function ownMark(byId: string | undefined, byName: string | null) {
+  return {
+    at: Math.floor(Date.now() / 1000),
+    by_id: byId ?? 'ops-token',
+    by_name: byName ?? 'вы',
+  };
+}
 
 /** Stable key identifying one (player, quest) review across state updates. */
 function reviewKey(r: AdminReviewWire): string {
@@ -63,17 +82,34 @@ export default function AdminReviewsPage() {
       : parseReviewsQuery(window.location.search),
   );
   const [confirm, setConfirm] = useState<AdminReviewWire | null>(null);
+  // «Отметить все проверенными» — the reviews it covers, while its confirm is open.
+  const [bulk, setBulk] = useState<AdminReviewWire[] | null>(null);
   const [busy, setBusy] = useState(false);
   // How many pages are open — for the list it was opened on; a new list starts at one.
   const [more, setMore] = useState({ list: '', pages: 1 });
   const { toast, showToast } = useToast();
+  const { session, displayName } = useMe();
 
   useEffect(() => {
     let cancelled = false;
     void api
       .adminListReviews()
       .then((r) => {
-        if (!cancelled) setReviews(r.reviews);
+        if (cancelled) return;
+        setReviews(r.reviews);
+        // Nothing in the link says which view: open on «Новые» while anything waits.
+        if (
+          !new URLSearchParams(window.location.search).has('view') &&
+          r.reviews.some((x) => reviewStatus(x) !== 'checked')
+        ) {
+          const next = { ...parseReviewsQuery(window.location.search), view: 'new' as const };
+          setQuery(next);
+          window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${serializeReviewsQuery(next)}`,
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setLoadError(true);
@@ -83,10 +119,18 @@ export default function AdminReviewsPage() {
     };
   }, []);
 
-  const setHidden = (target: AdminReviewWire, hidden: boolean) =>
-    setReviews((rs) =>
-      (rs ?? []).map((r) => (reviewKey(r) === reviewKey(target) ? { ...r, hidden } : r)),
-    );
+  const myMark = () => ownMark(session?.user_id, displayName);
+  const checkedNow = (r: AdminReviewWire): AdminReviewWire => ({
+    ...r,
+    check: { through: r.changed_at, ...myMark() },
+  });
+  const patchReviews = (
+    targets: readonly AdminReviewWire[],
+    patch: (r: AdminReviewWire) => AdminReviewWire,
+  ) => {
+    const keys = new Set(targets.map(reviewKey));
+    setReviews((rs) => (rs ?? []).map((r) => (keys.has(reviewKey(r)) ? patch(r) : r)));
+  };
 
   const applyHide = async () => {
     if (!confirm) return;
@@ -96,7 +140,9 @@ export default function AdminReviewsPage() {
         user_id: confirm.identity.user_id,
         quest_id: confirm.quest_id,
       });
-      setHidden(confirm, true);
+      // Hiding is deciding — the server checks the review too.
+      patchReviews([confirm], (r) => ({ ...checkedNow(r), hidden: true, hide: myMark() }));
+      refreshModerationCounts();
       setConfirm(null);
       showToast('Отзыв скрыт и исключён из оценки');
     } catch {
@@ -109,11 +155,38 @@ export default function AdminReviewsPage() {
   const unhide = async (r: AdminReviewWire) => {
     try {
       await api.adminUnhideReview({ user_id: r.identity.user_id, quest_id: r.quest_id });
-      setHidden(r, false);
+      patchReviews([r], (x) => ({ ...checkedNow(x), hidden: false, hide: null }));
+      refreshModerationCounts();
       showToast('Отзыв снова виден');
     } catch {
       showToast('Не удалось показать отзыв');
     }
+  };
+
+  /** «Проверено» at the versions shown — one review or the whole list. */
+  const check = async (targets: readonly AdminReviewWire[]) => {
+    try {
+      await api.adminCheckReviews({
+        reviews: targets.map((r) => ({
+          user_id: r.identity.user_id,
+          quest_id: r.quest_id,
+          through: r.changed_at,
+        })),
+      });
+      patchReviews(targets, checkedNow);
+      refreshModerationCounts();
+      showToast(`Проверено: ${targets.length}`);
+    } catch {
+      showToast('Не удалось отметить проверенным');
+    }
+  };
+
+  const applyBulk = async () => {
+    if (!bulk) return;
+    setBusy(true);
+    await check(bulk);
+    setBusy(false);
+    setBulk(null);
   };
 
   const copyId = (id: string) =>
@@ -283,7 +356,18 @@ export default function AdminReviewsPage() {
           {summary && <QuestSummaryCard summary={summary} />}
 
           <div className="amod-count">
-            {shown.length} {plural(shown.length, 'запись', 'записи', 'записей')}
+            <span>
+              {shown.length} {plural(shown.length, 'запись', 'записи', 'записей')}
+            </span>
+            {q.view === 'new' && shown.length > 0 && (
+              <button
+                type="button"
+                className="amod-btn amod-btn--resolve"
+                onClick={() => setBulk(shown)}
+              >
+                Отметить все проверенными · {shown.length}
+              </button>
+            )}
           </div>
 
           <div className="amod-banner" role="note">
@@ -300,6 +384,8 @@ export default function AdminReviewsPage() {
               <ReviewCard
                 key={reviewKey(r)}
                 review={r}
+                status={reviewStatus(r)}
+                onCheck={() => void check([r])}
                 onHide={() => setConfirm(r)}
                 onUnhide={() => void unhide(r)}
                 onCopyId={() => copyId(r.identity.user_id)}
@@ -352,6 +438,23 @@ export default function AdminReviewsPage() {
         }
       />
     )}
+    {bulk && (
+      <AdminConfirmSheet
+        label="Отметить проверенными"
+        title={`Отметить проверенными ${pluralCount(bulk.length, 'отзыв', 'отзыва', 'отзывов')}?`}
+        busy={busy}
+        applyLabel="Отметить проверенными"
+        busyLabel="Отмечаю…"
+        onCancel={() => !busy && setBulk(null)}
+        onApply={() => void applyBulk()}
+        text={
+          <>
+            Они уйдут из «Новых» и из счётчика в меню у всех администраторов. Если игрок
+            потом изменит оценку или текст, отзыв снова станет новым.
+          </>
+        }
+      />
+    )}
     {toast && <AdminToast text={toast} />}
     </>
   );
@@ -391,13 +494,37 @@ function QuestSummaryCard({ summary }: { summary: QuestSummary }) {
   );
 }
 
+const STATUS_TAGS: Record<Exclude<ReviewStatus, 'checked'>, string> = {
+  new: 'НОВЫЙ',
+  changed: 'ИЗМЕНЁН',
+};
+
+/**
+ * The moderation line under a card: who hid it (hiding checks it too), else who
+ * checked it — for the review as it is now. The history that went live already
+ * checked has nobody to name, so it gets no line.
+ */
+function markLine(review: AdminReviewWire, status: ReviewStatus): string | null {
+  const [label, mark] = review.hide
+    ? ['Скрыто', review.hide]
+    : status === 'checked' && review.check && review.check.by_id !== 'baseline'
+      ? ['Проверено', review.check]
+      : [null, null];
+  if (!label || !mark) return null;
+  return [label, markWho(mark), moderationDate(mark.at)].filter(Boolean).join(' · ');
+}
+
 function ReviewCard({
   review,
+  status,
+  onCheck,
   onHide,
   onUnhide,
   onCopyId,
 }: {
   review: AdminReviewWire;
+  status: ReviewStatus;
+  onCheck: () => void;
   onHide: () => void;
   onUnhide: () => void;
   onCopyId: () => void;
@@ -405,12 +532,18 @@ function ReviewCard({
   const badge = identityBadge(review.identity.kind);
   const where = [review.quest_name, review.quest_city].filter(Boolean).join(' · ');
   const at = new Date(review.created_at * 1000);
+  const marks = markLine(review, status);
   return (
-    <div className={`amod-card${review.hidden ? ' is-hidden' : ''}`}>
+    <div
+      className={`amod-card${review.hidden ? ' is-hidden' : ''}${status !== 'checked' ? ' is-new' : ''}`}
+    >
       <div className="amod-card__body">
         <div className="amod-card__head">
           <span className="amod-card__name">{identityName(review.identity)}</span>
           <span className={`amod-badge amod-badge--${badge.kind}`}>{badge.label}</span>
+          {status !== 'checked' && (
+            <span className={`amod-chip-tag amod-chip-tag--${status}`}>{STATUS_TAGS[status]}</span>
+          )}
           {/* Anonymous devices have no account, so no Пользователи entry. */}
           {review.identity.kind !== 'anon' && (
             <Link
@@ -453,8 +586,14 @@ function ReviewCard({
           <p className="amod-card__star-only">Оценка без отзыва — учитывается только в средней.</p>
         )}
         <ContactRow identity={review.identity} />
+        {marks && <p className="amod-card__marks">{marks}</p>}
       </div>
       <div className="amod-card__actions">
+        {status !== 'checked' && (
+          <button type="button" className="amod-btn amod-btn--resolve" onClick={onCheck}>
+            Проверено
+          </button>
+        )}
         {review.hidden ? (
           <>
             <span className="amod-chip-tag">СКРЫТО</span>

@@ -14,17 +14,19 @@ import React from 'react';
  *   gate and the header's UserMenu together), and anonymous visitors are
  *   denied without any request;
  * - children render only when access is granted; the denied/error screens
- *   render inside the shell so the chrome stays put.
+ *   render inside the shell so the chrome stays put;
+ * - the moderation tabs count what waits (a new low rating warns).
  */
-const { meMock, tokenMock, sessionMock, segmentMock } = vi.hoisted(() => ({
+const { meMock, countsMock, tokenMock, sessionMock, segmentMock } = vi.hoisted(() => ({
   meMock: vi.fn(),
+  countsMock: vi.fn(),
   tokenMock: vi.fn(),
   sessionMock: vi.fn(),
   segmentMock: vi.fn(),
 }));
 vi.mock('../../../lib/api', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  api: { me: meMock },
+  api: { me: meMock, adminModerationCounts: countsMock },
   hasAdminToken: tokenMock,
 }));
 vi.mock('../../../lib/identity', () => ({
@@ -51,6 +53,8 @@ function session(): { token: string; role: string; display_name: null } {
 
 beforeEach(() => {
   meMock.mockReset();
+  countsMock.mockReset();
+  countsMock.mockResolvedValue({ reviews_new: 0, reviews_new_low: 0, feedback_open: 0 });
   tokenMock.mockReset();
   sessionMock.mockReset();
   segmentMock.mockReset();
@@ -94,6 +98,24 @@ describe('AdminLayout', () => {
         .getAllByRole('link', { name: 'Пользователи' })
         .some((a) => a.getAttribute('aria-current') === 'page'),
     ).toBe(false);
+  });
+
+  it('counts what waits on the moderation tabs — a new low rating as a warning', async () => {
+    countsMock.mockResolvedValue({ reviews_new: 3, reviews_new_low: 1, feedback_open: 2 });
+    render(
+      <AdminLayout>
+        <div>page-body</div>
+      </AdminLayout>,
+    );
+    await screen.findByText('page-body');
+    const reviews = await screen.findAllByRole('link', { name: /^Отзывы\s*, ждут проверки: 3$/ });
+    expect(reviews[0].querySelector('.ash-tab-badge.is-alert')).toBeTruthy();
+    const feedback = screen.getAllByRole('link', {
+      name: /^Обратная связь\s*, ждут проверки: 2$/,
+    });
+    expect(feedback[0].querySelector('.ash-tab-badge.is-alert')).toBeNull();
+    // Nothing waits in Пользователи — no counter there.
+    expect(screen.getAllByRole('link', { name: 'Пользователи' }).length).toBeGreaterThan(0);
   });
 
   it('shows the spinner while checking and no page body', () => {

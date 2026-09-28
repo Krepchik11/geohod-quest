@@ -19,6 +19,10 @@ export interface SpaceTab {
   key: string;
   label: string;
   href: string;
+  /** Items waiting in the section — a counter after the label when above 0. */
+  badge?: number;
+  /** Paint the counter as a warning (e.g. a low rating among the new reviews). */
+  alert?: boolean;
 }
 
 function TabStrip({
@@ -42,6 +46,12 @@ function TabStrip({
           aria-current={t.key === active ? 'page' : undefined}
         >
           {t.label}
+          {!!t.badge && (
+            <span className={`ash-tab-badge${t.alert ? ' is-alert' : ''}`}>
+              <span className="visually-hidden">, ждут проверки: </span>
+              {t.badge}
+            </span>
+          )}
         </Link>
       ))}
     </nav>

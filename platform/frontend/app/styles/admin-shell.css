@@ -58,6 +58,28 @@
 }
 .ash-tabs a:hover { color: #3b71fe; }
 .ash-tabs a.is-active { color: #3b71fe; border-bottom-color: currentColor; }
+/* What waits in the section (Отзывы, Обратная связь) — a pill after the label.
+   Positioned so its visually-hidden label stays inside the scrolling tab row
+   instead of widening the page on a phone. */
+.ash-tab-badge {
+  position: relative;
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--blue);
+  color: var(--white);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  letter-spacing: 0;
+  text-align: center;
+  vertical-align: 1px;
+}
+.ash-tab-badge.is-alert { background: var(--red); }
 .ash-tabs--inline {
   display: flex;
   gap: 40px;

@@ -14,16 +14,20 @@ import React from 'react';
  * (Access gating lives in the route layout — see layout.test.tsx; the page itself
  * renders assuming access.)
  */
-const { listMock, hideMock, unhideMock } = vi.hoisted(() => ({
+const { listMock, hideMock, unhideMock, checkMock, countsMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   hideMock: vi.fn(),
   unhideMock: vi.fn(),
+  checkMock: vi.fn(),
+  countsMock: vi.fn(),
 }));
 vi.mock('../../../lib/api', () => ({
   api: {
     adminListReviews: listMock,
     adminHideReview: hideMock,
     adminUnhideReview: unhideMock,
+    adminCheckReviews: checkMock,
+    adminModerationCounts: countsMock,
   },
 }));
 
@@ -39,6 +43,13 @@ const id = (over: Partial<AdminIdentityWire>): AdminIdentityWire => ({
   ...over,
 });
 
+/** Moderation fields of a review already checked at its version (the history). */
+const checkedAt = (created_at: number) => ({
+  changed_at: created_at,
+  hide: null,
+  check: { through: created_at, at: 1, by_id: 'baseline', by_name: null },
+});
+
 const REVIEWS = {
   reviews: [
     {
@@ -49,6 +60,7 @@ const REVIEWS = {
       text: 'Отлично',
       created_at: 100,
       hidden: false,
+      ...checkedAt(100),
       identity: id({ user_id: 'acct:anna', display_name: 'Анна', kind: 'google', email: 'anna@gmail.com' }),
     },
     {
@@ -59,6 +71,7 @@ const REVIEWS = {
       text: null,
       created_at: 90,
       hidden: false,
+      ...checkedAt(90),
       identity: id({ user_id: 'acct:milan', display_name: 'Milan', kind: 'telegram', telegram_username: 'milan_bg' }),
     },
     {
@@ -69,6 +82,7 @@ const REVIEWS = {
       text: null,
       created_at: 80,
       hidden: false,
+      ...checkedAt(80),
       identity: id({ user_id: 'dev:anon', kind: 'anon' }),
     },
   ],
@@ -83,9 +97,13 @@ beforeEach(() => {
   listMock.mockReset();
   hideMock.mockReset();
   unhideMock.mockReset();
+  checkMock.mockReset();
+  countsMock.mockReset();
   listMock.mockResolvedValue(REVIEWS);
   hideMock.mockResolvedValue({});
   unhideMock.mockResolvedValue({});
+  checkMock.mockResolvedValue({});
+  countsMock.mockResolvedValue({ reviews_new: 0, reviews_new_low: 0, feedback_open: 0 });
 });
 
 describe('AdminReviewsPage', () => {
@@ -249,5 +267,100 @@ describe('AdminReviewsPage', () => {
     await waitFor(() =>
       expect(unhideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
     );
+  });
+});
+
+describe('AdminReviewsPage «Проверено»', () => {
+  /** A review no admin has checked yet. */
+  const fresh = (i: number) => ({ ...REVIEWS.reviews[i], check: null });
+
+  it('opens on «Новые» while anything waits and checks a review at the version shown', async () => {
+    listMock.mockResolvedValue({
+      // Анна is new; the anonymous 2★ was checked at 80 and changed at 85 since.
+      reviews: [fresh(0), REVIEWS.reviews[1], { ...REVIEWS.reviews[2], changed_at: 85 }],
+    });
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(window.location.search).toBe('?view=new');
+    expect(screen.getByText('Новые · 2').getAttribute('aria-pressed')).toBe('true');
+    expect(order(container)).toEqual(['Анна', 'Гость']);
+    expect(screen.getByText('НОВЫЙ')).toBeTruthy();
+    expect(screen.getByText('ИЗМЕНЁН')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByText('Проверено')[0]);
+    await waitFor(() =>
+      expect(checkMock).toHaveBeenCalledWith({
+        reviews: [{ user_id: 'acct:anna', quest_id: 'q1', through: 100 }],
+      }),
+    );
+    await waitFor(() => expect(order(container)).toEqual(['Гость']));
+    expect(screen.getByText('Новые · 1')).toBeTruthy();
+    expect(await screen.findByText('Проверено: 1')).toBeTruthy();
+    // The menu counters follow the action.
+    expect(countsMock).toHaveBeenCalled();
+  });
+
+  it('keeps the view a link names, even with new reviews waiting', async () => {
+    window.history.replaceState(null, '', '/admin/reviews?view=all');
+    listMock.mockResolvedValue({ reviews: [fresh(0), REVIEWS.reviews[1]] });
+    render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(window.location.search).toBe('?view=all');
+    expect(screen.getByText('Все · 2').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('marks the whole «Новые» list checked after a confirm', async () => {
+    listMock.mockResolvedValue({ reviews: [fresh(0), fresh(1), REVIEWS.reviews[2]] });
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    fireEvent.click(screen.getByText('Отметить все проверенными · 2'));
+    expect(screen.getByText('Отметить проверенными 2 отзыва?')).toBeTruthy();
+    fireEvent.click(screen.getByText('Отметить проверенными'));
+    await waitFor(() =>
+      expect(checkMock).toHaveBeenCalledWith({
+        reviews: [
+          { user_id: 'acct:anna', quest_id: 'q1', through: 100 },
+          { user_id: 'acct:milan', quest_id: 'q1', through: 90 },
+        ],
+      }),
+    );
+    await waitFor(() => expect(container.querySelectorAll('.amod-card').length).toBe(0));
+    expect(screen.getByText('Новые · 0')).toBeTruthy();
+  });
+
+  it('hiding a new review checks it too', async () => {
+    listMock.mockResolvedValue({ reviews: [fresh(0), REVIEWS.reviews[1]] });
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    fireEvent.click(screen.getByText('Скрыть'));
+    fireEvent.click(await screen.findByText('Скрыть отзыв'));
+    await waitFor(() => expect(hideMock).toHaveBeenCalled());
+    await waitFor(() => expect(order(container)).toEqual([]));
+    expect(screen.getByText('Новые · 0')).toBeTruthy();
+  });
+
+  it('says who hid or checked a review — nobody for the history', async () => {
+    const march12 = Date.UTC(2026, 2, 12, 12) / 1000;
+    window.history.replaceState(null, '', '/admin/reviews?view=all');
+    listMock.mockResolvedValue({
+      reviews: [
+        {
+          ...REVIEWS.reviews[0],
+          check: { through: 100, at: march12, by_id: 'acct:admin', by_name: 'Ольга' },
+        },
+        REVIEWS.reviews[1],
+        {
+          ...REVIEWS.reviews[2],
+          hidden: true,
+          hide: { at: march12, by_id: 'ops-token', by_name: null },
+        },
+      ],
+    });
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(screen.getByText('Проверено · Ольга · 12.03.2026')).toBeTruthy();
+    expect(screen.getByText('Скрыто · служебный токен · 12.03.2026')).toBeTruthy();
+    // Milan's review went live already checked — no line for it.
+    expect(container.querySelectorAll('.amod-card__marks').length).toBe(2);
   });
 });

@@ -400,6 +400,8 @@ mod tests {
             handlers::admin::AdminReviewWire,
             handlers::admin::AdminReviewsResponse,
             handlers::admin::ReviewHideRequest,
+            handlers::admin::ReviewCheckRequest,
+            handlers::admin::AdminModerationCounts,
             handlers::admin::AdminReportWire,
             handlers::admin::AdminFeedbackGroupWire,
             handlers::admin::AdminFeedbackResponse,
@@ -5627,6 +5629,103 @@ mod tests {
         );
     }
 
+    /// Migration 0008's baseline marks every existing review checked at its current
+    /// version, and the Postgres mark only moves forward — the in-memory twin's
+    /// rule. The backfill is replayed inside a transaction that is rolled back, so
+    /// the shared test database keeps its own state.
+    #[tokio::test]
+    async fn pg_checked_reviews_baseline_and_forward_only_marks() {
+        use sqlx::Row as _;
+        use store::{FactStore as _, ModerationStore as _};
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_checked_reviews: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let facts_store = pg_store::PgFactStore::new(pool.clone());
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let (player, quest) = (format!("p-check-{run}"), format!("q-check-{run}"));
+        let attempt = facts_store
+            .create_attempt(&player, &quest, &format!("{quest}-v1"))
+            .await
+            .expect("attempt");
+        facts_store
+            .append_idempotent(&attempt.attempt_id, vec![rate_fact("4", Some("ок"))])
+            .await
+            .expect("append")
+            .expect("known attempt");
+        let rated_at: i64 = sqlx::query("SELECT recorded_at FROM facts WHERE attempt_id = $1")
+            .bind(&attempt.attempt_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the rating fact")
+            .get("recorded_at");
+
+        // sqlx already created the table; replay only the backfill — twice, to
+        // show it is idempotent.
+        let migration = include_str!("../migrations/0008_checked_reviews.sql");
+        let backfill = &migration[migration.find("INSERT INTO").expect("backfill")..];
+        let mut tx = pool.begin().await.expect("begin");
+        for _ in 0..2 {
+            sqlx::raw_sql(backfill)
+                .execute(&mut *tx)
+                .await
+                .expect("replay the backfill");
+        }
+        let rows = sqlx::query(
+            "SELECT checked_through, checked_by FROM checked_reviews
+             WHERE user_id = $1 AND quest_id = $2",
+        )
+        .bind(&player)
+        .bind(&quest)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("baseline row");
+        tx.rollback().await.expect("rollback");
+        assert_eq!(rows.len(), 1, "one mark per (player, quest)");
+        assert_eq!(rows[0].get::<i64, _>("checked_through"), rated_at);
+        assert_eq!(rows[0].get::<String, _>("checked_by"), "baseline");
+
+        let moderation = pg_store::PgModerationStore::new(pool.clone());
+        let key = (player.clone(), quest.clone());
+        for (through, by, want) in [
+            (10, "a", (10, "a")),
+            (5, "b", (10, "a")),  // a stale re-check keeps the newer mark
+            (10, "c", (10, "c")), // the same version re-stamps who
+            (20, "d", (20, "d")),
+        ] {
+            moderation
+                .check_reviews(&[(player.clone(), quest.clone(), through)], 100, by)
+                .await
+                .expect("check");
+            let got = moderation
+                .review_checks()
+                .await
+                .expect("checks")
+                .remove(&key)
+                .expect("the mark");
+            assert_eq!(
+                (got.through, got.by.as_str()),
+                want,
+                "after checking {through} as {by}"
+            );
+        }
+        sqlx::query("DELETE FROM checked_reviews WHERE user_id = $1")
+            .bind(&player)
+            .execute(&pool)
+            .await
+            .expect("clean up");
+    }
+
     /// Everything a per-scenario Postgres test needs: the router over a real
     /// pool (migrations applied) and a run-unique tag so scenarios tolerate a
     /// shared, pre-populated database. `None` means "skip: no DATABASE_URL".
@@ -7047,6 +7146,159 @@ mod tests {
         assert_eq!(v["groups"][0]["resolved"], json!(false));
     }
 
+    /// The admin menu counters, as the ops token sees them.
+    async fn moderation_counts(app: &Router) -> Value {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, v) = get_json_h(app, "/api/admin/moderation/counts", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        v
+    }
+
+    /// The admin reviews list, keyed by author id.
+    async fn reviews_by_author(app: &Router) -> std::collections::HashMap<String, Value> {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, v) = get_json_h(app, "/api/admin/reviews", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        v["reviews"]
+            .as_array()
+            .expect("reviews")
+            .iter()
+            .map(|r| {
+                let id = r["identity"]["user_id"].as_str().expect("id").to_string();
+                (id, r.clone())
+            })
+            .collect()
+    }
+
+    /// «Проверено»: the menu counts what no admin has checked at its current
+    /// version; a check covers the version the admin saw — never a later one, and a
+    /// stale re-check never rolls a mark back; hiding a review checks it too.
+    #[tokio::test]
+    async fn admin_review_checks_count_and_cover_the_version_seen() {
+        let state = test_state(test_config());
+        seed_moderation(&state).await;
+        let app = build_router(state);
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let check = |user: &str, through: u64| json!({ "reviews": [{ "user_id": user, "quest_id": "q1", "through": through }] });
+
+        let c = moderation_counts(&app).await;
+        assert_eq!(c["reviews_new"], json!(4), "nothing checked yet");
+        assert_eq!(c["reviews_new_low"], json!(1), "the anonymous 2★");
+        assert_eq!(c["feedback_open"], json!(1));
+        let rs = reviews_by_author(&app).await;
+        assert!(
+            rs.values()
+                .all(|r| r["check"].is_null() && r["hide"].is_null())
+        );
+        let version = |id: &str| rs[id]["changed_at"].as_u64().expect("changed_at");
+        assert!(version("acct-google") > 0);
+
+        // Check two reviews at the versions shown — one request, the whole batch.
+        let batch = json!({ "reviews": [
+            { "user_id": "acct-google", "quest_id": "q1", "through": version("acct-google") },
+            { "user_id": "acct-email", "quest_id": "q1", "through": version("acct-email") },
+            { "user_id": "nobody", "quest_id": "q1", "through": 1 },
+        ] });
+        let (st, _) = post_json_h(&app, "/api/admin/reviews/check", batch, &admin).await;
+        assert_eq!(
+            st,
+            StatusCode::NO_CONTENT,
+            "a pair without a rating is skipped"
+        );
+        assert_eq!(moderation_counts(&app).await["reviews_new"], json!(2));
+        let rs2 = reviews_by_author(&app).await;
+        let google = &rs2["acct-google"]["check"];
+        assert_eq!(google["through"], json!(version("acct-google")));
+        assert_eq!(google["by_id"], json!("ops-token"));
+        assert!(google["by_name"].is_null());
+        assert!(google["at"].as_u64().expect("at") > 0);
+
+        // A check of an OLDER version than the current one leaves the review new —
+        // the «ИЗМЕНЁН» state: checked once, changed since.
+        let stale = check("acct-tg", version("acct-tg") - 1);
+        let _ = post_json_h(&app, "/api/admin/reviews/check", stale, &admin).await;
+        assert_eq!(moderation_counts(&app).await["reviews_new"], json!(2));
+        let rs3 = reviews_by_author(&app).await;
+        let tg = &rs3["acct-tg"];
+        assert!(tg["check"]["through"].as_u64() < tg["changed_at"].as_u64());
+
+        // A stale re-check never rolls a newer mark back.
+        let _ = post_json_h(
+            &app,
+            "/api/admin/reviews/check",
+            check("acct-google", 0),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            reviews_by_author(&app).await["acct-google"]["check"]["through"],
+            json!(version("acct-google"))
+        );
+
+        // A version from the future is clamped to the current one.
+        let ahead = check("acct-tg", version("acct-tg") + 1_000);
+        let _ = post_json_h(&app, "/api/admin/reviews/check", ahead, &admin).await;
+        assert_eq!(
+            reviews_by_author(&app).await["acct-tg"]["check"]["through"],
+            json!(version("acct-tg"))
+        );
+        let c = moderation_counts(&app).await;
+        assert_eq!(c["reviews_new"], json!(1), "only the anonymous 2★ is left");
+        assert_eq!(c["reviews_new_low"], json!(1));
+
+        // Hiding is deciding: the anonymous 2★ is hidden AND checked, with who/when.
+        let hide = json!({ "user_id": "dev-anon", "quest_id": "q1" });
+        let _ = post_json_h(&app, "/api/admin/reviews/hide", hide, &admin).await;
+        let c = moderation_counts(&app).await;
+        assert_eq!(
+            (c["reviews_new"].clone(), c["reviews_new_low"].clone()),
+            (json!(0), json!(0))
+        );
+        let rs4 = reviews_by_author(&app).await;
+        let anon = &rs4["dev-anon"];
+        assert_eq!(anon["hidden"], json!(true));
+        assert_eq!(anon["hide"]["by_id"], json!("ops-token"));
+        assert!(anon["hide"]["at"].as_u64().expect("at") > 0);
+        assert_eq!(anon["check"]["through"], anon["changed_at"]);
+
+        // Resolving the feedback group empties the other counter.
+        let key = json!({ "quest_id": "q1", "snapshot_id": "q1-v1", "step_position": 1 });
+        let _ = post_json_h(&app, "/api/admin/feedback/resolve", key, &admin).await;
+        assert_eq!(moderation_counts(&app).await["feedback_open"], json!(0));
+    }
+
+    /// A check by an admin account names that admin (their email, no display name).
+    #[tokio::test]
+    async fn admin_review_check_names_the_admin_and_caps_the_batch() {
+        let state = test_state(test_config());
+        seed_moderation(&state).await;
+        let app = build_router(state);
+        let bearer = admin_bearer(&app, "checks").await;
+        let auth = [("authorization", bearer.as_str())];
+        let through = reviews_by_author(&app).await["acct-google"]["changed_at"].clone();
+        let body = json!({ "reviews": [
+            { "user_id": "acct-google", "quest_id": "q1", "through": through },
+        ] });
+        let (st, _) = post_json_h(&app, "/api/admin/reviews/check", body, &auth).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let rs = reviews_by_author(&app).await;
+        let google = &rs["acct-google"]["check"];
+        assert_eq!(google["by_id"], json!("adm-checks"));
+        assert_eq!(google["by_name"], json!("adm-checks@example.com"));
+
+        let too_many: Vec<Value> = (0..5_001)
+            .map(|i| json!({ "user_id": format!("u{i}"), "quest_id": "q1", "through": 1 }))
+            .collect();
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/reviews/check",
+            json!({ "reviews": too_many }),
+            &auth,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+    }
+
     /// Register a constructor row (the authoring registry) with an authored city
     /// in its body. Registers NOTHING in the catalog — publishing is a separate
     /// act, which is the whole point of the callers below.
@@ -7168,7 +7420,11 @@ mod tests {
         let app = build_router(state);
         let key = json!({ "quest_id": "q1", "snapshot_id": "q1-v1", "step_position": 1 });
         let hide = json!({ "user_id": "dev-anon", "quest_id": "q1" });
-        for uri in ["/api/admin/reviews", "/api/admin/feedback"] {
+        for uri in [
+            "/api/admin/reviews",
+            "/api/admin/feedback",
+            "/api/admin/moderation/counts",
+        ] {
             let (st, _) = get_json(&app, uri).await;
             assert_eq!(st, StatusCode::FORBIDDEN, "{uri} without admin");
             let (st, _) = get_json_h(&app, uri, &[("x-admin-token", "wrong")]).await;
@@ -7177,6 +7433,7 @@ mod tests {
         for (uri, body) in [
             ("/api/admin/reviews/hide", hide.clone()),
             ("/api/admin/reviews/unhide", hide),
+            ("/api/admin/reviews/check", json!({ "reviews": [] })),
             ("/api/admin/feedback/resolve", key.clone()),
             ("/api/admin/feedback/reopen", key),
         ] {
