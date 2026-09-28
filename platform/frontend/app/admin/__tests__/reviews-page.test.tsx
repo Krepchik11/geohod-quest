@@ -5,10 +5,12 @@ import React from 'react';
 
 /**
  * Admin · Отзывы page. Pinned behaviors: the list renders every rating (star-only
- * included) with the resolved contact; hiding a review confirms with a before→after
- * average preview (same grain the server folds), calls the hide endpoint, and drops
- * the row from the shown list. (Access gating lives in the route layout — see
- * layout.test.tsx; the page itself renders assuming access.)
+ * included) with the resolved contact, newest first unless another sort is picked;
+ * every filter option carries its count; filters and sort round-trip through the
+ * URL; hiding a review confirms with a before→after average preview (same grain the
+ * server folds), calls the hide endpoint, and drops the row from the shown list.
+ * (Access gating lives in the route layout — see layout.test.tsx; the page itself
+ * renders assuming access.)
  */
 const { listMock, hideMock, unhideMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
@@ -70,7 +72,12 @@ const REVIEWS = {
   ],
 };
 
+/** Author names in on-screen order. */
+const order = (container: HTMLElement) =>
+  [...container.querySelectorAll('.amod-card__name')].map((n) => n.textContent);
+
 beforeEach(() => {
+  window.history.replaceState(null, '', '/admin/reviews');
   listMock.mockReset();
   hideMock.mockReset();
   unhideMock.mockReset();
@@ -89,14 +96,50 @@ describe('AdminReviewsPage', () => {
     expect(screen.getByText('anna@gmail.com')).toBeTruthy();
     expect(screen.getByText('@milan_bg')).toBeTruthy();
     expect(screen.getByText('аноним · контакта нет')).toBeTruthy();
-    expect(screen.getByText(/3 записи · 0 скрыто · сначала худшие/)).toBeTruthy();
+    expect(screen.getByText('3 записи')).toBeTruthy();
   });
 
-  it('hides the worst review after a before→after confirm and drops it from view', async () => {
+  it('lists newest first by default and re-sorts from the select into the URL', async () => {
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(order(container)).toEqual(['Анна', 'Milan', 'Гость']);
+    fireEvent.change(screen.getByLabelText('Сортировка'), { target: { value: 'worst' } });
+    expect(order(container)).toEqual(['Гость', 'Milan', 'Анна']);
+    expect(window.location.search).toBe('?sort=worst');
+    fireEvent.change(screen.getByLabelText('Сортировка'), { target: { value: 'best' } });
+    expect(order(container)).toEqual(['Анна', 'Milan', 'Гость']);
+  });
+
+  it('counts every filter option and disables the empty ratings', async () => {
+    listMock.mockResolvedValue({
+      reviews: [...REVIEWS.reviews.slice(0, 2), { ...REVIEWS.reviews[2], hidden: true }],
+    });
     render(<AdminReviewsPage />);
     await screen.findByText('Отлично');
-    // Worst-first ordering → the first «Скрыть» is the 2★ anonymous rating.
-    fireEvent.click(screen.getAllByText('Скрыть')[0]);
+    expect(screen.getByText('Видимые · 2')).toBeTruthy();
+    expect(screen.getByText('Скрытые · 1')).toBeTruthy();
+    expect(screen.getByText('Все · 3')).toBeTruthy();
+    // Rating counts follow the view: the hidden 2★ is not among the visible ones.
+    expect((screen.getByText('5★ · 1') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByText('2★ · 0') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('option', { name: 'Ирония судьбы · 2' })).toBeTruthy();
+  });
+
+  it('restores filters and sort from the URL', async () => {
+    window.history.replaceState(null, '', '/admin/reviews?view=all&rating=2&sort=best');
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Гость');
+    expect(order(container)).toEqual(['Гость']);
+    expect((screen.getByLabelText('Сортировка') as HTMLSelectElement).value).toBe('best');
+    expect(screen.getByText('Все · 1').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText('2★ · 1').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('hides a review after a before→after confirm and drops it from view', async () => {
+    render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    // Newest-first ordering → the last «Скрыть» is the oldest, the 2★ anonymous rating.
+    fireEvent.click(screen.getAllByText('Скрыть').at(-1)!);
     expect(await screen.findByText('Скрыть отзыв?')).toBeTruthy();
     // Average preview: (5+4+2)/3 = 3.7 → (5+4)/2 = 4.5 after hiding the 2★.
     expect(screen.getByText('3.7')).toBeTruthy();
@@ -105,20 +148,23 @@ describe('AdminReviewsPage', () => {
     await waitFor(() =>
       expect(hideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
     );
-    // Hidden (and showHidden off) → it leaves the list, the hidden counter ticks.
-    await waitFor(() => expect(screen.getByText(/1 скрыто/)).toBeTruthy());
+    // Hidden (and the «Видимые» view on) → it leaves the list, the hidden counter ticks.
+    await waitFor(() => expect(screen.getByText('Скрытые · 1')).toBeTruthy());
+    expect(screen.getByText('2 записи')).toBeTruthy();
   });
 
-  it('reveals hidden reviews via the toggle and can unhide them', async () => {
+  it('shows only hidden reviews on their tab and can unhide them', async () => {
     listMock.mockResolvedValue({
-      reviews: [{ ...REVIEWS.reviews[2], hidden: true }],
+      reviews: [REVIEWS.reviews[0], { ...REVIEWS.reviews[2], hidden: true }],
     });
-    render(<AdminReviewsPage />);
-    // Hidden by default → not shown until the toggle is on.
-    await waitFor(() => expect(screen.getByText(/1 скрыто/)).toBeTruthy());
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    // The «Видимые» view by default → the hidden one is not shown.
     expect(screen.queryByText('Показать')).toBeNull();
-    fireEvent.click(screen.getByText(/Показать скрытые/));
-    fireEvent.click(await screen.findByText('Показать'));
+    fireEvent.click(screen.getByText('Скрытые · 1'));
+    expect(order(container)).toEqual(['Гость']);
+    expect(window.location.search).toBe('?view=hidden');
+    fireEvent.click(screen.getByText('Показать'));
     await waitFor(() =>
       expect(unhideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
     );
