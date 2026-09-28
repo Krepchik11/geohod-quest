@@ -165,11 +165,12 @@ export function moderationDate(unixSeconds: number, nowMs: number = Date.now()):
 }
 
 /* ── Отзывы: filters, sort and their URL ──────────────────────────────────────
-   `?view=hidden&quest=q-1&rating=4&sort=worst` — defaults are left out, so the
-   plain page is the plain URL. */
+   `?view=hidden&quest=q-1&rating=4&text=with&q=спасибо&sort=worst` — defaults
+   are left out, so the plain page is the plain URL. */
 
 export type ReviewSort = 'new' | 'worst' | 'best';
 export type ReviewView = 'visible' | 'hidden' | 'all';
+export type ReviewText = 'all' | 'with' | 'without';
 
 export interface ReviewsQuery {
   /** A quest id, or `'all'`. */
@@ -177,6 +178,10 @@ export interface ReviewsQuery {
   /** 1–5, or 0 for every rating. */
   rating: number;
   view: ReviewView;
+  /** A written review, a star-only rating, or either. */
+  text: ReviewText;
+  /** The search box, as typed; `''` for none. */
+  q: string;
   sort: ReviewSort;
 }
 
@@ -184,6 +189,8 @@ export const DEFAULT_REVIEWS_QUERY: ReviewsQuery = {
   quest: 'all',
   rating: 0,
   view: 'visible',
+  text: 'all',
+  q: '',
   sort: 'new',
 };
 
@@ -199,16 +206,25 @@ export const REVIEW_VIEWS: ReadonlyArray<{ key: ReviewView; label: string }> = [
   { key: 'all', label: 'Все' },
 ];
 
+export const REVIEW_TEXTS: ReadonlyArray<{ key: ReviewText; label: string }> = [
+  { key: 'all', label: 'Все' },
+  { key: 'with', label: 'С текстом' },
+  { key: 'without', label: 'Только звёзды' },
+];
+
 /** Unknown or malformed values fall back to the default, one key at a time. */
 export function parseReviewsQuery(search: string): ReviewsQuery {
   const p = new URLSearchParams(search);
   const sort = REVIEW_SORTS.find((s) => s.key === p.get('sort'))?.key;
   const view = REVIEW_VIEWS.find((v) => v.key === p.get('view'))?.key;
+  const text = REVIEW_TEXTS.find((t) => t.key === p.get('text'))?.key;
   const rating = Number(p.get('rating'));
   return {
     quest: p.get('quest') || DEFAULT_REVIEWS_QUERY.quest,
     rating: Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : 0,
     view: view ?? DEFAULT_REVIEWS_QUERY.view,
+    text: text ?? DEFAULT_REVIEWS_QUERY.text,
+    q: p.get('q') ?? DEFAULT_REVIEWS_QUERY.q,
     sort: sort ?? DEFAULT_REVIEWS_QUERY.sort,
   };
 }
@@ -219,9 +235,26 @@ export function serializeReviewsQuery(q: ReviewsQuery): string {
   if (q.view !== DEFAULT_REVIEWS_QUERY.view) p.set('view', q.view);
   if (q.quest !== DEFAULT_REVIEWS_QUERY.quest) p.set('quest', q.quest);
   if (q.rating !== DEFAULT_REVIEWS_QUERY.rating) p.set('rating', String(q.rating));
+  if (q.text !== DEFAULT_REVIEWS_QUERY.text) p.set('text', q.text);
+  if (q.q.trim()) p.set('q', q.q);
   if (q.sort !== DEFAULT_REVIEWS_QUERY.sort) p.set('sort', q.sort);
   const s = p.toString();
   return s ? `?${s}` : '';
+}
+
+/** Case- and ё-insensitive: «Ёлка» finds «елка» and back. */
+const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+
+/**
+ * The search box as a predicate: a substring of the review text or of any way to
+ * name the author — name, email, Telegram handle (a leading @ is optional), id.
+ */
+export function reviewSearch(q: string): (r: AdminReviewWire) => boolean {
+  const needle = fold(q.trim()).replace(/^@/, '');
+  if (!needle) return () => true;
+  return (r) =>
+    [r.text, r.identity.display_name, r.identity.email, r.identity.telegram_username, r.identity.user_id]
+      .some((v) => !!v && fold(v).includes(needle));
 }
 
 /** A new array; ties inside one rating (or one instant) fall back to newest-first. */
@@ -238,38 +271,72 @@ export function sortReviews(
 }
 
 export interface ReviewFacets {
-  /** The shown list: every filter applied, sorted. */
+  /** The shown list: every filter and the search applied, sorted. */
   list: AdminReviewWire[];
-  /** Per view — counted under the quest and rating filters. */
+  /** Per view — counted under every other filter. */
   views: Record<ReviewView, number>;
-  /** Per star 1–5 — counted under the quest and view filters. */
+  /** Per star 1–5 — counted under every other filter. */
   ratings: Record<number, number>;
-  /** Per quest id — counted under the view and rating filters. */
+  /** Per quest id — counted under every other filter. */
   quests: Map<string, number>;
+  /** Written vs star-only — counted under every other filter. */
+  texts: Record<Exclude<ReviewText, 'all'>, number>;
 }
+
+type Filter = 'quest' | 'rating' | 'view' | 'text';
 
 /**
  * The list plus every filter's counts in one pass. Each count applies all the
- * OTHER filters, so it answers «how many would I see if I clicked this».
+ * OTHER filters, so it answers «how many would I see if I clicked this». The
+ * search narrows everything and has no count of its own.
  */
 export function reviewFacets(reviews: readonly AdminReviewWire[], q: ReviewsQuery): ReviewFacets {
   const views: Record<ReviewView, number> = { visible: 0, hidden: 0, all: 0 };
   const ratings: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   const quests = new Map<string, number>();
+  const texts = { with: 0, without: 0 };
   const list: AdminReviewWire[] = [];
+  const found = reviewSearch(q.q);
   for (const r of reviews) {
-    const byQuest = q.quest === 'all' || r.quest_id === q.quest;
-    const byRating = q.rating === 0 || r.rating === q.rating;
-    const byView = q.view === 'all' || r.hidden === (q.view === 'hidden');
-    if (byQuest && byRating) {
+    if (!found(r)) continue;
+    const ok: Record<Filter, boolean> = {
+      quest: q.quest === 'all' || r.quest_id === q.quest,
+      rating: q.rating === 0 || r.rating === q.rating,
+      view: q.view === 'all' || r.hidden === (q.view === 'hidden'),
+      text: q.text === 'all' || !!r.text === (q.text === 'with'),
+    };
+    const missed = (Object.keys(ok) as Filter[]).filter((f) => !ok[f]);
+    // A filter's own count takes the rows that pass everything else.
+    const countsFor = (f: Filter) => missed.length === 0 || (missed.length === 1 && missed[0] === f);
+    if (countsFor('view')) {
       views.all += 1;
       views[r.hidden ? 'hidden' : 'visible'] += 1;
     }
-    if (byQuest && byView) ratings[r.rating] = (ratings[r.rating] ?? 0) + 1;
-    if (byView && byRating) quests.set(r.quest_id, (quests.get(r.quest_id) ?? 0) + 1);
-    if (byQuest && byRating && byView) list.push(r);
+    if (countsFor('rating')) ratings[r.rating] = (ratings[r.rating] ?? 0) + 1;
+    if (countsFor('quest')) quests.set(r.quest_id, (quests.get(r.quest_id) ?? 0) + 1);
+    if (countsFor('text')) texts[r.text ? 'with' : 'without'] += 1;
+    if (missed.length === 0) list.push(r);
   }
-  return { list: sortReviews(list, q.sort), views, ratings, quests };
+  return { list: sortReviews(list, q.sort), views, ratings, quests, texts };
+}
+
+export interface QuestSummary extends QuestAverage {
+  /** Hidden ratings — out of the average. */
+  hidden: number;
+  /** Visible ratings per star 1–5. */
+  stars: Record<number, number>;
+}
+
+/** The quest as the site shows it: the average and star spread of its visible ratings. */
+export function questSummary(reviews: readonly AdminReviewWire[], questId: string): QuestSummary {
+  const stars: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  let hidden = 0;
+  for (const r of reviews) {
+    if (r.quest_id !== questId) continue;
+    if (r.hidden) hidden += 1;
+    else stars[r.rating] = (stars[r.rating] ?? 0) + 1;
+  }
+  return { ...questAverage(reviews, questId), hidden, stars };
 }
 
 /** «Все квесты» + every quest present, А–Я, each labelled with its count. */

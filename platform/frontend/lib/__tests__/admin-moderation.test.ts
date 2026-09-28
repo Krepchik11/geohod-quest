@@ -9,9 +9,11 @@ import {
   parseReviewsQuery,
   questAverage,
   questFilterOptions,
+  questSummary,
   relativeTime,
   reviewFacets,
   reviewQuestOptions,
+  reviewSearch,
   serializeReviewsQuery,
   sortReviews,
   templateLabel,
@@ -156,13 +158,25 @@ describe('reviews query', () => {
 
   it('round-trips through the URL, leaving the defaults out', () => {
     expect(serializeReviewsQuery(DEFAULT_REVIEWS_QUERY)).toBe('');
-    const q = { quest: 'q-1', rating: 4, view: 'hidden', sort: 'worst' } as const;
-    expect(serializeReviewsQuery(q)).toBe('?view=hidden&quest=q-1&rating=4&sort=worst');
+    expect(serializeReviewsQuery({ ...DEFAULT_REVIEWS_QUERY, q: '   ' })).toBe('');
+    const q = {
+      quest: 'q-1',
+      rating: 4,
+      view: 'hidden',
+      text: 'with',
+      q: '@anna',
+      sort: 'worst',
+    } as const;
+    expect(serializeReviewsQuery(q)).toBe(
+      '?view=hidden&quest=q-1&rating=4&text=with&q=%40anna&sort=worst',
+    );
     expect(parseReviewsQuery(serializeReviewsQuery(q))).toEqual(q);
   });
 
   it('drops unknown or malformed values key by key', () => {
-    expect(parseReviewsQuery('?sort=random&view=x&rating=9&quest=')).toEqual(DEFAULT_REVIEWS_QUERY);
+    expect(parseReviewsQuery('?sort=random&view=x&rating=9&quest=&text=maybe')).toEqual(
+      DEFAULT_REVIEWS_QUERY,
+    );
     expect(parseReviewsQuery('?rating=2.5&sort=best')).toEqual({ ...DEFAULT_REVIEWS_QUERY, sort: 'best' });
   });
 
@@ -185,6 +199,54 @@ describe('reviews query', () => {
     const hidden5 = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, view: 'hidden', rating: 5 });
     expect(hidden5.list).toEqual([]);
     expect(hidden5.views).toEqual({ visible: 2, hidden: 0, all: 2 });
+  });
+
+  it('counts written vs star-only, and the search narrows every count', () => {
+    const rs = [
+      { ...rev('q1', 5, 1), text: 'Спасибо, всё понравилось' },
+      { ...rev('q1', 4, 2), text: 'Нормально' },
+      rev('q1', 5, 3),
+      { ...rev('q2', 5, 4), text: 'СПАСИБО' },
+    ];
+    const f = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, text: 'with' });
+    expect(at(f.list)).toEqual([4, 2, 1]);
+    // The text counts ignore the text filter itself.
+    expect(f.texts).toEqual({ with: 3, without: 1 });
+    expect(f.ratings).toEqual({ 1: 0, 2: 0, 3: 0, 4: 1, 5: 2 });
+    const found = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, q: 'спасибо' });
+    expect(at(found.list)).toEqual([4, 1]);
+    expect(found.texts).toEqual({ with: 2, without: 0 });
+    expect(found.views).toEqual({ visible: 2, hidden: 0, all: 2 });
+    expect([...found.quests]).toEqual([['q1', 1], ['q2', 1]]);
+  });
+
+  it('searches the text and every name of the author, case- and ё-insensitive', () => {
+    const r: AdminReviewWire = {
+      ...rev('q1', 5, 1),
+      text: 'Ёлка у фонтана',
+      identity: id({
+        user_id: 'bubble-user-42',
+        display_name: 'Анна',
+        kind: 'telegram',
+        email: 'anna@mail.ru',
+        telegram_username: 'anna_tg',
+      }),
+    };
+    for (const q of ['елка', 'ФОНТАН', 'анна', 'ANNA@MAIL', '@anna_tg', 'user-42', '  ']) {
+      expect(reviewSearch(q)(r)).toBe(true);
+    }
+    expect(reviewSearch('борис')(r)).toBe(false);
+  });
+
+  it('summarizes a quest over its visible ratings', () => {
+    const rs = [rev('q1', 5, 1), rev('q1', 4, 2), rev('q1', 1, 3, true), rev('q2', 2, 4)];
+    expect(questSummary(rs, 'q1')).toEqual({
+      avg: 4.5,
+      count: 2,
+      hidden: 1,
+      stars: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 1 },
+    });
+    expect(questSummary([rev('q1', 3, 1, true)], 'q1')).toMatchObject({ avg: null, count: 0, hidden: 1 });
   });
 
   it('lists quests А–Я with their counts', () => {

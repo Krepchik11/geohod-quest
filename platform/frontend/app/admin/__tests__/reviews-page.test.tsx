@@ -6,8 +6,10 @@ import React from 'react';
 /**
  * Admin · Отзывы page. Pinned behaviors: the list renders every rating (star-only
  * included) with the resolved contact, newest first unless another sort is picked;
- * every filter option carries its count; filters and sort round-trip through the
- * URL; hiding a review confirms with a before→after average preview (same grain the
+ * every filter option carries its count; filters, search and sort round-trip
+ * through the URL; a picked quest gets its on-site summary; the list renders fifty
+ * at a time; account holders link to Пользователи and any author id copies; hiding
+ * a review confirms with a before→after average preview (same grain the
  * server folds), calls the hide endpoint, and drops the row from the shown list.
  * (Access gating lives in the route layout — see layout.test.tsx; the page itself
  * renders assuming access.)
@@ -123,6 +125,85 @@ describe('AdminReviewsPage', () => {
     expect((screen.getByText('5★ · 1') as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByText('2★ · 0') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('option', { name: 'Ирония судьбы · 2' })).toBeTruthy();
+    expect(screen.getByText('С текстом · 1')).toBeTruthy();
+    expect(screen.getByText('Только звёзды · 1')).toBeTruthy();
+  });
+
+  it('searches the text and the author into the URL, counts included', async () => {
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    const box = screen.getByLabelText('Поиск по отзывам');
+    fireEvent.change(box, { target: { value: '@MILAN' } });
+    await waitFor(() => expect(order(container)).toEqual(['Milan']));
+    expect(window.location.search).toBe('?q=%40MILAN');
+    expect(screen.getByText('Видимые · 1')).toBeTruthy();
+    fireEvent.change(box, { target: { value: 'отлично' } });
+    await waitFor(() => expect(order(container)).toEqual(['Анна']));
+    fireEvent.click(screen.getByLabelText('Очистить поиск'));
+    await waitFor(() => expect(order(container)).toEqual(['Анна', 'Milan', 'Гость']));
+    expect(window.location.search).toBe('');
+  });
+
+  it('filters written reviews from star-only ones', async () => {
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(screen.getByText('С текстом · 1')).toBeTruthy();
+    fireEvent.click(screen.getByText('Только звёзды · 2'));
+    expect(order(container)).toEqual(['Milan', 'Гость']);
+    expect(window.location.search).toBe('?text=without');
+  });
+
+  it('summarizes the picked quest as the site shows it', async () => {
+    listMock.mockResolvedValue({
+      reviews: [...REVIEWS.reviews.slice(0, 2), { ...REVIEWS.reviews[2], hidden: true }],
+    });
+    render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    expect(screen.queryByLabelText('Сводка по квесту')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Квест'), { target: { value: 'q1' } });
+    const summary = screen.getByLabelText('Сводка по квесту');
+    // (5 + 4) / 2 over the visible ratings — the hidden 2★ is out of it.
+    expect(summary.textContent).toContain('4.5');
+    expect(summary.textContent).toContain('2 оценки · 1 скрыто');
+  });
+
+  it('renders fifty at a time and starts over when the list changes', async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      ...REVIEWS.reviews[0],
+      rating: i < 60 ? 5 : 4,
+      created_at: 1000 - i,
+      identity: id({ user_id: `acct:${i}`, display_name: `Игрок ${i}`, kind: 'email' }),
+    }));
+    listMock.mockResolvedValue({ reviews: many });
+    const { container } = render(<AdminReviewsPage />);
+    await screen.findByText('Игрок 0');
+    const cards = () => container.querySelectorAll('.amod-card').length;
+    expect(cards()).toBe(50);
+    fireEvent.click(screen.getByText('Показать ещё · осталось 70'));
+    expect(cards()).toBe(100);
+    fireEvent.click(screen.getByText('Показать ещё · осталось 20'));
+    expect(cards()).toBe(120);
+    expect(screen.queryByText(/Показать ещё/)).toBeNull();
+    fireEvent.click(screen.getByText('4★ · 60'));
+    expect(cards()).toBe(50);
+    expect(screen.getByText('Показать ещё · осталось 10')).toBeTruthy();
+  });
+
+  it('links account holders to Пользователи and copies any author id', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<AdminReviewsPage />);
+    await screen.findByText('Отлично');
+    // Анна and Milan have accounts; an anonymous device has no Пользователи entry.
+    expect(screen.getAllByText('↗ Пользователи').map((a) => a.getAttribute('href'))).toEqual([
+      '/admin?user=acct%3Aanna',
+      '/admin?user=acct%3Amilan',
+    ]);
+    // The raw id is no longer printed — it is one click away.
+    expect(screen.queryByText('dev:anon')).toBeNull();
+    fireEvent.click(screen.getAllByText('Копировать ID')[2]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('dev:anon'));
+    expect(await screen.findByText('ID скопирован')).toBeTruthy();
   });
 
   it('restores filters and sort from the URL', async () => {
