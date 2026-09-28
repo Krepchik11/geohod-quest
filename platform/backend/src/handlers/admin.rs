@@ -49,6 +49,14 @@ pub fn router() -> Router<AppState> {
             "/api/admin/reviews/unhide",
             post(admin_unhide_review_handler),
         )
+        .route(
+            "/api/admin/reviews/check",
+            post(admin_check_reviews_handler),
+        )
+        .route(
+            "/api/admin/moderation/counts",
+            get(admin_moderation_counts_handler),
+        )
         .route("/api/admin/feedback", get(admin_list_feedback_handler))
         .route(
             "/api/admin/feedback/resolve",
@@ -212,6 +220,34 @@ async fn resolve_admin_identities(
 // step) with an open/resolved watermark. All gated by `require_admin_actor`; the
 // read-side folds live in `facts` + `store` and never mutate a fact.
 
+/// Who made a moderation decision, and when. `by_id` is the admin's user id, or
+/// `ops-token` (the operator token) / `baseline` (the history migration 0008
+/// marked checked); `by_name` is the admin's name or email when the id resolves.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ModerationMarkWire"))]
+pub(crate) struct ModerationMarkWire {
+    #[cfg_attr(test, ts(type = "number"))]
+    at: u64,
+    by_id: String,
+    by_name: Option<String>,
+}
+
+/// «Проверено» on a review: the review version it covers, and who checked when.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewCheckWire"))]
+pub(crate) struct ReviewCheckWire {
+    /// The `changed_at` the admin saw — the check covers the review while
+    /// `changed_at` has not moved past it.
+    #[cfg_attr(test, ts(type = "number"))]
+    through: u64,
+    #[cfg_attr(test, ts(type = "number"))]
+    at: u64,
+    by_id: String,
+    by_name: Option<String>,
+}
+
 /// One row of the global reviews list: an effective per-`(player, quest)` rating
 /// (star-only included), whether it is hidden, and the resolved author identity.
 #[derive(serde::Serialize)]
@@ -227,8 +263,35 @@ pub(crate) struct AdminReviewWire {
     text: Option<String>,
     #[cfg_attr(test, ts(type = "number"))]
     created_at: u64,
+    /// The review's version: when its stars or text last changed (the newest
+    /// rating's server instant) — what a «Проверено» covers.
+    #[cfg_attr(test, ts(type = "number"))]
+    changed_at: u64,
     hidden: bool,
+    /// Who hid the review and when; `None` while it is visible.
+    hide: Option<ModerationMarkWire>,
+    /// The last «Проверено»; `None` when no admin has checked the review yet.
+    check: Option<ReviewCheckWire>,
     identity: AdminIdentityWire,
+}
+
+/// The name an admin surface shows for the admin behind a moderation mark.
+fn admin_name(
+    by: &str,
+    identities: &std::collections::HashMap<String, AdminIdentityWire>,
+) -> Option<String> {
+    let id = identities.get(by)?;
+    id.display_name.clone().or_else(|| id.email.clone())
+}
+
+/// A review is checked while a «Проверено» mark covers its current version.
+fn is_checked(
+    checks: &std::collections::HashMap<(String, String), store::ReviewCheck>,
+    row: &facts::PlayerRatingRow,
+) -> bool {
+    checks
+        .get(&(row.user_id.clone(), row.quest_id.clone()))
+        .is_some_and(|c| c.through >= row.rated_at)
 }
 
 #[derive(serde::Serialize)]
@@ -243,22 +306,43 @@ async fn admin_list_reviews_handler(
     headers: HeaderMap,
 ) -> Result<Json<AdminReviewsResponse>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    // Independent reads — the fold rows, the hidden set, and the quest labels —
-    // run concurrently.
-    let (rows, hidden, labels) = tokio::join!(
+    // Independent reads — the fold rows, the moderation marks, and the quest
+    // labels — run concurrently.
+    let (rows, hides, checks, labels) = tokio::join!(
         state.store.quest_rating_rows(None),
-        state.moderation.hidden_review_keys(),
+        state.moderation.review_hides(),
+        state.moderation.review_checks(),
         resolve_quest_labels(&state),
     );
     let rows = rows?;
-    let hidden = hidden?;
+    let hides = hides?;
+    let checks = checks?;
     let (labels, _) = labels?;
-    let user_ids: Vec<String> = rows.iter().map(|r| r.user_id.clone()).collect();
+    // The authors and the admins behind the marks, in one batch.
+    let user_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.user_id.clone())
+        .chain(hides.values().map(|(_, by)| by.clone()))
+        .chain(checks.values().map(|c| c.by.clone()))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     let identities = resolve_admin_identities(&state, &user_ids).await?;
     let mut reviews: Vec<AdminReviewWire> = rows
         .into_iter()
         .map(|r| {
-            let is_hidden = hidden.contains(&(r.user_id.clone(), r.quest_id.clone()));
+            let key = (r.user_id.clone(), r.quest_id.clone());
+            let hide = hides.get(&key).map(|(at, by)| ModerationMarkWire {
+                at: *at,
+                by_id: by.clone(),
+                by_name: admin_name(by, &identities),
+            });
+            let check = checks.get(&key).map(|c| ReviewCheckWire {
+                through: c.through,
+                at: c.at,
+                by_id: c.by.clone(),
+                by_name: admin_name(&c.by, &identities),
+            });
             let label = labels.get(&r.quest_id);
             let identity = identities
                 .get(&r.user_id)
@@ -276,8 +360,11 @@ async fn admin_list_reviews_handler(
                 } else {
                     r.rated_at
                 },
+                changed_at: r.rated_at,
                 text: r.text,
-                hidden: is_hidden,
+                hidden: hide.is_some(),
+                hide,
+                check,
                 identity,
             }
         })
@@ -311,6 +398,13 @@ async fn admin_hide_review_handler(
         .moderation
         .hide_review(&req.user_id, &req.quest_id, store::now_secs(), &by)
         .await?;
+    // Deciding to hide is looking at it: the review counts as checked.
+    check_reviews_at(
+        &state,
+        [((req.user_id, req.quest_id), u64::MAX)].into(),
+        &by,
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -319,12 +413,141 @@ async fn admin_unhide_review_handler(
     headers: HeaderMap,
     Json(req): Json<ReviewHideRequest>,
 ) -> Result<StatusCode, AppError> {
-    require_admin_actor(&state, &headers).await?;
+    let actor = require_admin_actor(&state, &headers).await?;
+    let by = actor.user_id.unwrap_or_else(|| "ops-token".to_string());
     state
         .moderation
         .unhide_review(&req.user_id, &req.quest_id)
         .await?;
+    check_reviews_at(
+        &state,
+        [((req.user_id, req.quest_id), u64::MAX)].into(),
+        &by,
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// One review in a «Проверено» request: the pair and the `changed_at` the admin saw.
+#[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewCheckItem"))]
+pub(crate) struct ReviewCheckItem {
+    user_id: String,
+    quest_id: String,
+    #[cfg_attr(test, ts(type = "number"))]
+    through: u64,
+}
+
+/// Body for «Проверено» — one review, or a whole list («Отметить все»).
+#[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReviewCheckBody"))]
+pub(crate) struct ReviewCheckRequest {
+    reviews: Vec<ReviewCheckItem>,
+}
+
+/// The most reviews one «Проверено» request may carry — the whole history fits.
+const MAX_CHECK_BATCH: usize = 5_000;
+
+/// A rating at or below this many stars is low — the menu counter flags new ones.
+const LOW_RATING: i64 = 3;
+
+async fn admin_check_reviews_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ReviewCheckRequest>,
+) -> Result<StatusCode, AppError> {
+    let actor = require_admin_actor(&state, &headers).await?;
+    let by = actor.user_id.unwrap_or_else(|| "ops-token".to_string());
+    if req.reviews.len() > MAX_CHECK_BATCH {
+        return Err(AppError::BadRequest(format!(
+            "at most {MAX_CHECK_BATCH} reviews per request"
+        )));
+    }
+    // One mark per pair — the newest version named (Postgres rejects a pair
+    // repeated inside one upsert).
+    let mut wanted = std::collections::HashMap::new();
+    for r in req.reviews {
+        let through = wanted.entry((r.user_id, r.quest_id)).or_insert(0);
+        *through = (*through).max(r.through);
+    }
+    check_reviews_at(&state, wanted, &by).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Mark reviews checked at the versions named — each clamped to the review's
+/// current version, so a mark never covers a change nobody has seen yet
+/// (`u64::MAX` means «as it is now»). Pairs without a rating are skipped.
+async fn check_reviews_at(
+    state: &AppState,
+    wanted: std::collections::HashMap<(String, String), u64>,
+    by: &str,
+) -> Result<(), AppError> {
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let quests: Vec<String> = wanted
+        .keys()
+        .map(|(_, q)| q.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let items: Vec<(String, String, u64)> = state
+        .store
+        .quest_rating_rows(Some(quests.as_slice()))
+        .await?
+        .into_iter()
+        .filter_map(|r| {
+            let through = *wanted.get(&(r.user_id.clone(), r.quest_id.clone()))?;
+            Some((r.user_id, r.quest_id, through.min(r.rated_at)))
+        })
+        .collect();
+    state
+        .moderation
+        .check_reviews(&items, store::now_secs(), by)
+        .await
+}
+
+/// The admin menu's counters — what is waiting for a moderator.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminModerationCounts"))]
+pub(crate) struct AdminModerationCounts {
+    /// Reviews no admin has checked at their current version («Новые»).
+    reviews_new: u32,
+    /// Of those, rated `LOW_RATING` stars or lower.
+    reviews_new_low: u32,
+    /// Feedback groups still open.
+    feedback_open: u32,
+}
+
+async fn admin_moderation_counts_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AdminModerationCounts>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let (rows, checks, reports, resolutions) = tokio::join!(
+        state.store.quest_rating_rows(None),
+        state.moderation.review_checks(),
+        state.store.all_feedback_reports(),
+        state.moderation.feedback_resolutions(),
+    );
+    let checks = checks?;
+    let new: Vec<i64> = rows?
+        .iter()
+        .filter(|r| !is_checked(&checks, r))
+        .map(|r| r.rating)
+        .collect();
+    let feedback_open = facts::group_feedback(reports?, &resolutions?)
+        .iter()
+        .filter(|g| !g.resolved)
+        .count();
+    Ok(Json(AdminModerationCounts {
+        reviews_new: new.len() as u32,
+        reviews_new_low: new.iter().filter(|&&stars| stars <= LOW_RATING).count() as u32,
+        feedback_open: feedback_open as u32,
+    }))
 }
 
 /// One report inside a feedback group — its note, server time, and author identity.

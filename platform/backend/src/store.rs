@@ -3276,12 +3276,24 @@ impl InMemorySettingsStore {
 /// values (registry in `crate::settings`; no row = unset).
 pub type SettingsStores = std::sync::Arc<dyn KvStore<String>>;
 
+/// One «Проверено» mark on a `(user_id, quest_id)` review: the review version it
+/// covers (`through` — the rating's `rated_at` the admin saw), when, and by whom.
+/// The review reads unchecked again once its `rated_at` moves past `through`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReviewCheck {
+    pub through: u64,
+    pub at: u64,
+    pub by: String,
+}
+
 /// In-memory moderation overlay — the mutable admin decisions that sit *beside* the
 /// immutable fact log (content-moderation). Nothing here ever reads or writes `facts`.
 ///
-/// Two independent maps:
+/// Three independent maps:
 /// - `hidden_reviews`: `(user_id, quest_id) -> (hidden_at, hidden_by)`. Presence is
 ///   the whole signal — the pair's rating is dropped from the public page + average.
+/// - `checked_reviews`: `(user_id, quest_id) -> ReviewCheck` — «Проверено», a
+///   version watermark that only moves forward.
 /// - `resolved_feedback`: `(quest_id, snapshot_id, step_position) -> (acknowledged,
 ///   resolved_by)`. `acknowledged` is the report count the admin marked resolved; a
 ///   group reads resolved only while its current count has not grown past it, so an
@@ -3289,6 +3301,7 @@ pub type SettingsStores = std::sync::Arc<dyn KvStore<String>>;
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryModerationStore {
     hidden_reviews: HashMap<(String, String), (u64, String)>,
+    checked_reviews: HashMap<(String, String), ReviewCheck>,
     resolved_feedback: HashMap<(String, String, i32), (u64, String)>,
 }
 
@@ -3314,6 +3327,40 @@ impl InMemoryModerationStore {
     /// The set of hidden `(user_id, quest_id)` pairs — the fold's drop list.
     pub fn hidden_review_keys(&self) -> std::collections::HashSet<(String, String)> {
         self.hidden_reviews.keys().cloned().collect()
+    }
+
+    /// Every hide with its `(hidden_at, hidden_by)` — who hid a review, and when.
+    pub fn review_hides(&self) -> HashMap<(String, String), (u64, String)> {
+        self.hidden_reviews.clone()
+    }
+
+    /// Mark `(user_id, quest_id, through)` reviews checked. A mark only moves
+    /// forward: re-checking an older version (a stale page) keeps the newer mark;
+    /// the same version re-stamps who and when.
+    pub fn check_reviews(&mut self, items: &[(String, String, u64)], at: u64, by: &str) {
+        for (player, quest, through) in items {
+            let key = (player.clone(), quest.clone());
+            if self
+                .checked_reviews
+                .get(&key)
+                .is_some_and(|c| c.through > *through)
+            {
+                continue;
+            }
+            self.checked_reviews.insert(
+                key,
+                ReviewCheck {
+                    through: *through,
+                    at,
+                    by: by.to_string(),
+                },
+            );
+        }
+    }
+
+    /// Every «Проверено» mark.
+    pub fn review_checks(&self) -> HashMap<(String, String), ReviewCheck> {
+        self.checked_reviews.clone()
     }
 
     /// Mark a feedback group resolved, recording `acknowledged` = the group's report
@@ -3367,6 +3414,20 @@ pub trait ModerationStore: Send + Sync {
     /// See [`InMemoryModerationStore::hidden_review_keys`].
     async fn hidden_review_keys(&self) -> Result<HashSet<(String, String)>, AppError>;
 
+    /// See [`InMemoryModerationStore::review_hides`].
+    async fn review_hides(&self) -> Result<HashMap<(String, String), (u64, String)>, AppError>;
+
+    /// See [`InMemoryModerationStore::check_reviews`].
+    async fn check_reviews(
+        &self,
+        items: &[(String, String, u64)],
+        at: u64,
+        by: &str,
+    ) -> Result<(), AppError>;
+
+    /// See [`InMemoryModerationStore::review_checks`].
+    async fn review_checks(&self) -> Result<HashMap<(String, String), ReviewCheck>, AppError>;
+
     /// See [`InMemoryModerationStore::resolve_feedback`].
     async fn resolve_feedback(
         &self,
@@ -3407,6 +3468,24 @@ impl ModerationStore for std::sync::Mutex<InMemoryModerationStore> {
 
     async fn hidden_review_keys(&self) -> Result<HashSet<(String, String)>, AppError> {
         Ok(lock(self, "moderation")?.hidden_review_keys())
+    }
+
+    async fn review_hides(&self) -> Result<HashMap<(String, String), (u64, String)>, AppError> {
+        Ok(lock(self, "moderation")?.review_hides())
+    }
+
+    async fn check_reviews(
+        &self,
+        items: &[(String, String, u64)],
+        at: u64,
+        by: &str,
+    ) -> Result<(), AppError> {
+        lock(self, "moderation")?.check_reviews(items, at, by);
+        Ok(())
+    }
+
+    async fn review_checks(&self) -> Result<HashMap<(String, String), ReviewCheck>, AppError> {
+        Ok(lock(self, "moderation")?.review_checks())
     }
 
     async fn resolve_feedback(

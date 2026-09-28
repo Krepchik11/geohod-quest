@@ -188,6 +188,9 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .site-nav a { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; color:var(--text); padding:4px 0; border-bottom:1px solid transparent; transition:color .15s ease,border-color .15s ease; }
 .site-nav a:hover { color:var(--blue); }
 .site-nav a.is-active { border-color:currentColor; }
+/* «админка» counter — what waits for a moderator (same pill as the admin tabs). */
+.nav-badge { position:relative; display:inline-block; min-width:18px; height:18px; margin-left:6px; padding:0 5px; border-radius:9px; background:var(--blue); color:var(--white); font-family:var(--font-body); font-size:11px; font-weight:700; line-height:18px; letter-spacing:0; text-align:center; vertical-align:1px; }
+.nav-badge.is-alert { background:var(--red); }
 
 .user-menu { position:relative; flex:none; }
 .user-menu__btn { position:relative; display:flex; align-items:center; justify-content:center; width:44px; height:44px; border-radius:50%; background:var(--white); border:1px solid var(--border); color:var(--dark); transition:box-shadow .15s ease,border-color .15s ease; }

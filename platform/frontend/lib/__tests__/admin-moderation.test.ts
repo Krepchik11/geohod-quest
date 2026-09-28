@@ -5,6 +5,7 @@ import {
   identityBadge,
   identityContact,
   identityName,
+  markWho,
   moderationDate,
   parseReviewsQuery,
   questAverage,
@@ -14,6 +15,7 @@ import {
   reviewFacets,
   reviewQuestOptions,
   reviewSearch,
+  reviewStatus,
   serializeReviewsQuery,
   sortReviews,
   templateLabel,
@@ -76,7 +78,10 @@ describe('questAverage', () => {
     rating,
     text: null,
     created_at: 0,
+    changed_at: 0,
     hidden,
+    hide: null,
+    check: null,
     identity: id({ user_id: player }),
   });
   it('means the non-hidden ratings for the quest', () => {
@@ -151,7 +156,11 @@ describe('reviews query', () => {
     rating,
     text: null,
     created_at,
+    changed_at: created_at,
     hidden,
+    hide: null,
+    // Checked at the current version unless a test says otherwise.
+    check: { through: created_at, at: 0, by_id: 'baseline', by_name: null },
     identity: id({ user_id: `${quest}-${rating}-${created_at}` }),
   });
   const at = (list: AdminReviewWire[]) => list.map((r) => r.created_at);
@@ -192,13 +201,13 @@ describe('reviews query', () => {
     const rs = [rev('q1', 5, 1), rev('q1', 4, 2, true), rev('q2', 5, 3), rev('q2', 1, 4, true)];
     const f = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, quest: 'q1' });
     expect(at(f.list)).toEqual([1]);
-    expect(f.views).toEqual({ visible: 1, hidden: 1, all: 2 });
+    expect(f.views).toEqual({ new: 0, visible: 1, hidden: 1, all: 2 });
     // Ratings under quest q1 + the visible view; quests under the visible view alone.
     expect(f.ratings).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 });
     expect([...f.quests]).toEqual([['q1', 1], ['q2', 1]]);
     const hidden5 = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, view: 'hidden', rating: 5 });
     expect(hidden5.list).toEqual([]);
-    expect(hidden5.views).toEqual({ visible: 2, hidden: 0, all: 2 });
+    expect(hidden5.views).toEqual({ new: 0, visible: 2, hidden: 0, all: 2 });
   });
 
   it('counts written vs star-only, and the search narrows every count', () => {
@@ -216,7 +225,7 @@ describe('reviews query', () => {
     const found = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, q: 'спасибо' });
     expect(at(found.list)).toEqual([4, 1]);
     expect(found.texts).toEqual({ with: 2, without: 0 });
-    expect(found.views).toEqual({ visible: 2, hidden: 0, all: 2 });
+    expect(found.views).toEqual({ new: 0, visible: 2, hidden: 0, all: 2 });
     expect([...found.quests]).toEqual([['q1', 1], ['q2', 1]]);
   });
 
@@ -236,6 +245,31 @@ describe('reviews query', () => {
       expect(reviewSearch(q)(r)).toBe(true);
     }
     expect(reviewSearch('борис')(r)).toBe(false);
+  });
+
+  it('tells new, changed and checked reviews apart and lists the unchecked as «Новые»', () => {
+    const mark = { at: 1, by_id: 'acct:admin', by_name: 'Анна' };
+    expect(reviewStatus({ changed_at: 10, check: null })).toBe('new');
+    expect(reviewStatus({ changed_at: 10, check: { through: 9, ...mark } })).toBe('changed');
+    expect(reviewStatus({ changed_at: 10, check: { through: 10, ...mark } })).toBe('checked');
+
+    const rs = [
+      { ...rev('q1', 5, 1), check: null }, // new
+      { ...rev('q1', 2, 2, true), check: { through: 1, ...mark } }, // hidden, changed since
+      rev('q1', 4, 3), // checked
+    ];
+    const f = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, view: 'new' });
+    // «Новые» takes the unchecked whether hidden or not, and counts them like any view.
+    expect(at(f.list)).toEqual([2, 1]);
+    expect(f.views).toEqual({ new: 2, visible: 2, hidden: 1, all: 3 });
+    expect(f.ratings).toEqual({ 1: 0, 2: 1, 3: 0, 4: 0, 5: 1 });
+  });
+
+  it('names who made a mark — nobody for the history that went live checked', () => {
+    expect(markWho({ by_id: 'acct:admin', by_name: 'Анна' })).toBe('Анна');
+    expect(markWho({ by_id: 'ops-token', by_name: null })).toBe('служебный токен');
+    expect(markWho({ by_id: 'baseline', by_name: null })).toBeNull();
+    expect(markWho({ by_id: 'bubble-admin-7', by_name: null })).toBe('bubble-admin-7');
   });
 
   it('summarizes a quest over its visible ratings', () => {

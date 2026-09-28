@@ -6,6 +6,7 @@ import { useSelectedLayoutSegment } from 'next/navigation';
 import { hasAdminToken, isAuthFailure } from '../../lib/api';
 import { getSession, subscribeSession } from '../../lib/identity';
 import { isAdmin } from '../../lib/roles';
+import { useModerationCounts } from '../../lib/moderation-counts';
 import { fetchMe } from '../../lib/use-me';
 import SpaceHeader from '../components/SpaceHeader';
 
@@ -112,9 +113,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // is null for /admin itself (the users tab) and the section name for every
   // nested route (/admin/coupons/new → 'coupons') — no path parsing needed.
   const active = useSelectedLayoutSegment() ?? 'users';
+  // What waits for a moderator, on the two moderation tabs; a new low rating
+  // paints the Отзывы counter as a warning.
+  const counts = useModerationCounts(access === 'granted');
+  const tabs = TABS.map((t) =>
+    t.key === 'reviews'
+      ? { ...t, badge: counts?.reviews_new, alert: !!counts?.reviews_new_low }
+      : t.key === 'feedback'
+        ? { ...t, badge: counts?.feedback_open }
+        : t,
+  );
   return (
     <div className="ash-root">
-      <SpaceHeader eyebrow="АДМИНКА" tabs={TABS} active={active} tabsLabel="Разделы админки" />
+      <SpaceHeader eyebrow="АДМИНКА" tabs={tabs} active={active} tabsLabel="Разделы админки" />
       <AdminGate access={access}>
         <div className="ap-root">{children}</div>
       </AdminGate>

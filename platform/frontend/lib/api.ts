@@ -13,6 +13,7 @@ import type {
   AdminCouponWire,
   AdminFeatureWire,
   AdminFeedbackResponse,
+  AdminModerationCounts,
   AdminReviewsResponse,
   AdminSettingWire,
   AdminStatsOverviewWire,
@@ -37,6 +38,7 @@ import type {
   PublicFeatures,
   PublishedQuestWire,
   QuestBonusesWire,
+  ReviewCheckBody,
   ReviewHideBody,
   ReviewsPageWire,
 } from './generated';
@@ -349,6 +351,18 @@ export const api = {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify(body),
+    }),
+  // «Проверено» — one review or a whole list, each at the `changed_at` shown.
+  adminCheckReviews: (body: ReviewCheckBody) =>
+    apiFetch<void>('/api/admin/reviews/check', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  // What waits for a moderator — the admin menu's counters.
+  adminModerationCounts: () =>
+    apiFetch<AdminModerationCounts>('/api/admin/moderation/counts', {
+      headers: adminHeaders(),
     }),
   adminListFeedback: () =>
     apiFetch<AdminFeedbackResponse>('/api/admin/feedback', { headers: adminHeaders() }),

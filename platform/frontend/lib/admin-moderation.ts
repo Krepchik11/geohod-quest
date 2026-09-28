@@ -1,4 +1,4 @@
-import type { AdminIdentityWire, AdminReviewWire } from './api';
+import type { AdminIdentityWire, AdminReviewWire, ModerationMarkWire } from './api';
 import { plural } from './ru';
 import { fmtRating } from './storefront';
 
@@ -164,12 +164,39 @@ export function moderationDate(unixSeconds: number, nowMs: number = Date.now()):
   });
 }
 
+/* ── Отзывы: «Проверено» ─────────────────────────────────────────────────────── */
+
+/**
+ * Where a review stands with the moderators: `new` — no admin has checked it;
+ * `changed` — checked once, then the player changed the stars or the text;
+ * `checked` — a «Проверено» covers its current version.
+ */
+export type ReviewStatus = 'new' | 'changed' | 'checked';
+
+export function reviewStatus(r: Pick<AdminReviewWire, 'check' | 'changed_at'>): ReviewStatus {
+  if (!r.check) return 'new';
+  return r.check.through < r.changed_at ? 'changed' : 'checked';
+}
+
+/**
+ * Who made a moderation mark, as a card names them: the admin's name or email,
+ * the operator token by its role, the raw id otherwise; `null` for the history
+ * that went live already checked (`baseline`) — nobody to name there.
+ */
+export function markWho(mark: Pick<ModerationMarkWire, 'by_id' | 'by_name'>): string | null {
+  if (mark.by_name) return mark.by_name;
+  if (mark.by_id === 'baseline') return null;
+  if (mark.by_id === 'ops-token') return 'служебный токен';
+  return mark.by_id;
+}
+
 /* ── Отзывы: filters, sort and their URL ──────────────────────────────────────
    `?view=hidden&quest=q-1&rating=4&text=with&q=спасибо&sort=worst` — defaults
    are left out, so the plain page is the plain URL. */
 
 export type ReviewSort = 'new' | 'worst' | 'best';
-export type ReviewView = 'visible' | 'hidden' | 'all';
+/** `new` — not checked at the current version, hidden or not. */
+export type ReviewView = 'new' | 'visible' | 'hidden' | 'all';
 export type ReviewText = 'all' | 'with' | 'without';
 
 export interface ReviewsQuery {
@@ -201,6 +228,7 @@ export const REVIEW_SORTS: ReadonlyArray<{ key: ReviewSort; label: string }> = [
 ];
 
 export const REVIEW_VIEWS: ReadonlyArray<{ key: ReviewView; label: string }> = [
+  { key: 'new', label: 'Новые' },
   { key: 'visible', label: 'Видимые' },
   { key: 'hidden', label: 'Скрытые' },
   { key: 'all', label: 'Все' },
@@ -291,7 +319,7 @@ type Filter = 'quest' | 'rating' | 'view' | 'text';
  * search narrows everything and has no count of its own.
  */
 export function reviewFacets(reviews: readonly AdminReviewWire[], q: ReviewsQuery): ReviewFacets {
-  const views: Record<ReviewView, number> = { visible: 0, hidden: 0, all: 0 };
+  const views: Record<ReviewView, number> = { new: 0, visible: 0, hidden: 0, all: 0 };
   const ratings: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   const quests = new Map<string, number>();
   const texts = { with: 0, without: 0 };
@@ -299,10 +327,12 @@ export function reviewFacets(reviews: readonly AdminReviewWire[], q: ReviewsQuer
   const found = reviewSearch(q.q);
   for (const r of reviews) {
     if (!found(r)) continue;
+    const unchecked = reviewStatus(r) !== 'checked';
     const ok: Record<Filter, boolean> = {
       quest: q.quest === 'all' || r.quest_id === q.quest,
       rating: q.rating === 0 || r.rating === q.rating,
-      view: q.view === 'all' || r.hidden === (q.view === 'hidden'),
+      view:
+        q.view === 'all' || (q.view === 'new' ? unchecked : r.hidden === (q.view === 'hidden')),
       text: q.text === 'all' || !!r.text === (q.text === 'with'),
     };
     const missed = (Object.keys(ok) as Filter[]).filter((f) => !ok[f]);
@@ -311,6 +341,7 @@ export function reviewFacets(reviews: readonly AdminReviewWire[], q: ReviewsQuer
     if (countsFor('view')) {
       views.all += 1;
       views[r.hidden ? 'hidden' : 'visible'] += 1;
+      if (unchecked) views.new += 1;
     }
     if (countsFor('rating')) ratings[r.rating] = (ratings[r.rating] ?? 0) + 1;
     if (countsFor('quest')) quests.set(r.quest_id, (quests.get(r.quest_id) ?? 0) + 1);

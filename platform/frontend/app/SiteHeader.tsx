@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import UserMenu from './components/UserMenu';
 import { hasAdminToken } from '../lib/api';
+import { useModerationCounts, waitingTotal } from '../lib/moderation-counts';
 import { canEditQuests, isAdmin } from '../lib/roles';
 import { useMe } from '../lib/use-me';
 
@@ -19,6 +20,9 @@ import { useMe } from '../lib/use-me';
  * authorization regardless. The admin-token path admits an operator build
  * before any admin/editor account exists.
  *
+ * «админка» carries a counter of what waits for a moderator (new reviews +
+ * open feedback), so an admin notices without opening the admin.
+ *
  * Auth slot is the shared UserMenu: anonymous visitors see a text pill
  * «Войти» (the bare icon button never shows for them); signed-in users see
  * the avatar circle with the presence dot and the profile dropdown.
@@ -30,6 +34,9 @@ import { useMe } from '../lib/use-me';
 export default function SiteHeader() {
   const { role, session } = useMe();
   const [navOpen, setNavOpen] = useState(false);
+  const admin = isAdmin(role) || hasAdminToken();
+  const counts = useModerationCounts(admin);
+  const waiting = waitingTotal(counts);
 
   // Click-outside closes the panel, as in UserMenu.
   useEffect(() => {
@@ -76,8 +83,16 @@ export default function SiteHeader() {
         {(canEditQuests(role) || hasAdminToken()) && (
           <Link href="/quest-editor">редактор</Link>
         )}
-        {(isAdmin(role) || hasAdminToken()) && (
-          <Link href="/admin">админка</Link>
+        {admin && (
+          <Link href="/admin">
+            админка
+            {waiting > 0 && (
+              <span className={`nav-badge${counts?.reviews_new_low ? ' is-alert' : ''}`}>
+                <span className="visually-hidden">, ждут проверки: </span>
+                {waiting}
+              </span>
+            )}
+          </Link>
         )}
         {/* Phone only (CSS): the avatar's own popup is hidden there, so its
             entries ride along at the bottom of this panel. */}
