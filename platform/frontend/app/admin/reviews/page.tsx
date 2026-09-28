@@ -1,14 +1,22 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, type AdminReviewWire } from '../../../lib/api';
 import {
+  DEFAULT_REVIEWS_QUERY,
+  REVIEW_SORTS,
+  REVIEW_VIEWS,
   formatAverage,
   identityBadge,
   identityName,
+  moderationDate,
+  parseReviewsQuery,
   questAverage,
-  questFilterOptions,
-  relativeTime,
+  reviewFacets,
+  reviewQuestOptions,
+  serializeReviewsQuery,
+  type ReviewSort,
+  type ReviewsQuery,
 } from '../../../lib/admin-moderation';
 import { plural } from '../../../lib/ru';
 import { AdminConfirmSheet, AdminPageHead, AdminToast, useToast } from '../ui';
@@ -20,6 +28,9 @@ import { ContactRow } from '../moderation-ui';
  * rating from the quest page and its average. The hide confirm previews the quest
  * average before→after with the SAME per-player, hide-aware fold the server uses,
  * so the preview can never disagree with what ships.
+ *
+ * Filters and sort live in the URL (replaceState — a filter click is not a
+ * history step), so a reload or a shared link opens the same list.
  */
 
 const RATING_CHIPS: ReadonlyArray<{ value: number; label: string }> = [
@@ -39,9 +50,11 @@ function reviewKey(r: AdminReviewWire): string {
 export default function AdminReviewsPage() {
   const [reviews, setReviews] = useState<AdminReviewWire[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [quest, setQuest] = useState('all');
-  const [rating, setRating] = useState(0);
-  const [showHidden, setShowHidden] = useState(false);
+  const [query, setQuery] = useState<ReviewsQuery>(() =>
+    typeof window === 'undefined'
+      ? DEFAULT_REVIEWS_QUERY
+      : parseReviewsQuery(window.location.search),
+  );
   const [confirm, setConfirm] = useState<AdminReviewWire | null>(null);
   const [busy, setBusy] = useState(false);
   const { toast, showToast } = useToast();
@@ -94,17 +107,24 @@ export default function AdminReviewsPage() {
     }
   };
 
-  const questOptions = useMemo(() => questFilterOptions(reviews ?? []), [reviews]);
+  // A link to a quest that has no ratings (any more) shows every quest.
+  const q =
+    reviews && query.quest !== 'all' && !reviews.some((r) => r.quest_id === query.quest)
+      ? { ...query, quest: 'all' }
+      : query;
+  const update = (patch: Partial<ReviewsQuery>) => {
+    const next = { ...q, ...patch };
+    setQuery(next);
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${serializeReviewsQuery(next)}`,
+    );
+  };
 
-  const inScope = (reviews ?? []).filter(
-    (r) => (quest === 'all' || r.quest_id === quest) && (rating === 0 || r.rating === rating),
-  );
-  const hiddenCount = inScope.filter((r) => r.hidden).length;
-  const visible = inScope
-    .filter((r) => showHidden || !r.hidden)
-    .slice()
-    .sort((a, b) => a.rating - b.rating || b.created_at - a.created_at);
-  const shownCount = visible.filter((r) => !r.hidden).length;
+  const facets = reviewFacets(reviews ?? [], q);
+  const questOptions = reviewQuestOptions(reviews ?? [], facets.quests);
+  const shown = facets.list;
 
   const before = confirm ? questAverage(reviews ?? [], confirm.quest_id) : null;
   const after = confirm
@@ -131,12 +151,41 @@ export default function AdminReviewsPage() {
       ) : (
         <>
           <div className="amod-filters">
+            <span className="amod-filters__label">ПОКАЗАТЬ</span>
+            {REVIEW_VIEWS.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                className={`amod-chip${q.view === v.key ? ' is-on' : ''}`}
+                aria-pressed={q.view === v.key}
+                onClick={() => update({ view: v.key })}
+              >
+                {v.label} · {facets.views[v.key]}
+              </button>
+            ))}
+            <span className="amod-filters__end">
+              <span className="amod-filters__label">СОРТИРОВКА</span>
+              <select
+                className="amod-select"
+                aria-label="Сортировка"
+                value={q.sort}
+                onChange={(e) => update({ sort: e.target.value as ReviewSort })}
+              >
+                {REVIEW_SORTS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </div>
+          <div className="amod-filters">
             <span className="amod-filters__label">КВЕСТ</span>
             <select
               className="amod-select"
               aria-label="Квест"
-              value={quest}
-              onChange={(e) => setQuest(e.target.value)}
+              value={q.quest}
+              onChange={(e) => update({ quest: e.target.value })}
             >
               {questOptions.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -145,30 +194,26 @@ export default function AdminReviewsPage() {
               ))}
             </select>
             <span className="amod-filters__label">ОЦЕНКА</span>
-            {RATING_CHIPS.map((chip) => (
-              <button
-                key={chip.value}
-                type="button"
-                className={`amod-chip${rating === chip.value ? ' is-on' : ''}`}
-                aria-pressed={rating === chip.value}
-                onClick={() => setRating(chip.value)}
-              >
-                {chip.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`amod-chip amod-chip--right${showHidden ? ' is-on' : ''}`}
-              aria-pressed={showHidden}
-              onClick={() => setShowHidden((v) => !v)}
-            >
-              Показать скрытые · {hiddenCount}
-            </button>
+            {RATING_CHIPS.map((chip) => {
+              const on = q.rating === chip.value;
+              const count = chip.value === 0 ? null : facets.ratings[chip.value];
+              return (
+                <button
+                  key={chip.value}
+                  type="button"
+                  className={`amod-chip${on ? ' is-on' : ''}`}
+                  aria-pressed={on}
+                  disabled={count === 0 && !on}
+                  onClick={() => update({ rating: chip.value })}
+                >
+                  {count === null ? chip.label : `${chip.label} · ${count}`}
+                </button>
+              );
+            })}
           </div>
 
           <div className="amod-count">
-            {shownCount} {plural(shownCount, 'запись', 'записи', 'записей')} ·{' '}
-            {hiddenCount} скрыто · сначала худшие
+            {shown.length} {plural(shown.length, 'запись', 'записи', 'записей')}
           </div>
 
           <div className="amod-banner" role="note">
@@ -181,7 +226,7 @@ export default function AdminReviewsPage() {
           </div>
 
           <div className="amod-list">
-            {visible.map((r) => (
+            {shown.map((r) => (
               <ReviewCard
                 key={reviewKey(r)}
                 review={r}
@@ -192,7 +237,7 @@ export default function AdminReviewsPage() {
                 }
               />
             ))}
-            {visible.length === 0 && (
+            {shown.length === 0 && (
               <div className="amod-empty">Нет отзывов по выбранному фильтру.</div>
             )}
           </div>
@@ -245,9 +290,8 @@ function ReviewCard({
   onJump: () => void;
 }) {
   const badge = identityBadge(review.identity.kind);
-  const metaLine = [review.quest_name, review.quest_city, relativeTime(review.created_at)]
-    .filter(Boolean)
-    .join(' · ');
+  const where = [review.quest_name, review.quest_city].filter(Boolean).join(' · ');
+  const at = new Date(review.created_at * 1000);
   return (
     <div className={`amod-card${review.hidden ? ' is-hidden' : ''}`}>
       <div className="amod-card__body">
@@ -267,7 +311,15 @@ function ReviewCard({
               </span>
             ))}
           </span>
-          <span className="amod-card__meta">{metaLine}</span>
+          <span className="amod-card__meta">
+            {where} ·{' '}
+            <time
+              dateTime={at.toISOString()}
+              title={at.toLocaleString('ru-RU', { dateStyle: 'long', timeStyle: 'short' })}
+            >
+              {moderationDate(review.created_at)}
+            </time>
+          </span>
         </div>
         {review.text ? (
           <p className="amod-card__text">{review.text}</p>

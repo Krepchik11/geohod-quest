@@ -1,12 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
+  DEFAULT_REVIEWS_QUERY,
   formatAverage,
   identityBadge,
   identityContact,
   identityName,
+  moderationDate,
+  parseReviewsQuery,
   questAverage,
   questFilterOptions,
   relativeTime,
+  reviewFacets,
+  reviewQuestOptions,
+  serializeReviewsQuery,
+  sortReviews,
   templateLabel,
 } from '../admin-moderation';
 import type { AdminIdentityWire, AdminReviewWire } from '../api';
@@ -117,5 +124,75 @@ describe('formatAverage / templateLabel', () => {
     expect(templateLabel('task_answer')).toBe('вопрос');
     expect(templateLabel('congrats')).toBe('финал');
     expect(templateLabel(null)).toBe('');
+  });
+});
+
+describe('moderationDate', () => {
+  const now = Date.UTC(2026, 8, 28, 12);
+  it('stays relative inside a week, a calendar date beyond it', () => {
+    expect(moderationDate(now / 1000 - 2 * 86_400, now)).toBe('2 дня назад');
+    // Noon UTC — the same calendar day in any runner time zone.
+    expect(moderationDate(Date.UTC(2024, 4, 12, 12) / 1000, now)).toBe('12.05.2024');
+  });
+});
+
+describe('reviews query', () => {
+  const rev = (
+    quest: string,
+    rating: number,
+    created_at: number,
+    hidden = false,
+  ): AdminReviewWire => ({
+    quest_id: quest,
+    quest_name: quest === 'q1' ? 'Тайна крепости' : 'Ирония судьбы',
+    quest_city: null,
+    rating,
+    text: null,
+    created_at,
+    hidden,
+    identity: id({ user_id: `${quest}-${rating}-${created_at}` }),
+  });
+  const at = (list: AdminReviewWire[]) => list.map((r) => r.created_at);
+
+  it('round-trips through the URL, leaving the defaults out', () => {
+    expect(serializeReviewsQuery(DEFAULT_REVIEWS_QUERY)).toBe('');
+    const q = { quest: 'q-1', rating: 4, view: 'hidden', sort: 'worst' } as const;
+    expect(serializeReviewsQuery(q)).toBe('?view=hidden&quest=q-1&rating=4&sort=worst');
+    expect(parseReviewsQuery(serializeReviewsQuery(q))).toEqual(q);
+  });
+
+  it('drops unknown or malformed values key by key', () => {
+    expect(parseReviewsQuery('?sort=random&view=x&rating=9&quest=')).toEqual(DEFAULT_REVIEWS_QUERY);
+    expect(parseReviewsQuery('?rating=2.5&sort=best')).toEqual({ ...DEFAULT_REVIEWS_QUERY, sort: 'best' });
+  });
+
+  it('sorts newest / worst / best, ties newest-first, without mutating', () => {
+    const rs = [rev('q1', 5, 10), rev('q1', 2, 20), rev('q1', 5, 30), rev('q1', 2, 5)];
+    expect(at(sortReviews(rs, 'new'))).toEqual([30, 20, 10, 5]);
+    expect(at(sortReviews(rs, 'worst'))).toEqual([20, 5, 30, 10]);
+    expect(at(sortReviews(rs, 'best'))).toEqual([30, 10, 20, 5]);
+    expect(at(rs)).toEqual([10, 20, 30, 5]);
+  });
+
+  it('counts each filter under all the others', () => {
+    const rs = [rev('q1', 5, 1), rev('q1', 4, 2, true), rev('q2', 5, 3), rev('q2', 1, 4, true)];
+    const f = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, quest: 'q1' });
+    expect(at(f.list)).toEqual([1]);
+    expect(f.views).toEqual({ visible: 1, hidden: 1, all: 2 });
+    // Ratings under quest q1 + the visible view; quests under the visible view alone.
+    expect(f.ratings).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 });
+    expect([...f.quests]).toEqual([['q1', 1], ['q2', 1]]);
+    const hidden5 = reviewFacets(rs, { ...DEFAULT_REVIEWS_QUERY, view: 'hidden', rating: 5 });
+    expect(hidden5.list).toEqual([]);
+    expect(hidden5.views).toEqual({ visible: 2, hidden: 0, all: 2 });
+  });
+
+  it('lists quests А–Я with their counts', () => {
+    const rs = [rev('q1', 5, 1), rev('q2', 5, 2), rev('q1', 4, 3)];
+    expect(reviewQuestOptions(rs, new Map([['q1', 2]]))).toEqual([
+      { value: 'all', label: 'Все квесты' },
+      { value: 'q2', label: 'Ирония судьбы · 0' },
+      { value: 'q1', label: 'Тайна крепости · 2' },
+    ]);
   });
 });

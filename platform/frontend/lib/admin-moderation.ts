@@ -6,9 +6,10 @@ import { fmtRating } from './storefront';
  * View-model helpers for the two moderation tabs (Отзывы + Обратная связь) — pure
  * functions kept out of the page components so they can be unit-tested and shared:
  * Russian relative time, identity badge/contact resolution (matching the backend
- * `kind`), the step-template label map, quest-filter options, and the hide-aware
+ * `kind`), the step-template label map, quest-filter options, the hide-aware
  * quest average that powers the confirm-dialog before→after preview (a same-grain TS
- * mirror of the server fold, kept in step by tests).
+ * mirror of the server fold, kept in step by tests), and the Отзывы filter/sort
+ * model with its URL codec.
  */
 
 export { fmtRating as formatAverage };
@@ -146,5 +147,142 @@ export function questFilterOptions(
   return [
     { value: 'all', label: 'Все квесты' },
     ...[...seen].map(([value, label]) => ({ value, label })),
+  ];
+}
+
+/**
+ * A moderation timestamp: relative inside the last week («2 дня назад»), the
+ * calendar date beyond it («12.05.2024») — «2 года назад» is too coarse to tell
+ * two old reviews apart.
+ */
+export function moderationDate(unixSeconds: number, nowMs: number = Date.now()): string {
+  if (nowMs / 1000 - unixSeconds < 7 * 86_400) return relativeTime(unixSeconds, nowMs);
+  return new Date(unixSeconds * 1000).toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+/* ── Отзывы: filters, sort and their URL ──────────────────────────────────────
+   `?view=hidden&quest=q-1&rating=4&sort=worst` — defaults are left out, so the
+   plain page is the plain URL. */
+
+export type ReviewSort = 'new' | 'worst' | 'best';
+export type ReviewView = 'visible' | 'hidden' | 'all';
+
+export interface ReviewsQuery {
+  /** A quest id, or `'all'`. */
+  quest: string;
+  /** 1–5, or 0 for every rating. */
+  rating: number;
+  view: ReviewView;
+  sort: ReviewSort;
+}
+
+export const DEFAULT_REVIEWS_QUERY: ReviewsQuery = {
+  quest: 'all',
+  rating: 0,
+  view: 'visible',
+  sort: 'new',
+};
+
+export const REVIEW_SORTS: ReadonlyArray<{ key: ReviewSort; label: string }> = [
+  { key: 'new', label: 'Сначала новые' },
+  { key: 'worst', label: 'Сначала худшие' },
+  { key: 'best', label: 'Сначала лучшие' },
+];
+
+export const REVIEW_VIEWS: ReadonlyArray<{ key: ReviewView; label: string }> = [
+  { key: 'visible', label: 'Видимые' },
+  { key: 'hidden', label: 'Скрытые' },
+  { key: 'all', label: 'Все' },
+];
+
+/** Unknown or malformed values fall back to the default, one key at a time. */
+export function parseReviewsQuery(search: string): ReviewsQuery {
+  const p = new URLSearchParams(search);
+  const sort = REVIEW_SORTS.find((s) => s.key === p.get('sort'))?.key;
+  const view = REVIEW_VIEWS.find((v) => v.key === p.get('view'))?.key;
+  const rating = Number(p.get('rating'));
+  return {
+    quest: p.get('quest') || DEFAULT_REVIEWS_QUERY.quest,
+    rating: Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : 0,
+    view: view ?? DEFAULT_REVIEWS_QUERY.view,
+    sort: sort ?? DEFAULT_REVIEWS_QUERY.sort,
+  };
+}
+
+/** `''` for the defaults, else `?…` with only the non-default keys. */
+export function serializeReviewsQuery(q: ReviewsQuery): string {
+  const p = new URLSearchParams();
+  if (q.view !== DEFAULT_REVIEWS_QUERY.view) p.set('view', q.view);
+  if (q.quest !== DEFAULT_REVIEWS_QUERY.quest) p.set('quest', q.quest);
+  if (q.rating !== DEFAULT_REVIEWS_QUERY.rating) p.set('rating', String(q.rating));
+  if (q.sort !== DEFAULT_REVIEWS_QUERY.sort) p.set('sort', q.sort);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+/** A new array; ties inside one rating (or one instant) fall back to newest-first. */
+export function sortReviews(
+  reviews: readonly AdminReviewWire[],
+  sort: ReviewSort,
+): AdminReviewWire[] {
+  return reviews.toSorted((a, b) => {
+    const newest = b.created_at - a.created_at;
+    if (sort === 'worst') return a.rating - b.rating || newest;
+    if (sort === 'best') return b.rating - a.rating || newest;
+    return newest || a.rating - b.rating;
+  });
+}
+
+export interface ReviewFacets {
+  /** The shown list: every filter applied, sorted. */
+  list: AdminReviewWire[];
+  /** Per view — counted under the quest and rating filters. */
+  views: Record<ReviewView, number>;
+  /** Per star 1–5 — counted under the quest and view filters. */
+  ratings: Record<number, number>;
+  /** Per quest id — counted under the view and rating filters. */
+  quests: Map<string, number>;
+}
+
+/**
+ * The list plus every filter's counts in one pass. Each count applies all the
+ * OTHER filters, so it answers «how many would I see if I clicked this».
+ */
+export function reviewFacets(reviews: readonly AdminReviewWire[], q: ReviewsQuery): ReviewFacets {
+  const views: Record<ReviewView, number> = { visible: 0, hidden: 0, all: 0 };
+  const ratings: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  const quests = new Map<string, number>();
+  const list: AdminReviewWire[] = [];
+  for (const r of reviews) {
+    const byQuest = q.quest === 'all' || r.quest_id === q.quest;
+    const byRating = q.rating === 0 || r.rating === q.rating;
+    const byView = q.view === 'all' || r.hidden === (q.view === 'hidden');
+    if (byQuest && byRating) {
+      views.all += 1;
+      views[r.hidden ? 'hidden' : 'visible'] += 1;
+    }
+    if (byQuest && byView) ratings[r.rating] = (ratings[r.rating] ?? 0) + 1;
+    if (byView && byRating) quests.set(r.quest_id, (quests.get(r.quest_id) ?? 0) + 1);
+    if (byQuest && byRating && byView) list.push(r);
+  }
+  return { list: sortReviews(list, q.sort), views, ratings, quests };
+}
+
+/** «Все квесты» + every quest present, А–Я, each labelled with its count. */
+export function reviewQuestOptions(
+  reviews: readonly AdminReviewWire[],
+  counts: ReadonlyMap<string, number>,
+): Array<{ value: string; label: string }> {
+  const names = new Map<string, string>();
+  for (const r of reviews) if (!names.has(r.quest_id)) names.set(r.quest_id, r.quest_name);
+  return [
+    { value: 'all', label: 'Все квесты' },
+    ...[...names]
+      .toSorted(([, a], [, b]) => a.localeCompare(b, 'ru'))
+      .map(([value, name]) => ({ value, label: `${name} · ${counts.get(value) ?? 0}` })),
   ];
 }
