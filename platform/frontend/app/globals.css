@@ -222,10 +222,7 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .section-title { font-size:20px; line-height:28px; text-align:center; }
 .features { display:grid; grid-template-columns:repeat(2,360px); gap:48px; justify-content:center; }
 .feature { display:flex; gap:16px; padding:16px; height:120px; }
-.feature img { width:80px; height:80px; border-radius:8px; object-fit:cover; margin-top:4px; }
-/* §2.4: labeled placeholder until the four real photos exist */
-.feature__photo-slot { flex:none; width:80px; height:80px; border-radius:8px; margin-top:4px; background:repeating-linear-gradient(45deg,#E9EDF4 0 10px,#F4F6FA 10px 20px); display:grid; place-items:center; }
-.feature__photo-slot span { font-family:var(--font-geist-mono), ui-monospace, monospace; font-size:9.5px; color:#6E7079; text-align:center; line-height:1.35; padding:4px; }
+.feature img { flex:none; width:80px; height:80px; border-radius:8px; object-fit:cover; margin-top:4px; }
 .feature h3 { font-size:16px; line-height:1.2; }
 .feature p { margin-top:8px; font-size:14px; }
 
@@ -460,6 +457,37 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 .legal__body h2 { font-size:16px; font-weight:600; margin-top:14px; }
 .legal__body a { color:var(--blue); }
 .legal__body a:hover { text-decoration:underline; }
+
+/* RULES page (/rules — «Как играть»): numbered steps, the coin table, the FAQ.
+   Tailwind preflight strips list and table defaults, so they are restated here. */
+.rules { max-width:760px; margin:72px auto 0; display:flex; flex-direction:column; gap:44px; font-size:14.5px; line-height:1.65; }
+.rules__section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:24px; }
+.rules__section h2 { font-size:16px; line-height:24px; }
+.rules a:not(.btn) { color:var(--blue); }
+.rules a:not(.btn):hover { text-decoration:underline; }
+.rules__note { font-size:13.5px; color:var(--muted-2); }
+.rules__steps { list-style:none; margin:0; padding:0; counter-reset:rules-step; display:flex; flex-direction:column; gap:14px; }
+.rules__steps li { counter-increment:rules-step; position:relative; padding-left:46px; min-height:32px; }
+.rules__steps li::before { content:counter(rules-step); position:absolute; left:0; top:-2px; width:32px; height:32px; border-radius:50%; background:var(--blue); color:var(--white); display:grid; place-items:center; font-weight:700; font-size:14px; line-height:1; }
+.rules__list { list-style:disc; margin:0; padding-left:22px; display:flex; flex-direction:column; gap:8px; }
+.rules__list li::marker { color:var(--blue); }
+.rules__coins { width:100%; border-collapse:separate; border-spacing:0; background:var(--white); border-radius:var(--r-card); box-shadow:var(--shadow-card); overflow:hidden; }
+.rules__coins td { padding:12px 20px; border-bottom:1px solid var(--border-2); vertical-align:middle; }
+.rules__coins tr:last-child td { border-bottom:0; }
+.rules__coins td:last-child { text-align:right; white-space:nowrap; font-weight:700; font-size:15px; }
+.rules__coins .is-plus { color:var(--green); }
+.rules__coins .is-minus { color:var(--red); }
+.rules__coins-note { display:block; font-size:12.5px; line-height:1.4; color:var(--muted); }
+.rules__faq { display:flex; flex-direction:column; gap:10px; }
+.rules__faq summary { list-style:none; position:relative; padding:16px 52px 16px 20px; font-weight:600; cursor:pointer; }
+.rules__faq summary::-webkit-details-marker { display:none; }
+.rules__faq summary::after { content:'+'; position:absolute; right:20px; top:50%; transform:translateY(-50%); font-size:22px; font-weight:400; color:var(--blue); }
+.rules__faq details[open] summary::after { content:'−'; }
+.rules__faq details p { padding:0 20px 18px; }
+@media (max-width: 767px) {
+  .rules { margin-top:48px; gap:36px; }
+  .rules__coins td { padding:12px 16px; }
+}
 
 
 /* SHEET — ONE overlay shell for every modal that becomes a bottom sheet on a

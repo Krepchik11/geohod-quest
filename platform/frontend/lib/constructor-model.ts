@@ -63,6 +63,9 @@ export type CtorTemplate =
 /** Подарок за шаг-задание фиксирован платформой: всегда включён, всегда 5 монет. */
 export const GIFT_COINS = 5;
 
+/** Цена подсказки в новом шаге, пока автор её не поменял. */
+export const HINT_COST_DEFAULT = 5;
+
 export interface CtorStep {
   id: string;
   template: CtorTemplate;
@@ -305,7 +308,7 @@ export function newStep(template: CtorTemplate): CtorStep {
     video: null,
     acceptable: [],
     gift: { narrative: '' },
-    hint: { on: true, cost: 5, text: '', image: null, imageOrigin: null },
+    hint: { on: true, cost: HINT_COST_DEFAULT, text: '', image: null, imageOrigin: null },
     address: { on: false, name: '', distance: '', coords: '' },
   };
   if (template === 'start') s.kicker = 'Городской квест';
@@ -458,7 +461,7 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     if (typeof s.buttonLabel !== 'string') s.buttonLabel = '';
     s.hint = {
       on: legacy.hint?.on ?? true,
-      cost: legacy.hint?.cost ?? 5,
+      cost: legacy.hint?.cost ?? HINT_COST_DEFAULT,
       text: legacy.hint?.text ?? '',
       image: legacy.hint?.image ?? null,
       imageOrigin: sanitizeImageOrigin(step.hint?.imageOrigin),

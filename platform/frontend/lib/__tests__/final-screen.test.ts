@@ -27,7 +27,7 @@ describe('FinalScreen', () => {
   it('congratulates, invites the rating with the coins pitch, shows coins + time', () => {
     const html = render({ coinsEarned: 12, time: '1:24' });
     expect(html).toContain('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
-    expect(html).toContain('Оцените квест, оставьте отзыв и получите дополнительные коины');
+    expect(html).toContain('Оцените квест, оставьте отзыв и получите дополнительные монеты');
     expect(html).toContain('12');
     expect(html).toContain('1:24');
     expect(html).toContain('монет собрано');

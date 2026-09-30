@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import SiteShell from '../components/SiteShell';
 import { LegalArticle } from '../components/legal';
+import { SUPPORT_TG, SUPPORT_TG_URL } from '../../lib/contacts';
 
 export const metadata: Metadata = { title: 'Политика конфиденциальности — GEOHOD QUEST' };
 
@@ -12,7 +13,7 @@ export const metadata: Metadata = { title: 'Политика конфиденц�
 export default function PrivacyPage() {
   return (
     <SiteShell>
-      <LegalArticle title="Политика конфиденциальности" updated="1 июля 2026 года">
+      <LegalArticle title="Политика конфиденциальности" updated="30 сентября 2026 года">
         <h2>1. Какие данные мы собираем</h2>
         <p>
           Играть можно без аккаунта. В этом случае мы храним только обезличенный идентификатор
@@ -48,9 +49,9 @@ export default function PrivacyPage() {
         </p>
         <h2>6. Ваши права</h2>
         <p>
-          Вы можете запросить копию своих данных, исправление или удаление, написав на
-          {' '}<a href="mailto:geoquest@gmail.com">geoquest@gmail.com</a>. Удалить аккаунт можно
-          самостоятельно в профиле.
+          Вы можете запросить копию своих данных, исправление или удаление, написав в Telegram
+          {' '}<a href={SUPPORT_TG_URL} target="_blank" rel="noopener">{SUPPORT_TG}</a>. Удалить
+          аккаунт можно самостоятельно в профиле.
         </p>
         <h2>7. Изменения политики</h2>
         <p>

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import SiteShell from '../components/SiteShell';
 import { LegalArticle } from '../components/legal';
+import { SUPPORT_TG, SUPPORT_TG_URL } from '../../lib/contacts';
 
 export const metadata: Metadata = { title: 'Пользовательское соглашение — GEOHOD QUEST' };
 
@@ -11,7 +12,7 @@ export const metadata: Metadata = { title: 'Пользовательское с�
 export default function TermsPage() {
   return (
     <SiteShell>
-      <LegalArticle title="Пользовательское соглашение" updated="1 июля 2026 года">
+      <LegalArticle title="Пользовательское соглашение" updated="30 сентября 2026 года">
         <h2>1. О сервисе</h2>
         <p>
           GEOHOD QUEST — платформа городских квестов: вы покупаете квест и проходите его на
@@ -32,8 +33,8 @@ export default function TermsPage() {
         <h2>4. Возвраты</h2>
         <p>
           Если квест не работает или его содержание существенно не соответствует описанию, напишите
-          на <a href="mailto:geoquest@gmail.com">geoquest@gmail.com</a> — мы разберёмся и при
-          подтверждении проблемы вернём оплату.
+          в Telegram <a href={SUPPORT_TG_URL} target="_blank" rel="noopener">{SUPPORT_TG}</a> — мы
+          разберёмся и при подтверждении проблемы вернём оплату.
         </p>
         <h2>5. Правила поведения</h2>
         <p>
