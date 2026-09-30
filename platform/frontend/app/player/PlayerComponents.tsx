@@ -651,7 +651,7 @@ export function FinalScreen({ quest, copy, st, on }: {
       </div>
 
       <div className="p-ratecard">
-        <p className="lead">{copy?.rateLead || "Оцените квест, оставьте отзыв и получите дополнительные коины"}</p>
+        <p className="lead">{copy?.rateLead || "Оцените квест, оставьте отзыв и получите дополнительные монеты"}</p>
         <RateStars value={s.rating} onRate={h.rate} />
         {rated && (
           <>
