@@ -257,6 +257,26 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .quest-card__price--owned { color:var(--green); font-size:14px; }
 .quest-card__error { margin-top:10px; font-size:12px; color:var(--red); }
 .quest-card__cta.is-pending { background:#9DB6F8; display:inline-flex; gap:8px; }
+/* store_my_quests: an own-quest card — state on the cover, ONE offline chip
+   (download / update / complete / «⭳ офлайн» → remove), a progress strip. */
+.quest-card__state { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:24px; padding:0 10px; border-radius:12px; background:var(--blue); color:var(--white); font-size:11px; font-weight:700; }
+.quest-card__state--new { background:var(--white); color:var(--text); }
+.quest-card__state--done { background:var(--green); }
+.quest-card__dl { position:absolute; z-index:2; right:12px; top:12px; display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 10px; border:0; border-radius:12px; background:var(--white); color:var(--blue); font:inherit; font-size:11px; font-weight:700; cursor:pointer; }
+.quest-card__dl:hover { background:var(--blue-tint); }
+.quest-card__dl--ready { background:var(--navy); color:var(--white); }
+.quest-card__dl--ready:hover { background:var(--text); }
+.quest-card__dl.is-busy { cursor:default; }
+.quest-card__dl .psheet__spinner { width:11px; height:11px; border-color:var(--blue-tint); border-top-color:var(--blue); }
+.quest-card__strip { position:absolute; left:0; right:0; bottom:0; height:5px; background:color-mix(in srgb, var(--white) 45%, transparent); }
+.quest-card__strip i { display:block; height:100%; background:var(--blue); transition:width .3s ease; }
+.quest-card__mine { margin-right:auto; padding-right:8px; font-size:13px; font-weight:600; line-height:1.25; color:var(--text); }
+.quest-card__mine--done { color:var(--green); }
+.quest-card__footer .btn.quest-card__cta--mine { width:140px; }
+.hero__inner .btn.hero__cta--continue { width:auto; min-width:272px; max-width:min(440px, 100%); }
+.hero__cta-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rm-sheet__text { font-size:14px; line-height:1.45; color:var(--text); }
+.rm-sheet__actions { display:flex; flex-wrap:wrap; gap:10px; }
 .shop-note { text-align:center; margin-top:48px; font-size:14px; color:var(--muted); }
 .shop-note--error { color:var(--amber); }
 /* «Ничего не нашлось» is a row of the card grid, not a sibling of it. */
@@ -331,6 +351,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .hero__title { font-size:30px; line-height:1.08; }
   .hero__subtitle { margin-top:10px; font-size:15px; }
   .hero__inner .btn { margin-top:24px; width:100%; }
+  .hero__inner .btn.hero__cta--continue { width:100%; min-width:0; }
   .section-title { font-size:16px; }
   .quest-grid { gap:20px; grid-template-columns:minmax(0, 360px); }
   .quest-card { width:100%; max-width:360px; margin-left:auto; margin-right:auto; }

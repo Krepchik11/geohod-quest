@@ -8,6 +8,7 @@ import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, classify, isAuthFailure, type Me } from '../../lib/api';
+import { useRememberedClientFeature } from '../../lib/client-features';
 import { emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
 import { flushAll } from '../../lib/sync';
@@ -74,6 +75,7 @@ export default function ProfilePage() {
   const [sheet, setSheet] = useState<'name' | 'email' | 'password' | 'delete' | null>(null);
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const router = useRouter();
+  const mineOn = useRememberedClientFeature('store_my_quests');
 
   const reload = () => {
     setData({ source: 'loading' });
@@ -236,7 +238,11 @@ export default function ProfilePage() {
                   {data.source === 'loading' ? 'Загружаем профиль…' : 'Пока нет пройденных квестов.'}
                 </p>
               )}
-              <Link className="btn btn--secondary btn--md" href="/my-quests">Все мои квесты</Link>
+              {mineOn ? (
+                <Link className="btn btn--secondary btn--md" href="/#shop">Мои квесты</Link>
+              ) : (
+                <Link className="btn btn--secondary btn--md" href="/my-quests">Все мои квесты</Link>
+              )}
             </div>
           </div>
 

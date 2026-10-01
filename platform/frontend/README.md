@@ -48,6 +48,9 @@ lib/
   install.ts          install-affordance state machine (installable/ios/hidden)
   queue.ts            IndexedDB fact queue (offline append-only log + bundles)
   sync.ts             flush controller (single-flight, attempt registration)
+  download.ts         bundle download/removal (snapshot + media + player page for offline)
+  owned-quests.ts     one owned quest as the device knows it (state, step, download)
+  offline-shelf.ts    the shop's own quests with no network (remembered catalog/grants)
   identity.ts         anonymous-first device id + session (who is playing)
   api.ts              the single API client (attaches identity, normalizes errors)
   roles.ts            capability predicates (admin ⊃ editor ⊃ player)
@@ -63,6 +66,11 @@ lib/
   immediately (write-through); `sync.flush*` drains pending facts to the server when
   online, single-flight per attempt. The reducer in `QuestPlayerClient` is the UI
   source of truth; the queue is durable persistence.
+- **Own quests in the shop** (flag `store_my_quests`): owned quests lead the store
+  grid with their state, step and an offline chip (download / update / complete /
+  remove); with no network the page falls back to `lib/offline-shelf`. The flag is
+  read with `useRememberedClientFeature` — the last verdict the device saw — since
+  offline it can't be fetched at all.
 - **Quest colours** (`lib/quest-theme.ts`): an author picks three — background, text,
   button — and `themeVars` derives the player's whole `--p-*` palette from them,
   including the tones that must stay readable on a background the author chose. The

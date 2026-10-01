@@ -24,6 +24,7 @@ vi.mock('../../../lib/bundle-resolver', () => ({
 }));
 
 vi.mock('../../../lib/identity', () => ({ currentUserId: () => 'player-1' }));
+vi.mock('../../../lib/client-features', () => ({ useRememberedClientFeature: () => false }));
 
 const questBonuses = vi.fn();
 vi.mock('../../../lib/api', () => ({ api: { questBonuses: () => questBonuses() } }));

@@ -36,7 +36,7 @@ import {
 import { flushPending } from '../../lib/sync';
 import { currentUserId, getDeviceId } from '../../lib/identity';
 import { mapsSearchUrl } from '../../lib/maps';
-import { useClientFeature, useUniversalAnswer } from '../../lib/client-features';
+import { useClientFeature, useRememberedClientFeature, useUniversalAnswer } from '../../lib/client-features';
 import { StartGate } from './StartGate';
 import { coinChime, spendChime } from './sound';
 import { useOnline } from './useOnline';
@@ -313,6 +313,8 @@ export default function QuestPlayerClient({
   // Platform-wide universal answer (null while loading / flag off / unset) —
   // merged into every answer check next to the snapshot's quest-wide one.
   const globalUniversalAnswer = useUniversalAnswer();
+  // Own quests live in the shop (store_my_quests) — the menu's exit goes there.
+  const exitTo = useRememberedClientFeature('store_my_quests') ? '/#shop' : '/my-quests';
   // Rule inputs for the engine. Built per event (not per render): getDeviceId
   // touches localStorage, which must stay out of the render path.
   const buildCtx = useCallback(
@@ -721,7 +723,7 @@ export default function QuestPlayerClient({
           on={{
             close: closeMenu,
             feedback: () => setUi((u) => ({ ...u, menuOpen: false, feedbackOpen: true })),
-            exit: () => router.push('/my-quests'),
+            exit: () => router.push(exitTo),
             // §8.4: reset confirms in a paper popup — never fires directly.
             reset: () => setUi((u) => ({ ...u, menuOpen: false, resetConfirm: true })),
             sound: toggleSound,

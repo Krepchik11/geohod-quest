@@ -40,11 +40,15 @@ pub enum Feature {
     /// the shop cards. The quest finale carries its own button that this flag
     /// does NOT gate — see [`Self::client_visible`].
     QuestShare,
+    /// Storefront: the player's own quests lead the shop grid (state, progress,
+    /// offline download and removal on the card), and the shop replaces the
+    /// separate «Мои квесты» page, which then redirects there.
+    StoreMyQuests,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -52,6 +56,7 @@ impl Feature {
         Self::PlayerBackButton,
         Self::PlayerUniversalAnswer,
         Self::QuestShare,
+        Self::StoreMyQuests,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -65,6 +70,7 @@ impl Feature {
             Self::PlayerBackButton => "player_back_button",
             Self::PlayerUniversalAnswer => "player_universal_answer",
             Self::QuestShare => "quest_share",
+            Self::StoreMyQuests => "store_my_quests",
         }
     }
 
@@ -75,7 +81,10 @@ impl Feature {
     pub fn client_visible(self) -> bool {
         matches!(
             self,
-            Self::PlayerBackButton | Self::PlayerUniversalAnswer | Self::QuestShare
+            Self::PlayerBackButton
+                | Self::PlayerUniversalAnswer
+                | Self::QuestShare
+                | Self::StoreMyQuests
         )
     }
 
@@ -124,6 +133,8 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         Feature::PlayerUniversalAnswer => true,
         // A button that builds a public URL client-side — nothing to configure.
         Feature::QuestShare => true,
+        // Client-side layout over data the server already serves.
+        Feature::StoreMyQuests => true,
     }
 }
 
@@ -205,6 +216,7 @@ mod tests {
             "player_back_button",
             "player_universal_answer",
             "quest_share",
+            "store_my_quests",
         ] {
             let f = Feature::parse(key).expect("registered");
             assert!(f.client_visible(), "{key} must be client visible");

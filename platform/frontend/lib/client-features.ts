@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, type PublicFeatures } from './api';
 
 /**
@@ -31,9 +31,36 @@ function normalizeWire(wire: PublicFeatures | Record<string, boolean>): PublicFe
   return { flags: (wire as Record<string, boolean>) ?? {}, universal_answer: null };
 }
 
+/** The last flag verdicts this device saw — see useRememberedClientFeature. */
+const REMEMBERED_KEY = 'geohod-flags:v1';
+let remembered: Partial<Record<string, boolean>> | null = null;
+
+function readRemembered(): Partial<Record<string, boolean>> {
+  if (remembered) return remembered;
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(REMEMBERED_KEY) ?? '{}');
+    remembered = parsed && typeof parsed === 'object' ? (parsed as Partial<Record<string, boolean>>) : {};
+  } catch {
+    remembered = {}; // storage blocked or corrupt — nothing remembered
+  }
+  return remembered;
+}
+
+function remember(flags: Partial<Record<string, boolean>>): void {
+  remembered = { ...flags };
+  try {
+    window.localStorage.setItem(REMEMBERED_KEY, JSON.stringify(flags));
+  } catch {
+    // storage blocked — the next load simply has nothing to fall back on
+  }
+}
+
 function fetchFeatures(): Promise<PublicFeatures> {
   if (!cache) {
-    const promise = api.getPublicFeatures().then(normalizeWire);
+    const promise = api.getPublicFeatures().then(normalizeWire).then((f) => {
+      remember(f.flags ?? {});
+      return f;
+    });
     cache = promise;
     promise.catch(() => {
       if (cache === promise) cache = null;
@@ -70,12 +97,29 @@ export const CLIENT_FEATURE_KEYS = [
   'player_back_button',
   'player_universal_answer',
   'quest_share',
+  'store_my_quests',
 ] as const;
 export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];
 
 /** Effective verdict of one client-visible flag; `false` until loaded. */
 export function useClientFeature(key: ClientFeatureKey): boolean {
   return usePublicFeatures()?.flags?.[key] ?? false;
+}
+
+const noSubscription = () => () => {};
+
+/**
+ * Like useClientFeature, but until the fetch answers — and whenever it fails —
+ * serves the verdict this device saw last, instead of `false`. For flags that
+ * reshape a whole screen or must hold offline: the store's own-quests view must
+ * neither reshuffle on every load nor vanish in airplane mode, where the flag
+ * can never be fetched. The price: right after an admin flips the flag, a
+ * device shows its old verdict for the moment one fetch takes.
+ */
+export function useRememberedClientFeature(key: ClientFeatureKey): boolean {
+  const fetched = usePublicFeatures();
+  const last = useSyncExternalStore(noSubscription, () => readRemembered()[key] === true, () => false);
+  return fetched ? (fetched.flags?.[key] ?? false) : last;
 }
 
 /**

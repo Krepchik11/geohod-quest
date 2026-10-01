@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { storeBundle, precacheBundleMedia } from '../../lib/download';
+import { storeBundle, precacheBundleMedia, precachePlayerPage } from '../../lib/download';
 import { api } from '../../lib/api';
+import { useRememberedClientFeature } from '../../lib/client-features';
 import { currentUserId } from '../../lib/identity';
 import { resolveGate, type GateResolution } from '../../lib/bundle-resolver';
 import { serverQuestBonuses } from '../../lib/player-stats';
@@ -23,6 +24,7 @@ type GateState = { kind: 'loading' } | GateResolution;
  */
 export default function BundleGate({ questId }: { questId: string }) {
   const [state, setState] = useState<GateState>({ kind: 'loading' });
+  const mineOn = useRememberedClientFeature('store_my_quests');
   // What the server says this quest already paid this player, on ANY device
   // (issue #117). Asked here, in parallel with resolution, and never waited
   // for: the gate's whole point is that a downloaded quest opens without the
@@ -59,6 +61,7 @@ export default function BundleGate({ questId }: { questId: string }) {
         persist: async (wire) => {
           const row = await storeBundle(wire);
           void precacheBundleMedia(row.snapshot_id, row.snapshot, wire.primary_comic).catch(() => {});
+          void precachePlayerPage(questId);
         },
       });
       if (restart && !cancelled && typeof window !== 'undefined') {
@@ -98,10 +101,12 @@ export default function BundleGate({ questId }: { questId: string }) {
         title="Квест недоступен"
         text={
           state.offline
-            ? 'Вы офлайн, а этот квест ещё не скачан на устройство. Подключитесь к сети или скачайте его заранее в «Моих квестах».'
+            ? mineOn
+              ? 'Вы офлайн, а этот квест ещё не скачан на устройство. Подключитесь к сети или скачайте его заранее — кнопкой «⭳ Скачать» на карточке в магазине.'
+              : 'Вы офлайн, а этот квест ещё не скачан на устройство. Подключитесь к сети или скачайте его заранее в «Моих квестах».'
             : 'Не удалось открыть квест. Возможно, он не опубликован или адрес неверен.'
         }
-        cta={{ href: '/my-quests', label: 'К моим квестам' }}
+        cta={mineOn ? { href: '/#shop', label: 'В магазин' } : { href: '/my-quests', label: 'К моим квестам' }}
       />
     );
   }

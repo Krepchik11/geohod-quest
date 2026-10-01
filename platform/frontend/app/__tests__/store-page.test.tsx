@@ -10,9 +10,13 @@ import React from 'react';
  * is only a draft over it, and «Показать N квестов» promises exactly the number
  * of cards that appear. One apply = one history entry.
  */
-const { listQuestsMock, listGrantsMock } = vi.hoisted(() => ({
+const { listQuestsMock, listGrantsMock, mineFlag, ownedStatusMock, inProgressMock, shelfMock } = vi.hoisted(() => ({
   listQuestsMock: vi.fn(),
   listGrantsMock: vi.fn(),
+  mineFlag: { on: false },
+  ownedStatusMock: vi.fn(),
+  inProgressMock: vi.fn(),
+  shelfMock: vi.fn(),
 }));
 
 vi.mock('../../lib/api', () => ({
@@ -35,11 +39,25 @@ vi.mock('../../lib/identity', () => ({
 vi.mock('../../lib/download', () => ({ downloadBundle: vi.fn(async () => {}) }));
 vi.mock('../../lib/client-features', () => ({
   useClientFeature: () => false,
+  useRememberedClientFeature: (key: string) => key === 'store_my_quests' && mineFlag.on,
   useUniversalAnswer: () => null,
+}));
+// The device's view of own quests is lib/owned-quests' (tested there); the
+// page's job is the order, the hero and the offline fallback.
+vi.mock('../../lib/owned-quests', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/owned-quests')>()),
+  ownedStatus: ownedStatusMock,
+  latestInProgress: inProgressMock,
+}));
+vi.mock('../../lib/offline-shelf', () => ({
+  loadOfflineShelf: shelfMock,
+  rememberCatalog: vi.fn(),
+  rememberGrants: vi.fn(),
 }));
 
 import GeoQuestHome from '../page';
 import type { PublishedQuestWire } from '../../lib/api';
+import { FRESH_STATUS } from '../../lib/owned-quests';
 
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
@@ -75,6 +93,10 @@ beforeEach(() => {
   listQuestsMock.mockResolvedValue(CATALOG);
   listGrantsMock.mockResolvedValue([]);
   window.history.replaceState(null, '', '/');
+  mineFlag.on = false;
+  ownedStatusMock.mockResolvedValue(FRESH_STATUS);
+  inProgressMock.mockResolvedValue(null);
+  shelfMock.mockReset();
 });
 
 describe('the store page and the URL', () => {
@@ -199,5 +221,71 @@ describe('the store page and the URL', () => {
   it('no free-text search survives on the store page', async () => {
     await mountStore();
     expect(document.querySelector('#qf-search')).toBeNull();
+  });
+});
+
+describe('store_my_quests: the shop is the player\'s own shelf', () => {
+  const grant = (quest_id: string, granted_at: string) => ({
+    user_id: 'dev:test', quest_id, granted_at, source: 'free', source_ref: null,
+  });
+
+  beforeEach(() => {
+    mineFlag.on = true;
+    listGrantsMock.mockResolvedValue([grant('c', '2026-09-01T00:00:00Z'), grant('a', '2026-09-10T00:00:00Z')]);
+  });
+
+  it('own quests lead — the one in progress before the unstarted — then the rest by the sort', async () => {
+    ownedStatusMock.mockImplementation(async (id: string) =>
+      id === 'c'
+        ? { ...FRESH_STATUS, state: 'progress', pos: 2, total: 5, lastActivity: '2026-09-30T00:00:00Z' }
+        : FRESH_STATUS,
+    );
+    await mountStore();
+    await waitFor(() => expect(cardNames()).toEqual(['Шифры Ниша', 'Ад Калемегдана', 'Ярость Земуна']));
+    expect(screen.getByText('шаг 2 из 5')).toBeInTheDocument();
+    expect(ownedStatusMock).toHaveBeenCalledWith('c', 's'); // the published version, for «Обновить»
+  });
+
+  it('filters apply to own quests like to any card', async () => {
+    window.history.replaceState(null, '', '/?city=Земун');
+    await mountStore();
+    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна']));
+  });
+
+  it('the hero goes straight back into the quest in progress', async () => {
+    inProgressMock.mockResolvedValue({ questId: 'c', name: 'Шифры Ниша', downloaded: true });
+    await mountStore();
+    expect(await screen.findByRole('link', { name: 'Продолжить «Шифры Ниша»' })).toHaveAttribute('href', '/quest/c');
+  });
+
+  it('with own quests and none running, the hero points down at them', async () => {
+    await mountStore();
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Мои квесты' })).toHaveAttribute('href', '#shop'));
+  });
+
+  it('offline: only own quests from the device, under a note; nothing to buy', async () => {
+    listQuestsMock.mockRejectedValue(new Error('offline'));
+    shelfMock.mockResolvedValue({ quests: [CATALOG[0]], owned: new Set(['a']), grantedAt: new Map() });
+    await mountStore();
+    expect(screen.getByText(/^Нет сети\. Ниже — ваши квесты на этом устройстве/)).toBeInTheDocument();
+    expect(cardNames()).toEqual(['Ад Калемегдана']);
+    expect(screen.queryByRole('button', { name: 'Купить' })).toBeNull();
+    expect(ownedStatusMock).toHaveBeenCalledWith('a', null); // the published version is unknown offline
+  });
+
+  it('offline with nothing on the device says so instead of an error', async () => {
+    listQuestsMock.mockRejectedValue(new Error('offline'));
+    shelfMock.mockResolvedValue({ quests: [], owned: new Set(), grantedAt: new Map() });
+    render(<GeoQuestHome />);
+    expect(await screen.findByText('На этом устройстве нет ваших квестов.')).toBeInTheDocument();
+    expect(screen.queryByText(/Не удалось загрузить магазин/)).toBeNull();
+  });
+
+  it('with the flag off a failed catalog is still the plain error', async () => {
+    mineFlag.on = false;
+    listQuestsMock.mockRejectedValue(new Error('offline'));
+    render(<GeoQuestHome />);
+    expect(await screen.findByText(/Не удалось загрузить магазин/)).toBeInTheDocument();
+    expect(shelfMock).not.toHaveBeenCalled();
   });
 });

@@ -72,6 +72,43 @@ describe('useClientFeature', () => {
   });
 });
 
+describe('useRememberedClientFeature', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('a device that never saw the flag behaves like useClientFeature', async () => {
+    apiMock.getPublicFeatures.mockResolvedValue(wire({ store_my_quests: true }));
+    const { useRememberedClientFeature } = await loadModule();
+    const { result } = renderHook(() => useRememberedClientFeature('store_my_quests'));
+    expect(result.current).toBe(false);
+    await waitFor(() => expect(result.current).toBe(true));
+  });
+
+  it('serves the last verdict this device saw while offline', async () => {
+    apiMock.getPublicFeatures.mockResolvedValue(wire({ store_my_quests: true }));
+    const online = await loadModule();
+    const seen = renderHook(() => online.useRememberedClientFeature('store_my_quests'));
+    await waitFor(() => expect(seen.result.current).toBe(true));
+    seen.unmount();
+
+    // Next page load, airplane mode: the fetch fails, the memory answers.
+    vi.resetModules();
+    apiMock.getPublicFeatures.mockRejectedValue(new Error('offline'));
+    const offline = await loadModule();
+    const { result } = renderHook(() => offline.useRememberedClientFeature('store_my_quests'));
+    await waitFor(() => expect(apiMock.getPublicFeatures).toHaveBeenCalledTimes(2));
+    expect(result.current).toBe(true);
+  });
+
+  it('the fetched verdict wins over the remembered one', async () => {
+    window.localStorage.setItem('geohod-flags:v1', JSON.stringify({ store_my_quests: true }));
+    apiMock.getPublicFeatures.mockResolvedValue(wire({ store_my_quests: false }));
+    const { useRememberedClientFeature } = await loadModule();
+    const { result } = renderHook(() => useRememberedClientFeature('store_my_quests'));
+    expect(result.current).toBe(true); // remembered, before the answer
+    await waitFor(() => expect(result.current).toBe(false));
+  });
+});
+
 describe('legacy wire compat (flat flag map from a pre-rollout backend)', () => {
   it('reads flags from the old flat shape; universal answer stays null', async () => {
     apiMock.getPublicFeatures.mockResolvedValue({ player_back_button: true });

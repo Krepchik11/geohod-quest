@@ -2,16 +2,17 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import SiteShell from '../components/SiteShell';
 import { toast } from '../components/Toaster';
 import { api, type PublishedQuestWire } from '../../lib/api';
 import { fetchOwned } from '../../lib/collection';
-import { projectState, latestRating } from '../../lib/shared-model';
-import { getActiveAttempt, getFacts, getLatestBundleForQuest, type BundleRow } from '../../lib/queue';
+import type { BundleRow } from '../../lib/queue';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
+import { ctaFor, formatDate, ownedStatus, type OwnedState } from '../../lib/owned-quests';
 import { coverSrc } from '../../lib/cover';
 import { currentUserId } from '../../lib/identity';
-import { useClientFeature } from '../../lib/client-features';
+import { useClientFeature, useRememberedClientFeature } from '../../lib/client-features';
 import ShareQuestButton from '../components/ShareQuestButton';
 
 /**
@@ -28,6 +29,9 @@ import ShareQuestButton from '../components/ShareQuestButton';
  * manifest makes the browser prompt for THAT quest's app. A list-side link
  * can't do better: prompt() needs transient user activation, which navigation
  * destroys, and installed-state is undetectable across manifest scopes.
+ *
+ * store_my_quests: the shop is the home of own quests — this page only
+ * redirects there (old installs, bookmarks and links still land somewhere).
  */
 
 interface MqRow {
@@ -36,7 +40,7 @@ interface MqRow {
   city: string | null;
   duration: string | null;
   photo: string | null;
-  state: 'new' | 'progress' | 'done';
+  state: OwnedState;
   pos?: number;
   total?: number;
   attemptDate?: string;
@@ -54,51 +58,24 @@ type Collection =
   | { source: 'live'; rows: MqRow[] }
   | { source: 'error' };
 
-/** §4.1 (2.3): dates carry the year — «28.06.2026». */
-export function formatDate(iso: string | undefined): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-/** §4.1: the one honest CTA per state. */
-export function ctaFor(state: MqRow['state']): { label: string; variant: 'primary' | 'secondary'; restart: boolean } {
-  if (state === 'progress') return { label: 'Продолжить', variant: 'primary', restart: false };
-  if (state === 'done') return { label: 'Пройти заново', variant: 'secondary', restart: true };
-  return { label: 'Начать', variant: 'primary', restart: false };
-}
-
-/** Compose one live row from server meta + local queue/bundles state. */
+/** Compose one live row from server meta + this device's view (lib/owned-quests). */
 async function composeRow(meta: PublishedQuestWire): Promise<MqRow> {
-  const [attempt, bundle] = await Promise.all([
-    getActiveAttempt(meta.quest_id),
-    getLatestBundleForQuest(meta.quest_id),
-  ]);
-  const facts = attempt ? (await getFacts(attempt.attempt_key)).map((r) => r.fact) : [];
-  const proj = projectState(facts);
-  const total = bundle?.snapshot.steps.length;
-
-  let state: MqRow['state'] = 'new';
-  if (facts.some((f) => f.type === 'attempt_completed')) state = 'done';
-  else if (facts.length > 0 || (attempt && attempt.last_step_idx > 0)) state = 'progress';
-
+  const s = await ownedStatus(meta.quest_id, meta.snapshot_id);
   return {
     quest_id: meta.quest_id,
     title: meta.name,
     city: meta.city,
     duration: meta.duration,
     photo: coverSrc(meta.primary_comic),
-    state,
-    pos: attempt ? Math.min(attempt.last_step_idx + 1, total ?? attempt.last_step_idx + 1) : undefined,
-    total,
-    attemptDate: attempt?.created_at,
-    myRating: latestRating(facts),
+    state: s.state,
+    pos: s.pos,
+    total: s.total,
+    attemptDate: s.attemptDate,
+    myRating: s.myRating,
     version: meta.snapshot_version,
     publishedSnapshotId: meta.snapshot_id,
-    bundle,
-    updateAvailable: !!bundle && bundle.snapshot_id !== meta.snapshot_id,
-    ...(proj.completedSteps.length > 0 && state === 'progress' && total
-      ? { pos: Math.min(Math.max(...proj.completedSteps) + 2, total) }
-      : {}),
+    bundle: s.bundle,
+    updateAvailable: s.updateAvailable,
   };
 }
 
@@ -165,7 +142,13 @@ async function loadCollection(): Promise<Collection> {
 export default function MyQuestsPage() {
   const [collection, setCollection] = useState<Collection>({ source: 'loading' });
   const shareOn = useClientFeature('quest_share');
+  const mineOn = useRememberedClientFeature('store_my_quests');
+  const router = useRouter();
   const [downloads, setDownloads] = useState<Record<string, DownloadStage | null>>({});
+
+  useEffect(() => {
+    if (mineOn) router.replace('/#shop');
+  }, [mineOn, router]);
 
   const reload = useCallback(() => {
     setCollection({ source: 'loading' });
@@ -208,7 +191,9 @@ export default function MyQuestsPage() {
         <h2 className="co-title">Мои квесты</h2>
         <p className="co-sub">Все купленные и полученные квесты. Доступ бессрочный — проходите когда удобно.</p>
 
-        {collection.source === 'loading' ? (
+        {mineOn ? (
+          <p className="mq-sub" style={{ marginTop: 24 }}>Ваши квесты теперь в магазине — переходим…</p>
+        ) : collection.source === 'loading' ? (
           <p className="mq-sub" style={{ marginTop: 24 }}>Загружаем коллекцию…</p>
         ) : collection.source === 'error' ? (
           <div className="card mq-empty" style={{ marginTop: 24 }}>

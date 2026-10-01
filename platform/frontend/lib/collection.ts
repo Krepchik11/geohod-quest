@@ -28,11 +28,15 @@ interface OwnedSnapshot {
   owned: ReadonlySet<string>;
   /** False until the first grants answer (success or failure) for this identity. */
   loaded: boolean;
+  /** quest_id → granted_at as the server answered; null until it has (a failed
+   *  fetch leaves it null). Optimistic purchases are not in it. */
+  grantedAt: ReadonlyMap<string, string> | null;
 }
 
 interface Store {
   userId: string;
-  server: ReadonlySet<string>;
+  /** quest_id → granted_at; null until the server answered. */
+  server: ReadonlyMap<string, string> | null;
   optimistic: Set<string>;
   loaded: boolean;
   inflight: Promise<ReadonlySet<string>> | null;
@@ -40,16 +44,16 @@ interface Store {
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
-const SERVER_SNAPSHOT: OwnedSnapshot = { owned: EMPTY, loaded: false };
+const SERVER_SNAPSHOT: OwnedSnapshot = { owned: EMPTY, loaded: false, grantedAt: null };
 
 let store: Store | null = null;
 const listeners = new Set<() => void>();
 let unsubSession: (() => void) | null = null;
 
 function rebuildSnapshot(s: Store): void {
-  const owned = new Set(s.server);
+  const owned = new Set(s.server?.keys());
   for (const id of s.optimistic) owned.add(id);
-  s.snapshot = { owned, loaded: s.loaded };
+  s.snapshot = { owned, loaded: s.loaded, grantedAt: s.server };
   listeners.forEach((cb) => cb());
 }
 
@@ -62,7 +66,7 @@ function ensureStore(): Store {
   if (store?.userId !== userId) {
     store = {
       userId,
-      server: EMPTY,
+      server: null,
       optimistic: new Set(),
       loaded: false,
       inflight: null,
@@ -80,7 +84,7 @@ function load(s: Store): Promise<ReadonlySet<string>> {
         // Keyed by the store the request was made for: after an identity
         // switch `store` points elsewhere and this answer is dropped.
         if (store === s) {
-          s.server = new Set(grants.map((g) => g.quest_id));
+          s.server = new Map(grants.map((g) => [g.quest_id, g.granted_at]));
           s.loaded = true;
           rebuildSnapshot(s);
         }

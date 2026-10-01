@@ -6393,6 +6393,7 @@ mod tests {
                 ("player_back_button", true),
                 ("player_universal_answer", true),
                 ("quest_share", true),
+                ("store_my_quests", true),
             ]
         );
     }
@@ -6412,6 +6413,7 @@ mod tests {
                     "player_back_button": false,
                     "player_universal_answer": false,
                     "quest_share": false,
+                    "store_my_quests": false,
                 },
                 "universal_answer": null,
             })
@@ -6433,6 +6435,7 @@ mod tests {
                 "player_back_button": true,
                 "player_universal_answer": false,
                 "quest_share": false,
+                "store_my_quests": false,
             })
         );
     }
