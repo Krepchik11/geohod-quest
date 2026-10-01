@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import React from 'react';
 
 /**
@@ -12,9 +12,11 @@ import React from 'react';
  * - free «Получить» grants instantly, success state lives IN the card;
  * - pending/error status lives in the card, never under the grid.
  */
-const { checkoutMock, downloadMock, shareFlag } = vi.hoisted(() => ({
+const { checkoutMock, downloadMock, removeBlockMock, removeMock, shareFlag } = vi.hoisted(() => ({
   checkoutMock: vi.fn(),
   downloadMock: vi.fn(async () => ({})),
+  removeBlockMock: vi.fn(async (): Promise<'in-progress' | null> => null),
+  removeMock: vi.fn(async () => {}),
   shareFlag: { on: false },
 }));
 vi.mock('../../../lib/api', () => ({
@@ -29,14 +31,20 @@ vi.mock('../../../lib/identity', () => ({
   getSession: () => null,
   subscribeSession: () => () => {},
 }));
-vi.mock('../../../lib/download', () => ({ downloadBundle: downloadMock }));
+vi.mock('../../../lib/download', () => ({
+  downloadBundle: downloadMock,
+  removeBlock: removeBlockMock,
+  removeDownloadedQuest: removeMock,
+}));
 vi.mock('../../../lib/client-features', () => ({
   useClientFeature: (key: string) => (key === 'quest_share' ? shareFlag.on : false),
   useUniversalAnswer: () => null,
 }));
 
-import QuestCard from '../QuestCard';
+import QuestCard, { type MineProps } from '../QuestCard';
 import type { PublishedQuestWire } from '../../../lib/api';
+import { FRESH_STATUS, type OwnedStatus } from '../../../lib/owned-quests';
+import type { BundleRow } from '../../../lib/queue';
 
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
@@ -133,5 +141,105 @@ describe('QuestCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' }));
     await waitFor(() => expect(screen.getByText('✓ Квест в «Моих квестах»')).toBeTruthy());
     expect(downloadMock).toHaveBeenCalled();
+  });
+});
+
+/* store_my_quests: an owned card is the player's own quest — state, progress,
+   the one honest CTA and ONE offline chip that downloads, updates, completes a
+   partial download or opens «Удалить с устройства». */
+describe('QuestCard — own quest (store_my_quests)', () => {
+  const downloaded = (over: Partial<BundleRow> = {}): BundleRow => ({
+    snapshot_id: 's1', quest_id: 'q1', version: 1, size_bytes: 1, downloaded_at: '2026-09-01T00:00:00Z',
+    snapshot: {} as BundleRow['snapshot'], media_complete: true, ...over,
+  });
+  const mine = (status: Partial<OwnedStatus> | null, over: Partial<MineProps> = {}): MineProps => ({
+    status: status && { ...FRESH_STATUS, ...status },
+    offline: false,
+    onChange: vi.fn(),
+    ...over,
+  });
+  const ready = 'Скачан для офлайна. Удалить с устройства';
+
+  beforeEach(() => {
+    removeBlockMock.mockClear();
+    removeMock.mockClear();
+  });
+
+  it('not started: the badge, «Куплен», «Начать» into the player', () => {
+    render(<QuestCard quest={quest({})} owned mine={mine({})} />);
+    expect(screen.getByText('Не начат')).toBeTruthy();
+    expect(screen.getByText('Куплен')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Начать' }).getAttribute('href')).toBe('/quest/q1');
+  });
+
+  it('in progress: the step in the price slot and «Продолжить»', () => {
+    render(<QuestCard quest={quest({})} owned mine={mine({ state: 'progress', pos: 3, total: 12 })} />);
+    expect(screen.getByText('В процессе')).toBeTruthy();
+    expect(screen.getByText('шаг 3 из 12')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Продолжить' }).getAttribute('href')).toBe('/quest/q1');
+  });
+
+  it('done: the finish date, and «Пройти заново» restarts', () => {
+    render(<QuestCard quest={quest({})} owned mine={mine({ state: 'done', lastActivity: '2026-09-28T12:00:00Z' })} />);
+    expect(screen.getByText('пройден 28.09.2026')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Пройти заново' }).getAttribute('href')).toBe('/quest/q1?restart=1');
+  });
+
+  it('«⭳ Скачать» downloads on the card, then re-reads the status', async () => {
+    const m = mine({});
+    render(<QuestCard quest={quest({})} owned mine={m} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Скачать для офлайна' }));
+    await waitFor(() => expect(m.onChange).toHaveBeenCalledWith('q1'));
+    expect(downloadMock).toHaveBeenCalledWith('q1', 'dev:test', expect.anything(), expect.any(Function));
+  });
+
+  it('an update, and a partial download, are offered for re-download', () => {
+    const { rerender } = render(
+      <QuestCard quest={quest({})} owned mine={mine({ bundle: downloaded(), updateAvailable: true })} />,
+    );
+    expect(screen.getByRole('button', { name: 'Обновить' })).toBeTruthy();
+    rerender(<QuestCard quest={quest({})} owned mine={mine({ bundle: downloaded({ media_complete: false }) })} />);
+    expect(screen.getByRole('button', { name: '⭳ Докачать' })).toBeTruthy();
+  });
+
+  it('«⭳ офлайн» opens «Удалить с устройства»; confirming removes and re-reads', async () => {
+    const m = mine({ bundle: downloaded() });
+    render(<QuestCard quest={quest({})} owned mine={m} />);
+    fireEvent.click(screen.getByRole('button', { name: ready }));
+    const dialog = await screen.findByRole('dialog', { name: 'Удалить с устройства' });
+    const remove = within(dialog).getByRole('button', { name: 'Удалить' }) as HTMLButtonElement;
+    await waitFor(() => expect(remove.disabled).toBe(false));
+    fireEvent.click(remove);
+    await waitFor(() => expect(removeMock).toHaveBeenCalledWith('q1'));
+    await waitFor(() => expect(m.onChange).toHaveBeenCalledWith('q1'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a quest in progress cannot be removed — the sheet says why', async () => {
+    removeBlockMock.mockResolvedValueOnce('in-progress');
+    render(<QuestCard quest={quest({})} owned mine={mine({ state: 'progress', pos: 2, total: 5, bundle: downloaded() })} />);
+    fireEvent.click(screen.getByRole('button', { name: ready }));
+    expect(await screen.findByText('Квест уже начат')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it('offline: a downloaded quest plays; one not downloaded needs the network', () => {
+    const { rerender } = render(
+      <QuestCard quest={quest({})} owned mine={mine({ bundle: downloaded() }, { offline: true })} />,
+    );
+    expect(screen.getByRole('link', { name: 'Начать' }).getAttribute('href')).toBe('/quest/q1');
+    rerender(<QuestCard quest={quest({})} owned mine={mine({}, { offline: true })} />);
+    expect((screen.getByRole('button', { name: 'Нужна сеть' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Скачать для офлайна' })).toBeNull();
+  });
+
+  it('a free grant flips the card to the own quest and downloads visibly', async () => {
+    checkoutMock.mockResolvedValue({});
+    const m = mine(null);
+    render(<QuestCard quest={quest({ price: 0 })} owned={false} mine={m} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Получить' }));
+    await waitFor(() => expect(screen.getByText('✓ Квест ваш')).toBeTruthy());
+    await waitFor(() => expect(m.onChange).toHaveBeenCalledWith('q1'));
   });
 });

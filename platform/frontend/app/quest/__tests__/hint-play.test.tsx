@@ -27,6 +27,7 @@ vi.mock('../../../lib/api', () => ({ api: { listQuests: vi.fn(async () => []) } 
 
 vi.mock('../../../lib/client-features', () => ({
   useClientFeature: () => false,
+  useRememberedClientFeature: () => false,
   useUniversalAnswer: () => null,
 }));
 

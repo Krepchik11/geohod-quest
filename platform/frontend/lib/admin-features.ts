@@ -40,6 +40,7 @@ export const FEATURE_KEYS = [
   'player_back_button',
   'player_universal_answer',
   'quest_share',
+  'store_my_quests',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -83,6 +84,13 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
       'Кнопка «Поделиться» на витрине квеста, в «Моих квестах» и на карточках магазина. ' +
       'На финале квеста кнопка есть всегда, независимо от этого переключателя — ' +
       'флаги читаются по сети, а финал игрок часто открывает офлайн.',
+  },
+  store_my_quests: {
+    label: 'Мои квесты в магазине',
+    description:
+      'Свои квесты стоят первыми в сетке магазина: прогресс, кнопка «Продолжить», скачивание и ' +
+      'удаление с устройства прямо на карточке; без сети магазин показывает скачанные квесты. ' +
+      'Страница «Мои квесты» перенаправляет в магазин.',
   },
 };
 

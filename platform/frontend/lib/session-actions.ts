@@ -5,6 +5,7 @@
  */
 import { api } from './api';
 import { currentUserId, logout as clearSessionAndRotate } from './identity';
+import { forgetGrants } from './offline-shelf';
 import { clearLocalPlay } from './queue';
 import { flushAll } from './sync';
 
@@ -21,7 +22,8 @@ import { flushAll } from './sync';
  *     lib/identity.clearSession).
  *  3. Wipe this device's offline play state so the now-anonymous device is a clean
  *     visitor: no lingering attempts/facts to mis-attribute to the rotated id, no
- *     downloaded bundles to replay paid quests grant-free.
+ *     downloaded bundles to replay paid quests grant-free, no remembered grants
+ *     for the offline shop to show.
  *
  * Everything that synced stays on the account and returns on the next login.
  */
@@ -32,6 +34,7 @@ export async function logoutAndReset(): Promise<void> {
     // Offline / unrecoverable — already-synced history stays on the account.
   }
   clearSessionAndRotate();
+  forgetGrants();
   try {
     await clearLocalPlay();
   } catch {

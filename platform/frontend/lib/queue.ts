@@ -45,6 +45,10 @@ export interface BundleRow {
   snapshot: QuestSnapshot;
   size_bytes: number;
   downloaded_at: string;
+  /** Whether every media file the snapshot references reached the offline
+   *  cache. Stored `false` and confirmed by the media precache; absent on
+   *  bundles downloaded before the check existed, which count as complete. */
+  media_complete?: boolean;
 }
 
 interface GeohodDB extends DBSchema {
@@ -105,6 +109,11 @@ export function factNaturalKey(f: Fact): string {
 export async function getActiveAttempt(questId: string): Promise<AttemptRow | null> {
   const rows = await (await db()).getAllFromIndex('attempts', 'by-quest', questId);
   return rows.find((r) => r.status === 'active') ?? null;
+}
+
+/** Every attempt of one quest — active and superseded. */
+export async function getAttemptsForQuest(questId: string): Promise<AttemptRow[]> {
+  return (await db()).getAllFromIndex('attempts', 'by-quest', questId);
 }
 
 /** One attempt row by its client key (fresh read of server_attempt_id etc.), or null. */
@@ -276,6 +285,39 @@ export async function getLatestBundleForQuest(questId: string): Promise<BundleRo
   const rows = await (await db()).getAllFromIndex('bundles', 'by-quest', questId);
   if (rows.length === 0) return null;
   return rows.reduce((best, r) => (r.version > best.version ? r : best));
+}
+
+/** Every downloaded bundle on this device — all quests, all versions. */
+export async function listBundles(): Promise<BundleRow[]> {
+  return (await db()).getAll('bundles');
+}
+
+/** Record the media precache verdict on a stored bundle (no-op once it is gone). */
+export async function setBundleMediaComplete(snapshotId: string, complete: boolean): Promise<void> {
+  const d = await db();
+  const row = await d.get('bundles', snapshotId);
+  if (!row) return;
+  await d.put('bundles', { ...row, media_complete: complete });
+}
+
+/** «Удалить с устройства»: drop every downloaded version of a quest; returns their snapshot ids. */
+export async function deleteBundlesForQuest(questId: string): Promise<string[]> {
+  const d = await db();
+  const tx = d.transaction('bundles', 'readwrite');
+  const ids = await tx.store.index('by-quest').getAllKeys(questId);
+  await Promise.all(ids.map((id) => tx.store.delete(id)));
+  await tx.done;
+  return ids;
+}
+
+/**
+ * Retire the quest's active attempt without starting another; the next open
+ * binds a fresh one to whatever version it resolves. Its log stays, like every
+ * superseded attempt's. Callers use it only on an attempt with nothing in it.
+ */
+export async function supersedeActiveAttempt(questId: string): Promise<void> {
+  const current = await getActiveAttempt(questId);
+  if (current) await (await db()).put('attempts', { ...current, status: 'superseded' });
 }
 
 // ---------- device reset ----------
