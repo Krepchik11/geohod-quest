@@ -54,6 +54,16 @@ city: string | null,
  */
 duration: string | null, 
 /**
+ * How long the walk takes, in minutes ([`DEFAULT_DURATION_MIN`] unless the
+ * author changed it in the constructor).
+ */
+duration_min: number, 
+/**
+ * Route length in kilometres ([`DEFAULT_DISTANCE_KM`] unless the author
+ * changed it in the constructor).
+ */
+distance_km: number, 
+/**
  * Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
  */
 price: number | null, 

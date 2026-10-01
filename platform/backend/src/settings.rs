@@ -18,17 +18,22 @@ pub enum Setting {
     /// The platform-wide universal answer accepted on every answer step while
     /// the `player_universal_answer` feature flag is on.
     UniversalAnswer,
+    /// The cities announced as «скоро» on the storefront while the
+    /// `store_cities` feature flag is on — a comma-separated list (see
+    /// [`soon_cities`]).
+    SoonCities,
 }
 
 impl Setting {
     /// Every registered setting.
-    pub const ALL: [Self; 1] = [Self::UniversalAnswer];
+    pub const ALL: [Self; 2] = [Self::UniversalAnswer, Self::SoonCities];
 
     /// Stable wire/storage key. Never reuse a retired key for a new setting —
     /// a stale row would silently become its value.
     pub fn key(self) -> &'static str {
         match self {
             Self::UniversalAnswer => "universal_answer",
+            Self::SoonCities => "soon_cities",
         }
     }
 
@@ -45,6 +50,26 @@ impl Setting {
             .filter(|v| !v.is_empty())
             .map(str::to_string)
     }
+}
+
+/// The `soon_cities` value as a list: split on commas and line breaks, each
+/// name trimmed, blanks and repeats dropped, the admin's order kept.
+///
+/// # Arguments
+///
+/// * `value` - The stored setting, `None` when unset
+///
+/// # Returns
+///
+/// The city names in the order the admin typed them; empty when unset.
+pub fn soon_cities(value: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in value.unwrap_or_default().split([',', '\n']).map(str::trim) {
+        if !name.is_empty() && !out.iter().any(|c| c == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -68,6 +93,16 @@ mod tests {
         assert_eq!(Setting::parse(""), None);
         // Keys are exact — no case folding, no trimming.
         assert_eq!(Setting::parse("Universal_Answer"), None);
+    }
+
+    #[test]
+    fn soon_cities_splits_trims_and_dedups_in_order() {
+        assert_eq!(
+            soon_cities(Some(" Белград, Стамбул ,\nМосква,,Белград ")),
+            vec!["Белград", "Стамбул", "Москва"]
+        );
+        assert!(soon_cities(None).is_empty());
+        assert!(soon_cities(Some(" , ")).is_empty());
     }
 
     #[test]

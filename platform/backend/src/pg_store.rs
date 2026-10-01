@@ -724,6 +724,11 @@ fn published_from_row(row: &sqlx::postgres::PgRow) -> Result<PublishedMeta, AppE
         snapshot_id: row.try_get("snapshot_id").map_err(internal)?,
         city: row.try_get("city").map_err(internal)?,
         duration: row.try_get("duration").map_err(internal)?,
+        duration_min: row
+            .try_get::<i32, _>("duration_min")
+            .map_err(internal)?
+            .max(1) as u32,
+        distance_km: row.try_get("distance_km").map_err(internal)?,
         price: row.try_get("price").map_err(internal)?,
         description: row.try_get("description").map_err(internal)?,
         pages: row
@@ -741,7 +746,7 @@ fn published_from_row(row: &sqlx::postgres::PgRow) -> Result<PublishedMeta, AppE
 
 /// Published-quest columns selected wherever a [`PublishedMeta`] is read (kept in
 /// one place so list/get/bundle stay in sync with [`published_from_row`]).
-const PUBLISHED_COLS: &str = "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, price, description, pages, tasks, paid_hints, players_bonus";
+const PUBLISHED_COLS: &str = "quest_id, name, primary_comic, template_summary, snapshot_version, snapshot_id, city, duration, duration_min, distance_km, price, description, pages, tasks, paid_hints, players_bonus";
 
 impl PgGrantStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -882,8 +887,8 @@ impl GrantStore for PgGrantStore {
             "INSERT INTO published_quests
                  (quest_id, name, primary_comic, template_summary, snapshot_version,
                   snapshot_id, city, duration, price, description, pages, tasks, paid_hints,
-                  players_bonus)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                  players_bonus, duration_min, distance_km)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              ON CONFLICT (quest_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  primary_comic = EXCLUDED.primary_comic,
@@ -897,7 +902,9 @@ impl GrantStore for PgGrantStore {
                  pages = EXCLUDED.pages,
                  tasks = EXCLUDED.tasks,
                  paid_hints = EXCLUDED.paid_hints,
-                 players_bonus = EXCLUDED.players_bonus",
+                 players_bonus = EXCLUDED.players_bonus,
+                 duration_min = EXCLUDED.duration_min,
+                 distance_km = EXCLUDED.distance_km",
         )
         .bind(quest_id)
         .bind(&meta.name)
@@ -913,6 +920,8 @@ impl GrantStore for PgGrantStore {
         .bind(meta.tasks.map(|v| v as i32))
         .bind(meta.paid_hints)
         .bind(meta.players_bonus)
+        .bind(meta.duration_min as i32)
+        .bind(meta.distance_km)
         .execute(&mut *tx)
         .await
         .map_err(internal)?;

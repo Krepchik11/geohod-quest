@@ -519,6 +519,23 @@ impl InMemoryFactStore {
     }
 }
 
+/// Duration of a quest whose author did not set one: the owner's call — every
+/// quest is a 60-minute walk unless its author says otherwise.
+pub const DEFAULT_DURATION_MIN: u32 = 60;
+
+/// Route length of a quest whose author did not set one (same call: 5 km).
+pub const DEFAULT_DISTANCE_KM: f32 = 5.0;
+
+/// Serde default for [`PublishedMeta::duration_min`] (a fn path, as serde needs).
+fn default_duration_min() -> u32 {
+    DEFAULT_DURATION_MIN
+}
+
+/// Serde default for [`PublishedMeta::distance_km`].
+fn default_distance_km() -> f32 {
+    DEFAULT_DISTANCE_KM
+}
+
 /// Published quest metadata surfaced by the constructor's publish for the
 /// marketplace list and for binding new attempts to the latest snapshot.
 ///
@@ -541,6 +558,14 @@ pub struct PublishedMeta {
     /// Store-card duration label (e.g. "1.5 часа"); None when blank.
     #[serde(default)]
     pub duration: Option<String>,
+    /// How long the walk takes, in minutes ([`DEFAULT_DURATION_MIN`] unless the
+    /// author changed it in the constructor).
+    #[serde(default = "default_duration_min")]
+    pub duration_min: u32,
+    /// Route length in kilometres ([`DEFAULT_DISTANCE_KM`] unless the author
+    /// changed it in the constructor).
+    #[serde(default = "default_distance_km")]
+    pub distance_km: f32,
     /// Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
     #[serde(default)]
     #[cfg_attr(test, ts(type = "number | null"))]
@@ -3814,6 +3839,8 @@ mod grant_tests {
             tasks: None,
             paid_hints: None,
             players_bonus: 0,
+            duration_min: DEFAULT_DURATION_MIN,
+            distance_km: DEFAULT_DISTANCE_KM,
         }
     }
 
@@ -4268,6 +4295,8 @@ mod constructor_tests {
             tasks: None,
             paid_hints: None,
             players_bonus: 0,
+            duration_min: DEFAULT_DURATION_MIN,
+            distance_km: DEFAULT_DISTANCE_KM,
         };
         let authored = HashMap::from([
             (

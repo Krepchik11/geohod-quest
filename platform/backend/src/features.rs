@@ -44,11 +44,21 @@ pub enum Feature {
     /// offline download and removal on the card), and the shop replaces the
     /// separate «Мои квесты» page, which then redirects there.
     StoreMyQuests,
+    /// Storefront: the city chips above the shop (one city at a time) and the
+    /// «Скоро в новых городах» block; the upcoming cities are the
+    /// `soon_cities` runtime setting (`crate::settings`).
+    StoreCities,
+    /// Storefront: the structured quest facts — duration in minutes and route
+    /// length in kilometres — on the shop card, the product page and the hero.
+    QuestFacts,
+    /// Storefront: sign-in buttons inside the purchase sheet, so saving a
+    /// purchase to an account never leaves the page.
+    PurchaseInlineLogin,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 11] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -57,6 +67,9 @@ impl Feature {
         Self::PlayerUniversalAnswer,
         Self::QuestShare,
         Self::StoreMyQuests,
+        Self::StoreCities,
+        Self::QuestFacts,
+        Self::PurchaseInlineLogin,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -71,6 +84,9 @@ impl Feature {
             Self::PlayerUniversalAnswer => "player_universal_answer",
             Self::QuestShare => "quest_share",
             Self::StoreMyQuests => "store_my_quests",
+            Self::StoreCities => "store_cities",
+            Self::QuestFacts => "quest_facts",
+            Self::PurchaseInlineLogin => "purchase_inline_login",
         }
     }
 
@@ -85,6 +101,9 @@ impl Feature {
                 | Self::PlayerUniversalAnswer
                 | Self::QuestShare
                 | Self::StoreMyQuests
+                | Self::StoreCities
+                | Self::QuestFacts
+                | Self::PurchaseInlineLogin
         )
     }
 
@@ -134,7 +153,10 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         // A button that builds a public URL client-side — nothing to configure.
         Feature::QuestShare => true,
         // Client-side layout over data the server already serves.
-        Feature::StoreMyQuests => true,
+        Feature::StoreMyQuests | Feature::StoreCities | Feature::QuestFacts => true,
+        // The sheet reuses the sign-in buttons, which hide a provider the
+        // deployment has no credentials for — nothing to configure here.
+        Feature::PurchaseInlineLogin => true,
     }
 }
 
@@ -217,6 +239,9 @@ mod tests {
             "player_universal_answer",
             "quest_share",
             "store_my_quests",
+            "store_cities",
+            "quest_facts",
+            "purchase_inline_login",
         ] {
             let f = Feature::parse(key).expect("registered");
             assert!(f.client_visible(), "{key} must be client visible");

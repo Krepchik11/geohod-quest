@@ -98,6 +98,9 @@ export const CLIENT_FEATURE_KEYS = [
   'player_universal_answer',
   'quest_share',
   'store_my_quests',
+  'store_cities',
+  'quest_facts',
+  'purchase_inline_login',
 ] as const;
 export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];
 

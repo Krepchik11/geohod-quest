@@ -95,6 +95,13 @@ struct PublishRequest {
     city: Option<String>,
     #[serde(default)]
     duration: Option<String>,
+    /// Walk duration in minutes; absent (an older constructor) means
+    /// [`store::DEFAULT_DURATION_MIN`].
+    #[serde(default)]
+    duration_min: Option<u32>,
+    /// Route length in kilometres; absent means [`store::DEFAULT_DISTANCE_KM`].
+    #[serde(default)]
+    distance_km: Option<f32>,
     #[serde(default)]
     price: Option<i64>,
     /// Store description shown on the product page (§3.1); blank stays absent.
@@ -117,6 +124,7 @@ async fn publish_quest_handler(
     // publish is a direct API call so the role is enforced here too. Author binding
     // (which editor owns which quest) remains a tracked follow-up.
     require_editor_actor(&state, &headers).await?;
+    let (duration_min, distance_km) = quest_facts(req.duration_min, req.distance_km)?;
     // The frozen snapshot is what every player downloads, so it is the payload
     // that must NOT carry pixels. Externalized before it is registered, because
     // afterwards it is immutable and nothing may rewrite it — and strictly AFTER
@@ -142,6 +150,8 @@ async fn publish_quest_handler(
         // instead of rendering an empty pin/clock.
         city: req.city.filter(|s| !s.trim().is_empty()),
         duration: req.duration.filter(|s| !s.trim().is_empty()),
+        duration_min,
+        distance_km,
         price: req.price,
         description: req.description.filter(|s| !s.trim().is_empty()),
         pages,
@@ -170,6 +180,47 @@ async fn publish_quest_handler(
     Ok(Json(
         serde_json::json!({ "status": "published", "quest_id": req.quest_id }),
     ))
+}
+
+/// Longest walk a quest may claim: a day. Anything above is a typo.
+const MAX_DURATION_MIN: u32 = 24 * 60;
+
+/// Longest route a quest may claim, in kilometres.
+const MAX_DISTANCE_KM: f32 = 100.0;
+
+/// The store-card facts of a publish, defaulted and checked.
+///
+/// # Arguments
+///
+/// * `duration_min` - Minutes from the constructor; `None` from an older client
+/// * `distance_km` - Kilometres from the constructor; `None` from an older client
+///
+/// # Returns
+///
+/// `(minutes, kilometres)`, each defaulted to the owner's 60 min / 5 km.
+///
+/// # Errors
+///
+/// `AppError::BadRequest` when the minutes are outside 1..=1440 or the
+/// kilometres are not a number in (0, 100].
+fn quest_facts(
+    duration_min: Option<u32>,
+    distance_km: Option<f32>,
+) -> Result<(u32, f32), AppError> {
+    let minutes = duration_min.unwrap_or(store::DEFAULT_DURATION_MIN);
+    if !(1..=MAX_DURATION_MIN).contains(&minutes) {
+        return Err(AppError::BadRequest(format!(
+            "duration_min must be 1..={MAX_DURATION_MIN}, got {minutes}"
+        )));
+    }
+    let km = distance_km.unwrap_or(store::DEFAULT_DISTANCE_KM);
+    // `!(a > 0.0)` (not `a <= 0.0`) so a NaN is rejected too.
+    if !(km > 0.0 && km <= MAX_DISTANCE_KM) {
+        return Err(AppError::BadRequest(format!(
+            "distance_km must be in (0, {MAX_DISTANCE_KM}], got {km}"
+        )));
+    }
+    Ok((minutes, km))
 }
 
 /// One dashboard list row.
@@ -616,4 +667,32 @@ async fn delete_constructor_quest_handler(
     Ok(Json(
         serde_json::json!({ "status": "deleted", "quest_id": quest_id }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quest_facts_default_to_the_owners_60_minutes_and_5_km() {
+        assert_eq!(quest_facts(None, None).expect("defaults"), (60, 5.0));
+        assert_eq!(quest_facts(Some(90), Some(3.5)).expect("set"), (90, 3.5));
+    }
+
+    #[test]
+    fn quest_facts_reject_values_no_walk_has() {
+        for (minutes, km) in [
+            (Some(0), None),
+            (Some(MAX_DURATION_MIN + 1), None),
+            (None, Some(0.0)),
+            (None, Some(-1.0)),
+            (None, Some(MAX_DISTANCE_KM + 0.5)),
+            (None, Some(f32::NAN)),
+        ] {
+            assert!(
+                matches!(quest_facts(minutes, km), Err(AppError::BadRequest(_))),
+                "{minutes:?} {km:?}"
+            );
+        }
+    }
 }

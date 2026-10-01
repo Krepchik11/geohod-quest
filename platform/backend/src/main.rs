@@ -1847,6 +1847,10 @@ mod tests {
         // the card never has to fabricate city/duration/price.
         assert_eq!(row["city"], "Нови Сад");
         assert_eq!(row["duration"], "1.5 часа");
+        // A publish without the numeric facts (an older constructor) gets the
+        // owner's defaults: a 60-minute, 5 km walk.
+        assert_eq!(row["duration_min"], 60);
+        assert_eq!(row["distance_km"], 5.0);
         assert_eq!(row["price"], 300);
         // A freshly published quest has no ratings yet — reported honestly as zero,
         // not a fake "5 (2 отзыва)". (Pure projection of finale facts.)
@@ -5477,6 +5481,8 @@ mod tests {
                     tasks: None,
                     paid_hints: None,
                     players_bonus: 0,
+                    duration_min: crate::store::DEFAULT_DURATION_MIN,
+                    distance_km: crate::store::DEFAULT_DISTANCE_KM,
                 },
                 Some(json!({ "steps": [{ "image": blob }] })),
             )
@@ -5580,6 +5586,8 @@ mod tests {
                     tasks: Some(0),
                     paid_hints: Some(false),
                     players_bonus: 0,
+                    duration_min: crate::store::DEFAULT_DURATION_MIN,
+                    distance_km: crate::store::DEFAULT_DISTANCE_KM,
                 },
                 Some(json!({ "steps": [] })),
             )
@@ -6394,6 +6402,9 @@ mod tests {
                 ("player_universal_answer", true),
                 ("quest_share", true),
                 ("store_my_quests", true),
+                ("store_cities", true),
+                ("quest_facts", true),
+                ("purchase_inline_login", true),
             ]
         );
     }
@@ -6414,8 +6425,12 @@ mod tests {
                     "player_universal_answer": false,
                     "quest_share": false,
                     "store_my_quests": false,
+                    "store_cities": false,
+                    "quest_facts": false,
+                    "purchase_inline_login": false,
                 },
                 "universal_answer": null,
+                "soon_cities": [],
             })
         );
 
@@ -6436,6 +6451,9 @@ mod tests {
                 "player_universal_answer": false,
                 "quest_share": false,
                 "store_my_quests": false,
+                "store_cities": false,
+                "quest_facts": false,
+                "purchase_inline_login": false,
             })
         );
     }
@@ -6490,6 +6508,74 @@ mod tests {
         assert_eq!(v["value"], Value::Null);
         let (_, v) = get_json(&app, "/api/features").await;
         assert_eq!(v["universal_answer"], Value::Null);
+    }
+
+    /// The «скоро» cities reach GET /api/features only while `store_cities` is
+    /// on — as a clean list, in the admin's order.
+    #[tokio::test]
+    async fn soon_cities_served_only_when_store_cities_is_on() {
+        let app = test_app();
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/settings/soon_cities",
+            json!({ "value": "Белград, Стамбул,, Москва " }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v["soon_cities"], json!([]), "flag off: nothing announced");
+
+        let (st, _) = post_json_h(
+            &app,
+            "/api/admin/features/store_cities",
+            json!({ "enabled": true }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = get_json(&app, "/api/features").await;
+        assert_eq!(v["soon_cities"], json!(["Белград", "Стамбул", "Москва"]));
+    }
+
+    /// The numeric store-card facts round-trip through a publish, and a value
+    /// no walk can have is refused before anything is stored.
+    #[tokio::test]
+    async fn publish_carries_duration_minutes_and_route_km() {
+        let app = test_app();
+        let ids = Ids::new("quest-facts");
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1,
+                   "duration_min": 90, "distance_km": 3.5}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, product) = get_json(&app, &format!("/api/quests/{}", ids.quest)).await;
+        assert_eq!(product["duration_min"], 90);
+        assert_eq!(product["distance_km"], 3.5);
+
+        for bad in [
+            json!({"duration_min": 0}),
+            json!({"distance_km": 0}),
+            json!({"distance_km": 500}),
+        ] {
+            let mut body = json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                                  "snapshot_version": 2, "snapshot_id": ids.snap2});
+            for (k, v) in bad.as_object().expect("object") {
+                body[k] = v.clone();
+            }
+            let (st, _) = publish(&app, &ids, body).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let (_, product) = get_json(&app, &format!("/api/quests/{}", ids.quest)).await;
+        assert_eq!(
+            product["snapshot_version"], 1,
+            "a refused publish stores nothing"
+        );
     }
 
     #[tokio::test]
@@ -6741,6 +6827,8 @@ mod tests {
             tasks: Some(1),
             paid_hints: None,
             players_bonus: 0,
+            duration_min: crate::store::DEFAULT_DURATION_MIN,
+            distance_km: crate::store::DEFAULT_DISTANCE_KM,
         }
     }
 

@@ -432,7 +432,12 @@ pub struct PlayerReview {
     pub text: String,
 }
 
-/// One page of the non-hidden ratings that carry text, newest-written first,
+/// A review at least this long (in characters, trimmed) says something a buyer
+/// can use; shorter ones («Топ!», «Класс!») follow them on the product page.
+pub const SUBSTANTIVE_REVIEW_CHARS: usize = 60;
+
+/// One page of the non-hidden ratings that carry text — substantive ones
+/// ([`SUBSTANTIVE_REVIEW_CHARS`]) first, newest-written first within each group —
 /// plus the full count («{M} с отзывом»); each text is clamped to 500 chars.
 /// The sort runs over references and only the requested page is materialized.
 pub fn quest_reviews(
@@ -446,7 +451,14 @@ pub fn quest_reviews(
         .filter(|r| !row_hidden(r, hidden))
         .filter(|r| r.text.is_some())
         .collect();
-    with_text.sort_by_key(|r| std::cmp::Reverse((r.text_at, r.text_ord)));
+    // Keyed once per row (not per comparison): counting chars is O(len).
+    with_text.sort_by_cached_key(|r| {
+        let substantive = r
+            .text
+            .as_deref()
+            .is_some_and(|t| t.trim().chars().count() >= SUBSTANTIVE_REVIEW_CHARS);
+        std::cmp::Reverse((substantive, r.text_at, r.text_ord))
+    });
     let total = with_text.len();
     let page = with_text
         .into_iter()
@@ -877,6 +889,37 @@ mod tests {
         let (reviews, total) = quest_reviews(&rows, &hidden, 0, 10);
         assert_eq!((reviews.len(), total), (1, 1));
         assert_eq!(reviews[0].text, "oldest");
+    }
+
+    #[test]
+    fn quest_reviews_put_substantive_texts_first_then_newest() {
+        let long =
+            "Интересная прогулка: узнали про крепость то, чего не рассказывают на экскурсиях.";
+        assert!(long.chars().count() >= SUBSTANTIVE_REVIEW_CHARS);
+        let rows = vec![
+            rrow("p1", "q1", 5, Some("Топ!"), 40),
+            rrow("p2", "q1", 5, Some(long), 10),
+            rrow("p3", "q1", 4, Some(&format!("{long} Пойдём ещё.")), 20),
+            rrow("p4", "q1", 5, Some("Класс"), 30),
+        ];
+        let (reviews, total) = quest_reviews(&rows, &hidden_of(&[]), 0, 10);
+        assert_eq!(total, 4);
+        let order: Vec<i64> = reviews.iter().map(|r| r.rating).collect();
+        let texts: Vec<&str> = reviews.iter().map(|r| r.text.as_str()).collect();
+        assert!(
+            texts[0].ends_with("Пойдём ещё."),
+            "newest substantive first"
+        );
+        assert_eq!(texts[1], long);
+        assert_eq!(
+            &texts[2..],
+            ["Топ!", "Класс"],
+            "short ones after, newest first"
+        );
+        assert_eq!(order, vec![4, 5, 5, 5]);
+        // Paging walks the same order.
+        let (page, _) = quest_reviews(&rows, &hidden_of(&[]), 2, 1);
+        assert_eq!(page[0].text, "Топ!");
     }
 
     #[test]
