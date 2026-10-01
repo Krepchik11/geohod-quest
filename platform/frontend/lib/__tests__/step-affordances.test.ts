@@ -25,13 +25,13 @@ const ANSWER_STEP: DesignStep = {
 };
 
 const CONTROLS: Array<{ name: string; step: DesignStep; handler: keyof StepHandlers; marker: string }> = [
-  { name: 'start CTA', step: { template: 'start', text: 'Поехали' }, handler: 'next', marker: 'начать квест' },
-  { name: 'continue CTA', step: { template: 'continue', text: 'Дальше' }, handler: 'next', marker: 'продолжить' },
+  { name: 'start CTA', step: { template: 'start', text: 'Поехали' }, handler: 'next', marker: 'Начать квест' },
+  { name: 'continue CTA', step: { template: 'continue', text: 'Дальше' }, handler: 'next', marker: 'Продолжить' },
   {
     name: 'video CTA',
     step: { template: 'video', text: 'Смотрите', video: { dur: '0:30' } },
     handler: 'next',
-    marker: 'продолжить',
+    marker: 'Продолжить',
   },
   {
     name: 'physical confirm',
@@ -71,9 +71,9 @@ describe('PREVIEW_HANDLERS', () => {
     expect(html).toContain('p-submit');
   });
 
-  it('renders the finale complete (rating, «ОТПРАВИТЬ ОЦЕНКУ», skip button)', () => {
+  it('renders the finale complete (rating, «Отправить оценку», skip button)', () => {
     const html = render({ template: 'congrats', title: 'Готово' }, PREVIEW_HANDLERS);
-    expect(html).toContain('ОТПРАВИТЬ ОЦЕНКУ');
+    expect(html).toContain('Отправить оценку');
     expect(html).toContain('Пропустить оценку');
     expect(html).toContain('p-rate');
   });

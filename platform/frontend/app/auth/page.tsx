@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 import { api, classify } from '../../lib/api';
+import { safeNext } from '../../lib/auth-return';
 import { PASSWORD_ERROR, emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import {
   anonymousUserId,
@@ -109,9 +110,10 @@ export default function AuthPage() {
   const router = useRouter();
 
   // Signed in — whether just now or on arrival — means this page has nothing
-  // left to do: go straight to the main page (no interim «Вы вошли» card).
+  // left to do: go straight back to where the player came from (`?next=`, e.g.
+  // the quest whose purchase asked them to sign in), else the main page.
   useEffect(() => {
-    if (session) router.replace('/');
+    if (session) router.replace(safeNext(new URLSearchParams(window.location.search).get('next')));
   }, [session, router]);
 
   const applySession = useCallback((s: Session | null) => {

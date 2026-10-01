@@ -148,7 +148,13 @@ function sanitizeTags(v: unknown): string[] {
 export interface CtorQuestMeta {
   title: string;
   city: string;
+  /** Подпись длительности для магазина и плеера — ВСЕГДА выводится из
+   *  {@link durationMin} ({@link questDurationLabel}); своё поле автор не правит. */
   duration: string;
+  /** Длительность прогулки, минуты (ТЗ, задача 19; по умолчанию 60). */
+  durationMin: number;
+  /** Длина маршрута, км (по умолчанию 5). */
+  distanceKm: number;
   cover: string | null;
   /** Исходник {@link cover} для повторного кадрирования (см. {@link CtorImageOrigin}). */
   coverOrigin: CtorImageOrigin | null;
@@ -323,13 +329,42 @@ export function newStep(template: CtorTemplate): CtorStep {
   return s;
 }
 
+/** Длительность и длина маршрута нового квеста — решение владельца: 60 минут и
+ *  5 км у всех квестов, автор меняет их при подготовке (бэкенд — store.rs). */
+export const QUEST_DURATION_MIN_DEFAULT = 60;
+export const QUEST_DISTANCE_KM_DEFAULT = 5;
+export const QUEST_DURATION_MIN_MAX = 24 * 60;
+export const QUEST_DISTANCE_KM_MAX = 100;
+
+/** «≈ 60 мин» — подпись длительности, которую видят магазин и плеер. */
+export function questDurationLabel(minutes: number): string {
+  return `≈ ${minutes} мин`;
+}
+
+/** Минуты из поля: целое 1…1440, иначе умолчание. */
+export function sanitizeDurationMin(v: unknown): number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= QUEST_DURATION_MIN_MAX
+    ? v
+    : QUEST_DURATION_MIN_DEFAULT;
+}
+
+/** Километры из поля: число в (0; 100], десятые, иначе умолчание. */
+export function sanitizeDistanceKm(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= QUEST_DISTANCE_KM_MAX
+    ? Math.round(v * 10) / 10
+    : QUEST_DISTANCE_KM_DEFAULT;
+}
+
 export function newQuest(meta: Partial<CtorQuestMeta>): CtorQuest {
+  const durationMin = sanitizeDurationMin(meta.durationMin);
   return {
     id: 'q-' + uid(),
     meta: {
       title: meta.title?.trim() || 'Без названия',
       city: meta.city || '',
-      duration: meta.duration || '',
+      duration: questDurationLabel(durationMin),
+      durationMin,
+      distanceKm: sanitizeDistanceKm(meta.distanceKm),
       cover: meta.cover || null,
       coverOrigin: sanitizeImageOrigin(meta.coverOrigin),
       desc: meta.desc || '',
@@ -496,6 +531,11 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     ...raw.meta,
     coverOrigin: sanitizeImageOrigin(raw.meta.coverOrigin),
     playersBonus: raw.meta.playersBonus ?? 0,
+    // Тела до появления числовых полей (ТЗ, задача 19) получают решение
+    // владельца — 60 минут и 5 км; прежняя свободная подпись уступает выведенной.
+    durationMin: sanitizeDurationMin(raw.meta.durationMin),
+    distanceKm: sanitizeDistanceKm(raw.meta.distanceKm),
+    duration: questDurationLabel(sanitizeDurationMin(raw.meta.durationMin)),
     complexity: isComplexity(raw.meta.complexity) ? raw.meta.complexity : DEFAULT_COMPLEXITY,
     ageTarget: isAgeTarget(raw.meta.ageTarget) ? raw.meta.ageTarget : DEFAULT_AGE_TARGET,
     tags: sanitizeTags(raw.meta.tags),

@@ -1,0 +1,177 @@
+/* STOREFRONT v3 — ТЗ «Дизайн и юзабилити quest.geohod.ru» (2026-10-01).
+   The hero, the city chips, the shop head and grid, the card details and the
+   blocks under the shop. Tokens only (globals.css §0). */
+
+/* ---------- Typography rules (задача 33) ----------
+   Thin spaced capitals are for small overlines alone, never for a title: every
+   heading is the bold grotesque in ordinary case. */
+.heading { font-family:var(--font-body); font-weight:700; color:var(--navy); letter-spacing:0; text-transform:none; }
+.overline { font-family:var(--font-display); font-weight:500; font-size:12px; line-height:16px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); }
+
+/* ---------- Icons used by the store ---------- */
+.ic-pin { --ic:url("/assets/icons/c/ic-pin--navy.svg"); }
+.ic-clock { --ic:url("/assets/icons/c/ic-clock--navy.svg"); }
+.ic-route { --ic:url("/assets/icons/c/ic-route--navy.svg"); }
+.ic-people { --ic:url("/assets/icons/c/ic-people--navy.svg"); }
+.ic-tasks { --ic:url("/assets/icons/c/ic-tasks--navy.svg"); }
+.ic-offline { --ic:url("/assets/icons/c/ic-offline--navy.svg"); }
+.ic-star { --ic:url("/assets/icons/c/ic-star-18--gold.svg"); }
+.ic-tg-blue { --ic:url("/assets/icons/c/ic-telegram-plane--blue.svg"); }
+
+.btn--white { background:var(--white); color:var(--navy); }
+.btn--white:hover { background:var(--blue-tint); box-shadow:none; }
+
+/* ---------- City chips (задача 14) ---------- */
+.city-chips { display:flex; gap:8px; padding:4px 0 12px; overflow-x:auto; scrollbar-width:none; }
+.city-chips::-webkit-scrollbar { display:none; }
+.city-chip { flex:none; display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 14px; border-radius:18px; border:1px solid var(--border); background:var(--white); color:var(--text); font:inherit; font-size:14px; font-weight:500; cursor:pointer; white-space:nowrap; }
+.city-chip:hover { border-color:var(--muted); }
+.city-chip.is-on { background:var(--navy); border-color:var(--navy); color:var(--white); }
+.city-chip small { font-size:12px; font-weight:400; color:var(--muted); }
+
+/* ---------- Hero (задача 13) ----------
+   One grid: on a phone everything stacks with the photo between the subtitle
+   and the facts; on a desktop the copy is the left column and the photo spans
+   the right one. */
+.hero2 { padding-top:8px; }
+.hero2__inner { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); column-gap:48px; align-items:start;
+  grid-template-areas:
+    "over  photo"
+    "title photo"
+    "sub   photo"
+    "facts photo"
+    "cta   photo"
+    "under photo"; }
+.hero2__over { grid-area:over; margin:24px 0 0; font-family:var(--font-display); font-weight:500; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); }
+.hero2__title { grid-area:title; margin:10px 0 0; font-family:var(--font-display); font-weight:700; font-size:44px; line-height:48px; color:var(--navy); }
+.hero2__sub { grid-area:sub; margin:14px 0 0; font-size:17px; line-height:26px; color:var(--text); max-width:520px; }
+.hero2__photo { grid-area:photo; align-self:center; display:block; margin-top:24px; }
+.hero2__photo img { display:block; width:100%; height:380px; object-fit:cover; object-position:72% 40%; border-radius:var(--r-card); }
+.hero2__facts { grid-area:facts; display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 0; padding:0; list-style:none; }
+.hero2__facts li { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 13px; border-radius:17px; background:var(--white); border:1px solid var(--border-2); font-size:14px; font-weight:500; }
+.hero2__facts .ic { width:16px; height:16px; }
+.hero2__facts li.is-free { background:color-mix(in srgb, var(--green) 10%, var(--white)); border-color:color-mix(in srgb, var(--green) 30%, var(--white)); color:var(--green); }
+.hero2__cta { grid-area:cta; margin-top:22px; }
+.hero2__cta .btn { width:300px; }
+.hero2__cta .btn.hero__cta--continue { width:auto; min-width:300px; max-width:min(440px, 100%); }
+.hero2__under { grid-area:under; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; max-width:520px; margin:14px 0 0; font-size:14px; color:var(--muted-2); }
+.hero2__proof { display:inline-flex; align-items:center; gap:4px; }
+.hero2__proof .ic { width:16px; height:16px; }
+.hero2__proof b { color:var(--text); }
+.hero2__how { color:var(--blue); font-weight:600; }
+.hero2__how:hover { text-decoration:underline; }
+
+/* ---------- Shop head + grid (задачи 9, 34) ---------- */
+.store { padding-top:56px; }
+.store__head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+.store__title { margin:0; font-family:var(--font-body); font-weight:700; font-size:24px; line-height:30px; color:var(--navy); }
+.store__count { font-size:14px; color:var(--muted); white-space:nowrap; }
+.store .quest-grid { margin-top:20px; }
+
+/* ---------- Card (задачи 6, 11, 34) ---------- */
+.quest-card__free { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:28px; padding:0 11px; border-radius:14px; background:var(--green); color:var(--white); font-size:13px; font-weight:600; }
+.quest-card__attrs { margin-top:6px; font-size:13px; line-height:18px; color:var(--muted-2); }
+
+/* ---------- Under the shop (задачи 15, 16, 18) ---------- */
+/* A row of blocks that share it evenly — a lone block takes the whole row. */
+.store-after { display:flex; flex-wrap:wrap; gap:24px; margin-top:56px; }
+.store-after > .store-block { flex:1 1 320px; }
+.store-quote { flex:1 1 100%; margin:0; padding:24px 28px; border-radius:var(--r-card); background:var(--white); box-shadow:var(--shadow-card); }
+.store-quote blockquote { margin:0; font-size:18px; line-height:28px; color:var(--text); }
+.store-quote figcaption { margin-top:10px; font-size:14px; color:var(--muted-2); }
+.store-quote figcaption a { color:var(--blue); }
+.store-block { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:24px; border-radius:var(--r-card); }
+.store-block--white { background:var(--white); box-shadow:var(--shadow-card); }
+.store-block--navy { background:var(--navy); color:var(--white); }
+.store-block__row { display:flex; gap:14px; align-items:flex-start; }
+.store-block__icon { flex:none; width:44px; height:44px; border-radius:12px; background:var(--blue-tint); display:grid; place-items:center; }
+.store-block__icon .ic { width:24px; height:24px; }
+.store-block__title { margin:0; font-size:20px; line-height:26px; font-weight:700; }
+.store-block--white .store-block__title { color:var(--navy); }
+.store-block__text { margin:6px 0 0; font-size:15px; line-height:22px; }
+.store-block--navy .store-block__text { margin:0; opacity:.85; }
+.store-block__cities { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0; list-style:none; }
+.store-block__cities li { height:30px; padding:0 12px; display:inline-flex; align-items:center; border-radius:15px; border:1px solid color-mix(in srgb, var(--white) 35%, transparent); font-size:14px; }
+.store-block__cta { margin-top:auto; gap:8px; }
+.store-block__cta .ic { width:18px; height:18px; }
+
+@media (max-width: 1023px) {
+  .hero2__title { font-size:36px; line-height:40px; }
+  .hero2__photo img { height:300px; }
+}
+@media (max-width: 767px) {
+  .hero2__inner { grid-template-columns:minmax(0, 1fr); grid-template-areas:"over" "title" "sub" "photo" "facts" "cta" "under"; }
+  .hero2__over { margin-top:6px; font-size:12px; }
+  .hero2__title { font-size:30px; line-height:33px; }
+  .hero2__sub { font-size:16px; line-height:23px; }
+  .hero2__photo { margin-top:14px; }
+  .hero2__photo img { height:132px; }
+  .hero2__facts { margin-top:12px; }
+  .hero2__facts li { height:32px; font-size:13px; }
+  .hero2__cta { margin-top:14px; }
+  .hero2__cta .btn, .hero2__cta .btn.hero__cta--continue { width:100%; min-width:0; }
+  .hero2__under { margin-top:12px; font-size:13px; }
+  .store { padding-top:28px; }
+  .store__title { font-size:20px; line-height:26px; }
+  .store .quest-grid { margin-top:14px; }
+  .store-after { gap:16px; margin-top:32px; }
+  .store-quote { padding:18px 20px; }
+  .store-quote blockquote { font-size:16px; line-height:24px; }
+  .store-block { padding:18px; }
+  .store-block__cta { align-self:stretch; }
+}
+
+/* ---------- Purchase sheet (задачи 4, 26) ---------- */
+.psheet__account { display:flex; flex-direction:column; gap:8px; padding:14px; border-radius:14px; background:var(--blue-tint); }
+.psheet__account b { font-size:15px; color:var(--navy); }
+.psheet__account p { margin:0; font-size:13px; line-height:18px; color:var(--muted-2); }
+.psheet__account .af-social__buttons { display:flex; flex-direction:column; gap:8px; }
+.psheet__account-alt { align-self:center; font-size:13px; font-weight:600; color:var(--blue); }
+.psheet__fine { margin:0; font-size:12px; line-height:16px; color:var(--muted); text-align:center; }
+
+/* ---------- Product page (задачи 20–24, 28) ---------- */
+.qp-rating { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:8px; font-size:14px; color:var(--muted-2); }
+.qp-rating .ic { width:16px; height:16px; }
+.qp-rating b { color:var(--text); }
+.qp-rating a { color:var(--blue); font-weight:600; }
+.qp-brief { padding:6px 18px 14px; }
+.qp-brief__title { margin:10px 0 4px; font-size:16px; font-weight:700; color:var(--navy); }
+.qp-brief__grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); column-gap:16px; }
+.qp-brief__item { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border-2); }
+.qp-brief__item .ic { width:18px; height:18px; margin-top:1px; }
+.qp-brief__item b { display:block; font-size:15px; line-height:20px; color:var(--text); }
+.qp-brief__item small { display:block; font-size:13px; line-height:18px; color:var(--muted-2); }
+.qp-brief__item small a { color:var(--blue); font-weight:600; }
+.qp-brief__note { margin:6px 0 0; padding-top:10px; border-top:1px solid var(--border-2); font-size:13px; color:var(--muted-2); }
+.qp-brief__note a { color:var(--blue); font-weight:600; }
+.qp-quote { margin:0; padding:14px 16px; border-left:3px solid var(--star); background:var(--white); border-radius:0 12px 12px 0; }
+.qp-quote blockquote { margin:0; font-size:14.5px; line-height:21px; color:var(--text); }
+.qp-quote figcaption { margin-top:6px; font-size:13px; color:var(--muted-2); }
+.qp-order .qp-quote { background:var(--bg-subtle); }
+.qp-quote--mobile { display:none; }
+/* The story folds to four lines; «Читать полностью» opens it in place. */
+.qp-desc p { margin:0; }
+.qp-desc:not(.is-open) p { display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+.qp-desc__more { margin-top:6px; padding:0; border:0; background:none; color:var(--blue); font:inherit; font-size:14px; font-weight:600; cursor:pointer; }
+.qp-invite { display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:12px; background:var(--blue-tint); }
+.qp-invite p { margin:0; font-size:14px; line-height:20px; color:var(--navy); }
+
+@media (max-width: 1023px) {
+  .qp-brief__grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .qp-brief { padding:4px 14px 12px; }
+  .qp-brief__item b { font-size:14px; }
+  .qp-brief__item small { font-size:12px; }
+  .qp-quote--mobile { display:block; }
+  .qp-quote--desktop { display:none; }
+}
+
+/* ---------- Rules / legal titles (задача 33) ---------- */
+.rules__title { margin:0; font-size:32px; line-height:38px; text-align:center; }
+@media (max-width: 767px) { .rules__title { font-size:26px; line-height:32px; } }
+
+/* ---------- Empty profile (задача 27) ---------- */
+.pf-start { display:flex; flex-direction:column; gap:12px; }
+.pf-start__text { margin:0; font-size:14.5px; line-height:21px; color:var(--text); }
+.pf-start__login { display:flex; flex-direction:column; gap:10px; margin-top:4px; padding-top:12px; border-top:1px solid var(--border-2); }

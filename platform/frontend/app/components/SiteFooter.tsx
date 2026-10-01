@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { SUPPORT_TG, SUPPORT_TG_URL } from '../../lib/contacts';
+import { CLUB_CHANNEL, CLUB_CHANNEL_URL, SUPPORT_TG, SUPPORT_TG_URL } from '../../lib/contacts';
 
 /**
  * §1.3 / §2.6 — one shared storefront footer, rendered on ALL storefront pages.
@@ -27,9 +27,9 @@ export default function SiteFooter() {
             </a>
           </div>
           <div className="site-footer__col">
-            <a className="contact" href="https://t.me/serbia_progulki" target="_blank" rel="noopener">
+            <a className="contact" href={CLUB_CHANNEL_URL} target="_blank" rel="noopener">
               <span className="contact__tile"><span className="ic ic-tg" /></span>
-              <span className="contact__value">«Прогулки по Сербии» · канал</span>
+              <span className="contact__value">{CLUB_CHANNEL} · канал</span>
             </a>
           </div>
           <div className="site-footer__links">

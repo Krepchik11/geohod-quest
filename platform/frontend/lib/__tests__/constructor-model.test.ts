@@ -26,6 +26,9 @@ import {
   serializeDraft,
   stepToGameStep,
   type CtorQuest,
+  questDurationLabel,
+  sanitizeDistanceKm,
+  sanitizeDurationMin,
 } from '../constructor-model';
 import { toDesignStep } from '../design-step';
 import { isAnswerCorrect } from '../shared-model';
@@ -534,19 +537,32 @@ describe('serializeDraft', () => {
     expect(snap.steps[0].rich_content.main_text).not.toBe('mutated');
   });
 
-  it('freezes the real store-card city/duration in (and omits blanks)', () => {
-    // A fresh quest has blank city/duration → the snapshot carries neither, so the
-    // player shows no fabricated place rather than a hardcoded default.
+  it('freezes the real store-card city/duration in (and omits a blank city)', () => {
+    // A fresh quest has no city → the snapshot carries none, so the player shows
+    // no fabricated place. The duration is the owner's default (ТЗ, задача 19):
+    // 60 minutes, labelled from the number.
     const blank = serializeDraft(quest());
     expect(blank.city).toBeUndefined();
-    expect(blank.duration).toBeUndefined();
+    expect(blank.duration).toBe('≈ 60 мин');
 
     const q = quest();
     q.meta.city = 'Нови Сад';
-    q.meta.duration = '1.5 часа';
+    q.meta.durationMin = 90;
+    q.meta.duration = questDurationLabel(90);
     const snap = serializeDraft(q);
     expect(snap.city).toBe('Нови Сад');
-    expect(snap.duration).toBe('1.5 часа');
+    expect(snap.duration).toBe('≈ 90 мин');
+  });
+
+  it('defaults the walk to 60 minutes and 5 km and keeps sane author values', () => {
+    expect(quest().meta.durationMin).toBe(60);
+    expect(quest().meta.distanceKm).toBe(5);
+    expect(sanitizeDurationMin(90)).toBe(90);
+    expect(sanitizeDurationMin(0)).toBe(60);
+    expect(sanitizeDurationMin(2000)).toBe(60);
+    expect(sanitizeDistanceKm(3.46)).toBe(3.5);
+    expect(sanitizeDistanceKm(-1)).toBe(5);
+    expect(sanitizeDistanceKm(Number.NaN)).toBe(5);
   });
 
   it('freezes the start point in — always present, null when the author set none', () => {

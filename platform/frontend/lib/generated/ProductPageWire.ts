@@ -24,6 +24,11 @@ author_name: string | null,
  */
 author_published_count: number, 
 /**
+ * Author attributes from the constructor row, as on the catalog card;
+ * `None` for a legacy/direct publish.
+ */
+complexity: string | null, age_target: string | null, 
+/**
  * §11 reviews: newest-written first — the first page; the rest comes from
  * GET /api/quests/{id}/reviews.
  */
@@ -53,6 +58,16 @@ city: string | null,
  * Store-card duration label (e.g. "1.5 часа"); None when blank.
  */
 duration: string | null, 
+/**
+ * How long the walk takes, in minutes ([`DEFAULT_DURATION_MIN`] unless the
+ * author changed it in the constructor).
+ */
+duration_min: number, 
+/**
+ * Route length in kilometres ([`DEFAULT_DISTANCE_KM`] unless the author
+ * changed it in the constructor).
+ */
+distance_km: number, 
 /**
  * Price in whole rubles; Some(0) is an explicitly free quest, None is unset.
  */

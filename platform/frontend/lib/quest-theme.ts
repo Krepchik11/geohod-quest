@@ -113,6 +113,28 @@ function readableOn(hue: Rgb, bg: Rgb): Rgb {
   return out;
 }
 
+/** Та из двух крайностей (белый или чёрный), что читается на `bg` лучше. */
+function extremeOn(bg: Rgb): Rgb {
+  return ratio(WHITE, bg) >= ratio(BLACK, bg) ? WHITE : BLACK;
+}
+
+/**
+ * Цвет надписи и рамки контурных кнопок: цвет текста автора, сдвинутый к лучшей
+ * крайности ровно настолько, чтобы на фоне был контраст не ниже 4,5:1. В отличие
+ * от {@link readableOn}, доходит до самой крайности, а у белого или чёрного на
+ * любом фоне контраст не ниже ~4,58 — так что порог выполняется всегда (ТЗ,
+ * задача 31: кнопки плеера читаются при любой теме автора).
+ */
+function buttonInkOn(ink: Rgb, bg: Rgb): Rgb {
+  const target = extremeOn(bg);
+  let out = ink;
+  for (let step = 1; step <= 20 && ratio(out, bg) < MIN_TEXT_CONTRAST; step++) {
+    // Judged on the colour as it ships (hex-rounded), not the float mix.
+    out = parseHex(toHex(mix(ink, target, step * 0.05)))!;
+  }
+  return out;
+}
+
 /** Прозрачные производные от цвета текста; доли — из бумажной палитры. */
 const INK_ALPHAS: ReadonlyArray<readonly [string, number]> = [
   ['--p-muted', 0.72],
@@ -133,10 +155,14 @@ function build(theme: QuestTheme): CSSProperties {
     '--p-bg': toHex(bg),
     '--p-ink': toHex(ink),
     '--p-btn': toHex(btn),
-    // Надпись на залитой кнопке: та из двух крайностей, что на ней читается.
-    // Иначе тёмный текст на тёмной кнопке просто исчезает.
-    '--p-btn-ink': toHex(luminance(btn) > 0.45 ? BLACK : WHITE),
+    // Надпись на залитой кнопке: та из двух крайностей, что на ней читается
+    // лучше (сравнением контрастов, а не порогом яркости: на кнопке средней
+    // яркости белый давал ~3:1). Иначе тёмный текст на тёмной кнопке исчезает.
+    '--p-btn-ink': toHex(extremeOn(btn)),
     '--p-btn-hover': toHex(mix(btn, BLACK, 0.18)),
+    // Контурные кнопки (подсказка, «Решу сам» и т. п.) — цвет текста автора,
+    // доведённый до читаемости на фоне.
+    '--p-btn-line': toHex(buttonInkOn(ink, bg)),
     // Приподнятая поверхность светлее фона — и на светлой теме, и на тёмной.
     '--p-card': toHex(mix(bg, WHITE, 0.1)),
     // Заливка при наведении: фон, чуть сдвинутый к тексту.

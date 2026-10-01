@@ -52,8 +52,8 @@ export function StartGate({
         </div>
       </div>
       <div className="sg2__actions">
-        <button className="sg2__btn" type="button" onClick={onContinue}>продолжить попытку</button>
-        <button className="sg2__btn sg2__btn--outline" type="button" onClick={onRestart}>начать заново</button>
+        <button className="sg2__btn" type="button" onClick={onContinue}>Продолжить попытку</button>
+        <button className="sg2__btn sg2__btn--outline" type="button" onClick={onRestart}>Начать заново</button>
         <p className="sg2__caption">«Начать заново» сбросит прогресс попытки.<br />Заработанные монеты останутся при вас.</p>
       </div>
     </div>

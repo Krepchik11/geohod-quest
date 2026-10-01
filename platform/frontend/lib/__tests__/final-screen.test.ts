@@ -1,6 +1,6 @@
 /**
- * FinalScreen («ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ») render contract (§11):
- * - «ОТПРАВИТЬ ОЦЕНКУ» is the one forward CTA and unlocks only when BOTH the
+ * FinalScreen («Поздравляем, вы прошли квест!») render contract (§11):
+ * - «Отправить оценку» is the one forward CTA and unlocks only when BOTH the
  *   stars and a review text are in;
  * - «Пропустить оценку» is a real button and stays as the exit while the
  *   submit is locked;
@@ -26,7 +26,7 @@ function render(st: StepState, on: StepHandlers = PREVIEW_HANDLERS): string {
 describe('FinalScreen', () => {
   it('congratulates, invites the rating with the coins pitch, shows coins + time', () => {
     const html = render({ coinsEarned: 12, time: '1:24' });
-    expect(html).toContain('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
+    expect(html).toContain('Поздравляем, вы прошли квест!');
     expect(html).toContain('Оцените квест, оставьте отзыв и получите дополнительные монеты');
     expect(html).toContain('12');
     expect(html).toContain('1:24');
@@ -34,8 +34,8 @@ describe('FinalScreen', () => {
     expect(html).toContain('в пути');
   });
 
-  it('«ОТПРАВИТЬ ОЦЕНКУ» unlocks only when stars AND a comment are in', () => {
-    const submit = /<button[^>]*disabled[^>]*>ОТПРАВИТЬ ОЦЕНКУ/;
+  it('«Отправить оценку» unlocks only when stars AND a comment are in', () => {
+    const submit = /<button[^>]*disabled[^>]*>Отправить оценку/;
     expect(render({ coinsEarned: 5 })).toMatch(submit);
     expect(render({ coinsEarned: 5, rating: 5 })).toMatch(submit);
     expect(render({ coinsEarned: 5, rating: 5, reviewText: '   ' })).toMatch(submit);
@@ -83,7 +83,7 @@ describe('FinalScreen', () => {
 
     it('stands alongside the two commit-and-leave buttons, not instead of them', () => {
       const html = render({ coinsEarned: 5 }, { ...PREVIEW_HANDLERS, share });
-      expect(html).toContain('ОТПРАВИТЬ ОЦЕНКУ');
+      expect(html).toContain('Отправить оценку');
       expect(html).toContain('Пропустить оценку');
       expect(html).toMatch(/<button[^>]*>Поделиться квестом<\/button>/);
     });

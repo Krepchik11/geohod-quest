@@ -55,6 +55,10 @@ const FAQ: { q: string; a: string }[] = [
     a: 'Нет. Без аккаунта покупки и прогресс хранятся на устройстве и потеряются при смене телефона или браузера. Аккаунт сохраняет покупки, монеты и прогресс.',
   },
   {
+    q: 'Какие карты принимаются?',
+    a: 'Пока только карты российских банков: оплата проходит через ЮKassa. Бесплатные квесты оплаты не требуют.',
+  },
+  {
     q: 'Можно ли играть без интернета?',
     a: 'Да, если заранее скачать квест: «Мои квесты» → «Скачать для офлайна». Для покупки интернет нужен.',
   },
@@ -64,7 +68,7 @@ export default function RulesPage() {
   return (
     <SiteShell>
       <section className="container" style={{ paddingTop: 48 }} data-screen-label="Как играть">
-        <h1 className="section-title display">как играть</h1>
+        <h1 className="rules__title heading">Как играть</h1>
         <p style={{ maxWidth: 700, margin: '48px auto 0', textAlign: 'center' }}>
           Квест GEOHOD&nbsp;— это прогулка-экскурсия в&nbsp;формате игры: вы&nbsp;идёте по&nbsp;маршруту,
           следите за&nbsp;сюжетом и&nbsp;решаете задания прямо на&nbsp;улицах города. Всё&nbsp;—
@@ -85,11 +89,11 @@ export default function RulesPage() {
 
         <div className="rules">
           <section className="rules__section" id="start">
-            <h2 className="display">Как начать</h2>
+            <h2 className="heading">Как начать</h2>
             <ol className="rules__steps">
               <li>
                 Выберите квест в&nbsp;<Link href="/#shop">магазине</Link>{' '}и&nbsp;нажмите «Купить»&nbsp;— или
-                «Получить», если он&nbsp;бесплатный. Оплата картой через ЮKassa, промокод вводится в&nbsp;окне
+                «Получить», если он&nbsp;бесплатный. Оплата картой российского банка через ЮKassa, промокод вводится в&nbsp;окне
                 покупки.
               </li>
               <li>
@@ -108,7 +112,7 @@ export default function RulesPage() {
           </section>
 
           <section className="rules__section" id="play">
-            <h2 className="display">Как проходит игра</h2>
+            <h2 className="heading">Как проходит игра</h2>
             <ul className="rules__list">
               <li>Квест&nbsp;— это история из&nbsp;шагов: одни рассказывают сюжет, другие дают задания.</li>
               <li><b>Найти место.</b>{' '}Дойдите до&nbsp;нужной точки и&nbsp;подтвердите, что вы&nbsp;на&nbsp;месте.</li>
@@ -130,7 +134,7 @@ export default function RulesPage() {
           </section>
 
           <section className="rules__section" id="coins">
-            <h2 className="display">Монеты</h2>
+            <h2 className="heading">Монеты</h2>
             <p>
               Монеты&nbsp;— игровая валюта GEOHOD QUEST. Они общие для всех квестов; баланс виден в&nbsp;меню
               квеста и&nbsp;в&nbsp;профиле.
@@ -156,7 +160,7 @@ export default function RulesPage() {
           </section>
 
           <section className="rules__section" id="help">
-            <h2 className="display">Если что-то пошло не&nbsp;так</h2>
+            <h2 className="heading">Если что-то пошло не&nbsp;так</h2>
             <ul className="rules__list">
               <li>
                 Ответ не&nbsp;принимается, хотя вы уверены, нашли опечатку или объекта нет на&nbsp;месте&nbsp;—
@@ -174,7 +178,7 @@ export default function RulesPage() {
           </section>
 
           <section className="rules__section" id="safety">
-            <h2 className="display">Перед выходом и&nbsp;на&nbsp;маршруте</h2>
+            <h2 className="heading">Перед выходом и&nbsp;на&nbsp;маршруте</h2>
             <ul className="rules__list">
               <li>
                 Возьмите заряженный телефон&nbsp;— лучше с&nbsp;пауэрбанком&nbsp;— и&nbsp;мобильный интернет.
@@ -195,7 +199,7 @@ export default function RulesPage() {
           </section>
 
           <section className="rules__section" id="faq">
-            <h2 className="display">Частые вопросы</h2>
+            <h2 className="heading">Частые вопросы</h2>
             <div className="rules__faq">
               {FAQ.map((f) => (
                 <details className="card" key={f.q}>

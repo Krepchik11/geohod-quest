@@ -78,14 +78,14 @@ describe('конструкторский тест-игрок: подсказка
   it('на решённом задании ответ виден только для чтения, стрелка ведёт дальше (как в плеере)', async () => {
     const user = openTestPlayer();
     await answerStep(user, HINT.answer);
-    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
+    expect(await screen.findByText('Поздравляем, вы прошли квест!')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Назад' }));
 
     const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
     expect(field.readOnly).toBe(true);
-    expect(screen.queryByText(new RegExp(`подсказка · ${HINT.cost}`))).toBeNull();
+    expect(screen.queryByText(new RegExp(`Подсказка · ${HINT.cost}`))).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Дальше' }));
-    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
+    expect(await screen.findByText('Поздравляем, вы прошли квест!')).toBeTruthy();
     expect(screen.queryByText('Ответ неверный')).toBeNull();
   });
 });
@@ -99,7 +99,7 @@ describe('конструкторский тест-игрок: пропуск з�
     ).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Пропустить задание — 3 монеты' }));
     // Следующая страница черновика — поздравление.
-    expect(await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ')).toBeTruthy();
+    expect(await screen.findByText('Поздравляем, вы прошли квест!')).toBeTruthy();
   });
 });
 

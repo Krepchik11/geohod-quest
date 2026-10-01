@@ -11,4 +11,9 @@ export type PublicFeatures = { flags: { [key in string]?: boolean },
  * The platform-wide universal answer; `None` unless the
  * `player_universal_answer` flag is on AND a value is set.
  */
-universal_answer: string | null, };
+universal_answer: string | null, 
+/**
+ * Cities announced as «скоро» on the storefront; empty unless the
+ * `store_cities` flag is on AND the setting lists some.
+ */
+soon_cities: Array<string>, };

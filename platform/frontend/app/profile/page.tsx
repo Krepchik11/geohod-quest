@@ -7,7 +7,9 @@ import SiteShell from '../components/SiteShell';
 import InstallPrompt from '../components/InstallPrompt';
 import { toast } from '../components/Toaster';
 import SocialAuthButtons from '../components/SocialAuthButtons';
-import { api, classify, isAuthFailure, type Me } from '../../lib/api';
+import { api, classify, isAuthFailure, type Me, type PublishedQuestWire } from '../../lib/api';
+import { markOwned } from '../../lib/collection';
+import { useSavedCity } from '../../lib/saved-city';
 import { useRememberedClientFeature } from '../../lib/client-features';
 import { emailError, emailValid, normalizeEmail, passwordValid } from '../../lib/credentials';
 import { loginMethodModel } from '../../lib/login-methods';
@@ -49,6 +51,8 @@ type ProfileData =
       local: PlayerStatsFold;
       logs: AttemptLog[];
       titles: Record<string, string>;
+      /** The free quests on sale — what an empty profile offers to start with. */
+      freeQuests: PublishedQuestWire[];
       purchases: number;
       error: 'auth' | 'network' | null;
     };
@@ -76,6 +80,8 @@ export default function ProfilePage() {
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const router = useRouter();
   const mineOn = useRememberedClientFeature('store_my_quests');
+  const savedCity = useSavedCity();
+  const [granting, setGranting] = useState(false);
 
   const reload = () => {
     setData({ source: 'loading' });
@@ -105,11 +111,13 @@ export default function ProfilePage() {
       error = isAuthFailure(err) ? 'auth' : 'network';
     }
     let titles: Record<string, string> = {};
+    let freeQuests: PublishedQuestWire[] = [];
     try {
       const quests = await api.listQuests();
       titles = Object.fromEntries(quests.map((q) => [q.quest_id, q.name]));
+      freeQuests = quests.filter((q) => q.price === 0);
     } catch { /* keep raw ids */ }
-    setData({ source: 'ready', me, server, local, logs, titles, purchases, error });
+    setData({ source: 'ready', me, server, local, logs, titles, freeQuests, purchases, error });
   };
 
   useEffect(() => {
@@ -130,6 +138,24 @@ export default function ProfilePage() {
   const emailLabel = ready?.me?.email ?? session?.email ?? null;
   // §6.3 — the banner verdict is the server's (like can_unlink), never re-derived here.
   const unconfirmed = !!ready?.me?.needs_email_confirmation;
+
+  // ТЗ, задача 27: a profile with nothing in it offers the first step instead
+  // of a row of zeros — a free quest (of the player's city, when there is one)
+  // and, without an account, the sign-in.
+  const empty = !!ready && balance === 0 && completedIds.length === 0 && ready.purchases === 0;
+  const starter =
+    ready?.freeQuests.find((q) => q.city === savedCity) ?? ready?.freeQuests[0] ?? null;
+  const takeStarter = async (questId: string) => {
+    setGranting(true);
+    try {
+      await api.checkout({ user_id: currentUserId(), quest_id: questId });
+      markOwned(questId);
+      router.push(`/quest/${encodeURIComponent(questId)}/about`);
+    } catch {
+      setGranting(false);
+      toast('Не получилось взять квест — попробуйте ещё раз');
+    }
+  };
 
   const errorNote =
     ready?.error === 'auth'
@@ -206,7 +232,39 @@ export default function ProfilePage() {
               </span>
             </div>
 
-            {/* §7.1 honest tiles: coins + completed. No fabricated «рейтинг». */}
+            {empty && (
+              <div className="card pf-card pf-start">
+                <h4 className="pf-card__head">Начните с бесплатного квеста</h4>
+                {starter ? (
+                  <>
+                    <p className="pf-start__text">
+                      «{starter.name}»{starter.city ? ` — ${starter.city}` : ''}. Возьмите его и выходите на маршрут,
+                      когда будет удобно.
+                    </p>
+                    <button
+                      className="btn btn--block"
+                      type="button"
+                      disabled={granting}
+                      onClick={() => void takeStarter(starter.quest_id)}
+                    >
+                      {granting ? 'Оформляем…' : 'Получить'}
+                    </button>
+                  </>
+                ) : (
+                  <Link className="btn btn--block" href="/#shop">Выбрать квест</Link>
+                )}
+                {!registered && (
+                  <div className="pf-start__login">
+                    <p className="pf-note">Войдите, чтобы сохранить монеты и квесты на любом устройстве.</p>
+                    <SocialAuthButtons onSession={(s) => { setSession(s); reload(); }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* §7.1 honest tiles: coins + completed. No fabricated «рейтинг».
+                Shown once there is something to count (ТЗ, задача 27). */}
+            {!empty && (
             <div className="pf-tiles">
               <div className="card pf-tile">
                 <b>{balance}</b>
@@ -217,7 +275,9 @@ export default function ProfilePage() {
                 <span>{plural(completedIds.length, 'квест пройден', 'квеста пройдено', 'квестов пройдено')}</span>
               </div>
             </div>
+            )}
 
+            {!empty && (
             <div className="card pf-card">
               <h4 className="pf-card__head">Пройденные квесты</h4>
               {completedIds.length > 0 ? (
@@ -244,6 +304,7 @@ export default function ProfilePage() {
                 <Link className="btn btn--secondary btn--md" href="/my-quests">Все мои квесты</Link>
               )}
             </div>
+            )}
           </div>
 
           {/* §7.3 account block */}

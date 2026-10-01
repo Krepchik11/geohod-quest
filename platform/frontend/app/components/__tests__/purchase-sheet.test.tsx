@@ -35,8 +35,11 @@ vi.mock('../../../lib/api', () => ({
 vi.mock('../../../lib/identity', () => ({
   currentUserId: () => 'dev:test',
   getSession: () => sessionRef.current,
+  setSession: vi.fn(),
   subscribeSession: () => () => {},
 }));
+// Every sheet flag off: the classic warning with its sign-in link.
+vi.mock('../../../lib/client-features', () => ({ useClientFeature: () => false }));
 
 import PurchaseSheet from '../PurchaseSheet';
 

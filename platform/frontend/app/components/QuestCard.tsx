@@ -8,7 +8,15 @@ import { currentUserId } from '../../lib/identity';
 import { coverCss } from '../../lib/cover';
 import { downloadBundle, type DownloadStage } from '../../lib/download';
 import { ctaFor, formatDate, FRESH_STATUS, type OwnedStatus } from '../../lib/owned-quests';
-import { fmtRating, priceLabel, ratingPlural, playersPlural } from '../../lib/storefront';
+import {
+  attrsLine,
+  fmtRating,
+  playerCountPlural,
+  priceLabel,
+  questFacts,
+  ratingPlural,
+  showPlayers,
+} from '../../lib/storefront';
 import PurchaseSheet from './PurchaseSheet';
 import RemoveFromDeviceSheet from './RemoveFromDeviceSheet';
 import ShareQuestButton from './ShareQuestButton';
@@ -23,6 +31,9 @@ export interface MineProps {
   offline: boolean;
   /** A download or a removal changed what the device holds: re-read the status. */
   onChange: (questId: string) => void;
+  /** The quest became the player's on this card: the page keeps the card where
+   *  it is until the next visit instead of moving it from under the finger. */
+  onAcquired?: (questId: string) => void;
 }
 
 const STATE_LABEL = { new: 'Не начат', progress: 'В процессе', done: 'Пройден' } as const;
@@ -53,6 +64,7 @@ export default function QuestCard({
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const shareOn = useClientFeature('quest_share');
+  const factsOn = useClientFeature('quest_facts');
   const [state, setState] = useState<'idle' | 'pending' | 'error'>('idle');
   // «куплен только что»: the card flips in place after a grant (§3.4).
   const [justBought, setJustBought] = useState(false);
@@ -93,8 +105,10 @@ export default function QuestCard({
     try {
       await api.checkout({ user_id: currentUserId(), quest_id: quest.quest_id });
       setJustBought(true);
+      mine?.onAcquired?.(quest.quest_id);
       markOwned(quest.quest_id);
       setState('idle');
+      toast('Квест ваш — можно начинать');
       autoDownload();
     } catch {
       setState('error');
@@ -104,6 +118,7 @@ export default function QuestCard({
   const onPurchased = () => {
     setSheetOpen(false);
     setJustBought(true);
+    mine?.onAcquired?.(quest.quest_id);
     markOwned(quest.quest_id);
     setState('idle');
     autoDownload();
@@ -152,6 +167,9 @@ export default function QuestCard({
     );
   }
 
+  const facts = questFacts(quest, factsOn);
+  const attrs = attrsLine(quest);
+
   const progress = status.state === 'progress' && status.pos && status.total ? (status.pos / status.total) * 100 : null;
   const strip = busy && dl ? STAGE_WIDTH[dl] : progress;
 
@@ -176,34 +194,35 @@ export default function QuestCard({
               <span className="quest-card__strip" aria-hidden><i style={{ width: `${strip}%` }} /></span>
             )}
           </>
+        ) : owned ? (
+          <span className="quest-card__owned-badge">✓ Куплен</span>
         ) : (
-          owned && <span className="quest-card__owned-badge">✓ Куплен</span>
+          free && <span className="quest-card__free">Бесплатно</span>
         )}
       </div>
       <div className="quest-card__body">
-        {(quest.city || quest.duration) && (
+        {(quest.city || facts.time || facts.distance) && (
           <p className="quest-card__meta">
-            {quest.city && (
-              <span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-pin--navy.svg')" } as React.CSSProperties} />{quest.city}</span>
-            )}
-            {quest.duration && (
-              <span><span className="ic" style={{ '--ic': "url('/assets/icons/c/ic-clock-ring--navy.svg')" } as React.CSSProperties} />{quest.duration}</span>
-            )}
+            {quest.city && <span><span className="ic ic-pin" />{quest.city}</span>}
+            {facts.time && <span><span className="ic ic-clock" />{facts.time}</span>}
+            {facts.distance && <span><span className="ic ic-route" />{facts.distance}</span>}
           </p>
         )}
         <h3 className="quest-card__title">
           <Link className="quest-card__link" href={aboutUrl}>{quest.name}</Link>
         </h3>
+        {attrs && <p className="quest-card__attrs">{attrs}</p>}
         {quest.rating_count > 0 ? (
           <p className="rating quest-card__rating">
             <span className="ic" /><b>{fmtRating(quest.rating_avg)}</b>
-            <span className="muted">({quest.rating_count}&nbsp;{ratingPlural(quest.rating_count)})</span>
+            <span className="muted">
+              {quest.rating_count}&nbsp;{ratingPlural(quest.rating_count)}
+              {showPlayers(quest.players, quest.rating_count) &&
+                ` · ${quest.players} ${playerCountPlural(quest.players)}`}
+            </span>
           </p>
         ) : (
           <p className="rating quest-card__rating"><span className="muted">Нет оценок</span></p>
-        )}
-        {quest.players > 0 && (
-          <p className="quest-card__players muted">{quest.players}&nbsp;{playersPlural(quest.players)}</p>
         )}
         <hr className="quest-card__divider" />
         <div className="quest-card__footer">

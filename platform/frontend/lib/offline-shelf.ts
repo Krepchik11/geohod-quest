@@ -9,6 +9,7 @@
  * is read ONLY when the network is gone — never to decide anything online.
  */
 import type { PublishedQuestWire } from './api';
+import { DEFAULT_DISTANCE_KM, DEFAULT_DURATION_MIN } from './storefront';
 import { listBundles, type BundleRow } from './queue';
 
 const CATALOG_KEY = 'geohod-catalog:v1';
@@ -53,6 +54,9 @@ function cardFromBundle(b: BundleRow): PublishedQuestWire {
     name: b.snapshot.name,
     city: b.snapshot.city ?? null,
     duration: b.snapshot.duration ?? null,
+    // A snapshot carries no numbers; the owner's rule holds for every quest.
+    duration_min: DEFAULT_DURATION_MIN,
+    distance_km: DEFAULT_DISTANCE_KM,
     snapshot_id: b.snapshot_id,
     snapshot_version: b.version,
     primary_comic: null,

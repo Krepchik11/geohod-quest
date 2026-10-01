@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { logoutAndReset } from '../../lib/session-actions';
 import { roleWord } from '../../lib/roles';
 import { useMe } from '../../lib/use-me';
@@ -40,6 +41,7 @@ export default function UserMenu({
 }) {
   const { session, role, displayName } = useMe();
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
 
   // Click-outside closes the dropdown.
   useEffect(() => {
@@ -50,6 +52,8 @@ export default function UserMenu({
   }, [open]);
 
   if (!session && loginLink) {
+    // On the sign-in page itself the pill would lead to where the player is.
+    if (pathname?.startsWith('/auth')) return null;
     return <Link className="header-login" href="/auth">Войти</Link>;
   }
 
@@ -73,10 +77,10 @@ export default function UserMenu({
           <div className="user-menu__role">{roleWord(role)}</div>
         </div>
       )}
-      <Link href="/profile" role="menuitem">профиль</Link>
-      {siteLink && <Link href="/" role="menuitem">на сайт</Link>}
+      <Link href="/profile" role="menuitem">Профиль</Link>
+      {siteLink && <Link href="/" role="menuitem">На сайт</Link>}
       {session && (
-        <button type="button" role="menuitem" onClick={handleLogout}>выйти</button>
+        <button type="button" role="menuitem" onClick={handleLogout}>Выйти</button>
       )}
     </>
   );

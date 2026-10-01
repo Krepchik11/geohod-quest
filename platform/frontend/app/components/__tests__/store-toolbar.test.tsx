@@ -59,6 +59,7 @@ function setup(over: Partial<React.ComponentProps<typeof StoreToolbar>> = {}) {
     <StoreToolbar
       query={query}
       onApply={onApply}
+      filtersOn
       cities={CITIES}
       tags={TAGS}
       showOwnedToggle

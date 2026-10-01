@@ -63,6 +63,9 @@ export interface ShareQuestInput {
   questId: string;
   name: string;
   city?: string | null;
+  /** A message of the caller's own instead of {@link shareText} — e.g. the
+   *  «Пойдём в квест…?» invitation after a purchase. */
+  text?: string;
 }
 
 /**
@@ -80,7 +83,7 @@ export async function shareQuest(quest: ShareQuestInput): Promise<ShareOutcome> 
 
   if (nav?.share) {
     try {
-      await nav.share({ title: quest.name, text: shareText(quest.name, quest.city), url });
+      await nav.share({ title: quest.name, text: quest.text ?? shareText(quest.name, quest.city), url });
       return 'shared';
     } catch (err) {
       // A dismissed sheet is an AbortError. It is a decision, not a failure:

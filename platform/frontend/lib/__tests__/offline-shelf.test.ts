@@ -18,7 +18,7 @@ function card(quest_id: string, name: string): PublishedQuestWire {
   return {
     quest_id, name, primary_comic: 'https://media/cover', template_summary: '', description: null,
     pages: null, tasks: null, paid_hints: null, snapshot_version: 1, snapshot_id: `snap-${quest_id}`,
-    city: 'Белград', duration: '2 часа', price: 890, rating_avg: 4.5, rating_count: 3, players: 10,
+    city: 'Белград', duration: '2 часа', duration_min: 60, distance_km: 5, price: 890, rating_avg: 4.5, rating_count: 3, players: 10,
     complexity: null, age_target: null, tags: [],
   };
 }

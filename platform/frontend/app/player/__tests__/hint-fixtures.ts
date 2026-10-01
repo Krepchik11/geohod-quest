@@ -22,7 +22,7 @@ export const HINT = {
 } as const;
 
 /** The always-visible paper chip that sells the hint. */
-export const hintChip = () => screen.getByText(new RegExp(`подсказка · ${HINT.cost}`));
+export const hintChip = () => screen.getByText(new RegExp(`Подсказка · ${HINT.cost}`));
 
 /** Type into the answer field and submit it, exactly as a player would. */
 export async function answerStep(user: User, value: string): Promise<void> {

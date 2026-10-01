@@ -391,6 +391,8 @@ export default function Workspace() {
         // these instead of fabricating city/duration/price.
         city: active.meta.city,
         duration: active.meta.duration,
+        duration_min: active.meta.durationMin,
+        distance_km: active.meta.distanceKm,
         price: active.meta.price,
         description: active.meta.desc,
         players_bonus: active.meta.playersBonus,

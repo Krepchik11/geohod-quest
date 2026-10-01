@@ -9,7 +9,10 @@
     "player_back_button",
     "player_universal_answer",
     "quest_share",
-    "store_my_quests"
+    "store_my_quests",
+    "store_cities",
+    "quest_facts",
+    "purchase_inline_login"
   ],
-  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests"]
+  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests", "store_cities", "quest_facts", "purchase_inline_login"]
 }

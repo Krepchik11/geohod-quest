@@ -368,6 +368,10 @@ pub(crate) struct ProductPageWire {
     author_name: Option<String>,
     /// How many of this author's quests are currently on sale.
     author_published_count: u32,
+    /// Author attributes from the constructor row, as on the catalog card;
+    /// `None` for a legacy/direct publish.
+    complexity: Option<String>,
+    age_target: Option<String>,
     /// §11 reviews: newest-written first — the first page; the rest comes from
     /// GET /api/quests/{id}/reviews.
     reviews: Vec<ReviewWire>,
@@ -468,6 +472,32 @@ async fn review_wires(
         .collect())
 }
 
+/// Who signs a quest whose stored author label is not a name.
+const BRAND_AUTHOR: &str = "Geohod";
+
+/// The author name a buyer sees on the product page. The stored label falls
+/// back to an email or an account id when the account has no display name, and
+/// imported accounts carry a bare Telegram id («894599035») as their name; none
+/// of those is a name to show a buyer, so the platform signs the quest instead
+/// (owner's decision).
+///
+/// # Arguments
+///
+/// * `label` - The author label denormalized on the constructor row
+///
+/// # Returns
+///
+/// The trimmed label, or [`BRAND_AUTHOR`] when it is blank, all digits, an
+/// email or a player id (`dev:…`).
+fn public_author_label(label: &str) -> String {
+    let label = label.trim();
+    let not_a_name = label.is_empty()
+        || label.chars().all(|c| c.is_ascii_digit())
+        || label.contains('@')
+        || label.contains(':');
+    if not_a_name { BRAND_AUTHOR } else { label }.to_string()
+}
+
 /// First word of the display name; accounts without one (and anonymous
 /// players) are «Игрок». Emails never leak into reviews.
 fn review_author_label(display_name: Option<&str>) -> String {
@@ -514,7 +544,7 @@ async fn get_quest_product_handler(
                 .into_iter()
                 .filter(|s| s.status == store::CTOR_STATUS_PUBLISHED)
                 .count() as u32;
-            (Some(q.author_name.clone()), published)
+            (Some(public_author_label(&q.author_name)), published)
         }
     };
     // Ratings: one effective rating per (player, quest) across all versions, with
@@ -545,6 +575,7 @@ async fn get_quest_product_handler(
     let snapshot = snapshot?;
     let start_point = snapshot::snapshot_start_point(snapshot.as_ref());
     let theme = snapshot::snapshot_theme(snapshot.as_ref());
+    let attrs = ctor.map(|q| q.attrs);
     Ok(Json(ProductPageWire {
         meta,
         rating_avg,
@@ -552,6 +583,8 @@ async fn get_quest_product_handler(
         players,
         author_name,
         author_published_count,
+        complexity: attrs.as_ref().map(|a| a.complexity.clone()),
+        age_target: attrs.map(|a| a.age_target),
         reviews,
         reviews_total,
         start_point,
@@ -638,6 +671,9 @@ pub(crate) struct PublicFeaturesResponse {
     /// The platform-wide universal answer; `None` unless the
     /// `player_universal_answer` flag is on AND a value is set.
     universal_answer: Option<String>,
+    /// Cities announced as «скоро» on the storefront; empty unless the
+    /// `store_cities` flag is on AND the setting lists some.
+    soon_cities: Vec<String>,
 }
 
 /// GET /api/features — effective verdicts of the client-visible flags only
@@ -649,9 +685,10 @@ async fn public_features_handler(
     // One concurrent pass over both stores: the setting is fetched
     // unconditionally (and discarded when its flag is off) rather than
     // serializing a second round-trip behind the overrides read.
-    let (overrides, stored_answer) = tokio::try_join!(
+    let (overrides, stored_answer, stored_cities) = tokio::try_join!(
         state.flags.all(),
-        state.settings.get(Setting::UniversalAnswer.key())
+        state.settings.get(Setting::UniversalAnswer.key()),
+        state.settings.get(Setting::SoonCities.key())
     )?;
     let flags: std::collections::HashMap<&'static str, bool> = Feature::ALL
         .into_iter()
@@ -663,9 +700,15 @@ async fn public_features_handler(
     } else {
         None
     };
+    let soon_cities = if flags[Feature::StoreCities.key()] {
+        crate::settings::soon_cities(stored_cities.as_deref())
+    } else {
+        Vec::new()
+    };
     Ok(Json(PublicFeaturesResponse {
         flags,
         universal_answer,
+        soon_cities,
     }))
 }
 
@@ -681,4 +724,23 @@ async fn get_my_stats_handler(
     // Caller-scoped, PK-indexed lookup — never load every player's grants to count one's own.
     let grants_count = state.grants.grants_for_user(&user_id).await?.len();
     Ok(Json(facts::project_player_stats(&logs, grants_count)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_author_label_keeps_names_and_hides_identifiers() {
+        assert_eq!(public_author_label(" Krepchik "), "Krepchik");
+        assert_eq!(public_author_label("Анна Петрова"), "Анна Петрова");
+        // A Telegram id imported as a name, an email fallback, a player id, blank.
+        for not_a_name in ["894599035", "author@example.com", "dev:1b2c", "  "] {
+            assert_eq!(
+                public_author_label(not_a_name),
+                BRAND_AUTHOR,
+                "{not_a_name}"
+            );
+        }
+    }
 }

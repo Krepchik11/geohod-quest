@@ -547,6 +547,8 @@ mod tests {
             tasks: None,
             paid_hints: None,
             players_bonus: 0,
+            duration_min: crate::store::DEFAULT_DURATION_MIN,
+            distance_km: crate::store::DEFAULT_DISTANCE_KM,
         }
     }
 

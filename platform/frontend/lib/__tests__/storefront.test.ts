@@ -1,12 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { catalogFacts, factsLine, fmtRating, priceLabel, ratingPlural, questPlural, cityPlural } from '../storefront';
+import {
+  attrsLine,
+  busiestCity,
+  catalogFacts,
+  cityFacts,
+  cityPlural,
+  distanceLabel,
+  factsLine,
+  fmtRating,
+  heroTitle,
+  inviteText,
+  pickNextQuest,
+  priceLabel,
+  questFacts,
+  questPlural,
+  questsInCity,
+  ratingPlural,
+  showPlayers,
+} from '../storefront';
 import type { PublishedQuestWire } from '../api';
 
 /** §2.3 hero facts — computed from the LIVE catalog response, never fabricated. */
 function q(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
     quest_id: 'q', name: 'n', primary_comic: null, template_summary: '', description: null, pages: null, tasks: null, paid_hints: null,
-    snapshot_version: 1, snapshot_id: 's', city: null, duration: null,
+    snapshot_version: 1, snapshot_id: 's', city: null, duration: null, duration_min: 60, distance_km: 5,
     price: null, rating_avg: 0, rating_count: 0, players: 0,
     complexity: null, age_target: null, tags: [], ...over,
   };
@@ -44,7 +62,7 @@ describe('factsLine', () => {
     expect(factsLine({ quests: 12, cities: 4, avg: 4.75, ratings: 9 })).toEqual({
       quests: '12 квестов',
       cities: '4 города',
-      rating: '4.8 — средняя оценка игроков',
+      rating: '4,75 — средняя оценка игроков',
     });
   });
 
@@ -75,7 +93,74 @@ describe('plurals & labels', () => {
     expect(priceLabel(null)).toBe('');
   });
   it('rating formatter drops the trailing .0', () => {
-    expect(fmtRating(5)).toBe('5');
-    expect(fmtRating(4.75)).toBe('4.8');
+    // Hundredths and a decimal comma (ТЗ, задача 33): rounded to tenths every
+    // quest read «5» and the store could not tell them apart.
+    expect(fmtRating(5)).toBe('5,0');
+    expect(fmtRating(4.75)).toBe('4,75');
+    expect(fmtRating(4.966)).toBe('4,97');
+    expect(fmtRating(4.9)).toBe('4,9');
+  });
+});
+
+describe('ТЗ «Дизайн и юзабилити» helpers', () => {
+  it('shows «сыграли» only when it cannot contradict the ratings (задача 3)', () => {
+    expect(showPlayers(477, 59)).toBe(true);
+    expect(showPlayers(1, 41)).toBe(false);
+    expect(showPlayers(0, 0)).toBe(false);
+  });
+
+  it('labels time and distance from the numbers when quest_facts is on (задача 19)', () => {
+    const row = { duration: '90 минут', duration_min: 60, distance_km: 3.5 };
+    expect(questFacts(row, true)).toEqual({ time: '≈ 60 мин', distance: '3,5 км' });
+    expect(questFacts(row, false)).toEqual({ time: '90 минут', distance: null });
+    // A row cached offline before the numbers existed falls back to its label.
+    expect(questFacts({ duration: '2 часа' }, true)).toEqual({ time: '2 часа', distance: null });
+    expect(distanceLabel(5)).toBe('5 км');
+  });
+
+  it('gives the hero one value when the city agrees and a range when it does not', () => {
+    const qs = [
+      { duration: null, duration_min: 60, distance_km: 5 },
+      { duration: null, duration_min: 90, distance_km: 5 },
+    ];
+    expect(cityFacts(qs, true)).toEqual({ time: '≈ 60–90 мин', distance: '5 км' });
+    expect(cityFacts([{ duration: '≈ 60 мин' }, { duration: '≈ 60 мин' }], false)).toEqual({ time: '≈ 60 мин', distance: null });
+    expect(cityFacts([{ duration: 'час' }, { duration: 'два' }], false).time).toBeNull();
+  });
+
+  it('declines only the cities it knows', () => {
+    expect(heroTitle('Нови Сад')).toBe('Нови Сад, о котором не расскажет экскурсовод');
+    expect(heroTitle('Москва')).toBe('Москва, о которой не расскажет экскурсовод');
+    expect(questsInCity('Нови Сад')).toBe('Квесты в Нови Саде');
+    expect(questsInCity('Ниш')).toBe('Квесты · Ниш');
+    expect(questsInCity(null)).toBe('Квесты');
+  });
+
+  it('writes the invitation a player sends friends (задача 28)', () => {
+    expect(inviteText('Тайна крепости', 'Нови Сад', '≈ 60 мин', true)).toBe(
+      'Пойдём в квест «Тайна крепости» в Нови Саде? ≈ 60 минут, бесплатно',
+    );
+    expect(inviteText('Шифры', 'Ниш', null, false)).toBe('Пойдём в квест «Шифры»?');
+  });
+
+  it('builds the card facts line from the attributes the catalog serves', () => {
+    expect(attrsLine({ complexity: 'medium', age_target: 'everyone', tasks: 11 })).toBe(
+      'Средняя сложность · 11 заданий · можно с детьми',
+    );
+    expect(attrsLine({ complexity: null, age_target: null, tasks: null })).toBe('');
+  });
+
+  it('opens on the city with the most quests and offers the next quest of the same city', () => {
+    const qs = [
+      { quest_id: 'a', city: 'Белград', rating_avg: 5, rating_count: 3 },
+      { quest_id: 'b', city: 'Нови Сад', rating_avg: 4.9, rating_count: 9 },
+      { quest_id: 'c', city: 'Нови Сад', rating_avg: 5, rating_count: 1 },
+      { quest_id: 'd', city: 'Нови Сад', rating_avg: 4, rating_count: 2 },
+    ];
+    expect(busiestCity(qs)).toBe('Нови Сад');
+    // Not the current one, not another city; untaken first, then by rating.
+    expect(pickNextQuest(qs, 'b', 'Нови Сад', new Set())?.quest_id).toBe('c');
+    expect(pickNextQuest(qs, 'b', 'Нови Сад', new Set(['c']))?.quest_id).toBe('d');
+    expect(pickNextQuest(qs, 'a', 'Белград', new Set())).toBeNull();
   });
 });
