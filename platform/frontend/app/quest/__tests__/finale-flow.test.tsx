@@ -155,7 +155,7 @@ async function openFinale(paidBonuses: OncePerQuestType[] = []) {
       paidBonuses={paidBonuses}
     />,
   );
-  await screen.findByText('ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ');
+  await screen.findByText('Поздравляем, вы прошли квест!');
   return userEvent.setup();
 }
 
@@ -208,7 +208,7 @@ describe('the finale pays the review as it happens (#113)', () => {
     const user = await openFinale();
     await user.click(screen.getByRole('button', { name: '5 звёзд' }));
     await user.type(screen.getByPlaceholderText('Пара слов для будущих игроков?'), 'Отличный маршрут');
-    await user.click(screen.getByRole('button', { name: /ОТПРАВИТЬ ОЦЕНКУ/ }));
+    await user.click(screen.getByRole('button', { name: /Отправить оценку/ }));
 
     expect(await screen.findByText('За отзыв')).toBeTruthy();
     expect(appended.some((f) => f.type === 'comment_bonus' && f.coins_delta === 5)).toBe(true);

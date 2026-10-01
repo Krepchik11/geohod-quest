@@ -25,6 +25,21 @@ describe('themeVars', () => {
     expect(contrastRatio(onLight, '#F2F2F5')).toBeGreaterThan(MIN_TEXT_CONTRAST);
   });
 
+  it('keeps every button readable at 4.5:1 whatever three colours the author picks', () => {
+    // A deterministic sweep over the colour cube, mid-greys included — the
+    // shades where a luminance threshold used to pick the wrong label colour.
+    const steps = ['#000000', '#3e2c2c', '#555555', '#777777', '#7f7f7f', '#8a8a8a', '#999999', '#b0b0b0', '#ffffff', '#3b71fe', '#e7a934', '#c0395c', '#1f8a5b'];
+    for (const bg of steps) {
+      for (const ink of steps) {
+        for (const btn of steps) {
+          const v = themeVars({ bg, ink, btn }) as Record<string, string>;
+          expect(contrastRatio(v['--p-btn-ink'], v['--p-btn'])).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+          expect(contrastRatio(v['--p-btn-line'], v['--p-bg'])).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+        }
+      }
+    }
+  });
+
   it('lifts the fixed hues until they read on the author’s background', () => {
     // «Неверный ответ» and the coin caption are not the author's to choose, so
     // they must survive a background the author DID choose.

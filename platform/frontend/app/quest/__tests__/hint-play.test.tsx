@@ -114,7 +114,7 @@ const SHIFTED: QuestSnapshot = {
 async function openAnswerStep(snapshot: QuestSnapshot = SNAPSHOT) {
   render(<QuestPlayerClient snapshot={snapshot} questId="q-hint" snapshotId="snap-1" paidBonuses={[]} />);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: 'начать квест' }));
+  await user.click(await screen.findByRole('button', { name: 'Начать квест' }));
   await screen.findByPlaceholderText('Введите ответ');
   return user;
 }
@@ -184,7 +184,7 @@ describe('hint during play', () => {
     const user = await openAnswerStep();
     await answerStep(user, '1700');
     await user.click(await screen.findByRole('button', { name: 'Пропустить задание — 10 монет' }));
-    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeTruthy();
     await waitFor(() =>
       expect(appended.find((f) => f.type === 'task_skipped')).toMatchObject({
         step_position: 1,
@@ -199,18 +199,18 @@ describe('hint during play', () => {
   it('back on an answered step: the answer shows read-only and the arrow moves on, logging nothing', async () => {
     const user = await openAnswerStep();
     await answerStep(user, HINT.answer);
-    await screen.findByRole('button', { name: 'продолжить' });
+    await screen.findByRole('button', { name: 'Продолжить' });
     await user.click(screen.getByRole('button', { name: 'Назад' }));
 
     const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
     expect(field.readOnly).toBe(true);
     // Nothing left to sell on a solved step.
-    expect(screen.queryByText(new RegExp(`подсказка · ${HINT.cost}`))).toBeNull();
+    expect(screen.queryByText(new RegExp(`Подсказка · ${HINT.cost}`))).toBeNull();
 
     await waitFor(() => expect(appended.some((f) => f.type === 'answer_submitted' && f.local_is_correct)).toBe(true));
     const logged = appended.length;
     await user.click(screen.getByRole('button', { name: 'Дальше' }));
-    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeTruthy();
     expect(appended).toHaveLength(logged);
     expect(screen.queryByText('Ответ неверный')).toBeNull();
   });
@@ -219,7 +219,7 @@ describe('hint during play', () => {
     const user = await openAnswerStep();
     await answerStep(user, '1700');
     await user.click(await screen.findByRole('button', { name: 'Пропустить задание — 10 монет' }));
-    await screen.findByRole('button', { name: 'продолжить' });
+    await screen.findByRole('button', { name: 'Продолжить' });
     await user.click(screen.getByRole('button', { name: 'Назад' }));
 
     const field = (await screen.findByDisplayValue(HINT.answer)) as HTMLInputElement;
@@ -227,7 +227,7 @@ describe('hint during play', () => {
     await waitFor(() => expect(appended.some((f) => f.type === 'task_skipped')).toBe(true));
     const logged = appended.length;
     await user.click(screen.getByRole('button', { name: 'Дальше' }));
-    expect(await screen.findByRole('button', { name: 'продолжить' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeTruthy();
     expect(appended).toHaveLength(logged);
   });
 
@@ -255,7 +255,7 @@ describe('hint during play', () => {
     await waitFor(() => expect(document.querySelector('.p-popup')).toBeNull());
     expect(document.querySelector('.p-hintbox')?.textContent).toContain(HINT.text);
     // …and the chip is gone (nothing left to sell).
-    expect(screen.queryByText(new RegExp(`подсказка · ${HINT.cost}`))).toBeNull();
+    expect(screen.queryByText(new RegExp(`Подсказка · ${HINT.cost}`))).toBeNull();
   });
 
   it('keeps the purchased hint after a reload (rehydrated from the fact log)', async () => {
@@ -265,7 +265,7 @@ describe('hint during play', () => {
     render(<QuestPlayerClient snapshot={SNAPSHOT} questId="q-hint" snapshotId="snap-1" paidBonuses={[]} />);
     const user = userEvent.setup();
     // An in-progress attempt hydrates behind the start gate.
-    await user.click(await screen.findByRole('button', { name: 'продолжить попытку' }));
+    await user.click(await screen.findByRole('button', { name: 'Продолжить попытку' }));
     await screen.findByPlaceholderText('Введите ответ');
     expect(document.querySelector('.p-hintbox')?.textContent).toContain(HINT.text);
   });

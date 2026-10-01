@@ -213,6 +213,17 @@ export interface StepState {
   time?: string;
   steps?: string;
   rating?: number;
+  /** §32 «Что дальше» (real player only): the next quest worth taking and the
+   *  club's channel. Absent → the block is not rendered (previews, offline). */
+  whatNext?: WhatNext;
+}
+
+/** What the finale offers after the quest (ТЗ, задача 32). */
+export interface WhatNext {
+  /** Another quest of the same city the player has not taken yet. */
+  quest: { href: string; name: string; meta: string; cover: string | null } | null;
+  /** The club's channel, where group walks are announced. */
+  channel: { href: string; name: string };
 }
 
 /**
@@ -348,12 +359,18 @@ function AnswerForm({ value, wrong, solved, fieldLabel, submitLabel, solvedLabel
   );
 }
 
+/** A button label as the player sees it: first letter capital (ТЗ, задача 31),
+ *  the rest exactly as the author typed it. */
+export function buttonLabel(label: string): string {
+  return label ? label.charAt(0).toLocaleUpperCase('ru-RU') + label.slice(1) : label;
+}
+
 /** The step's primary call to action. No handler → no button (see `StepHandlers`). */
 function PrimaryAction({ on, label }: { on?: () => void; label: string }) {
   if (!on) return null;
   return (
     <div className="p-actions">
-      <button className="p-btn p-btn--solid" onClick={on}>{label}</button>
+      <button className="p-btn p-btn--solid" onClick={on}>{buttonLabel(label)}</button>
     </div>
   );
 }
@@ -488,7 +505,7 @@ export function StepView({ step, quest, copy, st, on }: {
             {quest?.duration && <span><PClock />{quest.duration}</span>}
           </div>
         )}
-        <PrimaryAction on={h.next} label={step.button || copy?.start || "начать квест"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.start || "Начать квест"} />
       </div>
     );
   }
@@ -501,7 +518,7 @@ export function StepView({ step, quest, copy, st, on }: {
         <PlaceLine place={step.place} nav={step.nav} onOpen={h.navigator} />
         <PrimaryAction
           on={h.next}
-          label={step.button || (step.template === "route_video" ? (copy?.onward || "в путь") : (copy?.next || "продолжить"))}
+          label={step.button || (step.template === "route_video" ? (copy?.onward || "В путь") : (copy?.next || "Продолжить"))}
         />
       </div>
     );
@@ -556,7 +573,7 @@ export function StepView({ step, quest, copy, st, on }: {
           <div className="p-hintchip-row">
             <button className="p-hintchip" type="button" onClick={h.buyHint}>
               <PCoin size={15} />
-              подсказка · {step.hint.cost} {plural(step.hint.cost, 'монета', 'монеты', 'монет')}
+              Подсказка · {step.hint.cost} {plural(step.hint.cost, 'монета', 'монеты', 'монет')}
             </button>
           </div>
         ) : null}
@@ -579,7 +596,7 @@ export function StepView({ step, quest, copy, st, on }: {
       <div className="p-stepbody">
         <MediaBlock image={step.image} imageLabel={step.imageLabel} />
         <p className="p-text">{step.text}</p>
-        <PrimaryAction on={h.next} label={step.button || copy?.next || "продолжить"} />
+        <PrimaryAction on={h.next} label={step.button || copy?.next || "Продолжить"} />
       </div>
     );
   }
@@ -642,7 +659,7 @@ export function FinalScreen({ quest, copy, st, on }: {
           "reread the last step" reachable here too. Previews pass no handler. */}
       {h.back && <button className="p-backfab" type="button" aria-label="Назад" onClick={h.back}><PBack /></button>}
       <p className="p-kicker" style={{ marginTop: "6px" }}>{quest?.title || quest?.name}</p>
-      <h2 className="p-title">{copy?.final || "ПОЗДРАВЛЯЕМ ВЫ ПРОШЛИ КВЕСТ"}</h2>
+      <h2 className="p-title">{copy?.final || "Поздравляем, вы прошли квест!"}</h2>
       <Flourish />
       <div className="p-final-coins"><PCoin size={30} /><PCoin size={38} /><PCoin size={30} /></div>
       <div className="p-final-stats">
@@ -670,10 +687,12 @@ export function FinalScreen({ quest, copy, st, on }: {
         )}
       </div>
 
+      {s.whatNext && <WhatNextBlock next={s.whatNext} onInvite={h.share} />}
+
       <div className="p-actions">
         {onward && (
           <button className="p-btn p-btn--solid" type="button" disabled={!canSubmit} onClick={onward}>
-            {copy?.submitRating || "ОТПРАВИТЬ ОЦЕНКУ"} <PArrow />
+            {copy?.submitRating || "Отправить оценку"} <PArrow />
           </button>
         )}
         {onward && !canSubmit && (
@@ -684,14 +703,47 @@ export function FinalScreen({ quest, copy, st, on }: {
           </button>
         )}
         {/* §share: the ONLY action here that neither commits nor leaves — the
-            player stays on the finale and keeps their stars and review text. */}
-        {h.share && (
+            player stays on the finale and keeps their stars and review text.
+            With «Что дальше» on screen the invitation lives there instead. */}
+        {h.share && !s.whatNext && (
           <button className="p-btn p-btn--ghost" type="button" onClick={h.share}>
             {copy?.share || "Поделиться квестом"}
           </button>
         )}
       </div>
     </div>
+  );
+}
+
+/** «Что дальше» under the rating (ТЗ, задача 32): another quest of this city,
+ *  the group walks in the club's channel, and an invitation for friends. */
+function WhatNextBlock({ next, onInvite }: { next: WhatNext; onInvite?: () => void }) {
+  return (
+    <section className="p-next" aria-labelledby="p-next-title">
+      <h3 className="p-next__title" id="p-next-title">Что дальше</h3>
+      {next.quest && (
+        <a className="p-next__quest" href={next.quest.href}>
+          <span
+            className="p-next__cover"
+            style={next.quest.cover ? { backgroundImage: `url("${next.quest.cover}")` } : undefined}
+            aria-hidden
+          />
+          <span className="p-next__body">
+            <b>{next.quest.name}</b>
+            <span>{next.quest.meta}</span>
+          </span>
+          <span className="p-next__go">Смотреть →</span>
+        </a>
+      )}
+      <a className="p-next__row" href={next.channel.href} target="_blank" rel="noopener">
+        Групповые прогулки — в канале {next.channel.name}
+      </a>
+      {onInvite && (
+        <button className="p-next__row" type="button" onClick={onInvite}>
+          Позвать друзей в этот квест
+        </button>
+      )}
+    </section>
   );
 }
 

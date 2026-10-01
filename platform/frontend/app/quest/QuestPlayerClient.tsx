@@ -45,6 +45,7 @@ import { shareQuest } from '../../lib/share';
 // AND a `showToast` (the coin-toast callback).
 import { toast as notify } from '../components/Toaster';
 import { useStepHistory } from './useStepHistory';
+import { useWhatNext } from './useWhatNext';
 import { useKeyboardInset } from './useKeyboardInset';
 import {
   PlayerFrame, StepView, TopBar, CoinToast,
@@ -440,6 +441,8 @@ export default function QuestPlayerClient({
   useEffect(() => {
     if (hydrated && onFinale) runEvent({ type: 'enter_terminal' });
   }, [hydrated, onFinale, runEvent]);
+  const factsOn = useClientFeature('quest_facts');
+  const whatNext = useWhatNext(questId, snapshot.city, onFinale, factsOn);
 
   // «Начать заново»: re-enter the gate with the restart intent so the fresh run
   // adopts the LATEST published version — resolution + version freeze live in one
@@ -643,6 +646,7 @@ export default function QuestPlayerClient({
         reviewText: ui.reviewText,
         coinsEarned: runEarned,
         time: elapsedLabel(attemptCreatedAt, attemptCompletedAt),
+        whatNext,
       }}
       on={{
         next: () => { setUi((u) => ({ ...u, wrong: false, answer: '' })); doAdvance(); },
