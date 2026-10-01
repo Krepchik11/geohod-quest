@@ -17,6 +17,11 @@ import {
   fmtTime,
   newQuest,
   newStep,
+  QUEST_DISTANCE_KM_MAX,
+  QUEST_DURATION_MIN_MAX,
+  questDurationLabel,
+  sanitizeDistanceKm,
+  sanitizeDurationMin,
   type CtorAgeTarget,
   type CtorComplexity,
   serializeDraft,
@@ -276,14 +281,39 @@ export function QuestSettings({ quest, onMeta, highlight, transfer }: {
           <span className="adm-label">Обложка<small>первый экран и карточка магазина</small></span>
           <QuestCoverZone meta={m} onMeta={onMeta} width={240} />
         </div>
-        <div className="ed-row3">
+        <div className="ed-row2">
           <div>
             <label className="adm-label" htmlFor="qs-city">Город</label>
             <input id="qs-city" className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
           </div>
           <div>
-            <label className="adm-label" htmlFor="qs-duration">Длительность</label>
-            <input id="qs-duration" className="input" placeholder="2–3 часа" value={m.duration} onChange={(e) => set({ duration: e.target.value })} />
+            <label className="adm-label" htmlFor="qs-duration">Длительность, мин</label>
+            <input
+              id="qs-duration"
+              className="input"
+              type="number"
+              min={1}
+              max={QUEST_DURATION_MIN_MAX}
+              step={5}
+              value={m.durationMin}
+              onChange={(e) => {
+                const durationMin = sanitizeDurationMin(Math.round(+e.target.value));
+                set({ durationMin, duration: questDurationLabel(durationMin) });
+              }}
+            />
+          </div>
+          <div>
+            <label className="adm-label" htmlFor="qs-distance">Длина маршрута, км</label>
+            <input
+              id="qs-distance"
+              className="input"
+              type="number"
+              min={0.1}
+              max={QUEST_DISTANCE_KM_MAX}
+              step={0.5}
+              value={m.distanceKm}
+              onChange={(e) => set({ distanceKm: sanitizeDistanceKm(+e.target.value) })}
+            />
           </div>
           <div>
             <label className="adm-label" htmlFor="qs-price">Цена, ₽</label>

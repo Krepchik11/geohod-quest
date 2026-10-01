@@ -144,3 +144,6 @@
 .adm-modal ul { margin: 0; padding-left: 20px; font-size: 14px; color: var(--ink); line-height: 1.7; }
 .adm-modal .note { font-size: 13px; color: var(--muted); }
 .adm-modal .row { display: flex; gap: 12px; justify-content: flex-end; }
+
+/* Город · минуты · км · цена — два ряда по два поля (ТЗ, задача 19). */
+.ed-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
