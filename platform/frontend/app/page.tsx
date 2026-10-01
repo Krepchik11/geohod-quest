@@ -5,14 +5,28 @@ import Link from 'next/link';
 import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
+import { CityChips, PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
 import { api, type PublishedQuestWire } from '../lib/api';
-import { useRememberedClientFeature } from '../lib/client-features';
+import { useClientFeature, useRememberedClientFeature, useSoonCities } from '../lib/client-features';
 import { useOwned } from '../lib/collection';
 import { currentUserId } from '../lib/identity';
 import { loadOfflineShelf, rememberCatalog, rememberGrants, type OfflineShelf } from '../lib/offline-shelf';
 import { latestInProgress, orderOwned, ownedStatus, type InProgress, type OwnedStatus } from '../lib/owned-quests';
-import { EMPTY_FACETS, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
-import { sortQuests } from '../lib/store-query';
+import { EMPTY_FACETS, countActiveValues, matchesAttrs, type FacetFilters } from '../lib/quest-filters';
+import { saveCity, useSavedCity } from '../lib/saved-city';
+import { sortQuests, type StoreQuery } from '../lib/store-query';
+import {
+  busiestCity,
+  catalogFacts,
+  cityFacts,
+  fmtRating,
+  heroTitle,
+  playerCountPlural,
+  questPlural,
+  questsInCity,
+  ratingPlural,
+  showPlayers,
+} from '../lib/storefront';
 import { useStoreQuery } from '../lib/useStoreQuery';
 
 /**
@@ -34,9 +48,27 @@ const uniqRu = (values: string[]) =>
   Array.from(new Set(values)).sort((a, b) => a.localeCompare(b, 'ru'));
 
 const NO_GRANTS: ReadonlyMap<string, string> = new Map();
+const NO_IDS: ReadonlySet<string> = new Set();
+
+/** Below this many quests in a city the filters cannot narrow anything worth
+ *  narrowing: only the sort is offered (ТЗ, задача 17). */
+const FILTERS_FROM = 6;
+
+/** The hero photo, served at the width the screen needs (ТЗ, задача 8): the
+ *  original PNG weighed 844 KB on every phone. */
+const HERO_SRCSET = '/assets/img/hero-main-720.webp 720w, /assets/img/hero-main-1240.webp 1240w';
+const HERO_SIZES = '(max-width: 767px) 100vw, 50vw';
 
 export default function GeoQuestHome() {
   const mineOn = useRememberedClientFeature('store_my_quests');
+  const citiesOn = useRememberedClientFeature('store_cities');
+  const factsOn = useClientFeature('quest_facts');
+  const soonCities = useSoonCities();
+  const savedCity = useSavedCity();
+  // Quests taken on this visit keep their place in the grid until the next one:
+  // moving a card to the top the moment it is taken put another quest's «Купить»
+  // under the same finger (ТЗ, задача 7).
+  const [acquired, setAcquired] = useState<ReadonlySet<string>>(NO_IDS);
   // `market` is the loaded list, or null on a catalog FAILURE; `marketLoading`
   // keeps the initial render distinct from a failure so loading never flashes
   // the error message.
@@ -71,20 +103,78 @@ export default function GeoQuestHome() {
   // hands back a whole new query on apply and keeps only a draft until then.
   const [query, applyQuery] = useStoreQuery(facetValues);
 
+  // The city the shop shows. With `store_cities` the player picks one (the URL
+  // first, then this device's last pick, then the city with the most quests);
+  // without it a single-city catalog still names its city in the hero.
+  const cities = useMemo(() => facetValues?.cities ?? [], [facetValues]);
+  const busiest = useMemo(() => (catalog ? busiestCity(catalog) : null), [catalog]);
+  const urlCity = query.filters.city.length === 1 ? query.filters.city[0] : null;
+  const activeCity = citiesOn
+    ? (urlCity ?? (savedCity && cities.includes(savedCity) ? savedCity : busiest))
+    : (urlCity ?? (cities.length === 1 ? cities[0] : null));
+  const soon = citiesOn ? soonCities.filter((c) => !cities.includes(c)) : [];
+  /** With city chips the city is theirs, not the filters' — the toolbar never sees it. */
+  const withCity = useCallback(
+    (f: FacetFilters): FacetFilters => (citiesOn && activeCity ? { ...f, city: [activeCity] } : f),
+    [citiesOn, activeCity],
+  );
+  const toolbarQuery: StoreQuery = citiesOn ? { ...query, filters: { ...query.filters, city: [] } } : query;
+  const applyToolbar = (next: StoreQuery) =>
+    applyQuery(citiesOn ? { ...next, filters: { ...next.filters, city: query.filters.city } } : next);
+  const pickCity = (city: string) => {
+    saveCity(city);
+    applyQuery({ ...query, filters: { ...query.filters, city: [city] } });
+  };
+
   /** ONE predicate for the grid and for the toolbar's live «Показать N». */
   const matching = useCallback(
     (f: FacetFilters) =>
-      catalog ? catalog.filter((q) => matchesAttrs(f, q, owned.has(q.quest_id))) : [],
-    [catalog, owned],
+      catalog ? catalog.filter((q) => matchesAttrs(withCity(f), q, owned.has(q.quest_id))) : [],
+    [catalog, owned, withCity],
   );
+
+  /** The quests of the shown city (all of them while no city is picked). */
+  const cityQuests = useMemo(
+    () => (catalog ? (activeCity ? catalog.filter((q) => q.city === activeCity) : catalog) : []),
+    [catalog, activeCity],
+  );
+  // Filters earn their place from FILTERS_FROM quests; until then they stay only
+  // while one is applied (a shared link must stay undoable) or while they are
+  // the sole way to pick among several cities (no city chips).
+  const filtersOn =
+    cityQuests.length >= FILTERS_FROM ||
+    countActiveValues(toolbarQuery.filters) > 0 ||
+    (!citiesOn && cities.length > 1);
 
   const visible = useMemo(() => {
     const list = matching(query.filters);
     if (!mineOn) return sortQuests(list, query.sort);
-    const mine = list.filter((q) => owned.has(q.quest_id));
-    const rest = list.filter((q) => !owned.has(q.quest_id));
+    const leads = (q: PublishedQuestWire) => owned.has(q.quest_id) && !acquired.has(q.quest_id);
+    const mine = list.filter(leads);
+    const rest = list.filter((q) => !leads(q));
     return [...orderOwned(mine, statuses ?? {}, grantedAt), ...sortQuests(rest, query.sort)];
-  }, [matching, query, mineOn, owned, statuses, grantedAt]);
+  }, [matching, query, mineOn, owned, acquired, statuses, grantedAt]);
+
+  const onAcquired = useCallback((questId: string) => {
+    setAcquired((cur) => new Set(cur).add(questId));
+  }, []);
+
+  const facts = cityFacts(cityQuests, factsOn);
+  const hasFree = cityQuests.some((q) => q.price === 0);
+  const proof = useMemo(() => {
+    const f = catalogFacts(cityQuests);
+    const players = cityQuests.reduce((n, q) => n + q.players, 0);
+    return f.avg == null ? null : { avg: f.avg, ratings: f.ratings, players };
+  }, [cityQuests]);
+  /** The quote comes from the city's most-rated quest — the likeliest to have one. */
+  const quoteQuest = useMemo(
+    () =>
+      cityQuests.reduce<PublishedQuestWire | null>(
+        (best, q) => (!best || q.rating_count > best.rating_count ? q : best),
+        null,
+      ),
+    [cityQuests],
+  );
 
   // The catalog is public and identity-free; the owned set comes from the
   // shared identity-keyed collection (lib/collection). A refetch (the network
@@ -163,23 +253,66 @@ export default function GeoQuestHome() {
   return (
     <SiteShell>
 
-      {/* HERO — §2.3: headline + CTA. */}
-      <section className="hero" style={{ backgroundImage: "url('/assets/img/hero-main.png')" }} data-screen-label="Главная — хиро">
-        <div className="hero__inner container">
-          <h1 className="hero__title display">авторские<br />квесты</h1>
-          <p className="hero__subtitle">Смотри на город по-новому!</p>
-          <HeroCta
-            inProgress={continueQuest}
-            name={continueQuest && (continueQuest.name ?? catalog?.find((q) => q.quest_id === continueQuest.questId)?.name)}
-            hasOwn={mineOn && owned.size > 0}
-            offline={offline}
-          />
+      {/* HERO (ТЗ, задача 13): what it is, where, how long and for whom —
+          the city in the headline, a light photo, three facts and the CTA. */}
+      <section className="hero2" data-screen-label="Главная — хиро">
+        {citiesOn && (cities.length > 1 || soon.length > 0) && (
+          <div className="container">
+            <CityChips cities={cities} soon={soon} active={activeCity} onPick={pickCity} />
+          </div>
+        )}
+        <div className="container hero2__inner">
+          <p className="hero2__over">Квесты-прогулки в смартфоне</p>
+          <h1 className="hero2__title">{heroTitle(activeCity)}</h1>
+          <p className="hero2__sub">
+            Маршрут, загадки и история — в телефоне. Без гида и записи: в любой день, вдвоём или компанией.
+          </p>
+          <picture className="hero2__photo">
+            <img
+              src="/assets/img/hero-main-1240.webp"
+              srcSet={HERO_SRCSET}
+              sizes={HERO_SIZES}
+              width={1240}
+              height={480}
+              alt="Две подруги проходят квест в смартфоне на улице старого города"
+              fetchPriority="high"
+            />
+          </picture>
+          {(facts.time || facts.distance || hasFree) && (
+            <ul className="hero2__facts">
+              {facts.time && <li><span className="ic ic-clock" aria-hidden />{facts.time}</li>}
+              {facts.distance && <li><span className="ic ic-route" aria-hidden />{facts.distance} пешком</li>}
+              {hasFree && <li className="is-free">Первый квест бесплатно</li>}
+            </ul>
+          )}
+          <div className="hero2__cta">
+            <HeroCta
+              inProgress={continueQuest}
+              name={continueQuest && (continueQuest.name ?? catalog?.find((q) => q.quest_id === continueQuest.questId)?.name)}
+              hasOwn={mineOn && owned.size > 0}
+              offline={offline}
+            />
+          </div>
+          <p className="hero2__under">
+            {proof && (
+              <span className="hero2__proof">
+                <span className="ic ic-star" aria-hidden /> <b>{fmtRating(proof.avg)}</b> · {proof.ratings}&nbsp;{ratingPlural(proof.ratings)}
+                {showPlayers(proof.players, proof.ratings) && ` · ${proof.players} ${playerCountPlural(proof.players)}`}
+              </span>
+            )}
+            <Link className="hero2__how" href="/rules">Как играть →</Link>
+          </p>
         </div>
       </section>
 
       {/* §2.1/§2.2 store grid — live quests, purchase status inside the cards */}
-      <section className="container container--wide" id="shop" style={{ paddingTop: 90 }} data-screen-label="Главная — магазин квестов">
-        <h2 className="section-title display">магазин квестов</h2>
+      <section className="container store" id="shop" data-screen-label="Главная — магазин квестов">
+        <div className="store__head">
+          <h2 className="store__title">{questsInCity(activeCity)}</h2>
+          {cityQuests.length > 0 && (
+            <span className="store__count">{cityQuests.length}&nbsp;{questPlural(cityQuests.length)}</span>
+          )}
+        </div>
         {offline && (
           <p className="shop-note">
             Нет сети. Ниже — ваши квесты на этом устройстве. Новые можно будет купить, когда появится связь.
@@ -199,11 +332,12 @@ export default function GeoQuestHome() {
           /* The toolbar is the FIRST ROW of the card grid (grid-column:1/-1),
              so its left edge meets the first card at any width — a separate
              container drifts from the grid by half a gutter. */
-          <div className="quest-grid" style={{ marginTop: 48 }}>
+          <div className="quest-grid">
             <StoreToolbar
-              query={query}
-              onApply={applyQuery}
-              cities={facetValues?.cities ?? []}
+              query={toolbarQuery}
+              onApply={applyToolbar}
+              filtersOn={filtersOn}
+              cities={citiesOn ? [] : cities}
               tags={facetValues?.tags ?? []}
               /* Offered to a viewer who owns something — and always kept
                  reachable while it is ON, so a link carrying it (or a failed
@@ -218,7 +352,7 @@ export default function GeoQuestHome() {
                 <button
                   type="button"
                   className="shop-note__reset"
-                  onClick={() => applyQuery({ filters: EMPTY_FACETS, sort: query.sort })}
+                  onClick={() => applyToolbar({ filters: EMPTY_FACETS, sort: query.sort })}
                 >
                   Сбросить фильтры
                 </button>
@@ -229,13 +363,25 @@ export default function GeoQuestHome() {
                   key={q.quest_id}
                   quest={q}
                   owned={owned.has(q.quest_id)}
-                  mine={mineOn ? { status: statuses?.[q.quest_id] ?? null, offline, onChange: refreshStatus } : undefined}
+                  mine={
+                    mineOn
+                      ? { status: statuses?.[q.quest_id] ?? null, offline, onChange: refreshStatus, onAcquired }
+                      : undefined
+                  }
                 />
               ))
             )}
           </div>
         )}
       </section>
+
+      {!offline && (
+        <div className="container store-after">
+          {quoteQuest && <PlayerQuote questId={quoteQuest.quest_id} questName={quoteQuest.name} />}
+          <TogetherBlock />
+          {soon.length > 0 && <SoonBlock cities={soon} />}
+        </div>
+      )}
 
     </SiteShell>
   );

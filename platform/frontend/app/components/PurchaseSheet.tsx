@@ -4,9 +4,13 @@ import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
-import { currentUserId, getSession, subscribeSession } from '../../lib/identity';
+import { authHref, buyAgainPath } from '../../lib/auth-return';
+import { useClientFeature } from '../../lib/client-features';
+import { currentUserId, getSession, setSession, subscribeSession } from '../../lib/identity';
 import { pollPaymentSettlement } from '../../lib/payment-return';
 import { coverCss } from '../../lib/cover';
+import { questFacts } from '../../lib/storefront';
+import SocialAuthButtons from './SocialAuthButtons';
 
 /**
  * §3.3 purchase confirmation sheet — bottom sheet on mobile, centered 440px
@@ -23,6 +27,8 @@ export interface PurchaseSheetQuest {
   name: string;
   city: string | null;
   duration: string | null;
+  duration_min?: number;
+  distance_km?: number;
   price: number | null;
   primary_comic: string | null;
 }
@@ -45,6 +51,8 @@ export default function PurchaseSheet({
   onPurchased: () => void;
 }) {
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
+  const inlineLogin = useClientFeature('purchase_inline_login');
+  const factsOn = useClientFeature('quest_facts');
   const [promoOpen, setPromoOpen] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [applied, setApplied] = useState<AppliedPromo | null>(null);
@@ -75,7 +83,9 @@ export default function PurchaseSheet({
 
   const price = quest.price ?? 0;
   const finalPrice = applied ? applied.finalPrice : price;
-  const metaLine = [quest.city, quest.duration, 'доступ навсегда'].filter(Boolean).join(' · ');
+  const metaLine = [quest.city, questFacts(quest, factsOn).time, 'доступ навсегда'].filter(Boolean).join(' · ');
+  // Signing in from here comes back to this quest with the sheet open again.
+  const signInHref = authHref(buyAgainPath(quest.quest_id));
 
   const confirm = async () => {
     setState('pending');
@@ -254,15 +264,25 @@ export default function PurchaseSheet({
           </>
         )}
 
-        {!session && (
+        {!session && (inlineLogin ? (
+          /* ТЗ, задача 26: an offer, not a warning — the player signs in right
+             here (Telegram/Google popups, no page change) or by e-mail, which
+             comes back to this sheet. */
+          <div className="psheet__account">
+            <b>Сохраните квест в аккаунте</b>
+            <p>Тогда он откроется на любом телефоне, а прогресс не потеряется. Это займёт пару секунд.</p>
+            <SocialAuthButtons onSession={setSession} />
+            <Link className="psheet__account-alt" href={signInHref}>или по почте</Link>
+          </div>
+        ) : (
           <div className="psheet__warn">
             <span aria-hidden>⚠</span>
             <span>
               Вы не вошли: покупка привяжется к этому устройству и потеряется при смене браузера.{' '}
-              <Link href="/auth">Войти</Link>
+              <Link href={signInHref}>Войти</Link>
             </span>
           </div>
-        )}
+        ))}
 
         {paymentUnavailable && (
           <div className="psheet__error">
@@ -306,6 +326,13 @@ export default function PurchaseSheet({
                   ? `Оплатить ${finalPrice} ₽`
                   : `Подтвердить — ${finalPrice} ₽`}
           </button>
+        )}
+        {finalPrice > 0 && (
+          /* ТЗ, задача 4: said before the gateway, not discovered on it. */
+          <p className="psheet__fine">
+            Оплата картой российского банка через ЮKassa.
+            {!session && inlineLogin && <><br />Без входа квест сохранится только на этом устройстве.</>}
+          </p>
         )}
         <button className="psheet__cancel" type="button" onClick={onClose} disabled={busy}>
           Отмена

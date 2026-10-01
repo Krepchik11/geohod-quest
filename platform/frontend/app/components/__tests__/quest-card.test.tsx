@@ -50,7 +50,7 @@ function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
     quest_id: 'q1', name: 'Тайны старого Белграда', primary_comic: null,
     template_summary: '', description: null, pages: null, tasks: null, paid_hints: null, snapshot_version: 1, snapshot_id: 's1',
-    city: 'Белград', duration: '2–3 часа', price: 890,
+    city: 'Белград', duration: '2–3 часа', duration_min: 60, distance_km: 5, price: 890,
     rating_avg: 4.8, rating_count: 24, players: 0,
     complexity: null, age_target: null, tags: [], ...over,
   };
@@ -98,9 +98,16 @@ describe('QuestCard', () => {
 
   it('shows the players counter (real + marketing bonus) only when positive', () => {
     const { rerender } = render(<QuestCard quest={quest({ players: 0 })} owned={false} />);
-    expect(screen.queryByText(/сыграл/)).toBeNull();
+    expect(screen.queryByText(/игрок/)).toBeNull();
     rerender(<QuestCard quest={quest({ players: 1240 })} owned={false} />);
-    expect(screen.getByText(/1240\s+игроков сыграли/)).toBeTruthy();
+    expect(screen.getByText(/1240\s+игроков/)).toBeTruthy();
+  });
+
+  it('hides a players counter that would contradict the ratings (ТЗ, задача 3)', () => {
+    // 24 ratings imported without completions: «1 игрок» next to them reads as a fake.
+    render(<QuestCard quest={quest({ players: 1, rating_count: 24 })} owned={false} />);
+    expect(screen.queryByText(/игрок/)).toBeNull();
+    expect(screen.getByText(/24\s+оценки/)).toBeTruthy();
   });
 
   it('paid quest: «Купить» opens the confirmation sheet, no instant charge', () => {

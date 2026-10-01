@@ -27,14 +27,14 @@ describe('SiteHeader «админка» counter', () => {
   it('counts new reviews and open feedback for an admin', async () => {
     meMock.mockReturnValue({ role: 'admin', session: { token: 't' }, displayName: null });
     render(<SiteHeader />);
-    const link = await screen.findByRole('link', { name: /^админка\s*, ждут проверки: 5$/ });
+    const link = await screen.findByRole('link', { name: /^Админка\s*, ждут проверки: 5$/ });
     expect(link.querySelector('.nav-badge.is-alert')).toBeTruthy();
   });
 
   it('never asks for the counters for a player', async () => {
     meMock.mockReturnValue({ role: 'player', session: { token: 't' }, displayName: null });
     render(<SiteHeader />);
-    await waitFor(() => expect(screen.queryByText('админка')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('Админка')).toBeNull());
     expect(countsMock).not.toHaveBeenCalled();
   });
 });

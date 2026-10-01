@@ -185,7 +185,7 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .nav-toggle { display:none; }
 .site-nav__account { display:none; }
 .site-nav { display:flex; gap:48px; margin:0 auto; padding-left:90px; }
-.site-nav a { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; color:var(--text); padding:4px 0; border-bottom:1px solid transparent; transition:color .15s ease,border-color .15s ease; }
+.site-nav a { font-family:var(--font-display); font-size:15px; font-weight:500; white-space:nowrap; color:var(--text); padding:4px 0; border-bottom:1px solid transparent; transition:color .15s ease,border-color .15s ease; }
 .site-nav a:hover { color:var(--blue); }
 .site-nav a.is-active { border-color:currentColor; }
 /* «админка» counter — what waits for a moderator (same pill as the admin tabs). */
@@ -202,7 +202,7 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .user-icon .head, .user-icon .body { background:var(--ic) no-repeat center/contain; }
 .user-menu__dropdown { position:absolute; right:0; top:56px; min-width:120px; padding:14px 16px; background:var(--white); border-radius:var(--r-ui); box-shadow:var(--shadow-pop); display:none; flex-direction:column; gap:12px; z-index:30; }
 .user-menu.is-open .user-menu__dropdown { display:flex; }
-.user-menu__dropdown a, .user-menu__dropdown button { font-family:var(--font-display); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--text); }
+.user-menu__dropdown a, .user-menu__dropdown button { font-family:var(--font-display); font-size:15px; font-weight:500; color:var(--text); }
 .user-menu__dropdown button { background:none; border:0; padding:0; margin:0; text-align:left; cursor:pointer; }
 .user-menu__dropdown a:hover, .user-menu__dropdown button:hover { color:var(--blue); }
 .user-menu__head { display:flex; flex-direction:column; gap:2px; padding-bottom:10px; border-bottom:1px solid var(--border); white-space:nowrap; }
@@ -228,17 +228,19 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 
 /* Real rows: fixed-width card columns that wrap, centered, and capped at five
    per row (the max-width is exactly 5 columns + 4 gaps) on any viewport. */
-.quest-grid { display:grid; grid-template-columns:repeat(auto-fill, 303px); gap:24.5px; justify-content:center; max-width:calc(5 * 303px + 4 * 24.5px); margin-left:auto; margin-right:auto; }
-.quest-card { position:relative; width:303px; overflow:hidden; transition:transform .15s ease,box-shadow .15s ease; }
+/* Three columns across the shared container — the grid's edges are the logo's
+   and the headline's edges (ТЗ, задача 9). */
+.quest-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:24px; }
+.quest-card { position:relative; display:flex; flex-direction:column; overflow:hidden; transition:transform .15s ease,box-shadow .15s ease; }
 .quest-card:hover { transform:translateY(-4px); box-shadow:0 16px 24px rgba(0,0,0,.08),1px 2px 15px rgba(0,0,0,.08); }
 .quest-card__photo { position:relative; display:block; height:220px; background:center/cover no-repeat; border-radius:var(--r-card) var(--r-card) 0 0; }
 .quest-card__photo .qmark { position:absolute; inset:0; display:grid; place-items:center; font-family:var(--font-serif); font-size:44px; letter-spacing:.03em; color:var(--white); }
 .quest-card__photo .author { position:absolute; right:16px; bottom:-16px; width:32px; height:32px; border-radius:50%; border:1px solid var(--white); object-fit:cover; }
-.quest-card__body { padding:16px; }
-.quest-card__meta { display:flex; gap:16px; font-size:12px; line-height:18px; color:var(--text); opacity:.5; }
+.quest-card__body { flex:1; display:flex; flex-direction:column; padding:16px; }
+.quest-card__meta { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; line-height:18px; color:var(--muted-2); }
 .quest-card__meta span { display:inline-flex; align-items:center; gap:4px; }
 .quest-card__meta .ic { width:14px; height:14px; }
-.quest-card__title { margin-top:16px; font-weight:700; font-size:18px; line-height:1.22; min-height:44px; }
+.quest-card__title { margin-top:10px; font-weight:700; font-size:19px; line-height:24px; color:var(--navy); }
 /* The title anchor stretches over the whole card so the entire card is one click
    target to the product page. Interactive controls (the footer CTA) sit above it
    via z-index so a click on a button never triggers the card navigation. */
@@ -247,11 +249,13 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .rating .ic { --ic:url("/assets/icons/c/ic-star-18--gold.svg"); width:17px; height:16px; }
 .rating b { font-weight:700; }
 .rating .muted { font-weight:400; }
-.quest-card__rating { margin-top:20px; }
-.quest-card__divider { margin:16px 4px 0; border:0; border-top:1px solid rgba(18,41,71,.2); }
-.quest-card__footer { position:relative; z-index:2; margin-top:14px; display:flex; align-items:center; justify-content:space-between; }
-.quest-card__price { font-weight:700; font-size:20px; }
-.quest-card__footer .btn.quest-card__cta { width:160px; padding:0; }
+.quest-card__rating { margin:10px 0 16px; font-size:15px; flex-wrap:wrap; }
+/* The divider rides the free space down, so every footer in a row sits on one
+   line whatever the card above it says (ТЗ, задача 6). */
+.quest-card__divider { margin:auto 0 0; border:0; border-top:1px solid rgba(18,41,71,.12); }
+.quest-card__footer { position:relative; z-index:2; margin-top:14px; display:flex; align-items:center; gap:10px; }
+.quest-card__price { margin-right:auto; font-weight:700; font-size:20px; white-space:nowrap; }
+.quest-card__footer .btn.quest-card__cta { flex:none; width:auto; min-width:136px; height:44px; padding:0 22px; }
 .quest-card__owned-badge { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:24px; padding:0 10px; border-radius:12px; background:rgba(255,255,255,.92); color:var(--green); font-size:11px; font-weight:700; }
 .quest-card__players { margin-top:10px; font-size:13px; font-weight:500; }
 .quest-card__price--owned { color:var(--green); font-size:14px; }
@@ -270,9 +274,9 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .quest-card__dl .psheet__spinner { width:11px; height:11px; border-color:var(--blue-tint); border-top-color:var(--blue); }
 .quest-card__strip { position:absolute; left:0; right:0; bottom:0; height:5px; background:color-mix(in srgb, var(--white) 45%, transparent); }
 .quest-card__strip i { display:block; height:100%; background:var(--blue); transition:width .3s ease; }
-.quest-card__mine { margin-right:auto; padding-right:8px; font-size:13px; font-weight:600; line-height:1.25; color:var(--text); }
+.quest-card__mine { margin-right:auto; font-size:13px; font-weight:600; line-height:1.25; color:var(--text); }
 .quest-card__mine--done { color:var(--green); }
-.quest-card__footer .btn.quest-card__cta--mine { width:140px; }
+.quest-card__footer .btn.quest-card__cta--mine { min-width:120px; }
 .hero__inner .btn.hero__cta--continue { width:auto; min-width:272px; max-width:min(440px, 100%); }
 .hero__cta-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rm-sheet__text { font-size:14px; line-height:1.45; color:var(--text); }
@@ -314,10 +318,10 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 /* §1.1 storefront restacks — the only media queries the site layer keeps */
 @media (max-width: 1240px) {
   html, body { overflow-x:hidden; }
-  .quest-grid { gap:24px; }
   .features { grid-template-columns:repeat(2, minmax(0, 360px)); }
 }
 @media (max-width: 900px) {
+  .quest-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
   .features { grid-template-columns:1fr; gap:16px; max-width:460px; margin-left:auto; margin-right:auto; }
   .feature { height:auto; }
 }
@@ -333,7 +337,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .site-nav { display:none; }
   /* Panel hangs off the burger, no wider than its longest entry. */
   .site-nav.is-open { display:flex; flex-direction:column; gap:0; position:absolute; left:auto; right:0; top:calc(100% + 2px); z-index:30; width:max-content; min-width:172px; max-width:calc(100vw - 40px); margin:0; padding:2px 0; background:var(--sand); border:1px solid rgba(18,41,71,.10); border-radius:var(--r-card); box-shadow:0 14px 28px rgba(18,41,71,.14); }
-  .site-nav.is-open a { font-size:14px; letter-spacing:.1em; padding:12px 18px; border-bottom:1px solid rgba(18,41,71,.08); }
+  .site-nav.is-open a { font-size:15px; padding:12px 18px; border-bottom:1px solid rgba(18,41,71,.08); }
   .site-nav.is-open a:last-child { border-bottom:0; }
   /* Profile and logout ride inside this panel — no avatar button on a phone. */
   .user-menu { display:none; }
@@ -341,7 +345,7 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .site-nav.is-open .user-menu__inline { display:flex; flex-direction:column; }
   .site-nav.is-open .user-menu__head { padding:10px 18px 8px; border-bottom:1px solid rgba(18,41,71,.08); }
   .site-nav.is-open .user-menu__name { font-size:13.5px; max-width:none; }
-  .site-nav.is-open .user-menu__inline button { font-family:var(--font-display); font-size:14px; letter-spacing:.1em; text-transform:uppercase; color:var(--text); background:none; border:0; padding:12px 18px; text-align:left; cursor:pointer; }
+  .site-nav.is-open .user-menu__inline button { font-family:var(--font-display); font-size:15px; font-weight:500; color:var(--text); background:none; border:0; padding:12px 18px; text-align:left; cursor:pointer; }
   /* Phone: the photo is cropped too tight for a side-by-side, so the scrim
      turns vertical and the whole block sits on the readable top half. */
   /* cover crops hard at phone width: bias right so the people stay in frame */
@@ -353,15 +357,13 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .hero__inner .btn { margin-top:24px; width:100%; }
   .hero__inner .btn.hero__cta--continue { width:100%; min-width:0; }
   .section-title { font-size:16px; }
-  .quest-grid { gap:20px; grid-template-columns:minmax(0, 360px); }
-  .quest-card { width:100%; max-width:360px; margin-left:auto; margin-right:auto; }
+  .quest-grid { gap:20px; grid-template-columns:minmax(0, 1fr); }
   .site-footer__grid { grid-template-columns:1fr; gap:20px; }
   .site-footer__links { justify-self:start; }
 }
 @media (max-width: 420px) {
   .hero { min-height:410px; }
   .hero__title { font-size:27px; }
-  .quest-card { max-width:none; }
 }
 
 .info-tile { display:flex; gap:8px; width:156px; }
@@ -472,7 +474,7 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
 
 /* LEGAL pages (/privacy, /terms — §2.6) */
 .legal { flex:1; padding-top:8px; padding-bottom:72px; max-width:820px; }
-.legal__title { font-size:24px; }
+.legal__title { font-size:28px; line-height:34px; }
 .legal__updated { margin-top:10px; font-size:13px; color:var(--muted); }
 .legal__body { margin-top:28px; display:flex; flex-direction:column; gap:14px; font-size:14.5px; line-height:1.65; color:var(--text); }
 .legal__body h2 { font-size:16px; font-weight:600; margin-top:14px; }
@@ -483,7 +485,7 @@ body.admin { min-width:1240px; background:var(--bg-subtle); color:var(--ink); }
    Tailwind preflight strips list and table defaults, so they are restated here. */
 .rules { max-width:760px; margin:72px auto 0; display:flex; flex-direction:column; gap:44px; font-size:14.5px; line-height:1.65; }
 .rules__section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:24px; }
-.rules__section h2 { font-size:16px; line-height:24px; }
+.rules__section h2 { font-size:20px; line-height:26px; }
 .rules a:not(.btn) { color:var(--blue); }
 .rules a:not(.btn):hover { text-decoration:underline; }
 .rules__note { font-size:13.5px; color:var(--muted-2); }

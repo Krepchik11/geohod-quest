@@ -133,8 +133,8 @@
 .qp-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--text); opacity: .6; }
 .qp-meta span { display: inline-flex; align-items: center; gap: 5px; }
 .qp-meta .ic { width: 14px; height: 14px; }
-.qp-title { margin-top: 14px; font-size: 30px; line-height: 1.25; letter-spacing: .12em; }
-.qp-desc { margin-top: 16px; font-size: 15px; line-height: 1.7; }
+.qp-title { margin: 0; font-size: 32px; line-height: 38px; }
+.qp-desc { font-size: 15px; line-height: 1.7; }
 .qp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 /* «Место старта»: компактная вторичная кнопка-ссылка в левой колонке. */
 .qp-startpoint { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; }
@@ -173,12 +173,12 @@
 }
 @media (max-width: 767px) {
   .qp-cover { height: 240px; }
-  .qp-title { font-size: 21px; }
+  .qp-title { font-size: 24px; line-height: 29px; }
   .qp-right { display: none; } /* the sticky buy bar replaces the order card… */
   .qp--owned-mobile .qp-right { display: block; } /* …but owned state stays visible */
   .qp-buybar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,.96); border-top: 1px solid var(--border-2); padding: 12px 20px calc(24px + env(safe-area-inset-bottom)); }
   .qp-buybar__price { display: flex; flex-direction: column; }
-  .qp-buybar__price small { font-size: 11px; color: var(--muted); }
+  .qp-buybar__price small { font-size: 12px; color: var(--muted-2); }
   .qp-buybar__price b { font-size: 20px; }
   .qp-buybar__btn { flex: 1; }
   .qp { padding-bottom: 120px; }

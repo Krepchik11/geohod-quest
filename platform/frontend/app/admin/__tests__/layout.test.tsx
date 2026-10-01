@@ -38,6 +38,7 @@ vi.mock('../../../lib/session-actions', () => ({
 }));
 vi.mock('next/navigation', () => ({
   useSelectedLayoutSegment: segmentMock,
+  usePathname: () => '/admin',
 }));
 
 import AdminLayout from '../layout';

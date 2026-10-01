@@ -20,10 +20,13 @@ export default function ShareQuestButton({
   quest,
   variant = 'button',
   className,
+  label = 'Поделиться',
 }: {
   quest: ShareQuestInput;
   variant?: 'button' | 'icon';
   className?: string;
+  /** The button's words (the full-width variant only). */
+  label?: string;
 }) {
   // Called straight from onClick — `navigator.share` needs the transient user
   // activation that an await before it would spend.
@@ -58,7 +61,7 @@ export default function ShareQuestButton({
       type="button"
       onClick={onShare}
     >
-      Поделиться
+      {label}
     </button>
   );
 }

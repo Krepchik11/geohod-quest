@@ -42,7 +42,7 @@ vi.mock('../../../../../lib/client-features', () => ({
   useUniversalAnswer: () => null,
 }));
 
-import AboutClient, { productChips } from '../AboutClient';
+import AboutClient from '../AboutClient';
 import { ApiError } from '../../../../../lib/api';
 
 const PRODUCT = {
@@ -67,14 +67,6 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/quest/q1/about');
 });
 
-describe('productChips', () => {
-  it('derives honest chips and hides unknown ones', () => {
-    expect(productChips({ pages: 12, tasks: 4, paid_hints: true })).toEqual([
-      '12 страниц', '4 задания', 'подсказки за монеты', 'работает офлайн',
-    ]);
-    expect(productChips({ pages: null, tasks: null, paid_hints: null })).toEqual(['работает офлайн']);
-  });
-});
 
 /* §share: the product page IS what a shared link opens, so the button is
    offered to every visitor — the recipient of a link has not bought it yet. */
@@ -103,7 +95,7 @@ describe('AboutClient — «Поделиться»', () => {
     shareFlag.on = true;
     listGrantsMock.mockResolvedValue([{ quest_id: 'q1', user_id: 'dev:test' }]);
     render(<AboutClient questId="q1" />);
-    await screen.findByText('✓ Квест куплен');
+    await screen.findByText('✓ Квест ваш');
     expect(screen.getByRole('button', { name })).toBeTruthy();
   });
 });
@@ -121,6 +113,8 @@ describe('AboutClient', () => {
       total: 12,
     });
     render(<AboutClient questId="q1" />);
+    // Three reviews first (ТЗ, задача 24), then «Все N отзывов» opens the page.
+    fireEvent.click(await screen.findByRole('button', { name: /^Все \d+ отзыв/ }));
     const btn = await screen.findByRole('button', { name: /Показать ещё/ });
     fireEvent.click(btn);
     await screen.findByText('одиннадцатый отзыв');
@@ -144,12 +138,17 @@ describe('AboutClient', () => {
   it('renders model data: breadcrumb, meta, description, author, chips', async () => {
     render(<AboutClient questId="q1" />);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Тайны старого Белграда' })).toBeTruthy());
-    expect(screen.getByText('Магазин квестов')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /^Квесты/ })).toBeTruthy();
     expect(screen.getByText('Прогулка по кварталам.')).toBeTruthy();
     expect(screen.getByText('Мария К.')).toBeTruthy();
     expect(screen.getByText('3 квеста в магазине')).toBeTruthy();
-    expect(screen.getByText('12 страниц')).toBeTruthy();
-    expect(screen.getByText(/★ 4.8 · 24 оценки/)).toBeTruthy();
+    // «Коротко» (ТЗ, задача 20) instead of the old chips: tasks, company, offline.
+    expect(screen.getByText('4 задания')).toBeTruthy();
+    expect(screen.getByText('Компанией')).toBeTruthy();
+    expect(screen.queryByText(/страниц/)).toBeNull();
+    expect(screen.getByText(/4,8/)).toBeTruthy();
+    // The rating line under the title and the reviews head both count them.
+    expect(screen.getAllByText(/24\s+оценки/).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Купить за 890 ₽' })).toBeTruthy();
   });
 
@@ -160,7 +159,7 @@ describe('AboutClient', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Купить за 890 ₽' }));
     expect(screen.getByText('Подтвердите покупку')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' }));
-    await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('✓ Квест ваш')).toBeTruthy());
     expect(screen.getByRole('link', { name: 'Пройти квест' }).getAttribute('href')).toBe('/quest/q1');
     expect(downloadMock).toHaveBeenCalled();
   });
@@ -168,7 +167,7 @@ describe('AboutClient', () => {
   it('already-owned quest renders the owned card straight away', async () => {
     listGrantsMock.mockResolvedValue([{ user_id: 'dev:test', quest_id: 'q1' }]);
     render(<AboutClient questId="q1" />);
-    await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('✓ Квест ваш')).toBeTruthy());
   });
 
   it('free quest grants instantly without the sheet', async () => {
@@ -177,7 +176,7 @@ describe('AboutClient', () => {
     render(<AboutClient questId="q1" />);
     await waitFor(() => screen.getAllByRole('button', { name: 'Получить' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Получить' })[0]);
-    await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('✓ Квест ваш')).toBeTruthy());
     expect(screen.queryByText('Подтвердите покупку')).toBeNull();
   });
 
@@ -187,8 +186,9 @@ describe('AboutClient', () => {
       start_point: { lat: 44.8176, lng: 20.4569 },
     });
     render(<AboutClient questId="q1" />);
-    // The label is always exactly «Место старта» — no address, no point name.
-    const link = await screen.findByRole('link', { name: 'Место старта' });
+    // «Коротко» carries the start as a map link — still no address text (an open
+    // question of the ТЗ), only the coordinates the author set.
+    const link = await screen.findByRole('link', { name: 'Место старта на карте' });
     expect(link.getAttribute('href')).toBe(
       'https://www.google.com/maps/search/?api=1&query=44.8176,20.4569',
     );
@@ -232,7 +232,7 @@ describe('AboutClient — ЮKassa return (?payment={id})', () => {
     pollMock.mockResolvedValue('succeeded');
     window.history.replaceState(null, '', '/quest/q1/about?payment=pay-1');
     render(<AboutClient questId="q1" />);
-    await waitFor(() => expect(screen.getByText('✓ Квест куплен')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('✓ Квест ваш')).toBeTruthy());
     expect(pollMock).toHaveBeenCalledWith('pay-1');
     expect(screen.getByText('Оплата прошла — квест ваш навсегда.')).toBeTruthy();
     expect(downloadMock).toHaveBeenCalled();
@@ -255,6 +255,6 @@ describe('AboutClient — ЮKassa return (?payment={id})', () => {
     window.history.replaceState(null, '', '/quest/q1/about?payment=pay-1');
     render(<AboutClient questId="q1" />);
     await waitFor(() => expect(screen.getByText(/Платёж ещё обрабатывается/)).toBeTruthy());
-    expect(screen.queryByText('✓ Квест куплен')).toBeNull();
+    expect(screen.queryByText('✓ Квест ваш')).toBeNull();
   });
 });

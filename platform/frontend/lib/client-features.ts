@@ -28,7 +28,7 @@ let cache: Promise<PublicFeatures> | null = null;
  */
 function normalizeWire(wire: PublicFeatures | Record<string, boolean>): PublicFeatures {
   if (wire && typeof wire === 'object' && 'flags' in wire) return wire as PublicFeatures;
-  return { flags: (wire as Record<string, boolean>) ?? {}, universal_answer: null };
+  return { flags: (wire as Record<string, boolean>) ?? {}, universal_answer: null, soon_cities: [] };
 }
 
 /** The last flag verdicts this device saw — see useRememberedClientFeature. */
@@ -124,6 +124,17 @@ export function useRememberedClientFeature(key: ClientFeatureKey): boolean {
   const last = useSyncExternalStore(noSubscription, () => readRemembered()[key] === true, () => false);
   return fetched ? (fetched.flags?.[key] ?? false) : last;
 }
+
+/**
+ * Cities announced as «скоро» (the `soon_cities` setting, served only while
+ * `store_cities` is on); empty while loading, on failure, and from a backend
+ * that predates the field.
+ */
+export function useSoonCities(): readonly string[] {
+  return usePublicFeatures()?.soon_cities ?? NO_CITIES;
+}
+
+const NO_CITIES: readonly string[] = Object.freeze([]);
 
 /**
  * The platform-wide universal answer, or `null` while loading / when the

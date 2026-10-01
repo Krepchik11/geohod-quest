@@ -15,7 +15,7 @@ export function LegalArticle({
 }) {
   return (
     <main className="container legal">
-      <h1 className="display legal__title">{title}</h1>
+      <h1 className="heading legal__title">{title}</h1>
       <p className="legal__updated">Обновлено: {updated}</p>
       <article className="legal__body">{children}</article>
     </main>

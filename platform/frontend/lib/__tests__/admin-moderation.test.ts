@@ -123,9 +123,9 @@ describe('questFilterOptions', () => {
 });
 
 describe('formatAverage / templateLabel', () => {
-  it('formats one-decimal averages', () => {
-    expect(formatAverage(4)).toBe('4');
-    expect(formatAverage(14 / 3)).toBe('4.7');
+  it('formats averages as the store does — hundredths, decimal comma', () => {
+    expect(formatAverage(4)).toBe('4,0');
+    expect(formatAverage(14 / 3)).toBe('4,67');
   });
   it('labels step templates', () => {
     expect(templateLabel('task_answer')).toBe('вопрос');

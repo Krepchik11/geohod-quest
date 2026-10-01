@@ -10,10 +10,11 @@ import React from 'react';
  * is only a draft over it, and «Показать N квестов» promises exactly the number
  * of cards that appear. One apply = one history entry.
  */
-const { listQuestsMock, listGrantsMock, mineFlag, ownedStatusMock, inProgressMock, shelfMock } = vi.hoisted(() => ({
+const { listQuestsMock, listGrantsMock, mineFlag, citiesFlag, ownedStatusMock, inProgressMock, shelfMock } = vi.hoisted(() => ({
   listQuestsMock: vi.fn(),
   listGrantsMock: vi.fn(),
   mineFlag: { on: false },
+  citiesFlag: { on: false, soon: [] as string[] },
   ownedStatusMock: vi.fn(),
   inProgressMock: vi.fn(),
   shelfMock: vi.fn(),
@@ -39,8 +40,10 @@ vi.mock('../../lib/identity', () => ({
 vi.mock('../../lib/download', () => ({ downloadBundle: vi.fn(async () => {}) }));
 vi.mock('../../lib/client-features', () => ({
   useClientFeature: () => false,
-  useRememberedClientFeature: (key: string) => key === 'store_my_quests' && mineFlag.on,
+  useRememberedClientFeature: (key: string) =>
+    (key === 'store_my_quests' && mineFlag.on) || (key === 'store_cities' && citiesFlag.on),
   useUniversalAnswer: () => null,
+  useSoonCities: () => citiesFlag.soon,
 }));
 // The device's view of own quests is lib/owned-quests' (tested there); the
 // page's job is the order, the hero and the offline fallback.
@@ -62,7 +65,7 @@ import { FRESH_STATUS } from '../../lib/owned-quests';
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {
     quest_id: 'q', name: 'Квест', primary_comic: null, template_summary: '', description: null, pages: null, tasks: null, paid_hints: null,
-    snapshot_version: 1, snapshot_id: 's', city: 'Белград', duration: '2 часа',
+    snapshot_version: 1, snapshot_id: 's', city: 'Белград', duration: '2 часа', duration_min: 60, distance_km: 5,
     price: 890, rating_avg: 4.5, rating_count: 10, players: 100,
     complexity: 'medium', age_target: 'everyone', tags: ['история'],
     ...over,
@@ -93,7 +96,10 @@ beforeEach(() => {
   listQuestsMock.mockResolvedValue(CATALOG);
   listGrantsMock.mockResolvedValue([]);
   window.history.replaceState(null, '', '/');
+  window.localStorage.clear();
   mineFlag.on = false;
+  citiesFlag.on = false;
+  citiesFlag.soon = [];
   ownedStatusMock.mockResolvedValue(FRESH_STATUS);
   inProgressMock.mockResolvedValue(null);
   shelfMock.mockReset();
@@ -266,7 +272,9 @@ describe('store_my_quests: the shop is the player\'s own shelf', () => {
   it('offline: only own quests from the device, under a note; nothing to buy', async () => {
     listQuestsMock.mockRejectedValue(new Error('offline'));
     shelfMock.mockResolvedValue({ quests: [CATALOG[0]], owned: new Set(['a']), grantedAt: new Map() });
-    await mountStore();
+    // One quest on the device: no filters to offer (ТЗ, задача 17), only the sort.
+    render(<GeoQuestHome />);
+    await screen.findByText(/^Нет сети\./);
     expect(screen.getByText(/^Нет сети\. Ниже — ваши квесты на этом устройстве/)).toBeInTheDocument();
     expect(cardNames()).toEqual(['Ад Калемегдана']);
     expect(screen.queryByRole('button', { name: 'Купить' })).toBeNull();
@@ -287,5 +295,51 @@ describe('store_my_quests: the shop is the player\'s own shelf', () => {
     render(<GeoQuestHome />);
     expect(await screen.findByText(/Не удалось загрузить магазин/)).toBeInTheDocument();
     expect(shelfMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('store_cities: one city at a time (ТЗ, задачи 14–17)', () => {
+  it('opens on the busiest city, names it in the hero and offers only the sort for a few quests', async () => {
+    citiesFlag.on = true;
+    listQuestsMock.mockResolvedValue([
+      ...CATALOG,
+      quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', rating_avg: 4, rating_count: 1 }),
+    ]);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна']));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Земун, о котором не расскажет экскурсовод');
+    expect(screen.getByRole('button', { name: 'Земун' })).toHaveAttribute('aria-pressed', 'true');
+    // Two quests in the city: no filters, only the sort (and no city facet anyway).
+    expect(screen.queryByRole('button', { name: /^Фильтры/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Сортировка/ })).toBeTruthy();
+  });
+
+  it('a picked city filters the shop, lands in the URL and is remembered', async () => {
+    citiesFlag.on = true;
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Белград' }));
+    expect(cardNames()).toEqual(['Ад Калемегдана']);
+    expect(search()).toBe('?city=Белград');
+    expect(window.localStorage.getItem('geohod-city:v1')).toBe('Белград');
+  });
+
+  it('announces the «скоро» cities with a chip and a block that leads to the channel', async () => {
+    citiesFlag.on = true;
+    citiesFlag.soon = ['Белград', 'Стамбул'];
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cards()).toHaveLength(1));
+    // Белград already has quests — only Стамбул is «скоро».
+    expect(screen.getByRole('link', { name: /Стамбул\s*скоро/ })).toHaveAttribute('href', '#soon');
+    expect(screen.getByRole('heading', { name: 'Скоро в новых городах' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Узнать о запуске/ })).toHaveAttribute('href', 'https://t.me/serbia_progulki');
+  });
+
+  it('without the flag there are no chips and no «скоро», while «Вместе веселее» stays', async () => {
+    citiesFlag.soon = ['Стамбул'];
+    await mountStore();
+    expect(screen.queryByRole('group', { name: 'Город' })).toBeNull();
+    expect(screen.queryByText('Скоро в новых городах')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Вместе веселее' })).toBeTruthy();
   });
 });

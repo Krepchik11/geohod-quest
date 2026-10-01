@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import UserMenu from './components/UserMenu';
 import { hasAdminToken } from '../lib/api';
+import { SUPPORT_TG_URL } from '../lib/contacts';
 import { useModerationCounts, waitingTotal } from '../lib/moderation-counts';
 import { canEditQuests, isAdmin } from '../lib/roles';
 import { useMe } from '../lib/use-me';
@@ -75,17 +76,17 @@ export default function SiteHeader() {
         aria-label="Основная навигация"
         onClick={() => setNavOpen(false)}
       >
-        <Link href="/">главная</Link>
-        <Link href="/#shop">квесты</Link>
-        <Link href="/rules">как играть</Link>
-        {/* §1.3: absolute anchor so «контакты» works from every page, not just /. */}
-        <Link href="/#contacts">контакты</Link>
+        {/* Three sections, three destinations (ТЗ, задача 12): the logo is the
+            way home, and support is the Telegram chat the footer also links. */}
+        <Link href="/#shop">Квесты</Link>
+        <Link href="/rules">Как играть</Link>
+        <a href={SUPPORT_TG_URL} target="_blank" rel="noopener">Поддержка</a>
         {(canEditQuests(role) || hasAdminToken()) && (
-          <Link href="/quest-editor">редактор</Link>
+          <Link href="/quest-editor">Редактор</Link>
         )}
         {admin && (
           <Link href="/admin">
-            админка
+            Админка
             {waiting > 0 && (
               <span className={`nav-badge${counts?.reviews_new_low ? ' is-alert' : ''}`}>
                 <span className="visually-hidden">, ждут проверки: </span>

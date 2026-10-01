@@ -37,6 +37,9 @@ export interface StoreToolbarProps {
   query: StoreQuery;
   /** Commit: exactly one call per apply. */
   onApply: (next: StoreQuery) => void;
+  /** Filters are offered at all: with a handful of quests only the sort is
+   *  (the caller keeps them on while any filter is applied). */
+  filtersOn: boolean;
   /** Cities/tags that actually exist in the catalog (sorted by the caller). */
   cities: string[];
   tags: string[];
@@ -80,6 +83,7 @@ const focusablesIn = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLEle
 export default function StoreToolbar({
   query,
   onApply,
+  filtersOn,
   cities,
   tags,
   showOwnedToggle,
@@ -195,7 +199,7 @@ export default function StoreToolbar({
 
   return (
     <div className="stb" ref={rootRef}>
-      {isPhone ? (
+      {isPhone && filtersOn ? (
         <button
           type="button"
           className={`btn btn--quiet btn--md btn--block stb-btn${appliedCount > 0 ? ' is-active' : ''}`}
@@ -209,6 +213,7 @@ export default function StoreToolbar({
         </button>
       ) : (
         <>
+          {filtersOn && (
           <div className="stb-anchor">
             <button
               type="button"
@@ -240,6 +245,7 @@ export default function StoreToolbar({
               </div>
             )}
           </div>
+          )}
 
           <div className="stb-anchor">
             <button

@@ -181,7 +181,7 @@ describe('AdminReviewsPage', () => {
     fireEvent.change(screen.getByLabelText('Квест'), { target: { value: 'q1' } });
     const summary = screen.getByLabelText('Сводка по квесту');
     // (5 + 4) / 2 over the visible ratings — the hidden 2★ is out of it.
-    expect(summary.textContent).toContain('4.5');
+    expect(summary.textContent).toContain('4,5');
     expect(summary.textContent).toContain('2 оценки · 1 скрыто');
   });
 
@@ -240,9 +240,9 @@ describe('AdminReviewsPage', () => {
     // Newest-first ordering → the last «Скрыть» is the oldest, the 2★ anonymous rating.
     fireEvent.click(screen.getAllByText('Скрыть').at(-1)!);
     expect(await screen.findByText('Скрыть отзыв?')).toBeTruthy();
-    // Average preview: (5+4+2)/3 = 3.7 → (5+4)/2 = 4.5 after hiding the 2★.
-    expect(screen.getByText('3.7')).toBeTruthy();
-    expect(screen.getByText('4.5')).toBeTruthy();
+    // Average preview: (5+4+2)/3 = 3,67 → (5+4)/2 = 4,5 after hiding the 2★.
+    expect(screen.getByText('3,67')).toBeTruthy();
+    expect(screen.getByText('4,5')).toBeTruthy();
     fireEvent.click(screen.getByText('Скрыть отзыв'));
     await waitFor(() =>
       expect(hideMock).toHaveBeenCalledWith({ user_id: 'dev:anon', quest_id: 'q1' }),
