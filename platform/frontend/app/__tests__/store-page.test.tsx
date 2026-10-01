@@ -273,10 +273,11 @@ describe('store_my_quests: the shop is the player\'s own shelf', () => {
     listQuestsMock.mockRejectedValue(new Error('offline'));
     shelfMock.mockResolvedValue({ quests: [CATALOG[0]], owned: new Set(['a']), grantedAt: new Map() });
     // One quest on the device: no filters to offer (ТЗ, задача 17), only the sort.
+    // The note shows while the shelf's own quests still settle, so wait for the
+    // card itself — not for the note — before reading the grid.
     render(<GeoQuestHome />);
-    await screen.findByText(/^Нет сети\./);
+    await waitFor(() => expect(cardNames()).toEqual(['Ад Калемегдана']));
     expect(screen.getByText(/^Нет сети\. Ниже — ваши квесты на этом устройстве/)).toBeInTheDocument();
-    expect(cardNames()).toEqual(['Ад Калемегдана']);
     expect(screen.queryByRole('button', { name: 'Купить' })).toBeNull();
     expect(ownedStatusMock).toHaveBeenCalledWith('a', null); // the published version is unknown offline
   });
