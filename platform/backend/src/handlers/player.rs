@@ -368,6 +368,10 @@ pub(crate) struct ProductPageWire {
     author_name: Option<String>,
     /// How many of this author's quests are currently on sale.
     author_published_count: u32,
+    /// Author attributes from the constructor row, as on the catalog card;
+    /// `None` for a legacy/direct publish.
+    complexity: Option<String>,
+    age_target: Option<String>,
     /// §11 reviews: newest-written first — the first page; the rest comes from
     /// GET /api/quests/{id}/reviews.
     reviews: Vec<ReviewWire>,
@@ -571,6 +575,7 @@ async fn get_quest_product_handler(
     let snapshot = snapshot?;
     let start_point = snapshot::snapshot_start_point(snapshot.as_ref());
     let theme = snapshot::snapshot_theme(snapshot.as_ref());
+    let attrs = ctor.map(|q| q.attrs);
     Ok(Json(ProductPageWire {
         meta,
         rating_avg,
@@ -578,6 +583,8 @@ async fn get_quest_product_handler(
         players,
         author_name,
         author_published_count,
+        complexity: attrs.as_ref().map(|a| a.complexity.clone()),
+        age_target: attrs.map(|a| a.age_target),
         reviews,
         reviews_total,
         start_point,

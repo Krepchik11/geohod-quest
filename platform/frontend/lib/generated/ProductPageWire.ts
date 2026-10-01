@@ -24,6 +24,11 @@ author_name: string | null,
  */
 author_published_count: number, 
 /**
+ * Author attributes from the constructor row, as on the catalog card;
+ * `None` for a legacy/direct publish.
+ */
+complexity: string | null, age_target: string | null, 
+/**
  * §11 reviews: newest-written first — the first page; the rest comes from
  * GET /api/quests/{id}/reviews.
  */
