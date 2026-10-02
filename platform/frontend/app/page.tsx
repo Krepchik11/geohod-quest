@@ -1,6 +1,6 @@
 'use client'; // narrow island ONLY for the live catalog + owned set (§2)
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
@@ -28,6 +28,13 @@ import {
   showPlayers,
 } from '../lib/storefront';
 import { useStoreQuery } from '../lib/useStoreQuery';
+import { useStuck } from '../lib/use-stuck';
+
+/** Height of the pinned site header on a phone (globals.css .site-header): the
+ *  shop head pins right under it. */
+const HEADER_PIN_PX = 64;
+/** Height of the pinned shop head on a phone (styles/storefront.css). */
+const SHOP_HEAD_PX = 52;
 
 /**
  * Landing v2 (SPEC §2 / Landing v2.dc.html). The store grid is 100% live: every
@@ -69,6 +76,13 @@ export default function GeoQuestHome() {
   // moving a card to the top the moment it is taken put another quest's «Купить»
   // under the same finger (ТЗ, задача 7).
   const [acquired, setAcquired] = useState<ReadonlySet<string>>(NO_IDS);
+  // The shop head pins under the header on a phone; its shadow shows only then.
+  const headSentinel = useRef<HTMLDivElement | null>(null);
+  const headStuck = useStuck(headSentinel, HEADER_PIN_PX);
+  // Once the list's end reaches the head's lower edge the head slides away
+  // whole — the page may run out before the list has pushed it under the header.
+  const listEndSentinel = useRef<HTMLDivElement | null>(null);
+  const headLeaving = useStuck(listEndSentinel, HEADER_PIN_PX + SHOP_HEAD_PX);
   // `market` is the loaded list, or null on a catalog FAILURE; `marketLoading`
   // keeps the initial render distinct from a failure so loading never flashes
   // the error message.
@@ -307,10 +321,29 @@ export default function GeoQuestHome() {
 
       {/* §2.1/§2.2 store grid — live quests, purchase status inside the cards */}
       <section className="container store" id="shop" data-screen-label="Главная — магазин квестов">
-        <div className="store__head">
+        <div className="sticky-sentinel" ref={headSentinel} aria-hidden />
+        {/* The head pins under the header on a phone and leaves with the
+            section; the sort/filter control rides in it (a round button on a
+            phone, the toolbar row under the title on a desktop). */}
+        <div className={`store__head${headStuck ? ' is-stuck' : ''}${headLeaving ? ' is-leaving' : ''}`}>
           <h2 className="store__title">{questsInCity(activeCity)}</h2>
           {cityQuests.length > 0 && (
             <span className="store__count">{cityQuests.length}&nbsp;{questPlural(cityQuests.length)}</span>
+          )}
+          {!loading && catalog !== null && catalog.length > 0 && (
+            <StoreToolbar
+              query={toolbarQuery}
+              onApply={applyToolbar}
+              filtersOn={filtersOn}
+              cities={citiesOn ? [] : cities}
+              tags={facetValues?.tags ?? []}
+              /* Offered to a viewer who owns something — and always kept
+                 reachable while it is ON, so a link carrying it (or a failed
+                 grants load) never leaves an unswitchable filter behind.
+                 Offline every card is the viewer's own: nothing to hide. */
+              showOwnedToggle={(!offline && owned.size > 0) || query.filters.hideOwned}
+              countFor={(f) => matching(f).length}
+            />
           )}
         </div>
         {offline && (
@@ -329,23 +362,7 @@ export default function GeoQuestHome() {
             {offline ? 'На этом устройстве нет ваших квестов.' : 'Скоро здесь появятся квесты.'}
           </p>
         ) : (
-          /* The toolbar is the FIRST ROW of the card grid (grid-column:1/-1),
-             so its left edge meets the first card at any width — a separate
-             container drifts from the grid by half a gutter. */
           <div className="quest-grid">
-            <StoreToolbar
-              query={toolbarQuery}
-              onApply={applyToolbar}
-              filtersOn={filtersOn}
-              cities={citiesOn ? [] : cities}
-              tags={facetValues?.tags ?? []}
-              /* Offered to a viewer who owns something — and always kept
-                 reachable while it is ON, so a link carrying it (or a failed
-                 grants load) never leaves an unswitchable filter behind.
-                 Offline every card is the viewer's own: nothing to hide. */
-              showOwnedToggle={(!offline && owned.size > 0) || query.filters.hideOwned}
-              countFor={(f) => matching(f).length}
-            />
             {visible.length === 0 ? (
               <p className="shop-note shop-note--grid">
                 Ничего не нашлось.{' '}
@@ -373,6 +390,7 @@ export default function GeoQuestHome() {
             )}
           </div>
         )}
+        <div className="sticky-sentinel" ref={listEndSentinel} aria-hidden />
       </section>
 
       {!offline && (

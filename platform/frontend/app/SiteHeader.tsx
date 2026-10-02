@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import UserMenu from './components/UserMenu';
 import { hasAdminToken } from '../lib/api';
@@ -8,6 +8,7 @@ import { SUPPORT_TG_URL } from '../lib/contacts';
 import { useModerationCounts, waitingTotal } from '../lib/moderation-counts';
 import { canEditQuests, isAdmin } from '../lib/roles';
 import { useMe } from '../lib/use-me';
+import { useStuck } from '../lib/use-stuck';
 
 /**
  * SiteHeader v2 (§2.5, §1.2) — logo + nav + auth slot.
@@ -35,6 +36,9 @@ import { useMe } from '../lib/use-me';
 export default function SiteHeader() {
   const { role, session } = useMe();
   const [navOpen, setNavOpen] = useState(false);
+  // Pinned on a phone (globals.css): the shadow shows once the page has moved.
+  const topSentinel = useRef<HTMLDivElement | null>(null);
+  const stuck = useStuck(topSentinel, 0);
   const admin = isAdmin(role) || hasAdminToken();
   const counts = useModerationCounts(admin);
   const waiting = waitingTotal(counts);
@@ -48,7 +52,9 @@ export default function SiteHeader() {
   }, [navOpen]);
 
   return (
-    <header className="site-header container">
+    <>
+    <div className="sticky-sentinel" ref={topSentinel} aria-hidden />
+    <header className={`site-header container${stuck ? ' is-stuck' : ''}`}>
       <Link className="logo" href="/" aria-label="GEOHOD QUEST — на главную">
         <span className="ic logo-mark" />
         <span className="ic logo-text" />
@@ -106,5 +112,6 @@ export default function SiteHeader() {
 
       <UserMenu loginLink />
     </header>
+    </>
   );
 }

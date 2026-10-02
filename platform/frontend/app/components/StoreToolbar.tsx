@@ -140,10 +140,15 @@ export default function StoreToolbar({
     if (open !== 'sheet') return;
     const el = sheetRef.current;
     if (el) focusablesIn(el)[0]?.focus();
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // On the root, not the body: the root's overflow governs the viewport, so
+    // the page stops scrolling and the pinned header stays pinned. A hidden
+    // body under a clipped root turns into a scroller of its own and drags the
+    // sticky rows off their places.
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = previous;
+      root.style.overflow = previous;
     };
   }, [open]);
 
@@ -196,20 +201,24 @@ export default function StoreToolbar({
   };
 
   const badge = appliedCount > 0 ? <span className="stb-badge">{appliedCount}</span> : null;
+  const sheetTitle = filtersOn ? 'Фильтры и сортировка' : 'Сортировка';
 
   return (
     <div className="stb" ref={rootRef}>
-      {isPhone && filtersOn ? (
+      {isPhone ? (
+        /* A phone keeps the control in the pinned shop head: one round button
+           that opens the sheet — sort only while there is nothing to filter. */
         <button
           type="button"
-          className={`btn btn--quiet btn--md btn--block stb-btn${appliedCount > 0 ? ' is-active' : ''}`}
+          className={`stb-round${appliedCount > 0 ? ' is-active' : ''}`}
+          /* The badge is drawn, so the count goes into the name as before. */
+          aria-label={appliedCount > 0 ? `${sheetTitle} ${appliedCount}` : sheetTitle}
           aria-haspopup="dialog"
           aria-expanded={open === 'sheet'}
           onClick={(e) => openPanel('sheet', e.currentTarget)}
         >
-          Фильтры и сортировка
+          <span className="ic ic-sliders" aria-hidden />
           {badge}
-          <span className="stb-caret" aria-hidden />
         </button>
       ) : (
         <>
@@ -275,15 +284,17 @@ export default function StoreToolbar({
             className="sheet stb-sheet"
             role="dialog"
             aria-modal="true"
-            aria-label="Фильтры и сортировка"
+            aria-label={sheetTitle}
             ref={sheetRef}
             onKeyDown={trapFocus}
           >
             <span className="sheet__grip" aria-hidden />
             <div className="stb-sheet__head">
-              <h3>Фильтры и сортировка</h3>
-              <ResetButton disabled={!canReset} onClick={resetDraft} />
+              <h3>{sheetTitle}</h3>
+              {filtersOn && <ResetButton disabled={!canReset} onClick={resetDraft} />}
             </div>
+            {filtersOn ? (
+            <>
             <div className="stb-sheet__body">
               <FieldGroup label="Сортировка">
                 <SortOptions value={draft.sort} onPick={(sort) => setDraft((d) => ({ ...d, sort }))} />
@@ -299,6 +310,13 @@ export default function StoreToolbar({
               />
             </div>
             <ApplyButton className="btn btn--block" count={countFor(draft.filters)} onClick={applyDraft} />
+            </>
+            ) : (
+              /* Nothing to filter: the sort is the whole form, so a pick commits. */
+              <div className="stb-sheet__body">
+                <SortOptions value={query.sort} onPick={pickSortNow} />
+              </div>
+            )}
           </div>
         </div>,
         document.body,

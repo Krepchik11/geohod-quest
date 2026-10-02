@@ -63,9 +63,11 @@
 
 /* ---------- Shop head + grid (задачи 9, 34) ---------- */
 .store { padding-top:56px; }
-.store__head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
-.store__title { margin:0; font-family:var(--font-body); font-weight:700; font-size:24px; line-height:30px; color:var(--navy); }
-.store__count { font-size:14px; color:var(--muted); white-space:nowrap; }
+/* Title and count on one line, the sort/filter toolbar under them (desktop). */
+.store__head { display:grid; grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"title count" "tools tools"; align-items:baseline; column-gap:16px; }
+.store__title { grid-area:title; margin:0; font-family:var(--font-body); font-weight:700; font-size:24px; line-height:30px; color:var(--navy); }
+.store__count { grid-area:count; font-size:14px; color:var(--muted); white-space:nowrap; }
+.store__head .stb { grid-area:tools; margin-top:20px; }
 .store .quest-grid { margin-top:20px; }
 
 /* ---------- Card (задачи 6, 11, 34) ---------- */
@@ -112,7 +114,18 @@
   .hero2__cta .btn, .hero2__cta .btn.hero__cta--continue { width:100%; min-width:0; }
   .hero2__under { margin-top:12px; font-size:13px; }
   .store { padding-top:28px; }
-  .store__title { font-size:20px; line-height:26px; }
+  /* Pinned right under the header while the shop scrolls by, then it leaves
+     with the section. Full-bleed, so no card peeks past its edges. */
+  .store__head { position:sticky; top:64px; z-index:15; grid-template-columns:minmax(0, 1fr) auto auto; grid-template-areas:"title count tools"; align-items:center; column-gap:10px; min-height:52px; margin-inline:calc(-1 * var(--gutter)); padding:4px var(--gutter); background:var(--sand); transition:box-shadow .15s ease, transform .2s ease, opacity .2s ease; }
+  .store__head.is-stuck { box-shadow:var(--shadow-pop); }
+  /* Past the list it slides up under the header instead of leaving a strip. */
+  .store__head.is-leaving { transform:translateY(-100%); opacity:0; visibility:hidden; box-shadow:none; transition:transform .2s ease, opacity .2s ease, visibility 0s .2s; }
+  /* Two pinned rows read as one bar: its shadow sits under the lower one. */
+  body:has(.store__head.is-stuck:not(.is-leaving)) .site-header { box-shadow:none; }
+  .store__head .stb { margin-top:0; }
+  /* Shrinks a notch on the narrowest phones so «Квесты в Нови Саде» still fits whole. */
+  .store__title { font-size:clamp(17px, 5vw, 20px); line-height:26px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .store__count { font-size:13px; }
   .store .quest-grid { margin-top:14px; }
   .store-after { gap:16px; margin-top:32px; }
   .store-quote { padding:18px 20px; }
