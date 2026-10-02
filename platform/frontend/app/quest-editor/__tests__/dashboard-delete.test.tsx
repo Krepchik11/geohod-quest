@@ -75,6 +75,33 @@ describe('dashboard: deleting a quest', () => {
     fireEvent.click(view.container.ownerDocument.querySelector('.qcd-modal__confirm')!);
     expect(actions.onDelete).toHaveBeenCalledWith(q);
   });
+
+  it('asks whether to delete for good, naming the quest', () => {
+    setup(quest({ name: 'Тайна крепости' }));
+    openDelete();
+    const dialog = screen.getByRole('dialog', { name: 'Вы хотите удалить квест безвозвратно?' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.textContent).toContain('Квест «Тайна крепости» будет удалён');
+    expect(dialog.textContent).toContain('Восстановить его будет нельзя.');
+  });
+
+  it('focuses «Отмена», so a stray Enter cannot delete', () => {
+    setup(quest({}));
+    openDelete();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Отмена' }));
+  });
+
+  it.each([
+    ['«Отмена»', () => fireEvent.click(screen.getByRole('button', { name: 'Отмена' }))],
+    ['a click outside', () => fireEvent.click(document.querySelector('.qcd-ovl')!)],
+    ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+  ])('%s closes without deleting', (_, close) => {
+    const { actions } = setup(quest({}));
+    openDelete();
+    close();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(actions.onDelete).not.toHaveBeenCalled();
+  });
 });
 
 describe('dashboard: «Запустить»', () => {

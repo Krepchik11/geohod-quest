@@ -55,9 +55,25 @@ describe('templates and presets', () => {
     expect(newStep('continue').image).toBeNull();
   });
 
-  it('prefills every step with the address block off (optional feature)', () => {
-    expect(newStep('task_no').address).toEqual({ on: false, name: '', distance: '', coords: '' });
+  it('prefills every step with the address block off (optional feature), named «Локация»', () => {
+    expect(newStep('task_no').address).toEqual({ on: false, name: 'Локация', distance: '', coords: '' });
     expect(newStep('route_video').address.on).toBe(false);
+  });
+
+  it('a new page with the address switched on is not stopped for a missing name', () => {
+    const q = quest();
+    const s = newStep('task_no');
+    s.address = { ...s.address, on: true, coords: '45.25, 19.84' };
+    q.steps = [q.steps[0], s, q.steps[1]];
+    expect(computeGates(q).perPage[s.id]?.some((m) => m.text.includes('название не задано'))).toBeFalsy();
+    expect(stepToGameStep(s, q.meta).rich_content.place_text).toBe('Локация');
+  });
+
+  it('duplicating a page keeps the author\'s address name', () => {
+    const s = newStep('task_answer');
+    s.address = { ...s.address, name: 'Мост' };
+    const { steps, newId } = duplicateStep([s], s.id);
+    expect(steps.find((x) => x.id === newId)!.address.name).toBe('Мост');
   });
 
   it('prefills route_video with a video block', () => {
@@ -789,6 +805,20 @@ describe('migrateQuest (legacy draft bodies)', () => {
     const q = migrateQuest(body, 'q-old')!;
     // The old address always rendered; hiding it on migrate would lose content.
     expect(q.steps[1].address).toEqual({ on: true, name: 'пл. Свободы 1', distance: '', coords: '' });
+  });
+
+  it('names a legacy step with neither address nor navigator label «Локация», block stays off', () => {
+    const body = legacyBody() as { steps: Array<{ place: string; nav: unknown }> };
+    body.steps[1].place = '  ';
+    body.steps[1].nav = { on: false, coords: '' };
+    const q = migrateQuest(body, 'q-old')!;
+    expect(q.steps[1].address).toEqual({ on: false, name: 'Локация', distance: '', coords: '' });
+  });
+
+  it('never refills a name the author cleared (current-shape body)', () => {
+    const body = legacyBody() as { steps: CtorQuest['steps'] };
+    body.steps[1] = { ...newStep('task_no'), address: { on: true, name: '', distance: '', coords: '45.25, 19.84' } };
+    expect(migrateQuest(body, 'q-old')!.steps[1].address.name).toBe('');
   });
 
   it('defaults the missing hint toggle to ON, keeping cost and text; adds the image slot', () => {

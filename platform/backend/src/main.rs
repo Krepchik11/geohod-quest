@@ -5734,6 +5734,121 @@ mod tests {
             .expect("clean up");
     }
 
+    /// Migration 0010 names every empty address «Локация» on the pages that show
+    /// the block — on or off — and leaves written names, other templates, legacy
+    /// steps, bodies without steps and `updated_at` alone. Replayed inside a
+    /// transaction that is rolled back, like 0007.
+    #[tokio::test]
+    async fn pg_address_name_default_migration_fills_empty_names() {
+        use sqlx::Row as _;
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_address_name_default_migration: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let qid = format!("q-addr-{run}");
+        let bare = format!("q-addr-bare-{run}");
+        let address = |on: bool, name: Option<&str>| {
+            let mut a = json!({ "on": on, "distance": "400 м", "coords": "45.25, 19.84" });
+            if let Some(name) = name {
+                a["name"] = json!(name);
+            }
+            a
+        };
+        let body = json!({
+            "meta": { "title": "Адреса" },
+            "steps": [
+                { "id": "s0", "template": "start", "address": address(false, Some("")) },
+                { "id": "s1", "template": "task_no", "address": address(true, Some("")) },
+                { "id": "s2", "template": "task_answer", "address": address(false, Some("   ")) },
+                { "id": "s3", "template": "route_video", "address": address(false, None) },
+                { "id": "s4", "template": "video", "address": address(true, Some("Мост")) },
+                { "id": "s5", "template": "task_no", "place": "", "nav": { "on": false } },
+                { "id": "s6", "template": "congrats", "address": address(false, Some("")) },
+            ],
+        });
+        let bare_body = json!({ "meta": { "title": "Без страниц" } });
+
+        let migration = include_str!("../migrations/0010_address_name_default.sql");
+        let mut tx = pool.begin().await.expect("begin");
+        for (id, body) in [(&qid, &body), (&bare, &bare_body)] {
+            sqlx::query(
+                "INSERT INTO constructor_quests
+                     (quest_id, author_id, author_name, name, body, created_at, updated_at)
+                 VALUES ($1, 'a-addr', 'Автор', 'Адреса', $2, 1, 7)",
+            )
+            .bind(id)
+            .bind(body)
+            .execute(&mut *tx)
+            .await
+            .expect("insert a draft");
+        }
+        sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0010");
+        let again = sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0010 again");
+        let rows = sqlx::query(
+            "SELECT quest_id, body, updated_at FROM constructor_quests
+             WHERE quest_id = ANY($1) ORDER BY quest_id",
+        )
+        .bind(vec![qid.clone(), bare.clone()])
+        .fetch_all(&mut *tx)
+        .await
+        .expect("read back");
+        tx.rollback().await.expect("rollback");
+
+        assert_eq!(again.rows_affected(), 0, "a second run changes nothing");
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row.get::<i64, _>("updated_at"), 7, "not an author's edit");
+        }
+        let got = |id: &str| -> Value {
+            rows.iter()
+                .find(|r| r.get::<String, _>("quest_id") == id)
+                .expect("row")
+                .get("body")
+        };
+        assert_eq!(got(&bare), bare_body, "a body without steps is left as is");
+        let steps = got(&qid)["steps"].clone();
+        let names: Vec<Value> = steps
+            .as_array()
+            .expect("steps")
+            .iter()
+            .map(|s| s["address"]["name"].clone())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                json!(""),        // start: no block on this page
+                json!("Локация"), // empty, block on
+                json!("Локация"), // spaces, block off
+                json!("Локация"), // no name at all
+                json!("Мост"),    // written by the author
+                Value::Null,      // legacy shape: migrateQuest's job
+                json!(""),        // congrats: no block on this page
+            ]
+        );
+        let mut want = body.clone();
+        for i in [1, 2, 3] {
+            want["steps"][i]["address"]["name"] = json!("Локация");
+        }
+        assert_eq!(steps, want["steps"], "only the names change, order kept");
+    }
+
     /// Everything a per-scenario Postgres test needs: the router over a real
     /// pool (migrations applied) and a run-unique tag so scenarios tolerate a
     /// shared, pre-populated database. `None` means "skip: no DATABASE_URL".
