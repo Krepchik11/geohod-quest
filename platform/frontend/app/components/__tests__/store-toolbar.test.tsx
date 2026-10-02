@@ -239,6 +239,17 @@ describe('StoreToolbar — the mobile sheet', () => {
     expect(groups[0]).toHaveAccessibleName('Сортировка');
   });
 
+  it('with nothing to filter, the round button is the sort alone and a pick commits at once', () => {
+    const { onApply } = setup({ filtersOn: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
+    const sheet = screen.getByRole('dialog', { name: 'Сортировка' });
+    expect(within(sheet).queryByRole('group', { name: 'Город' })).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: /Показать/ })).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: /По названию/ }));
+    expect(onApply).toHaveBeenCalledWith({ filters: EMPTY_FACETS, sort: 'name' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('commits sorting and filters together, in one apply', () => {
     const { onApply } = setup();
     fireEvent.click(screen.getByRole('button', { name: /Фильтры и сортировка/ }));
@@ -274,9 +285,9 @@ describe('StoreToolbar — the mobile sheet', () => {
   it('locks the page behind the sheet and unlocks it on close', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: /Фильтры и сортировка/ }));
-    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.documentElement.style.overflow).toBe('hidden');
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(document.body.style.overflow).toBe('');
+    expect(document.documentElement.style.overflow).toBe('');
   });
 
   it('traps focus and returns it to the trigger on close', () => {

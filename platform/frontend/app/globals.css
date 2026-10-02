@@ -163,7 +163,12 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .auth-error { margin-top:10px; padding:10px 14px; border-radius:10px; background:rgba(231,90,124,.1); color:var(--red); font-size:13px; }
 
 /* SITE — fluid shell (§1): no width floor, clamp gutters */
-.container { max-width:1240px; margin-inline:auto; padding-inline:clamp(20px, 4vw, 42px); }
+/* --gutter: the side padding, readable by children that run full-bleed (the
+   pinned shop head on a phone). */
+.container { --gutter:clamp(20px, 4vw, 42px); max-width:1240px; margin-inline:auto; padding-inline:var(--gutter); }
+/* Zero-height marker before a sticky element: lib/use-stuck watches it to tell
+   when that element is pinned. */
+.sticky-sentinel { height:1px; margin-bottom:-1px; pointer-events:none; }
 /* The store section alone: wide enough for the grid's five 303px columns
    (+4 gaps + side padding); everything else keeps the 1240px design width. */
 .container--wide { max-width:calc(5 * 303px + 4 * 24.5px + 2 * 42px); }
@@ -317,7 +322,9 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 
 /* §1.1 storefront restacks — the only media queries the site layer keeps */
 @media (max-width: 1240px) {
-  html, body { overflow-x:hidden; }
+  /* clip, not hidden: hidden makes <body> a scroll container, and position:sticky
+     inside it would then never pin (the pinned header and shop head on a phone). */
+  html, body { overflow-x:clip; }
   .features { grid-template-columns:repeat(2, minmax(0, 360px)); }
 }
 @media (max-width: 900px) {
@@ -327,7 +334,12 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
 }
 @media (max-width: 767px) {
   /* header: logo + auth slot only; nav lives in the tab bar (§1.2) */
-  .site-header { height:64px; justify-content:space-between; gap:8px; }
+  /* Pinned on every storefront page (the player has its own header). The page
+     background runs under it; the shadow appears once content scrolls beneath. */
+  .site-header { position:sticky; top:0; height:64px; justify-content:space-between; gap:8px; background:var(--sand); transition:box-shadow .15s ease; }
+  .site-header.is-stuck { box-shadow:var(--shadow-pop); }
+  /* Anchors land below the pinned header, never under it. */
+  html { scroll-padding-top:64px; }
   /* Logo pushes the trailing controls together, so the auth slot and the
      burger sit side by side instead of drifting apart under space-between. */
   .site-header .logo { margin-right:auto; }
