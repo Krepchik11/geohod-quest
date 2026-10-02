@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import type { ConstructorQuestWire, CtorStatus } from '../../lib/api';
 import {
   AGE_TARGET_LABEL,
@@ -13,6 +13,7 @@ import { matchesAttrs, singleValueFacets } from '../../lib/quest-filters';
 import { coverSrc, monogram } from '../../lib/cover';
 import SpaceHeader from '../components/SpaceHeader';
 import StatusControl from './StatusControl';
+import { useEscape } from './controls';
 
 /**
  * Конструктор-дашборд — главная страница конструктора. Точный порт дизайна
@@ -51,6 +52,46 @@ function CoverThumb({ name, cover }: { name: string; cover: string | null }) {
       {src
         ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} />
         : <span>{monogram(name)}</span>}
+    </div>
+  );
+}
+
+/**
+ * Подтверждение удаления квеста. Удаление физическое — корзины нет, поэтому
+ * «безвозвратно» стоит в самом вопросе (ТЗ «доработка Редактора», задача 1).
+ * Фокус встаёт на «Отмена»: случайный Enter не должен стереть квест.
+ */
+function DeleteQuestModal({ quest, onCancel, onConfirm }: {
+  quest: ConstructorQuestWire;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEscape(onCancel);
+  const titleId = useId();
+  return (
+    <div className="qcd-ovl" onClick={onCancel}>
+      <div className="qcd-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
+        <div className="qcd-modal__icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M5 7h14M10 7V5a1 1 0 011-1h2a1 1 0 011 1v2M8 7l1 12a1 1 0 001 1h4a1 1 0 001-1l1-12" stroke="#e75a7c" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </div>
+        <h3 id={titleId}>Вы хотите удалить квест безвозвратно?</h3>
+        <p>
+          Квест «{quest.name}» будет удалён вместе со всеми страницами и черновиками.
+          Восстановить его будет нельзя.
+        </p>
+        {/* Удаление снимает квест и с продажи — автор должен знать это до
+            нажатия, а не узнать от покупателей. */}
+        {quest.published_version != null ? (
+          <p>
+            <b>Квест пропадёт из магазина.</b>
+            {quest.buyers > 0 ? ` Купившие (${quest.buyers}) потеряют к нему доступ.` : null}
+          </p>
+        ) : null}
+        <div className="qcd-modal__row">
+          <button className="qcd-modal__cancel" type="button" autoFocus onClick={onCancel}>Отмена</button>
+          <button className="qcd-modal__confirm" type="button" onClick={onConfirm}>Удалить</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -275,40 +316,14 @@ export default function Dashboard({
 
       {/* ===== Модалка удаления ===== */}
       {deleteTarget ? (
-        <div className="qcd-ovl" onClick={() => setDeleteTarget(null)}>
-          <div className="qcd-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="qcd-modal__icon">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M5 7h14M10 7V5a1 1 0 011-1h2a1 1 0 011 1v2M8 7l1 12a1 1 0 001 1h4a1 1 0 001-1l1-12" stroke="#e75a7c" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </div>
-            <h3>Удалить квест?</h3>
-            <p>
-              Квест «{deleteTarget.name}» будет удалён без возможности восстановления,
-              вместе со всеми его страницами и черновиками.
-            </p>
-            {/* Удаление снимает квест и с продажи — автор должен знать это до
-                нажатия, а не узнать от покупателей. */}
-            {deleteTarget.published_version != null ? (
-              <p>
-                <b>Квест пропадёт из магазина.</b>
-                {deleteTarget.buyers > 0 ? ` Купившие (${deleteTarget.buyers}) потеряют к нему доступ.` : null}
-              </p>
-            ) : null}
-            <div className="qcd-modal__row">
-              <button className="qcd-modal__cancel" type="button" onClick={() => setDeleteTarget(null)}>Отмена</button>
-              <button
-                className="qcd-modal__confirm"
-                type="button"
-                onClick={() => {
-                  const target = deleteTarget;
-                  setDeleteTarget(null);
-                  actions.onDelete(target);
-                }}
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteQuestModal
+          quest={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            setDeleteTarget(null);
+            actions.onDelete(deleteTarget);
+          }}
+        />
       ) : null}
 
       {/* ===== Тост ===== */}

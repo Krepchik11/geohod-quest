@@ -66,6 +66,11 @@ export const GIFT_COINS = 5;
 /** Цена подсказки в новом шаге, пока автор её не поменял. */
 export const HINT_COST_DEFAULT = 5;
 
+/** «Название» блока «Адрес и расстояние» в новой странице — решение владельца
+ *  (2026-10-02); автор меняет его. Тем же текстом миграция бэкенда 0010
+ *  заполнила пустые названия в старых черновиках. */
+export const ADDRESS_NAME_DEFAULT = 'Локация';
+
 export interface CtorStep {
   id: string;
   template: CtorTemplate;
@@ -315,7 +320,7 @@ export function newStep(template: CtorTemplate): CtorStep {
     acceptable: [],
     gift: { narrative: '' },
     hint: { on: true, cost: HINT_COST_DEFAULT, text: '', image: null, imageOrigin: null },
-    address: { on: false, name: '', distance: '', coords: '' },
+    address: { on: false, name: ADDRESS_NAME_DEFAULT, distance: '', coords: '' },
   };
   if (template === 'start') s.kicker = 'Городской квест';
   if (template === 'video') s.video = { dur: '0:00', label: 'видео-приветствие' };
@@ -504,16 +509,18 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
     delete (s as LegacyStepFields).allowNote;
     // Раздельные «Адрес» (place) и «Навигатор» (nav: coords или lat/lng+label)
     // сливаются в один блок «Адрес и расстояние». Название = прежний адрес, при
-    // его отсутствии — подпись точки навигатора; расстояние отдельного поля не
-    // имело — остаётся частью названия.
+    // его отсутствии — подпись точки навигатора, а без обоих — умолчание новой
+    // страницы; расстояние отдельного поля не имело — остаётся частью названия.
+    // Пустое название в теле текущей формы не трогаем: его стёр автор.
     if (s.address === undefined) {
       const lat = legacy.nav?.lat?.trim() || '';
       const lng = legacy.nav?.lng?.trim() || '';
-      const name = legacy.place || legacy.nav?.label || '';
+      const oldName = legacy.place || legacy.nav?.label || '';
+      const name = oldName.trim() ? oldName : ADDRESS_NAME_DEFAULT;
       s.address = {
         // Старый адрес показывался всегда — блок включается и при выключенном
         // навигаторе, чтобы текст не пропал со страницы (координаты допросит гейт).
-        on: !!legacy.nav?.on || !!name.trim(),
+        on: !!legacy.nav?.on || !!oldName.trim(),
         name,
         distance: '',
         coords: legacy.nav?.coords ?? (lat && lng ? `${lat}, ${lng}` : ''),
