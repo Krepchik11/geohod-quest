@@ -132,16 +132,25 @@ export function cityFacts(quests: QuestFactsSource[], factsOn: boolean): { time:
   };
 }
 
-/** The city with the most quests (ties: ru order) — where a first visit opens. */
-export function busiestCity(quests: Array<{ city: string | null }>): string | null {
+/** One city of the catalog and how many quests it has. */
+export interface CityCount {
+  city: string;
+  count: number;
+}
+
+/** The catalog's cities, the busiest first (ties: ru order) — the order of the
+ *  city list in the shop's title. */
+export function citiesByCount(quests: Array<{ city: string | null }>): CityCount[] {
   const counts = new Map<string, number>();
   for (const q of quests) if (q.city) counts.set(q.city, (counts.get(q.city) ?? 0) + 1);
-  let best: string | null = null;
-  for (const [city, n] of counts) {
-    const top = best === null ? 0 : (counts.get(best) ?? 0);
-    if (n > top || (n === top && best !== null && city.localeCompare(best, 'ru') < 0)) best = city;
-  }
-  return best;
+  return Array.from(counts, ([city, count]) => ({ city, count })).sort(
+    (a, b) => b.count - a.count || a.city.localeCompare(b.city, 'ru'),
+  );
+}
+
+/** The city with the most quests (ties: ru order) — where a first visit opens. */
+export function busiestCity(quests: Array<{ city: string | null }>): string | null {
+  return citiesByCount(quests)[0]?.city ?? null;
 }
 
 /** «Средняя сложность · 11 заданий · можно с детьми» — the card's facts line
@@ -190,11 +199,18 @@ export function inviteText(name: string, city: string | null, time: string | nul
   return `Пойдём в квест «${name}»${where ? ` ${where}` : ''}?${tail ? ` ${tail}` : ''}`;
 }
 
+/** The shop's title split around the city, so the city alone can be the
+ *  switch: «Квесты в » + «Нови Саде»; an unknown city reads «Квесты · » + «Ниш». */
+export function questsInCityParts(city: string | null): { lead: string; place: string | null } {
+  if (!city) return { lead: 'Квесты', place: null };
+  const where = CITY_IN[city];
+  return where ? { lead: 'Квесты в ', place: where } : { lead: 'Квесты · ', place: city };
+}
+
 /** «Квесты в Нови Саде»; an unknown city reads «Квесты · Город». */
 export function questsInCity(city: string | null): string {
-  if (!city) return 'Квесты';
-  const where = CITY_IN[city];
-  return where ? `Квесты в ${where}` : `Квесты · ${city}`;
+  const { lead, place } = questsInCityParts(city);
+  return place ? lead + place : lead;
 }
 
 /** The hero's headline for a city (text approved by the owner); without one,

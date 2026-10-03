@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   attrsLine,
   busiestCity,
+  citiesByCount,
   catalogFacts,
   cityFacts,
   cityPlural,
@@ -15,6 +16,7 @@ import {
   questFacts,
   questPlural,
   questsInCity,
+  questsInCityParts,
   ratingPlural,
   showPlayers,
 } from '../storefront';
@@ -134,6 +136,27 @@ describe('ТЗ «Дизайн и юзабилити» helpers', () => {
     expect(questsInCity('Нови Сад')).toBe('Квесты в Нови Саде');
     expect(questsInCity('Ниш')).toBe('Квесты · Ниш');
     expect(questsInCity(null)).toBe('Квесты');
+    // The title splits around the city so the city alone can be the switch.
+    expect(questsInCityParts('Нови Сад')).toEqual({ lead: 'Квесты в ', place: 'Нови Саде' });
+    expect(questsInCityParts('Ниш')).toEqual({ lead: 'Квесты · ', place: 'Ниш' });
+    expect(questsInCityParts(null)).toEqual({ lead: 'Квесты', place: null });
+  });
+
+  it('lists the cities the busiest first, equal ones in ru order, cityless quests aside', () => {
+    const qs = [
+      { city: 'Стамбул' },
+      { city: 'Нови Сад' },
+      { city: 'Белград' },
+      { city: 'Нови Сад' },
+      { city: null },
+      { city: 'Нови Сад' },
+    ];
+    expect(citiesByCount(qs)).toEqual([
+      { city: 'Нови Сад', count: 3 },
+      { city: 'Белград', count: 1 },
+      { city: 'Стамбул', count: 1 },
+    ]);
+    expect(citiesByCount([])).toEqual([]);
   });
 
   it('writes the invitation a player sends friends (задача 28)', () => {

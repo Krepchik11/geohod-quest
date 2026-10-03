@@ -64,9 +64,21 @@
 /* ---------- Shop head + grid (задачи 9, 34) ---------- */
 .store { padding-top:56px; }
 /* Title and count on one line, the sort/filter toolbar under them (desktop). */
-.store__head { display:grid; grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"title count" "tools tools"; align-items:baseline; column-gap:16px; }
+.store__head { position:relative; display:grid; grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"title count" "tools tools"; align-items:baseline; column-gap:16px; }
 .store__title { grid-area:title; margin:0; font-family:var(--font-body); font-weight:700; font-size:24px; line-height:30px; color:var(--navy); }
 .store__count { grid-area:count; font-size:14px; color:var(--muted); white-space:nowrap; }
+/* The city in the title is the switch (`store_cities`): blue, with a caret, it
+   drops the catalog's cities, the busiest first. */
+.store__city { display:inline; color:var(--blue); white-space:nowrap; transition:color .15s ease; }
+.store__city:hover { color:var(--blue-hover); }
+.store__city-caret { --ic:url("/assets/icons/c/ic-select-chevron--blue.svg"); width:12px; height:7px; margin-left:6px; vertical-align:middle; transition:transform .15s ease; }
+.store__city.is-open .store__city-caret { transform:rotate(180deg); }
+.city-pop { position:absolute; left:0; top:40px; z-index:40; display:flex; flex-direction:column; gap:2px; width:260px; max-width:calc(100vw - 32px); padding:8px; background:var(--white); border:1px solid var(--border-2); border-radius:var(--r-ui); box-shadow:var(--shadow-pop); animation:stb-pop-in .14s ease-out; }
+.city-opt { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; padding:0 12px; border-radius:var(--r-ui); font-size:14px; font-weight:500; color:var(--navy); text-align:left; }
+.city-opt:hover { background:var(--bg-subtle); }
+.city-opt.is-on { background:var(--blue-tint); color:var(--blue); font-weight:600; }
+.city-opt__count { flex:none; font-size:13px; font-weight:400; color:var(--muted); }
+@media (prefers-reduced-motion: reduce) { .city-pop { animation:none; } }
 .store__head .stb { grid-area:tools; margin-top:20px; }
 .store .quest-grid { margin-top:20px; }
 
@@ -116,16 +128,20 @@
   .store { padding-top:28px; }
   /* Pinned right under the header while the shop scrolls by, then it leaves
      with the section. Full-bleed, so no card peeks past its edges. */
-  .store__head { position:sticky; top:64px; z-index:15; grid-template-columns:minmax(0, 1fr) auto auto; grid-template-areas:"title count tools"; align-items:center; column-gap:10px; min-height:52px; margin-inline:calc(-1 * var(--gutter)); padding:4px var(--gutter); background:var(--sand); transition:box-shadow .15s ease, transform .2s ease, opacity .2s ease; }
+  .store__head { position:sticky; top:64px; z-index:15; grid-template-columns:minmax(0, 1fr) auto; grid-template-areas:"title tools" "count tools"; align-items:center; column-gap:10px; min-height:52px; margin-inline:calc(-1 * var(--gutter)); padding:4px var(--gutter); background:var(--sand); transition:box-shadow .15s ease, transform .2s ease, opacity .2s ease; }
   .store__head.is-stuck { box-shadow:var(--shadow-pop); }
   /* Past the list it slides up under the header instead of leaving a strip. */
   .store__head.is-leaving { transform:translateY(-100%); opacity:0; visibility:hidden; box-shadow:none; transition:transform .2s ease, opacity .2s ease, visibility 0s .2s; }
   /* Two pinned rows read as one bar: its shadow sits under the lower one. */
   body:has(.store__head.is-stuck:not(.is-leaving)) .site-header { box-shadow:none; }
   .store__head .stb { margin-top:0; }
-  /* Shrinks a notch on the narrowest phones so «Квесты в Нови Саде» still fits whole. */
-  .store__title { font-size:clamp(17px, 5vw, 20px); line-height:26px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .store__count { font-size:13px; }
+  /* The count sits small under the title, so the title (with the city switch)
+     has the whole width up to the round button — on one line beside it a
+     two-digit count left «Нови Саде ▾» no room even at 390px. */
+  .store__title { align-self:end; font-size:20px; line-height:24px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .store__count { align-self:start; font-size:13px; line-height:16px; }
+  .store__city-caret { width:10px; height:6px; margin-left:4px; }
+  .city-pop { left:var(--gutter); top:calc(100% + 4px); width:min(280px, calc(100% - 2 * var(--gutter))); max-width:none; }
   .store .quest-grid { margin-top:14px; }
   .store-after { gap:16px; margin-top:32px; }
   .store-quote { padding:18px 20px; }
