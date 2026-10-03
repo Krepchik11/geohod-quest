@@ -81,6 +81,10 @@
 @media (prefers-reduced-motion: reduce) { .city-pop { animation:none; } }
 .store__head .stb { grid-area:tools; margin-top:20px; }
 .store .quest-grid { margin-top:20px; }
+/* A city of the feed: the gap before the next city sits INSIDE the run (under
+   its last card), so on a phone the next head pushes the pinned one out
+   directly, with no moment of a headless list between them. */
+.shop-section:not(:last-child) .quest-grid { padding-bottom:56px; }
 
 /* ---------- Card (задачи 6, 11, 34) ---------- */
 .quest-card__free { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:28px; padding:0 11px; border-radius:14px; background:var(--green); color:var(--white); font-size:13px; font-weight:600; }
@@ -133,7 +137,7 @@
   /* Past the list it slides up under the header instead of leaving a strip. */
   .store__head.is-leaving { transform:translateY(-100%); opacity:0; visibility:hidden; box-shadow:none; transition:transform .2s ease, opacity .2s ease, visibility 0s .2s; }
   /* Two pinned rows read as one bar: its shadow sits under the lower one. */
-  body:has(.store__head.is-stuck:not(.is-leaving)) .site-header { box-shadow:none; }
+  body:has(.store__head.is-stuck) .site-header { box-shadow:none; }
   .store__head .stb { margin-top:0; }
   /* The count sits small under the title, so the title (with the city switch)
      has the whole width up to the round button — on one line beside it a
@@ -143,6 +147,7 @@
   .store__city-caret { width:10px; height:6px; margin-left:4px; }
   .city-pop { left:var(--gutter); top:calc(100% + 4px); width:min(280px, calc(100% - 2 * var(--gutter))); max-width:none; }
   .store .quest-grid { margin-top:14px; }
+  .shop-section:not(:last-child) .quest-grid { padding-bottom:32px; }
   .store-after { gap:16px; margin-top:32px; }
   .store-quote { padding:18px 20px; }
   .store-quote blockquote { font-size:16px; line-height:24px; }

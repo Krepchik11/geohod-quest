@@ -48,6 +48,9 @@ export interface StoreToolbarProps {
   showOwnedToggle: boolean;
   /** Live N for the draft; the page owns the catalog. */
   countFor: (filters: FacetFilters) => number;
+  /** Only the phone's round button: the heads of a city feed after the first
+   *  one pin on a phone and need it there, while a desktop keeps one toolbar. */
+  phoneOnly?: boolean;
 }
 
 type OpenPanel = 'none' | 'filters' | 'sort' | 'sheet';
@@ -88,6 +91,7 @@ export default function StoreToolbar({
   tags,
   showOwnedToggle,
   countFor,
+  phoneOnly = false,
 }: StoreToolbarProps) {
   const isPhone = useIsPhone();
   const [open, setOpen] = useState<OpenPanel>('none');
@@ -202,6 +206,8 @@ export default function StoreToolbar({
 
   const badge = appliedCount > 0 ? <span className="stb-badge">{appliedCount}</span> : null;
   const sheetTitle = filtersOn ? 'Фильтры и сортировка' : 'Сортировка';
+
+  if (phoneOnly && !isPhone) return null;
 
   return (
     <div className="stb" ref={rootRef}>

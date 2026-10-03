@@ -301,62 +301,90 @@ describe('store_my_quests: the shop is the player\'s own shelf', () => {
   });
 });
 
-describe('store_cities: one city at a time (ТЗ, задачи 14–17)', () => {
-  it('opens on the busiest city, names it in the hero and offers only the sort for a few quests', async () => {
+describe('store_cities: a feed of cities, the picked one first (ТЗ, задачи 14–17)', () => {
+  const FOUR = [
+    ...CATALOG,
+    quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', rating_avg: 4, rating_count: 1 }),
+  ];
+  const runTitles = () => Array.from(document.querySelectorAll('.store__title')).map((h) => h.textContent);
+  const runCounts = () =>
+    Array.from(document.querySelectorAll('.store__count')).map((c) => c.textContent?.replace(/\s+/g, ' '));
+
+  it('opens on the busiest city, names it in the hero and runs on through the other cities', async () => {
     citiesFlag.on = true;
-    listQuestsMock.mockResolvedValue([
-      ...CATALOG,
-      quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', rating_avg: 4, rating_count: 1 }),
-    ]);
+    listQuestsMock.mockResolvedValue(FOUR);
     render(<GeoQuestHome />);
-    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна']));
+    await waitFor(() =>
+      expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна', 'Ад Калемегдана', 'Шифры Ниша']),
+    );
+    // Each city under its own heading and count: the busiest first, then by count (ties in ru order).
+    expect(runTitles()).toEqual(['Квесты · Земун', 'Квесты в Белграде', 'Квесты · Ниш']);
+    expect(runCounts()).toEqual(['2 квеста', '1 квест', '1 квест']);
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Земун, о котором не расскажет экскурсовод');
     const chips = screen.getByRole('group', { name: 'Город' });
     expect(within(chips).getByRole('button', { name: 'Земун' })).toHaveAttribute('aria-pressed', 'true');
-    // Two quests in the city: no filters, only the sort (and no city facet anyway).
+    // Four quests: no filters, only the sort — and one toolbar for the whole feed on a desktop.
     expect(screen.queryByRole('button', { name: /^Фильтры/ })).toBeNull();
-    expect(screen.getByRole('button', { name: /^Сортировка/ })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /^Сортировка/ })).toHaveLength(1);
   });
 
-  it('a picked city filters the shop, lands in the URL and is remembered', async () => {
+  it('a picked chip leads the feed, lands in the URL and is remembered', async () => {
     citiesFlag.on = true;
     render(<GeoQuestHome />);
-    await waitFor(() => expect(cards()).toHaveLength(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Белград' }));
-    expect(cardNames()).toEqual(['Ад Калемегдана']);
-    expect(search()).toBe('?city=Белград');
-    expect(window.localStorage.getItem('geohod-city:v1')).toBe('Белград');
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Город' })).getByRole('button', { name: 'Ниш' }));
+    expect(cardNames()).toEqual(['Шифры Ниша', 'Ад Калемегдана', 'Ярость Земуна']);
+    expect(runTitles()).toEqual(['Квесты · Ниш', 'Квесты в Белграде', 'Квесты · Земун']);
+    expect(search()).toBe('?city=Ниш');
+    expect(window.localStorage.getItem('geohod-city:v1')).toBe('Ниш');
   });
 
-  it('the city in the title drops the cities, the busiest first, and switches the shop', async () => {
+  it('the city in any head drops the cities, the busiest first; a pick leads the feed with it', async () => {
     citiesFlag.on = true;
-    listQuestsMock.mockResolvedValue([
-      ...CATALOG,
-      quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', rating_avg: 4, rating_count: 1 }),
-    ]);
+    listQuestsMock.mockResolvedValue(FOUR);
     render(<GeoQuestHome />);
-    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна']));
-    const title = screen.getByRole('heading', { level: 2, name: 'Квесты · Земун' });
-    fireEvent.click(within(title).getByRole('button', { name: 'Земун' }));
+    await waitFor(() => expect(cards()).toHaveLength(4));
+    // A later city's head works the same; its own city is the marked one.
+    const title = screen.getByRole('heading', { level: 2, name: 'Квесты · Ниш' });
+    fireEvent.click(within(title).getByRole('button', { name: 'Ниш' }));
     const list = screen.getByRole('dialog', { name: 'Выбор города' });
     expect(within(list).getAllByRole('button').map((b) => b.textContent?.replace(/\s+/g, ' '))).toEqual([
       'Земун 2 квеста',
       'Белград 1 квест',
       'Ниш 1 квест',
     ]);
+    expect(within(list).getByRole('button', { name: /Ниш/ })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(within(list).getByRole('button', { name: /Белград/ }));
-    expect(cardNames()).toEqual(['Ад Калемегдана']);
+    expect(cardNames()).toEqual(['Ад Калемегдана', 'Ярость Земуна', 'Тайны Земуна', 'Шифры Ниша']);
+    expect(runTitles()).toEqual(['Квесты в Белграде', 'Квесты · Земун', 'Квесты · Ниш']);
     expect(search()).toBe('?city=Белград');
     expect(window.localStorage.getItem('geohod-city:v1')).toBe('Белград');
-    expect(screen.getByRole('heading', { level: 2, name: 'Квесты в Белграде' })).toBeTruthy();
     expect(screen.queryByRole('dialog', { name: 'Выбор города' })).toBeNull();
+  });
+
+  it('filters reach the whole feed: a city they leave empty drops out of it', async () => {
+    citiesFlag.on = true;
+    window.history.replaceState(null, '', '/?price=free');
+    listQuestsMock.mockResolvedValue(FOUR);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна']));
+    expect(runTitles()).toEqual(['Квесты · Земун']);
+    expect(runCounts()).toEqual(['1 квест']);
+  });
+
+  it('a quest without a city has no place in the feed', async () => {
+    citiesFlag.on = true;
+    listQuestsMock.mockResolvedValue([...CATALOG, quest({ quest_id: 'x', name: 'Без города', city: null })]);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    expect(cardNames()).not.toContain('Без города');
   });
 
   it('announces the «скоро» cities with a chip and a block that leads to the channel', async () => {
     citiesFlag.on = true;
     citiesFlag.soon = ['Белград', 'Стамбул'];
     render(<GeoQuestHome />);
-    await waitFor(() => expect(cards()).toHaveLength(1));
+    await waitFor(() => expect(cards()).toHaveLength(3));
     // Белград already has quests — only Стамбул is «скоро».
     expect(screen.getByRole('link', { name: /Стамбул\s*скоро/ })).toHaveAttribute('href', '#soon');
     expect(screen.getByRole('heading', { name: 'Скоро в новых городах' })).toBeTruthy();
