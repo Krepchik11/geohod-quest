@@ -6,6 +6,7 @@ import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import CityTitle from './components/CityTitle';
+import ShopSection, { HEADER_PIN_PX } from './components/ShopSection';
 import { CityChips, PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { useClientFeature, useRememberedClientFeature, useSoonCities } from '../lib/client-features';
@@ -29,13 +30,6 @@ import {
   showPlayers,
 } from '../lib/storefront';
 import { useStoreQuery } from '../lib/useStoreQuery';
-import { useStuck } from '../lib/use-stuck';
-
-/** Height of the pinned site header on a phone (globals.css .site-header): the
- *  shop head pins right under it. */
-const HEADER_PIN_PX = 64;
-/** Height of the pinned shop head on a phone (styles/storefront.css). */
-const SHOP_HEAD_PX = 52;
 
 /**
  * Landing v2 (SPEC §2 / Landing v2.dc.html). The store grid is 100% live: every
@@ -62,6 +56,12 @@ const NO_IDS: ReadonlySet<string> = new Set();
  *  narrowing: only the sort is offered (ТЗ, задача 17). */
 const FILTERS_FROM = 6;
 
+/** The shop heads pin under the header — a phone (styles/storefront.css). */
+const pinsOnPhone = (shop: HTMLElement): boolean => {
+  const head = shop.querySelector('.store__head');
+  return !!head && getComputedStyle(head).position === 'sticky';
+};
+
 /** The hero photo, served at the width the screen needs (ТЗ, задача 8): the
  *  original PNG weighed 844 KB on every phone. */
 const HERO_SRCSET = '/assets/img/hero-main-720.webp 720w, /assets/img/hero-main-1240.webp 1240w';
@@ -77,16 +77,10 @@ export default function GeoQuestHome() {
   // moving a card to the top the moment it is taken put another quest's «Купить»
   // under the same finger (ТЗ, задача 7).
   const [acquired, setAcquired] = useState<ReadonlySet<string>>(NO_IDS);
-  // The shop head pins under the header on a phone; its shadow shows only then.
-  const headSentinel = useRef<HTMLDivElement | null>(null);
-  const headStuck = useStuck(headSentinel, HEADER_PIN_PX);
-  const headRef = useRef<HTMLDivElement | null>(null);
-  // A city picked in the pinned title brings the new list up from its start.
-  const showShopTop = useRef(false);
-  // Once the list's end reaches the head's lower edge the head slides away
-  // whole — the page may run out before the list has pushed it under the header.
-  const listEndSentinel = useRef<HTMLDivElement | null>(null);
-  const headLeaving = useStuck(listEndSentinel, HEADER_PIN_PX + SHOP_HEAD_PX);
+  const shopRef = useRef<HTMLElement | null>(null);
+  // A city picked inside the feed restarts it: its start comes up into view —
+  // a counter, so a pick of the city that already leads scrolls up as well.
+  const [shopTopRound, setShopTopRound] = useState(0);
   // `market` is the loaded list, or null on a catalog FAILURE; `marketLoading`
   // keeps the initial render distinct from a failure so loading never flashes
   // the error message.
@@ -131,10 +125,11 @@ export default function GeoQuestHome() {
     ? (urlCity ?? (savedCity && cities.includes(savedCity) ? savedCity : busiest))
     : (urlCity ?? (cities.length === 1 ? cities[0] : null));
   const soon = citiesOn ? soonCities.filter((c) => !cities.includes(c)) : [];
-  /** With city chips the city is theirs, not the filters' — the toolbar never sees it. */
-  const withCity = useCallback(
-    (f: FacetFilters): FacetFilters => (citiesOn && activeCity ? { ...f, city: [activeCity] } : f),
-    [citiesOn, activeCity],
+  /** With `store_cities` the shop is a feed of every city — the URL's city only
+   *  leads it, so it never narrows the cards (nor reaches the toolbar). */
+  const feedFilters = useCallback(
+    (f: FacetFilters): FacetFilters => (citiesOn ? { ...f, city: [] } : f),
+    [citiesOn],
   );
   const toolbarQuery: StoreQuery = citiesOn ? { ...query, filters: { ...query.filters, city: [] } } : query;
   const applyToolbar = (next: StoreQuery) =>
@@ -146,18 +141,26 @@ export default function GeoQuestHome() {
   /** The title's city list (`store_cities`): the busiest city first. */
   const cityCounts = useMemo(() => (catalog ? citiesByCount(catalog) : []), [catalog]);
   const pickCityInTitle = (city: string) => {
-    const head = headRef.current;
-    // Picked while pinned (a phone, mid-list): the other city's list starts
-    // right under the pinned rows instead of somewhere in its middle.
-    showShopTop.current = headStuck && !!head && getComputedStyle(head).position === 'sticky';
+    // Picked inside the feed (its start already scrolled by): the feed restarts
+    // from the picked city, so its start comes up instead of some other city's
+    // middle — on a phone right under the pinned header.
+    const shop = shopRef.current;
+    if (shop && shop.getBoundingClientRect().top < (pinsOnPhone(shop) ? HEADER_PIN_PX : 0)) {
+      setShopTopRound((n) => n + 1);
+    }
     pickCity(city);
   };
 
-  /** ONE predicate for the grid and for the toolbar's live «Показать N». */
+  /** ONE predicate for the grid and for the toolbar's live «Показать N». A
+   *  quest without a city has no place in a feed of cities. */
   const matching = useCallback(
     (f: FacetFilters) =>
-      catalog ? catalog.filter((q) => matchesAttrs(withCity(f), q, owned.has(q.quest_id))) : [],
-    [catalog, owned, withCity],
+      catalog
+        ? catalog.filter(
+            (q) => (!citiesOn || !!q.city) && matchesAttrs(feedFilters(f), q, owned.has(q.quest_id)),
+          )
+        : [],
+    [catalog, owned, citiesOn, feedFilters],
   );
 
   /** The quests of the shown city (all of them while no city is picked). */
@@ -165,11 +168,13 @@ export default function GeoQuestHome() {
     () => (catalog ? (activeCity ? catalog.filter((q) => q.city === activeCity) : catalog) : []),
     [catalog, activeCity],
   );
+  /** What the shop lays out: the whole feed of cities, or the one shown city. */
+  const shopCount = citiesOn ? (catalog ?? []).filter((q) => !!q.city).length : cityQuests.length;
   // Filters earn their place from FILTERS_FROM quests; until then they stay only
   // while one is applied (a shared link must stay undoable) or while they are
   // the sole way to pick among several cities (no city chips).
   const filtersOn =
-    cityQuests.length >= FILTERS_FROM ||
+    shopCount >= FILTERS_FROM ||
     countActiveValues(toolbarQuery.filters) > 0 ||
     (!citiesOn && cities.length > 1);
 
@@ -182,15 +187,29 @@ export default function GeoQuestHome() {
     return [...orderOwned(mine, statuses ?? {}, grantedAt), ...sortQuests(rest, query.sort)];
   }, [matching, query, mineOn, owned, acquired, statuses, grantedAt]);
 
+  /** The shop's runs (`store_cities`): the picked city first, then the others,
+   *  the busiest first; a city the filters leave empty drops out of the feed.
+   *  Without the flag the shop is one run. */
+  const runs = useMemo(() => {
+    if (!citiesOn) return [{ city: activeCity, quests: visible }];
+    const order = [activeCity, ...cityCounts.map((c) => c.city).filter((c) => c !== activeCity)];
+    return order
+      .filter((c): c is string => !!c)
+      .map((city) => ({ city, quests: visible.filter((q) => q.city === city) }))
+      .filter((run) => run.quests.length > 0);
+  }, [citiesOn, activeCity, cityCounts, visible]);
+
   useEffect(() => {
-    if (!showShopTop.current) return;
-    showShopTop.current = false;
-    const sentinel = headSentinel.current;
-    if (!sentinel) return;
-    // The 1px sentinel wholly past the pin line (touching it still counts as
-    // in view), so the head stays pinned and shadowed.
-    window.scrollTo({ top: sentinel.getBoundingClientRect().top + window.scrollY - HEADER_PIN_PX + 2 });
-  }, [activeCity]);
+    if (shopTopRound === 0) return;
+    const shop = shopRef.current;
+    const sentinel = shop?.querySelector<HTMLElement>('.sticky-sentinel');
+    if (!shop || !sentinel) return;
+    // On a phone the first head's 1px sentinel goes wholly past the pin line
+    // (touching it still counts as in view), so the head lands pinned and
+    // shadowed; a desktop gets the head a little below the window's top.
+    const offset = pinsOnPhone(shop) ? HEADER_PIN_PX - 2 : 24;
+    window.scrollTo({ top: sentinel.getBoundingClientRect().top + window.scrollY - offset });
+  }, [shopTopRound]);
 
   const onAcquired = useCallback((questId: string) => {
     setAcquired((cur) => new Set(cur).add(questId));
@@ -343,80 +362,88 @@ export default function GeoQuestHome() {
       </section>
 
       {/* §2.1/§2.2 store grid — live quests, purchase status inside the cards */}
-      <section className="container store" id="shop" data-screen-label="Главная — магазин квестов">
-        <div className="sticky-sentinel" ref={headSentinel} aria-hidden />
-        {/* The head pins under the header on a phone and leaves with the
-            section; the sort/filter control rides in it (a round button on a
-            phone, the toolbar row under the title on a desktop). */}
-        <div
-          className={`store__head${headStuck ? ' is-stuck' : ''}${headLeaving ? ' is-leaving' : ''}`}
-          ref={headRef}
-        >
-          <CityTitle city={activeCity} cities={citiesOn ? cityCounts : null} onPick={pickCityInTitle} />
-          {cityQuests.length > 0 && (
-            <span className="store__count">{cityQuests.length}&nbsp;{questPlural(cityQuests.length)}</span>
-          )}
-          {!loading && catalog !== null && catalog.length > 0 && (
-            <StoreToolbar
-              query={toolbarQuery}
-              onApply={applyToolbar}
-              filtersOn={filtersOn}
-              cities={citiesOn ? [] : cities}
-              tags={facetValues?.tags ?? []}
-              /* Offered to a viewer who owns something — and always kept
-                 reachable while it is ON, so a link carrying it (or a failed
-                 grants load) never leaves an unswitchable filter behind.
-                 Offline every card is the viewer's own: nothing to hide. */
-              showOwnedToggle={(!offline && owned.size > 0) || query.filters.hideOwned}
-              countFor={(f) => matching(f).length}
-            />
-          )}
-        </div>
-        {offline && (
-          <p className="shop-note">
-            Нет сети. Ниже — ваши квесты на этом устройстве. Новые можно будет купить, когда появится связь.
-          </p>
-        )}
-        {loading ? (
-          <p className="shop-note">Загружаем магазин…</p>
-        ) : catalog === null ? (
-          <p className="shop-note shop-note--error">
-            Не удалось загрузить магазин — проверьте подключение и обновите страницу.
-          </p>
-        ) : catalog.length === 0 ? (
-          <p className="shop-note">
-            {offline ? 'На этом устройстве нет ваших квестов.' : 'Скоро здесь появятся квесты.'}
-          </p>
-        ) : (
-          <div className="quest-grid">
-            {visible.length === 0 ? (
-              <p className="shop-note shop-note--grid">
-                Ничего не нашлось.{' '}
-                <button
-                  type="button"
-                  className="shop-note__reset"
-                  onClick={() => applyToolbar({ filters: EMPTY_FACETS, sort: query.sort })}
-                >
-                  Сбросить фильтры
-                </button>
+      <section className="container store" id="shop" ref={shopRef} data-screen-label="Главная — магазин квестов">
+        {/* A run per city (`store_cities`), the picked one first. Each head
+            pins under the header on a phone until the next city's head pushes
+            it out; the sort/filter control rides in every head on a phone (a
+            round button), on a desktop only the first head has the toolbar. */}
+        {(runs.length > 0 ? runs : [{ city: activeCity, quests: [] }]).map((run, i, all) => (
+          <ShopSection
+            key={run.city ?? ''}
+            last={i === all.length - 1}
+            head={
+              <>
+                <CityTitle city={run.city} cities={citiesOn ? cityCounts : null} onPick={pickCityInTitle} />
+                {run.quests.length > 0 && (
+                  <span className="store__count">{run.quests.length}&nbsp;{questPlural(run.quests.length)}</span>
+                )}
+                {!loading && catalog !== null && catalog.length > 0 && (
+                  <StoreToolbar
+                    query={toolbarQuery}
+                    onApply={applyToolbar}
+                    filtersOn={filtersOn}
+                    cities={citiesOn ? [] : cities}
+                    tags={facetValues?.tags ?? []}
+                    /* Offered to a viewer who owns something — and always kept
+                       reachable while it is ON, so a link carrying it (or a failed
+                       grants load) never leaves an unswitchable filter behind.
+                       Offline every card is the viewer's own: nothing to hide. */
+                    showOwnedToggle={(!offline && owned.size > 0) || query.filters.hideOwned}
+                    countFor={(f) => matching(f).length}
+                    phoneOnly={i > 0}
+                  />
+                )}
+              </>
+            }
+          >
+            {i === 0 && offline && (
+              <p className="shop-note">
+                Нет сети. Ниже — ваши квесты на этом устройстве. Новые можно будет купить, когда появится связь.
               </p>
-            ) : (
-              visible.map((q) => (
-                <QuestCard
-                  key={q.quest_id}
-                  quest={q}
-                  owned={owned.has(q.quest_id)}
-                  mine={
-                    mineOn
-                      ? { status: statuses?.[q.quest_id] ?? null, offline, onChange: refreshStatus, onAcquired }
-                      : undefined
-                  }
-                />
-              ))
             )}
-          </div>
-        )}
-        <div className="sticky-sentinel" ref={listEndSentinel} aria-hidden />
+            {i === 0 &&
+              (loading ? (
+                <p className="shop-note">Загружаем магазин…</p>
+              ) : catalog === null ? (
+                <p className="shop-note shop-note--error">
+                  Не удалось загрузить магазин — проверьте подключение и обновите страницу.
+                </p>
+              ) : catalog.length === 0 ? (
+                <p className="shop-note">
+                  {offline ? 'На этом устройстве нет ваших квестов.' : 'Скоро здесь появятся квесты.'}
+                </p>
+              ) : null)}
+            {!loading && catalog !== null && catalog.length > 0 && (
+              <div className="quest-grid">
+                {run.quests.length === 0 ? (
+                  <p className="shop-note shop-note--grid">
+                    Ничего не нашлось.{' '}
+                    <button
+                      type="button"
+                      className="shop-note__reset"
+                      onClick={() => applyToolbar({ filters: EMPTY_FACETS, sort: query.sort })}
+                    >
+                      Сбросить фильтры
+                    </button>
+                  </p>
+                ) : (
+                  run.quests.map((q) => (
+                    <QuestCard
+                      key={q.quest_id}
+                      quest={q}
+                      owned={owned.has(q.quest_id)}
+                      mine={
+                        mineOn
+                          ? { status: statuses?.[q.quest_id] ?? null, offline, onChange: refreshStatus, onAcquired }
+                          : undefined
+                      }
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </ShopSection>
+        ))}
       </section>
 
       {!offline && (

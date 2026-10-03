@@ -239,6 +239,15 @@ describe('StoreToolbar — the mobile sheet', () => {
     expect(groups[0]).toHaveAccessibleName('Сортировка');
   });
 
+  it('a phone-only toolbar (a later city head of the feed) is the round button on a phone, nothing on a desktop', () => {
+    const { view } = setup({ phoneOnly: true });
+    expect(screen.getByRole('button', { name: 'Фильтры и сортировка' })).toBeTruthy();
+    view.unmount();
+    setViewport(false);
+    const desktop = setup({ phoneOnly: true });
+    expect(desktop.view.container).toBeEmptyDOMElement();
+  });
+
   it('with nothing to filter, the round button is the sort alone and a pick commits at once', () => {
     const { onApply } = setup({ filtersOn: false });
     fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
