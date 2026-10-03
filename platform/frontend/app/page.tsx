@@ -5,6 +5,7 @@ import Link from 'next/link';
 import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
+import CityTitle from './components/CityTitle';
 import { CityChips, PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
 import { api, type PublishedQuestWire } from '../lib/api';
 import { useClientFeature, useRememberedClientFeature, useSoonCities } from '../lib/client-features';
@@ -17,13 +18,13 @@ import { saveCity, useSavedCity } from '../lib/saved-city';
 import { sortQuests, type StoreQuery } from '../lib/store-query';
 import {
   busiestCity,
+  citiesByCount,
   catalogFacts,
   cityFacts,
   fmtRating,
   heroTitle,
   playerCountPlural,
   questPlural,
-  questsInCity,
   ratingPlural,
   showPlayers,
 } from '../lib/storefront';
@@ -79,6 +80,9 @@ export default function GeoQuestHome() {
   // The shop head pins under the header on a phone; its shadow shows only then.
   const headSentinel = useRef<HTMLDivElement | null>(null);
   const headStuck = useStuck(headSentinel, HEADER_PIN_PX);
+  const headRef = useRef<HTMLDivElement | null>(null);
+  // A city picked in the pinned title brings the new list up from its start.
+  const showShopTop = useRef(false);
   // Once the list's end reaches the head's lower edge the head slides away
   // whole — the page may run out before the list has pushed it under the header.
   const listEndSentinel = useRef<HTMLDivElement | null>(null);
@@ -139,6 +143,15 @@ export default function GeoQuestHome() {
     saveCity(city);
     applyQuery({ ...query, filters: { ...query.filters, city: [city] } });
   };
+  /** The title's city list (`store_cities`): the busiest city first. */
+  const cityCounts = useMemo(() => (catalog ? citiesByCount(catalog) : []), [catalog]);
+  const pickCityInTitle = (city: string) => {
+    const head = headRef.current;
+    // Picked while pinned (a phone, mid-list): the other city's list starts
+    // right under the pinned rows instead of somewhere in its middle.
+    showShopTop.current = headStuck && !!head && getComputedStyle(head).position === 'sticky';
+    pickCity(city);
+  };
 
   /** ONE predicate for the grid and for the toolbar's live «Показать N». */
   const matching = useCallback(
@@ -168,6 +181,16 @@ export default function GeoQuestHome() {
     const rest = list.filter((q) => !leads(q));
     return [...orderOwned(mine, statuses ?? {}, grantedAt), ...sortQuests(rest, query.sort)];
   }, [matching, query, mineOn, owned, acquired, statuses, grantedAt]);
+
+  useEffect(() => {
+    if (!showShopTop.current) return;
+    showShopTop.current = false;
+    const sentinel = headSentinel.current;
+    if (!sentinel) return;
+    // The 1px sentinel wholly past the pin line (touching it still counts as
+    // in view), so the head stays pinned and shadowed.
+    window.scrollTo({ top: sentinel.getBoundingClientRect().top + window.scrollY - HEADER_PIN_PX + 2 });
+  }, [activeCity]);
 
   const onAcquired = useCallback((questId: string) => {
     setAcquired((cur) => new Set(cur).add(questId));
@@ -325,8 +348,11 @@ export default function GeoQuestHome() {
         {/* The head pins under the header on a phone and leaves with the
             section; the sort/filter control rides in it (a round button on a
             phone, the toolbar row under the title on a desktop). */}
-        <div className={`store__head${headStuck ? ' is-stuck' : ''}${headLeaving ? ' is-leaving' : ''}`}>
-          <h2 className="store__title">{questsInCity(activeCity)}</h2>
+        <div
+          className={`store__head${headStuck ? ' is-stuck' : ''}${headLeaving ? ' is-leaving' : ''}`}
+          ref={headRef}
+        >
+          <CityTitle city={activeCity} cities={citiesOn ? cityCounts : null} onPick={pickCityInTitle} />
           {cityQuests.length > 0 && (
             <span className="store__count">{cityQuests.length}&nbsp;{questPlural(cityQuests.length)}</span>
           )}

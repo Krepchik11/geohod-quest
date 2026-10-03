@@ -38,6 +38,11 @@ export function saveCity(city: string): void {
   listeners.forEach((l) => l());
 }
 
+/** Forget the module's copy, so the next read goes back to storage (tests). */
+export function resetSavedCityForTests(): void {
+  cached = undefined;
+}
+
 /** The remembered city, or null (server render, nothing saved, storage blocked). */
 export function useSavedCity(): string | null {
   return useSyncExternalStore(subscribe, read, () => null);

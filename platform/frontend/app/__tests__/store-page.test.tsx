@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resetCollectionForTests } from '../../lib/collection';
+import { resetSavedCityForTests } from '../../lib/saved-city';
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import React from 'react';
 
 /**
@@ -97,6 +98,7 @@ beforeEach(() => {
   listGrantsMock.mockResolvedValue([]);
   window.history.replaceState(null, '', '/');
   window.localStorage.clear();
+  resetSavedCityForTests();
   mineFlag.on = false;
   citiesFlag.on = false;
   citiesFlag.soon = [];
@@ -309,7 +311,8 @@ describe('store_cities: one city at a time (ТЗ, задачи 14–17)', () => 
     render(<GeoQuestHome />);
     await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна']));
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Земун, о котором не расскажет экскурсовод');
-    expect(screen.getByRole('button', { name: 'Земун' })).toHaveAttribute('aria-pressed', 'true');
+    const chips = screen.getByRole('group', { name: 'Город' });
+    expect(within(chips).getByRole('button', { name: 'Земун' })).toHaveAttribute('aria-pressed', 'true');
     // Two quests in the city: no filters, only the sort (and no city facet anyway).
     expect(screen.queryByRole('button', { name: /^Фильтры/ })).toBeNull();
     expect(screen.getByRole('button', { name: /^Сортировка/ })).toBeTruthy();
@@ -323,6 +326,30 @@ describe('store_cities: one city at a time (ТЗ, задачи 14–17)', () => 
     expect(cardNames()).toEqual(['Ад Калемегдана']);
     expect(search()).toBe('?city=Белград');
     expect(window.localStorage.getItem('geohod-city:v1')).toBe('Белград');
+  });
+
+  it('the city in the title drops the cities, the busiest first, and switches the shop', async () => {
+    citiesFlag.on = true;
+    listQuestsMock.mockResolvedValue([
+      ...CATALOG,
+      quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', rating_avg: 4, rating_count: 1 }),
+    ]);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна', 'Тайны Земуна']));
+    const title = screen.getByRole('heading', { level: 2, name: 'Квесты · Земун' });
+    fireEvent.click(within(title).getByRole('button', { name: 'Земун' }));
+    const list = screen.getByRole('dialog', { name: 'Выбор города' });
+    expect(within(list).getAllByRole('button').map((b) => b.textContent?.replace(/\s+/g, ' '))).toEqual([
+      'Земун 2 квеста',
+      'Белград 1 квест',
+      'Ниш 1 квест',
+    ]);
+    fireEvent.click(within(list).getByRole('button', { name: /Белград/ }));
+    expect(cardNames()).toEqual(['Ад Калемегдана']);
+    expect(search()).toBe('?city=Белград');
+    expect(window.localStorage.getItem('geohod-city:v1')).toBe('Белград');
+    expect(screen.getByRole('heading', { level: 2, name: 'Квесты в Белграде' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Выбор города' })).toBeNull();
   });
 
   it('announces the «скоро» cities with a chip and a block that leads to the channel', async () => {
@@ -340,6 +367,8 @@ describe('store_cities: one city at a time (ТЗ, задачи 14–17)', () => 
     citiesFlag.soon = ['Стамбул'];
     await mountStore();
     expect(screen.queryByRole('group', { name: 'Город' })).toBeNull();
+    // Nor a city switch in the title: several cities are picked in the filters.
+    expect(within(screen.getByRole('heading', { level: 2, name: 'Квесты' })).queryByRole('button')).toBeNull();
     expect(screen.queryByText('Скоро в новых городах')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Вместе веселее' })).toBeTruthy();
   });
