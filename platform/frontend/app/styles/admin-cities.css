@@ -1,0 +1,225 @@
+/*
+ * Admin Города screen — the city list under the unified admin shell. One card
+ * list like admin-features.css: a row per city (picture, name, counters,
+ * slogan, «Изменить»); editing swaps the row for an inline form. Page
+ * scaffolding (canvas, head, sheet, toast) is the shared `ap-*` layer —
+ * styles/admin-page.css + app/admin/ui.tsx.
+ */
+
+.acity-list {
+  margin-top: 28px;
+  background: var(--white);
+  border: 1px solid var(--border-2);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.acity-list + .acity-list {
+  margin-top: 16px;
+}
+/* The head action stays one line; the lede gives way on a phone. */
+.acity-add {
+  flex: none;
+  white-space: nowrap;
+}
+
+.acity-empty {
+  padding: 36px 28px;
+  font-size: 14px;
+  color: var(--muted-2);
+  text-align: center;
+}
+
+/* ---- row ---- */
+.acity-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 28px;
+}
+.acity-row + .acity-row,
+.acity-row + .acity-form,
+.acity-form + .acity-row {
+  border-top: 1px solid var(--border-2);
+}
+.acity-row__info {
+  flex: 1;
+  min-width: 0;
+}
+.acity-row__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.acity-row__meta {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--muted-2);
+}
+.acity-row__slogan {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.acity-row__slogan.is-empty {
+  color: var(--muted);
+}
+.acity-row__note {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--amber);
+}
+.acity-row .btn {
+  flex-shrink: 0;
+}
+
+/* ---- picture slot ---- */
+.acity-thumb {
+  flex: none;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-ui);
+  overflow: hidden;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.acity-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.acity-thumb span {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  padding: 0 6px;
+}
+.acity-thumb--large {
+  width: 100%;
+}
+
+/* ---- inline form ---- */
+.acity-form {
+  padding: 22px 28px 24px;
+  background: var(--bg-subtle);
+}
+.acity-form__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.acity-form__body {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+}
+.acity-form__media {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.acity-form__media-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.acity-form__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.acity-form .adm-label {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.acity-form__hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-2);
+}
+.acity-form__media .acity-form__hint {
+  margin: 0;
+}
+.acity-form__error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--red);
+}
+.acity-form__count {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+.acity-form__actions {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.acity-form__buttons {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+.acity-form__delete {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 360px;
+}
+.acity-form__delete .acity-form__hint {
+  margin: 0;
+}
+.acity-form__delete-btn {
+  align-self: flex-start;
+  color: var(--red);
+}
+.acity-form__delete-btn:hover {
+  color: var(--red);
+}
+.acity-list .link:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
+/* ---- mobile ---- */
+@media (max-width: 767px) {
+  .acity-row {
+    padding: 16px;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .acity-row .acity-thumb {
+    width: 72px;
+  }
+  .acity-row .btn {
+    width: 100%;
+  }
+  .acity-form {
+    padding: 18px 16px 20px;
+  }
+  .acity-form__body {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .acity-form__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .acity-form__buttons {
+    margin-left: 0;
+  }
+  .acity-form__buttons .btn {
+    flex: 1;
+  }
+}

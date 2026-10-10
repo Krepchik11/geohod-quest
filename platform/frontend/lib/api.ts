@@ -10,6 +10,7 @@
 
 import { authHeaders, type Session } from './identity';
 import type {
+  AdminCityWire,
   AdminCouponWire,
   AdminFeatureWire,
   AdminFeedbackResponse,
@@ -23,6 +24,9 @@ import type {
   AuthProviders,
   BundleWire,
   CheckoutResult,
+  CityCreateBody,
+  CityDeleteBody,
+  CitySaveBody,
   ConstructorAuthorWire,
   ConstructorQuestFullWire,
   ConstructorQuestWire,
@@ -322,6 +326,30 @@ export const api = {
       body: JSON.stringify({ value }),
     }),
 
+  // Admin «Города» (backend cities.rs) — same gating. Every call answers with
+  // the whole fresh list: a rename or merge moves quest counts between rows.
+  // A rename onto a listed city is a merge and answers 409 until `merge: true`.
+  adminListCities: () =>
+    apiFetch<AdminCityWire[]>('/api/admin/cities', { headers: adminHeaders() }),
+  adminCreateCity: (body: CityCreateBody) =>
+    apiFetch<AdminCityWire[]>('/api/admin/cities', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminSaveCity: (body: CitySaveBody) =>
+    apiFetch<AdminCityWire[]>('/api/admin/cities/save', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminDeleteCity: (body: CityDeleteBody) =>
+    apiFetch<AdminCityWire[]>('/api/admin/cities/delete', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+
   // Admin statistics (admin-stats spec) — same dual-credential gating. Raw
   // counters over an inclusive UTC day range; omitting `from` = «Всё время»
   // (the backend anchors the range at the earliest recorded event).
@@ -445,6 +473,9 @@ export const api = {
       headers: adminHeaders(),
       body: JSON.stringify({ status }),
     }),
+  // The city names the settings dropdown offers (the admin «Города» list).
+  listConstructorCities: () =>
+    apiFetch<string[]>('/api/constructor/cities', { headers: adminHeaders() }),
   // Who a quest may be handed to, and the handover itself. Both admin-only on
   // the server (see handlers/constructor.rs) — the constructor hides them from
   // everyone else, and the API refuses regardless.

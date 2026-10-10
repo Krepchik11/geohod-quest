@@ -23,9 +23,9 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
-    AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, ConstructorQuest,
-    ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore, GrantStore,
-    KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
+    AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, CityRecord, CityStore,
+    ConstructorQuest, ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore,
+    GrantStore, KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
     ReviewCheck, now_rfc3339, now_secs,
 };
 
@@ -938,6 +938,28 @@ impl GrantStore for PgGrantStore {
             .await
             .map_err(internal)?;
         Ok(res.rows_affected() > 0)
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::rename_city`]. Which stored
+    /// spellings trim to `from` is decided in Rust (the in-memory rule), then
+    /// one UPDATE moves exactly those.
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError> {
+        let stored: Vec<String> =
+            sqlx::query_scalar("SELECT DISTINCT city FROM published_quests WHERE city IS NOT NULL")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?;
+        let matching: Vec<String> = stored.into_iter().filter(|c| c.trim() == from).collect();
+        if matching.is_empty() {
+            return Ok(0);
+        }
+        let res = sqlx::query("UPDATE published_quests SET city = $2 WHERE city = ANY($1)")
+            .bind(&matching)
+            .bind(to)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(usize::try_from(res.rows_affected()).unwrap_or(usize::MAX))
     }
 
     /// See [`crate::store::InMemoryGrantStore::list_all_grants`].
@@ -2184,6 +2206,36 @@ impl ConstructorStore for PgConstructorStore {
             .map(|(_, label)| label))
     }
 
+    /// See [`crate::store::InMemoryConstructorStore::rename_city`]. Like
+    /// [`Self::fetch_labels`], SQL only navigates to `meta.city`: the spellings
+    /// that trim to `from` are picked in Rust, then one UPDATE moves exactly
+    /// those (`updated_at` untouched).
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError> {
+        let stored: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT body -> 'meta' ->> 'city' FROM constructor_quests \
+             WHERE jsonb_typeof(body -> 'meta' -> 'city') = 'string'",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        let matching: Vec<String> = stored.into_iter().filter(|c| c.trim() == from).collect();
+        if matching.is_empty() {
+            return Ok(0);
+        }
+        let res = sqlx::query(
+            "UPDATE constructor_quests \
+             SET body = jsonb_set(body, '{meta,city}', to_jsonb($2::text)) \
+             WHERE jsonb_typeof(body -> 'meta' -> 'city') = 'string' \
+               AND body -> 'meta' ->> 'city' = ANY($1)",
+        )
+        .bind(&matching)
+        .bind(to)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(usize::try_from(res.rows_affected()).unwrap_or(usize::MAX))
+    }
+
     /// See [`crate::store::InMemoryConstructorStore::delete`].
     async fn delete(
         &self,
@@ -2823,6 +2875,68 @@ impl KvStore<String> for PgSettingsStore {
             .await
             .map_err(internal)?;
         Ok(())
+    }
+}
+
+/// City rows on PostgreSQL (`cities`, migration 0011).
+#[derive(Clone, Debug)]
+pub struct PgCityStore {
+    pool: PgPool,
+}
+
+impl PgCityStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl CityStore for PgCityStore {
+    /// See [`crate::store::InMemoryCityStore::list`].
+    async fn list(&self) -> Result<Vec<CityRecord>, AppError> {
+        let rows = sqlx::query("SELECT name, image, slogan FROM cities")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok(CityRecord {
+                    name: r.try_get("name").map_err(internal)?,
+                    image: r.try_get("image").map_err(internal)?,
+                    slogan: r.try_get("slogan").map_err(internal)?,
+                })
+            })
+            .collect()
+    }
+
+    /// See [`crate::store::InMemoryCityStore::upsert`].
+    async fn upsert(&self, city: CityRecord) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO cities (name, image, slogan, updated_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (name) DO UPDATE
+             SET image = EXCLUDED.image, slogan = EXCLUDED.slogan,
+                 updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&city.name)
+        .bind(&city.image)
+        .bind(&city.slogan)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryCityStore::delete`].
+    async fn delete(&self, name: &str) -> Result<bool, AppError> {
+        let res = sqlx::query("DELETE FROM cities WHERE name = $1")
+            .bind(name)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
     }
 }
 

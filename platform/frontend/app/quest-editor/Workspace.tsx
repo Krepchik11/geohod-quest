@@ -28,9 +28,10 @@ import {
   type ConstructorQuestWire,
   type CtorStatus,
 } from '../../lib/api';
+import { useClientFeature } from '../../lib/client-features';
 import { isAdmin } from '../../lib/roles';
 import { useMe } from '../../lib/use-me';
-import { BuilderScreen } from './Builder';
+import { BuilderScreen, type CityOptions } from './Builder';
 import Dashboard from './Dashboard';
 import { TestOverlay } from './TestPlayer';
 
@@ -88,6 +89,12 @@ export default function Workspace() {
   // списка квестов, а не хранится второй копией.
   const [authors, setAuthors] = useState<ConstructorAuthorWire[] | null>(null);
 
+  // ---- Город из списка администратора (флаг ctor_city_list) ----
+  // null — ещё грузится; без флага список не запрашивается вовсе, и город в
+  // настройках вводится вручную.
+  const cityList = useClientFeature('ctor_city_list');
+  const [cityNames, setCityNames] = useState<readonly string[] | 'failed' | null>(null);
+
   const showToast = useCallback((msg: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(msg);
@@ -131,6 +138,23 @@ export default function Workspace() {
       .then(setAuthors)
       .catch(() => setAuthors(null));
   }, [role]);
+
+  // The cities the settings dropdown offers — once per visit: a city the admin
+  // adds meanwhile appears after a reload.
+  useEffect(() => {
+    if (!cityList) return;
+    void api
+      .listConstructorCities()
+      .then(setCityNames)
+      .catch(() => setCityNames('failed'));
+  }, [cityList]);
+  const cities: CityOptions | undefined = !cityList
+    ? undefined
+    : cityNames === null
+      ? { state: 'loading' }
+      : cityNames === 'failed'
+        ? { state: 'failed' }
+        : { state: 'ready', names: cityNames };
 
   // Server autosave: persist the active draft (debounced) whenever it changes.
   // savedAt is NOT part of `active`, so updating it never retriggers this effect.
@@ -470,6 +494,7 @@ export default function Workspace() {
                   }
                 : undefined
             }
+            cities={cities}
             actions={{
               onSel: selectIn,
               onPatchQuest: patchQuest,
