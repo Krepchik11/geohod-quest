@@ -21,6 +21,7 @@ import "./styles/admin-shell.css";
 import "./styles/admin-page.css";
 import "./styles/admin-coupons.css";
 import "./styles/admin-features.css";
+import "./styles/admin-cities.css";
 import "./styles/admin-stats.css";
 import "./styles/admin-moderation.css";
 

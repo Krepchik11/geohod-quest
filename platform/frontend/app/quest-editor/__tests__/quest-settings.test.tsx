@@ -219,3 +219,50 @@ describe('QuestSettings colours', () => {
     expect(screen.getByText(new RegExp(BAD_THEME_CONTRAST_TEXT))).toBeTruthy();
   });
 });
+
+/**
+ * Город из списка администратора (флаг ctor_city_list): без списка — поле
+ * ввода, как раньше; со списком — только выбор, свой город не вводится, а
+ * город черновика, которого в списке нет, остаётся выбранным с пометкой.
+ */
+describe('QuestSettings city', () => {
+  const ready = (names: string[]) => ({ state: 'ready' as const, names });
+
+  it('stays a free text field while the list is off', () => {
+    const { onMeta } = setup({ city: 'Нови Сад' });
+    const city = screen.getByLabelText('Город') as HTMLInputElement;
+    expect(city.tagName).toBe('INPUT');
+    fireEvent.change(city, { target: { value: 'Белград' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ city: 'Белград' }));
+  });
+
+  it('offers only the listed cities and writes the picked name', () => {
+    const quest = newQuest({ title: 'X', city: '  Нови Сад ' });
+    const onMeta = vi.fn();
+    render(<QuestSettings quest={quest} onMeta={onMeta} cities={ready(['Белград', 'Нови Сад'])} />);
+    const city = screen.getByLabelText('Город') as HTMLSelectElement;
+    expect(city.tagName).toBe('SELECT');
+    expect(city.value).toBe('Нови Сад');
+    expect([...city.options].map((o) => o.text)).toEqual(['Не выбран', 'Белград', 'Нови Сад']);
+    fireEvent.change(city, { target: { value: 'Белград' } });
+    expect(onMeta).toHaveBeenLastCalledWith(expect.objectContaining({ city: 'Белград' }));
+  });
+
+  it('keeps an unlisted city of an old draft selected, marked', () => {
+    const quest = newQuest({ title: 'X', city: 'Нови-Сад' });
+    render(<QuestSettings quest={quest} onMeta={vi.fn()} cities={ready(['Нови Сад'])} />);
+    const city = screen.getByLabelText('Город') as HTMLSelectElement;
+    expect(city.value).toBe('Нови-Сад');
+    expect(city.selectedOptions[0].text).toBe('Нови-Сад (нет в списке)');
+  });
+
+  it('waits for the list, and says so when it cannot load', () => {
+    const quest = newQuest({ title: 'X', city: 'Нови Сад' });
+    const { rerender } = render(
+      <QuestSettings quest={quest} onMeta={vi.fn()} cities={{ state: 'loading' }} />,
+    );
+    expect((screen.getByLabelText('Город') as HTMLSelectElement).disabled).toBe(true);
+    rerender(<QuestSettings quest={quest} onMeta={vi.fn()} cities={{ state: 'failed' }} />);
+    expect(screen.getByText(/Не удалось загрузить список городов/)).toBeTruthy();
+  });
+});

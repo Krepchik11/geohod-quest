@@ -242,15 +242,69 @@ function AuthorBlock({ transfer }: { transfer: AuthorTransfer }) {
   );
 }
 
+/* ---------- Город из списка ---------- */
+
+/**
+ * Города, из которых выбирает автор, — список администратора (страница
+ * «Города»; флаг `ctor_city_list`). Пока флаг выключен, Workspace не передаёт
+ * ничего, и город вводится вручную, как раньше.
+ */
+export type CityOptions =
+  | { state: 'loading' }
+  | { state: 'failed' }
+  | { state: 'ready'; names: readonly string[] };
+
+/**
+ * Город — только из списка: у одного города одно написание, и магазин не
+ * разводит «Нови Сад» и «Нови-Сад» по разным чипам. Свой город автор не
+ * вводит — его добавляет администратор. Город черновика, которого в списке
+ * нет, остаётся выбранным (с пометкой), пока автор его не сменит.
+ */
+function CitySelect({ value, options, onChange }: {
+  value: string;
+  options: CityOptions;
+  onChange: (city: string) => void;
+}) {
+  const names = options.state === 'ready' ? options.names : [];
+  const current = value.trim();
+  const unlisted = current !== '' && !names.includes(current);
+  return (
+    <>
+      <select
+        id="qs-city"
+        className="input"
+        value={current}
+        disabled={options.state !== 'ready'}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">Не выбран</option>
+        {unlisted ? <option value={current}>{`${current} (нет в списке)`}</option> : null}
+        {names.map((name) => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+      </select>
+      <p className="adm-helper" style={{ textAlign: 'left', fontSize: 12, margin: '6px 0 0' }}>
+        {options.state === 'loading'
+          ? 'Загружаем список городов…'
+          : options.state === 'failed'
+            ? 'Не удалось загрузить список городов — обновите страницу.'
+            : 'Нет нужного города — его добавляет администратор.'}
+      </p>
+    </>
+  );
+}
+
 /* ---------- Настройки квеста ---------- */
 
-export function QuestSettings({ quest, onMeta, highlight, transfer }: {
+export function QuestSettings({ quest, onMeta, highlight, transfer, cities }: {
   quest: CtorQuest;
   onMeta: (meta: CtorQuestMeta) => void;
   /** §9.2: control to scroll to + flash after an «Исправить →» click. */
   highlight?: { field?: GateField; nonce: number } | null;
   /** Передача квеста другому автору — только для администратора. */
   transfer?: AuthorTransfer;
+  /** Выбор города из списка; нет — город вводится вручную. */
+  cities?: CityOptions;
 }) {
   const m = quest.meta;
   const set = (patch: Partial<CtorQuestMeta>) => onMeta({ ...m, ...patch });
@@ -284,7 +338,11 @@ export function QuestSettings({ quest, onMeta, highlight, transfer }: {
         <div className="ed-row2">
           <div>
             <label className="adm-label" htmlFor="qs-city">Город</label>
-            <input id="qs-city" className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
+            {cities ? (
+              <CitySelect value={m.city} options={cities} onChange={(city) => set({ city })} />
+            ) : (
+              <input id="qs-city" className="input" value={m.city} onChange={(e) => set({ city: e.target.value })} />
+            )}
           </div>
           <div>
             <label className="adm-label" htmlFor="qs-duration">Длительность, мин</label>
@@ -591,6 +649,7 @@ export function BuilderScreen({
   publishing,
   exporting,
   transfer,
+  cities,
   actions,
 }: {
   quest: CtorQuest;
@@ -608,6 +667,8 @@ export function BuilderScreen({
   exporting: boolean;
   /** Передача квеста другому автору — только для администратора. */
   transfer?: AuthorTransfer;
+  /** Выбор города из списка администратора (флаг ctor_city_list). */
+  cities?: CityOptions;
   actions: BuilderActions;
 }) {
   const gates: Gates = useMemo(() => computeGates(quest), [quest]);
@@ -731,6 +792,7 @@ export function BuilderScreen({
               onMeta={setMeta}
               highlight={highlight && highlight.pageId === null ? highlight : null}
               transfer={transfer}
+              cities={cities}
             />
           ) : (
             <PageEditor
