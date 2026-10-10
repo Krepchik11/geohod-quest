@@ -54,11 +54,14 @@ pub enum Feature {
     /// Storefront: sign-in buttons inside the purchase sheet, so saving a
     /// purchase to an account never leaves the page.
     PurchaseInlineLogin,
+    /// Constructor: the quest city is picked from the admin's city list
+    /// (the «Города» page) instead of typed, so one city has one spelling.
+    CtorCityList,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -70,6 +73,7 @@ impl Feature {
         Self::StoreCities,
         Self::QuestFacts,
         Self::PurchaseInlineLogin,
+        Self::CtorCityList,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -87,6 +91,7 @@ impl Feature {
             Self::StoreCities => "store_cities",
             Self::QuestFacts => "quest_facts",
             Self::PurchaseInlineLogin => "purchase_inline_login",
+            Self::CtorCityList => "ctor_city_list",
         }
     }
 
@@ -104,6 +109,7 @@ impl Feature {
                 | Self::StoreCities
                 | Self::QuestFacts
                 | Self::PurchaseInlineLogin
+                | Self::CtorCityList
         )
     }
 
@@ -157,6 +163,8 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         // The sheet reuses the sign-in buttons, which hide a provider the
         // deployment has no credentials for — nothing to configure here.
         Feature::PurchaseInlineLogin => true,
+        // A dropdown over data the server already serves.
+        Feature::CtorCityList => true,
     }
 }
 

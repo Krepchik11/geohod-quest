@@ -19,7 +19,7 @@ use crate::authz::{
 };
 use crate::errors::AppError;
 use crate::store::{self, ConstructorQuest, ConstructorQuestSummary, PublishedMeta};
-use crate::{AppState, export, snapshot};
+use crate::{AppState, cities, export, snapshot};
 
 pub fn router() -> Router<AppState> {
     // All mutations are POST — the router/CORS surface is GET+POST only by
@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(MAX_AUTHORING_BODY_BYTES)),
         )
         .route("/api/constructor/authors", get(list_authors_handler))
+        .route("/api/constructor/cities", get(list_cities_handler))
         .route(
             "/api/constructor/quests/{quest_id}/status",
             post(set_constructor_status_handler),
@@ -596,6 +597,23 @@ async fn list_authors_handler(
     let rank = |r: &str| auth::ROLES.iter().position(|known| *known == r);
     authors.sort_by(|a, b| (rank(&a.role), &a.name).cmp(&(rank(&b.role), &b.name)));
     Ok(Json(authors))
+}
+
+/// GET /api/constructor/cities — the cities the settings dropdown offers: the
+/// admin's «Города» list (saved cities plus every city quests use), in
+/// alphabetical order. Editor-gated, like the rest of the constructor.
+async fn list_cities_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<String>>, AppError> {
+    require_editor_actor(&state, &headers).await?;
+    let mut names: Vec<String> = cities::load_rows(&state)
+        .await?
+        .into_iter()
+        .map(|row| row.record.name)
+        .collect();
+    names.sort_by_cached_key(|name| name.to_lowercase());
+    Ok(Json(names))
 }
 
 /// Body for POST /api/constructor/quests/{id}/author.

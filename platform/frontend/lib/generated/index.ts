@@ -1,3 +1,4 @@
+export type { AdminCityWire } from './AdminCityWire';
 export type { AdminCouponWire } from './AdminCouponWire';
 export type { AdminFeatureWire } from './AdminFeatureWire';
 export type { AdminFeedbackGroupWire } from './AdminFeedbackGroupWire';
@@ -19,6 +20,9 @@ export type { AttemptMeta } from './AttemptMeta';
 export type { AuthProviders } from './AuthProviders';
 export type { BundleWire } from './BundleWire';
 export type { CheckoutResult } from './CheckoutResult';
+export type { CityCreateBody } from './CityCreateBody';
+export type { CityDeleteBody } from './CityDeleteBody';
+export type { CitySaveBody } from './CitySaveBody';
 export type { ConstructorAuthorWire } from './ConstructorAuthorWire';
 export type { ConstructorQuestFullWire } from './ConstructorQuestFullWire';
 export type { ConstructorQuestWire } from './ConstructorQuestWire';

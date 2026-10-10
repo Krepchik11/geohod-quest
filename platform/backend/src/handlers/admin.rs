@@ -17,8 +17,8 @@ use crate::facts::{self, MigrationResult};
 use crate::features::Feature;
 use crate::features::feature_available;
 use crate::settings::Setting;
-use crate::store::PublishedMeta;
-use crate::{AppState, admin_stats, auth, backfill, store};
+use crate::store::{CityRecord, PublishedMeta};
+use crate::{AppState, admin_stats, auth, backfill, cities, store};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -77,6 +77,12 @@ pub fn router() -> Router<AppState> {
             "/api/admin/settings/{key}",
             get(get_setting_handler).post(set_setting_handler),
         )
+        .route(
+            "/api/admin/cities",
+            get(admin_list_cities_handler).post(admin_create_city_handler),
+        )
+        .route("/api/admin/cities/save", post(admin_save_city_handler))
+        .route("/api/admin/cities/delete", post(admin_delete_city_handler))
         .route("/api/admin/stats", get(admin_stats_overview_handler))
         .route(
             "/api/admin/stats/{quest_id}",
@@ -1011,6 +1017,196 @@ async fn set_setting_handler(
         key: setting.key(),
         value,
     }))
+}
+
+/// One line of the admin «Города» list (see `crate::cities`).
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "AdminCityWire"))]
+pub(crate) struct AdminCityWire {
+    name: String,
+    /// Media URL of the picture for the main banner; `null` until uploaded.
+    image: Option<String>,
+    slogan: Option<String>,
+    /// Distinct quests whose draft or store card names this city.
+    quests: u32,
+    /// Quests a player sees in the shop under this city.
+    in_store: u32,
+}
+
+impl AdminCityWire {
+    fn from_row(row: cities::CityRow) -> Self {
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        Self {
+            name: row.record.name,
+            image: row.record.image,
+            slogan: row.record.slogan,
+            quests: count(row.usage.quests),
+            in_store: count(row.usage.in_store),
+        }
+    }
+}
+
+/// Every city mutation answers with the fresh list, so the page re-renders
+/// counts that a rename or merge moved.
+async fn city_list(state: &AppState) -> Result<Json<Vec<AdminCityWire>>, AppError> {
+    let rows = cities::load_rows(state).await?;
+    Ok(Json(
+        rows.into_iter().map(AdminCityWire::from_row).collect(),
+    ))
+}
+
+/// The picture as stored: an inline `data:` payload goes to the media store
+/// first, then only a URL is accepted.
+async fn city_image(state: &AppState, image: Option<String>) -> Result<Option<String>, AppError> {
+    cities::check_image(state.media.externalize(image).await?)
+}
+
+/// GET /api/admin/cities — the city list: saved cities plus every city quests
+/// use, with quest counts.
+async fn admin_list_cities_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminCityWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    city_list(&state).await
+}
+
+/// Body for adding a city.
+#[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CityCreateBody"))]
+pub(crate) struct CityCreateRequest {
+    name: String,
+    image: Option<String>,
+    slogan: Option<String>,
+}
+
+/// POST /api/admin/cities — add a city; 409 when the name is already listed.
+async fn admin_create_city_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CityCreateRequest>,
+) -> Result<Json<Vec<AdminCityWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let name = cities::normalize_name(&req.name)?;
+    let slogan = cities::normalize_slogan(req.slogan.as_deref())?;
+    let rows = cities::load_rows(&state).await?;
+    if rows.iter().any(|r| r.record.name == name) {
+        return Err(AppError::Conflict(format!(
+            "город «{name}» уже есть в списке"
+        )));
+    }
+    let image = city_image(&state, req.image).await?;
+    state
+        .cities
+        .upsert(CityRecord {
+            name,
+            image,
+            slogan,
+        })
+        .await?;
+    city_list(&state).await
+}
+
+/// Body for editing a city: the name as listed now plus the whole edited form.
+#[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CitySaveBody"))]
+pub(crate) struct CitySaveRequest {
+    /// The city as the list shows it now.
+    name: String,
+    /// The edited name; the same name (once normalized) is no rename.
+    new_name: String,
+    image: Option<String>,
+    slogan: Option<String>,
+    /// Confirms renaming onto a city already listed: the quests join it and
+    /// this city leaves the list.
+    #[serde(default)]
+    merge: bool,
+}
+
+/// POST /api/admin/cities/save — save the picture and slogan, renaming when
+/// the name changed.
+///
+/// A rename moves the city string of every draft and every store card (frozen
+/// snapshots keep theirs). Onto a city already listed it is a merge and needs
+/// `merge: true` (409 otherwise); the merged city keeps its own picture and
+/// slogan, the edited values only fill what it lacks. Quests move before the
+/// rows: a failure midway leaves the old name listed, and saving again
+/// finishes the move.
+async fn admin_save_city_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CitySaveRequest>,
+) -> Result<Json<Vec<AdminCityWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let to = cities::normalize_name(&req.new_name)?;
+    let slogan = cities::normalize_slogan(req.slogan.as_deref())?;
+    let rows = cities::load_rows(&state).await?;
+    let listed = |name: &str| rows.iter().find(|r| r.record.name == name);
+    if listed(&req.name).is_none() {
+        return Err(AppError::NotFound(format!(
+            "города «{}» нет в списке",
+            req.name
+        )));
+    }
+    let mut record = CityRecord {
+        name: to.clone(),
+        image: city_image(&state, req.image).await?,
+        slogan,
+    };
+    if to == req.name {
+        state.cities.upsert(record).await?;
+        return city_list(&state).await;
+    }
+    if let Some(target) = listed(&to) {
+        if !req.merge {
+            return Err(AppError::Conflict(format!(
+                "город «{to}» уже есть в списке"
+            )));
+        }
+        record.image = target.record.image.clone().or(record.image);
+        record.slogan = target.record.slogan.clone().or(record.slogan);
+    }
+    state.constructor.rename_city(&req.name, &to).await?;
+    state.grants.rename_city(&req.name, &to).await?;
+    state.cities.upsert(record).await?;
+    state.cities.delete(&req.name).await?;
+    city_list(&state).await
+}
+
+/// Body for removing a city.
+#[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CityDeleteBody"))]
+pub(crate) struct CityDeleteRequest {
+    name: String,
+}
+
+/// POST /api/admin/cities/delete — remove a city no quest uses; 409 while any
+/// does (it would stay listed through its quests anyway).
+async fn admin_delete_city_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CityDeleteRequest>,
+) -> Result<Json<Vec<AdminCityWire>>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    let rows = cities::load_rows(&state).await?;
+    let Some(row) = rows.iter().find(|r| r.record.name == req.name) else {
+        return Err(AppError::NotFound(format!(
+            "города «{}» нет в списке",
+            req.name
+        )));
+    };
+    if row.usage.quests > 0 {
+        return Err(AppError::Conflict(format!(
+            "в городе «{}» есть квесты — сначала перенесите их в другой город",
+            req.name
+        )));
+    }
+    state.cities.delete(&req.name).await?;
+    city_list(&state).await
 }
 
 /// Query for the admin statistics endpoints: an inclusive UTC day range.

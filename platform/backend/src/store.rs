@@ -27,8 +27,8 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::pg_store::{
-    PgAuthStore, PgConstructorStore, PgCouponStore, PgFactStore, PgFlagStore, PgGrantStore,
-    PgModerationStore, PgPaymentStore, PgSettingsStore,
+    PgAuthStore, PgCityStore, PgConstructorStore, PgCouponStore, PgFactStore, PgFlagStore,
+    PgGrantStore, PgModerationStore, PgPaymentStore, PgSettingsStore,
 };
 
 /// Unix seconds (0 on clock error; informational only).
@@ -679,6 +679,20 @@ impl InMemoryGrantStore {
     /// played history and balances never change (invariant 4); only access ends.
     pub fn unpublish(&mut self, quest_id: &str) -> bool {
         self.published.remove(quest_id).is_some()
+    }
+
+    /// Move every store card whose city (trimmed) is `from` to `to`; returns
+    /// how many moved. Only the listing changes — the frozen snapshots keep
+    /// the city they were published with.
+    pub fn rename_city(&mut self, from: &str, to: &str) -> usize {
+        let mut moved = 0;
+        for meta in self.published.values_mut() {
+            if meta.city.as_deref().map(str::trim) == Some(from) {
+                meta.city = Some(to.to_string());
+                moved += 1;
+            }
+        }
+        moved
     }
 
     /// Replace a frozen snapshot's media references in place — the media
@@ -1919,6 +1933,9 @@ pub trait GrantStore: Send + Sync {
     /// See [`InMemoryGrantStore::unpublish`].
     async fn unpublish(&self, quest_id: &str) -> Result<bool, AppError>;
 
+    /// See [`InMemoryGrantStore::rename_city`].
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError>;
+
     /// See [`InMemoryGrantStore::stats_purchase_events`].
     async fn stats_purchase_events(
         &self,
@@ -2000,6 +2017,10 @@ impl GrantStore for std::sync::Mutex<InMemoryGrantStore> {
 
     async fn unpublish(&self, quest_id: &str) -> Result<bool, AppError> {
         Ok(lock(self, "grants")?.unpublish(quest_id))
+    }
+
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError> {
+        Ok(lock(self, "grants")?.rename_city(from, to))
     }
 
     async fn stats_purchase_events(
@@ -2111,6 +2132,16 @@ pub struct QuestAttributes {
 pub struct CatalogListing {
     pub status: String,
     pub attrs: QuestAttributes,
+}
+
+/// Whether a published quest is on sale in the shop: its lifecycle status is
+/// `published`, or it has no constructor row at all (a legacy/direct publish).
+/// A `test`/`draft` quest keeps its snapshot but leaves the shop.
+pub fn listed_in_store(listings: &HashMap<String, CatalogListing>, quest_id: &str) -> bool {
+    listings
+        .get(quest_id)
+        .map(|l| l.status.as_str())
+        .is_none_or(|s| s == CTOR_STATUS_PUBLISHED)
 }
 
 impl Default for QuestAttributes {
@@ -2569,6 +2600,22 @@ impl InMemoryConstructorStore {
         self.quests.get(quest_id).map(ConstructorQuest::label)
     }
 
+    /// Point every draft whose authored city is `from` (by the label rule:
+    /// a JSON string, trimmed) at `to`; returns how many moved. An admin's
+    /// rename, not an author's edit — `updated_at` stays.
+    pub fn rename_city(&mut self, from: &str, to: &str) -> usize {
+        let mut moved = 0;
+        for q in self.quests.values_mut() {
+            if ctor_body_city(&q.body).map(str::trim) == Some(from)
+                && let Some(meta) = q.body.get_mut("meta").and_then(|m| m.as_object_mut())
+            {
+                meta.insert("city".into(), serde_json::Value::String(to.to_string()));
+                moved += 1;
+            }
+        }
+        moved
+    }
+
     /// Delete a quest; `true` if a row was removed. A quest that has left
     /// `expected_author` is not this caller's to delete ([`AuthorGuard`]).
     pub fn delete(&mut self, quest_id: &str, expected_author: AuthorGuard<'_>) -> bool {
@@ -2653,6 +2700,9 @@ pub trait ConstructorStore: Send + Sync {
 
     /// See [`InMemoryConstructorStore::label_for_quest`].
     async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError>;
+
+    /// See [`InMemoryConstructorStore::rename_city`].
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError>;
 
     /// See [`InMemoryConstructorStore::delete`].
     async fn delete(
@@ -2756,6 +2806,10 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
 
     async fn label_for_quest(&self, quest_id: &str) -> Result<Option<QuestLabel>, AppError> {
         Ok(lock(self, "constructor")?.label_for_quest(quest_id))
+    }
+
+    async fn rename_city(&self, from: &str, to: &str) -> Result<usize, AppError> {
+        Ok(lock(self, "constructor")?.rename_city(from, to))
     }
 
     async fn delete(
@@ -3301,6 +3355,77 @@ impl InMemorySettingsStore {
 /// values (registry in `crate::settings`; no row = unset).
 pub type SettingsStores = std::sync::Arc<dyn KvStore<String>>;
 
+/// What the admin saved for one city on the «Города» page: the picture for
+/// the main banner and the slogan. Keyed by the name quests use; holds no
+/// quest links (see `crate::cities`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CityRecord {
+    pub name: String,
+    /// Media URL of the city picture; `None` when not uploaded.
+    pub image: Option<String>,
+    pub slogan: Option<String>,
+}
+
+/// In-memory city rows, keyed by name.
+#[derive(Debug, Default)]
+pub struct InMemoryCityStore {
+    rows: HashMap<String, CityRecord>,
+}
+
+impl InMemoryCityStore {
+    /// A fresh store holds no rows — the list is then just the cities quests use.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every saved row, in no particular order.
+    pub fn list(&self) -> Vec<CityRecord> {
+        self.rows.values().cloned().collect()
+    }
+
+    /// Insert or replace the row named `city.name`.
+    pub fn upsert(&mut self, city: CityRecord) {
+        self.rows.insert(city.name.clone(), city);
+    }
+
+    /// Remove the row; `true` when there was one.
+    pub fn delete(&mut self, name: &str) -> bool {
+        self.rows.remove(name).is_some()
+    }
+}
+
+/// City-row storage backend (see [`FactStore`] for the pattern).
+#[async_trait::async_trait]
+pub trait CityStore: Send + Sync {
+    /// See [`InMemoryCityStore::list`].
+    async fn list(&self) -> Result<Vec<CityRecord>, AppError>;
+
+    /// See [`InMemoryCityStore::upsert`].
+    async fn upsert(&self, city: CityRecord) -> Result<(), AppError>;
+
+    /// See [`InMemoryCityStore::delete`].
+    async fn delete(&self, name: &str) -> Result<bool, AppError>;
+}
+
+/// Shared city-row storage handle.
+pub type CityStores = std::sync::Arc<dyn CityStore>;
+
+#[async_trait::async_trait]
+impl CityStore for std::sync::Mutex<InMemoryCityStore> {
+    async fn list(&self) -> Result<Vec<CityRecord>, AppError> {
+        Ok(lock(self, "cities")?.list())
+    }
+
+    async fn upsert(&self, city: CityRecord) -> Result<(), AppError> {
+        lock(self, "cities")?.upsert(city);
+        Ok(())
+    }
+
+    async fn delete(&self, name: &str) -> Result<bool, AppError> {
+        Ok(lock(self, "cities")?.delete(name))
+    }
+}
+
 /// One «Проверено» mark on a `(user_id, quest_id)` review: the review version it
 /// covers (`through` — the rating's `rated_at` the admin saw), when, and by whom.
 /// The review reads unchecked again once its `rated_at` moves past `through`.
@@ -3548,6 +3673,7 @@ pub struct Storage {
     pub flags: FlagStores,
     pub settings: SettingsStores,
     pub moderation: ModerationStores,
+    pub cities: CityStores,
 }
 
 impl Storage {
@@ -3564,6 +3690,7 @@ impl Storage {
             flags: Arc::new(Mutex::new(InMemoryFlagStore::new())),
             settings: Arc::new(Mutex::new(InMemorySettingsStore::new())),
             moderation: Arc::new(Mutex::new(InMemoryModerationStore::new())),
+            cities: Arc::new(Mutex::new(InMemoryCityStore::new())),
         }
     }
 
@@ -3579,7 +3706,8 @@ impl Storage {
             payments: Arc::new(PgPaymentStore::new(pool.clone())),
             flags: Arc::new(PgFlagStore::new(pool.clone())),
             settings: Arc::new(PgSettingsStore::new(pool.clone())),
-            moderation: Arc::new(PgModerationStore::new(pool)),
+            moderation: Arc::new(PgModerationStore::new(pool.clone())),
+            cities: Arc::new(PgCityStore::new(pool)),
         }
     }
 }

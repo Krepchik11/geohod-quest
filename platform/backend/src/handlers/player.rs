@@ -291,12 +291,7 @@ async fn list_quests_handler(
     // the store.
     let visible: Vec<PublishedMeta> = published
         .into_iter()
-        .filter(|meta| {
-            listings
-                .get(&meta.quest_id)
-                .map(|l| l.status.as_str())
-                .is_none_or(|s| s == store::CTOR_STATUS_PUBLISHED)
-        })
+        .filter(|meta| store::listed_in_store(&listings, &meta.quest_id))
         .collect();
     // Ratings for EVERY visible quest: per-player, all-versions, hide-aware
     // (content-moderation) — one effective rating per (player, quest), dropping

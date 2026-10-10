@@ -28,6 +28,7 @@ mod admin_stats;
 mod auth;
 mod authz;
 mod backfill;
+mod cities;
 mod config;
 mod coupons;
 mod errors;
@@ -52,7 +53,7 @@ use std::sync::{Arc, Mutex};
 use config::AppConfig;
 use media::MediaStores;
 use store::{
-    AuthStores, ConstructorStores, CouponStores, FactStores, FlagStores, GrantStores,
+    AuthStores, CityStores, ConstructorStores, CouponStores, FactStores, FlagStores, GrantStores,
     ModerationStores, PaymentStores, SettingsStores, Storage,
 };
 use yookassa::YookassaGateway;
@@ -82,6 +83,9 @@ pub struct AppState {
     /// feedback resolution watermarks, kept entirely separate from the immutable
     /// fact log. Admin-only reads/writes; the read-side folds consult it.
     pub moderation: ModerationStores,
+    /// What the admin saved per city — banner picture and slogan (the «Города»
+    /// page; the city list itself is assembled in `cities.rs`).
+    pub cities: CityStores,
     /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
     /// disabled (501, fail-closed); tests inject the scripted fake.
     pub yookassa: Option<YookassaGateway>,
@@ -134,6 +138,7 @@ fn app_state(config: AppConfig, media: MediaStores, storage: Storage) -> AppStat
         flags: storage.flags,
         settings: storage.settings,
         moderation: storage.moderation,
+        cities: storage.cities,
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -412,6 +417,10 @@ mod tests {
             handlers::admin::FeatureWire,
             handlers::player::PublicFeaturesResponse,
             handlers::admin::SettingWire,
+            handlers::admin::AdminCityWire,
+            handlers::admin::CityCreateRequest,
+            handlers::admin::CitySaveRequest,
+            handlers::admin::CityDeleteRequest,
             handlers::admin::CouponPayload,
             handlers::admin::AdminCouponWire,
             store::AttemptMeta,
@@ -2301,6 +2310,212 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(product["name"], json!("Витринное имя"));
         assert_eq!(product["city"], json!("Казань"));
+    }
+
+    /// The admin «Города» page end to end: the list is built from the cities
+    /// quests use (no seed), a saved city carries a picture and a slogan, a
+    /// rename onto a listed city is a merge that moves drafts AND store cards,
+    /// and only a city without quests can be deleted. City names carry the run
+    /// tag — the Postgres suites share one database.
+    async fn scenario_admin_cities(app: &Router, ids: &Ids) {
+        let tag = ids.quest.trim_start_matches("quest-");
+        let editor = editor_bearer(app, &ids.player).await;
+        let ed = [("authorization", editor.as_str())];
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let novi = format!("Нови Сад {tag}");
+        let typo = format!("Нови-Сад {tag}");
+        let kraljevo = format!("Кралево {tag}");
+        let q1 = format!("{}-1", ids.quest);
+        let q2 = format!("{}-2", ids.quest);
+        let q3 = format!("{}-3", ids.quest);
+
+        // q1 and q2 are on sale (one under the typo), q3 is a draft only.
+        for (quest, city, card) in [
+            (&q1, format!("  {novi}  "), Some(&novi)),
+            (&q2, typo.clone(), Some(&typo)),
+            (&q3, novi.clone(), None),
+        ] {
+            let (st, _) = post_json_h(
+                app,
+                "/api/constructor/quests",
+                json!({
+                    "quest_id": quest, "name": "Квест", "steps_count": 1,
+                    "body": { "id": quest, "meta": { "title": "Квест", "city": city } }
+                }),
+                &ed,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+            if let Some(card) = card {
+                let (st, _) = publish(
+                    app,
+                    ids,
+                    json!({
+                        "quest_id": quest, "name": "Квест", "template_summary": "1 step",
+                        "snapshot_version": 1, "snapshot_id": format!("{quest}-v1"),
+                        "city": card, "snapshot": { "steps": [{ "template": "start" }] }
+                    }),
+                )
+                .await;
+                assert_eq!(st, StatusCode::OK);
+            }
+        }
+
+        let row_of = |list: &Value, name: &str| {
+            list.as_array()
+                .expect("city list")
+                .iter()
+                .find(|r| r["name"] == name)
+                .cloned()
+        };
+
+        // The list needs no seeding: both spellings are there with their counts.
+        let (st, list) = get_json_h(app, "/api/admin/cities", &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let row = row_of(&list, &novi).expect("the city quests use is listed");
+        assert_eq!(
+            (row["quests"].clone(), row["in_store"].clone()),
+            (json!(2), json!(1))
+        );
+        assert_eq!(row["image"], Value::Null);
+        let row = row_of(&list, &typo).expect("the misspelt city is listed too");
+        assert_eq!(
+            (row["quests"].clone(), row["in_store"].clone()),
+            (json!(1), json!(1))
+        );
+
+        // The constructor dropdown offers the same names; the admin page is
+        // admin-only.
+        let (st, names) = get_json_h(app, "/api/constructor/cities", &ed).await;
+        assert_eq!(st, StatusCode::OK);
+        let names: Vec<&str> = names
+            .as_array()
+            .expect("names")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(names.contains(&novi.as_str()) && names.contains(&typo.as_str()));
+        let (st, _) = get_json(app, "/api/constructor/cities").await;
+        assert!(st.is_client_error(), "the dropdown list is editor-gated");
+        let (st, _) = get_json_h(app, "/api/admin/cities", &ed).await;
+        assert!(st.is_client_error(), "an editor is not an admin");
+
+        // Add a city before any quest: the picture goes to the media store.
+        let (st, list) = post_json_h(
+            app,
+            "/api/admin/cities",
+            json!({ "name": format!("  Кралево   {tag} "), "slogan": " Город роз ",
+                    "image": "data:image/png;base64,AAAA" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{list}");
+        let row = row_of(&list, &kraljevo).expect("added, name normalized");
+        assert_eq!(row["slogan"], json!("Город роз"));
+        assert_eq!(row["quests"], json!(0));
+        let image = row["image"].as_str().expect("picture stored");
+        assert!(!image.starts_with("data:"), "no inline bytes: {image}");
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/cities",
+            json!({ "name": kraljevo, "image": null, "slogan": null }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "already listed");
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/cities",
+            json!({ "name": "   ", "image": null, "slogan": null }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // A slogan on the real city.
+        let (st, list) = post_json_h(
+            app,
+            "/api/admin/cities/save",
+            json!({ "name": novi, "new_name": novi, "image": null, "slogan": "Город у Дуная" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{list}");
+        assert_eq!(
+            row_of(&list, &novi).expect("row")["slogan"],
+            json!("Город у Дуная")
+        );
+
+        // Renaming the typo onto it is a merge: refused until confirmed.
+        let merge = |confirm: bool| {
+            json!({ "name": typo, "new_name": format!(" {novi} "), "image": null,
+                    "slogan": "Другой слоган", "merge": confirm })
+        };
+        let (st, _) = post_json_h(app, "/api/admin/cities/save", merge(false), &admin).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        let (st, list) = post_json_h(app, "/api/admin/cities/save", merge(true), &admin).await;
+        assert_eq!(st, StatusCode::OK, "{list}");
+        assert!(row_of(&list, &typo).is_none(), "the typo left the list");
+        let row = row_of(&list, &novi).expect("merged city");
+        assert_eq!(
+            (row["quests"].clone(), row["in_store"].clone()),
+            (json!(3), json!(2))
+        );
+        assert_eq!(
+            row["slogan"],
+            json!("Город у Дуная"),
+            "the target keeps its slogan"
+        );
+        // Both the draft and the store card moved.
+        let (_, q) = get_json_h(app, &format!("/api/constructor/quests/{q2}"), &ed).await;
+        assert_eq!(q["body"]["meta"]["city"], json!(novi));
+        let (_, card) = get_json(app, &format!("/api/quests/{q2}")).await;
+        assert_eq!(card["city"], json!(novi));
+
+        // A plain rename carries every quest and the saved data along.
+        let renamed = format!("Novi Sad {tag}");
+        let (st, list) = post_json_h(
+            app,
+            "/api/admin/cities/save",
+            json!({ "name": novi, "new_name": renamed, "image": null, "slogan": "Город у Дуная" }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{list}");
+        assert!(row_of(&list, &novi).is_none());
+        let row = row_of(&list, &renamed).expect("renamed city");
+        assert_eq!(
+            (row["quests"].clone(), row["in_store"].clone()),
+            (json!(3), json!(2))
+        );
+        assert_eq!(row["slogan"], json!("Город у Дуная"));
+        let (_, q) = get_json_h(app, &format!("/api/constructor/quests/{q1}"), &ed).await;
+        assert_eq!(
+            q["body"]["meta"]["city"],
+            json!(renamed),
+            "a padded spelling moved too"
+        );
+        let (_, card) = get_json(app, &format!("/api/quests/{q1}")).await;
+        assert_eq!(card["city"], json!(renamed));
+
+        // Only a city without quests can be deleted.
+        let delete = |name: &str| json!({ "name": name });
+        let (st, _) = post_json_h(app, "/api/admin/cities/delete", delete(&renamed), &admin).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        let (st, list) =
+            post_json_h(app, "/api/admin/cities/delete", delete(&kraljevo), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(row_of(&list, &kraljevo).is_none());
+        let (st, _) = post_json_h(app, "/api/admin/cities/delete", delete(&kraljevo), &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = post_json_h(
+            app,
+            "/api/admin/cities/save",
+            json!({ "name": kraljevo, "new_name": kraljevo, "image": null, "slogan": null }),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
     async fn scenario_bad_payload(app: &Router, ids: &Ids) {
@@ -5230,6 +5445,7 @@ mod tests {
             media: MediaStores::from_config(&media_cfg).expect("in-process media store"),
             payment_rows: storage.payments,
             moderation: storage.moderation,
+            cities: storage.cities,
             flags: storage.flags,
             settings: storage.settings,
             yookassa: None,
@@ -5964,6 +6180,7 @@ mod tests {
         admin_stats_and_feedbacks_per_version = ids scenario_admin_stats / "admin";
         admin_user_management_list_and_roles = ids scenario_admin_users / "users";
         admin_surfaces_name_quests_from_the_authoring_registry = ids scenario_admin_quest_labels / "labels";
+        admin_cities_list_rename_merge_delete = ids scenario_admin_cities / "cities";
         admin_coupons_crud_validation_and_gating = ids scenario_admin_coupons / "cpncrud";
         coupon_validate_previews_without_consuming = ids scenario_coupon_validate / "cpnprev";
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
@@ -6520,6 +6737,7 @@ mod tests {
                 ("store_cities", true),
                 ("quest_facts", true),
                 ("purchase_inline_login", true),
+                ("ctor_city_list", true),
             ]
         );
     }
@@ -6543,6 +6761,7 @@ mod tests {
                     "store_cities": false,
                     "quest_facts": false,
                     "purchase_inline_login": false,
+                    "ctor_city_list": false,
                 },
                 "universal_answer": null,
                 "soon_cities": [],
@@ -6569,6 +6788,7 @@ mod tests {
                 "store_cities": false,
                 "quest_facts": false,
                 "purchase_inline_login": false,
+                "ctor_city_list": false,
             })
         );
     }

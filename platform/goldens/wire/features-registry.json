@@ -12,7 +12,8 @@
     "store_my_quests",
     "store_cities",
     "quest_facts",
-    "purchase_inline_login"
+    "purchase_inline_login",
+    "ctor_city_list"
   ],
-  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests", "store_cities", "quest_facts", "purchase_inline_login"]
+  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests", "store_cities", "quest_facts", "purchase_inline_login", "ctor_city_list"]
 }

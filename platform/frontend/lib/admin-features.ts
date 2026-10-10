@@ -44,6 +44,7 @@ export const FEATURE_KEYS = [
   'store_cities',
   'quest_facts',
   'purchase_inline_login',
+  'ctor_city_list',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -116,6 +117,12 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
     label: 'Вход в окне покупки',
     description:
       'В окне покупки — кнопки входа через Telegram и Google: игрок сохраняет квест в аккаунте, не уходя со страницы.',
+  },
+  ctor_city_list: {
+    label: 'Город из списка в конструкторе',
+    description:
+      'В настройках квеста город выбирается из списка на странице «Города» админки, а не вводится вручную — ' +
+      'у одного города одно написание. Новый город добавляет администратор.',
   },
 };
 
