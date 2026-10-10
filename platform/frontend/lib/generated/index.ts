@@ -23,6 +23,7 @@ export type { CheckoutResult } from './CheckoutResult';
 export type { CityCreateBody } from './CityCreateBody';
 export type { CityDeleteBody } from './CityDeleteBody';
 export type { CitySaveBody } from './CitySaveBody';
+export type { CityWire } from './CityWire';
 export type { ConstructorAuthorWire } from './ConstructorAuthorWire';
 export type { ConstructorQuestFullWire } from './ConstructorQuestFullWire';
 export type { ConstructorQuestWire } from './ConstructorQuestWire';

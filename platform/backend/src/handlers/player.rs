@@ -45,6 +45,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/grants", get(list_grants_handler))
         .route("/api/features", get(public_features_handler))
+        .route("/api/cities", get(public_cities_handler))
         .route("/api/measure/rates", get(get_measure_rates_handler))
         .route("/api/users/me/stats", get(get_my_stats_handler))
 }
@@ -705,6 +706,37 @@ async fn public_features_handler(
         universal_answer,
         soon_cities,
     }))
+}
+
+/// One city as the storefront banner shows it: what the admin saved on the
+/// «Города» page. Quest counts stay admin-only — the shop counts its own cards.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CityWire"))]
+pub(crate) struct CityWire {
+    name: String,
+    /// Media URL of the banner picture; `null` until the admin uploads one.
+    image: Option<String>,
+    /// `null` until the admin writes one.
+    slogan: Option<String>,
+}
+
+/// GET /api/cities — the saved city rows (picture, slogan) for the main
+/// banner. Public: nothing here is more private than the shop itself.
+async fn public_cities_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<CityWire>>, AppError> {
+    let mut rows = state.cities.list().await?;
+    rows.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| CityWire {
+                name: r.name,
+                image: r.image,
+                slogan: r.slogan,
+            })
+            .collect(),
+    ))
 }
 
 /// Cross-attempt player statistics: storage gathers the logs, the pure

@@ -419,6 +419,7 @@ mod tests {
             handlers::admin::SettingWire,
             handlers::admin::AdminCityWire,
             handlers::admin::CityCreateRequest,
+            handlers::player::CityWire,
             handlers::admin::CitySaveRequest,
             handlers::admin::CityDeleteRequest,
             handlers::admin::CouponPayload,
@@ -2444,6 +2445,26 @@ mod tests {
         assert_eq!(
             row_of(&list, &novi).expect("row")["slogan"],
             json!("Город у Дуная")
+        );
+
+        // The banner reads the same rows without credentials — picture and
+        // slogan only, no quest counts.
+        let (st, public) = get_json(app, "/api/cities").await;
+        assert_eq!(st, StatusCode::OK);
+        let row = row_of(&public, &novi).expect("a saved city is public");
+        assert_eq!(
+            row,
+            json!({ "name": novi, "image": null, "slogan": "Город у Дуная" })
+        );
+        let row = row_of(&public, &kraljevo).expect("a city without quests too");
+        assert!(
+            row["image"]
+                .as_str()
+                .is_some_and(|i| !i.starts_with("data:"))
+        );
+        assert!(
+            row_of(&public, &typo).is_none(),
+            "a city only quests name has nothing to show"
         );
 
         // Renaming the typo onto it is a merge: refused until confirmed.
