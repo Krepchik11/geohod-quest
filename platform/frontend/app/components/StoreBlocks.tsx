@@ -8,46 +8,11 @@ import { SUBSTANTIVE_REVIEW_CHARS } from '../../lib/storefront';
 
 /**
  * The storefront blocks around the shop grid (ТЗ «Дизайн и юзабилити», этап 2):
- * the city chips (`store_cities`), «Вместе веселее», «Скоро в новых городах»
- * (`store_cities`) and one player's quote. Everything they show is real: the
+ * «Вместе веселее», «Скоро в новых городах» (`store_cities`) and one player's
+ * quote. Everything they show is real: the
  * cities come from the catalog and the `soon_cities` setting, the quote from the
  * quest's own reviews — a block with nothing real to show renders nothing.
  */
-
-/** One row of city chips: the catalog's cities (one is picked) and the ones
- *  announced as «скоро», which lead to the block that tells about them. */
-export function CityChips({
-  cities,
-  soon,
-  active,
-  onPick,
-}: {
-  cities: string[];
-  soon: string[];
-  active: string | null;
-  onPick: (city: string) => void;
-}) {
-  return (
-    <div className="city-chips" role="group" aria-label="Город">
-      {cities.map((city) => (
-        <button
-          key={city}
-          type="button"
-          className={`city-chip${city === active ? ' is-on' : ''}`}
-          aria-pressed={city === active}
-          onClick={() => onPick(city)}
-        >
-          {city}
-        </button>
-      ))}
-      {soon.map((city) => (
-        <a key={city} className="city-chip city-chip--soon" href="#soon">
-          {city} <small>скоро</small>
-        </a>
-      ))}
-    </div>
-  );
-}
 
 /** «Вместе веселее»: one quest serves the whole company (the /rules FAQ says
  *  so); the group walks themselves are announced in the club's channel. */

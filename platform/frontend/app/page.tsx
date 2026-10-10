@@ -1,14 +1,15 @@
 'use client'; // narrow island ONLY for the live catalog + owned set (§2)
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import SiteShell from './components/SiteShell';
 import QuestCard from './components/QuestCard';
 import StoreToolbar from './components/StoreToolbar';
 import CityTitle from './components/CityTitle';
+import CityHero from './components/CityHero';
 import ShopSection, { HEADER_PIN_PX } from './components/ShopSection';
-import { CityChips, PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
-import { api, type PublishedQuestWire } from '../lib/api';
+import { PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
+import { api, type CityWire, type PublishedQuestWire } from '../lib/api';
+import { coverSrc } from '../lib/cover';
 import { useClientFeature, useRememberedClientFeature, useSoonCities } from '../lib/client-features';
 import { useOwned } from '../lib/collection';
 import { currentUserId } from '../lib/identity';
@@ -21,13 +22,9 @@ import {
   busiestCity,
   citiesByCount,
   catalogFacts,
-  cityFacts,
-  fmtRating,
-  heroTitle,
-  playerCountPlural,
+  heroSlogan,
+  heroStats,
   questPlural,
-  ratingPlural,
-  showPlayers,
 } from '../lib/storefront';
 import { useStoreQuery } from '../lib/useStoreQuery';
 
@@ -62,11 +59,6 @@ const pinsOnPhone = (shop: HTMLElement): boolean => {
   return !!head && getComputedStyle(head).position === 'sticky';
 };
 
-/** The hero photo, served at the width the screen needs (ТЗ, задача 8): the
- *  original PNG weighed 844 KB on every phone. */
-const HERO_SRCSET = '/assets/img/hero-main-720.webp 720w, /assets/img/hero-main-1240.webp 1240w';
-const HERO_SIZES = '(max-width: 767px) 100vw, 50vw';
-
 export default function GeoQuestHome() {
   const mineOn = useRememberedClientFeature('store_my_quests');
   const citiesOn = useRememberedClientFeature('store_cities');
@@ -91,6 +83,9 @@ export default function GeoQuestHome() {
   const [shelf, setShelf] = useState<OfflineShelf | null>(null);
   const [statuses, setStatuses] = useState<Record<string, OwnedStatus> | null>(null);
   const [inProgress, setInProgress] = useState<InProgress | null>(null);
+  // The admin's picture and slogan per city (the «Города» page); null until
+  // they arrive — and for good offline, where the banner keeps its plain plate.
+  const [cityRows, setCityRows] = useState<readonly CityWire[] | null>(null);
 
   const failed = !marketLoading && market === null;
   const offline = mineOn && failed && shelf !== null;
@@ -215,12 +210,10 @@ export default function GeoQuestHome() {
     setAcquired((cur) => new Set(cur).add(questId));
   }, []);
 
-  const facts = cityFacts(cityQuests, factsOn);
-  const hasFree = cityQuests.some((q) => q.price === 0);
+  /** The city's average rating — absent only while none of its quests is rated. */
   const proof = useMemo(() => {
     const f = catalogFacts(cityQuests);
-    const players = cityQuests.reduce((n, q) => n + q.players, 0);
-    return f.avg == null ? null : { avg: f.avg, ratings: f.ratings, players };
+    return f.avg == null ? null : { avg: f.avg, ratings: f.ratings };
   }, [cityQuests]);
   /** The quote comes from the city's most-rated quest — the likeliest to have one. */
   const quoteQuest = useMemo(
@@ -231,6 +224,12 @@ export default function GeoQuestHome() {
       ),
     [cityQuests],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listCities().then((rows) => { if (!cancelled) setCityRows(rows); }, () => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // The catalog is public and identity-free; the owned set comes from the
   // shared identity-keyed collection (lib/collection). A refetch (the network
@@ -305,61 +304,30 @@ export default function GeoQuestHome() {
     mineOn && catalog !== null && ((!offline && !live.loaded) || (owned.size > 0 && statuses === null));
   const loading = marketLoading || (mineOn && failed && shelf === null) || settling;
   const continueQuest = mineOn && inProgress && (!offline || inProgress.downloaded) ? inProgress : null;
+  const continueName =
+    continueQuest && (continueQuest.name ?? catalog?.find((q) => q.quest_id === continueQuest.questId)?.name);
+  const cityRow = cityRows?.find((r) => r.name === activeCity) ?? null;
 
   return (
     <SiteShell>
 
-      {/* HERO (ТЗ, задача 13): what it is, where, how long and for whom —
-          the city in the headline, a light photo, three facts and the CTA. */}
-      <section className="hero2" data-screen-label="Главная — хиро">
-        {citiesOn && (cities.length > 1 || soon.length > 0) && (
-          <div className="container">
-            <CityChips cities={cities} soon={soon} active={activeCity} onPick={pickCity} />
-          </div>
-        )}
-        <div className="container hero2__inner">
-          <p className="hero2__over">Квесты-прогулки в смартфоне</p>
-          <h1 className="hero2__title">{heroTitle(activeCity)}</h1>
-          <p className="hero2__sub">
-            Маршрут, загадки и история — в телефоне. Без гида и записи: в любой день, вдвоём или компанией.
-          </p>
-          <picture className="hero2__photo">
-            <img
-              src="/assets/img/hero-main-1240.webp"
-              srcSet={HERO_SRCSET}
-              sizes={HERO_SIZES}
-              width={1240}
-              height={480}
-              alt="Две подруги проходят квест в смартфоне на улице старого города"
-              fetchPriority="high"
-            />
-          </picture>
-          {(facts.time || facts.distance || hasFree) && (
-            <ul className="hero2__facts">
-              {facts.time && <li><span className="ic ic-clock" aria-hidden />{facts.time}</li>}
-              {facts.distance && <li><span className="ic ic-route" aria-hidden />{facts.distance} пешком</li>}
-              {hasFree && <li className="is-free">Первый квест бесплатно</li>}
-            </ul>
-          )}
-          <div className="hero2__cta">
-            <HeroCta
-              inProgress={continueQuest}
-              name={continueQuest && (continueQuest.name ?? catalog?.find((q) => q.quest_id === continueQuest.questId)?.name)}
-              hasOwn={mineOn && owned.size > 0}
-              offline={offline}
-            />
-          </div>
-          <p className="hero2__under">
-            {proof && (
-              <span className="hero2__proof">
-                <span className="ic ic-star" aria-hidden /> <b>{fmtRating(proof.avg)}</b> · {proof.ratings}&nbsp;{ratingPlural(proof.ratings)}
-                {showPlayers(proof.players, proof.ratings) && ` · ${proof.players} ${playerCountPlural(proof.players)}`}
-              </span>
-            )}
-            <Link className="hero2__how" href="/rules">Как играть →</Link>
-          </p>
-        </div>
-      </section>
+      {/* The main banner (owner, 2026-10-10): one title, the city buttons, the
+          picked city's photo with its slogan and numbers, «Выбрать квест». */}
+      <CityHero
+        city={activeCity}
+        cities={citiesOn ? cityCounts : []}
+        soon={soon}
+        onPick={pickCity}
+        image={coverSrc(cityRow?.image)}
+        slogan={heroSlogan(activeCity, cityRow?.slogan)}
+        stats={heroStats(cityQuests, factsOn)}
+        proof={proof}
+        continueTo={
+          continueQuest
+            ? { href: `/quest/${encodeURIComponent(continueQuest.questId)}`, name: continueName ?? null, offline }
+            : null
+        }
+      />
 
       {/* §2.1/§2.2 store grid — live quests, purchase status inside the cards */}
       <section className="container store" id="shop" ref={shopRef} data-screen-label="Главная — магазин квестов">
@@ -456,32 +424,4 @@ export default function GeoQuestHome() {
 
     </SiteShell>
   );
-}
-
-/**
- * The hero's one button: straight back into the quest in progress, else down to
- * the own quests leading the grid, else the shop. Offline it is a real
- * navigation, so the service worker serves the cached player page.
- */
-function HeroCta({
-  inProgress,
-  name,
-  hasOwn,
-  offline,
-}: {
-  inProgress: InProgress | null;
-  name: string | null | undefined;
-  hasOwn: boolean;
-  offline: boolean;
-}) {
-  if (inProgress) {
-    const href = `/quest/${encodeURIComponent(inProgress.questId)}`;
-    const label = <span className="hero__cta-text">{name ? `Продолжить «${name}»` : 'Продолжить квест'}</span>;
-    return offline ? (
-      <a className="btn hero__cta--continue" href={href}>{label}</a>
-    ) : (
-      <Link className="btn hero__cta--continue" href={href}>{label}</Link>
-    );
-  }
-  return <a className="btn" href="#shop">{hasOwn ? 'Мои квесты' : 'Выбрать квест'}</a>;
 }
