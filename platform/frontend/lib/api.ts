@@ -27,6 +27,7 @@ import type {
   CityCreateBody,
   CityDeleteBody,
   CitySaveBody,
+  CityWire,
   ConstructorAuthorWire,
   ConstructorQuestFullWire,
   ConstructorQuestWire,
@@ -554,6 +555,8 @@ export const api = {
   // these; see lib/client-features.ts).
   getPublicFeatures: () =>
     apiFetch<PublicFeatures>('/api/features'),
+  // Public: the picture and slogan the admin saved per city (the main banner).
+  listCities: () => apiFetch<CityWire[]>('/api/cities'),
   // Auth v2 (§6): the email-first step + recovery R1 + soft confirmation.
   authIdentify: (email: string) =>
     apiFetch<{ exists: boolean; confirmed: boolean }>('/api/auth/identify', {

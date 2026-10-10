@@ -4,11 +4,12 @@ import {
   busiestCity,
   citiesByCount,
   catalogFacts,
-  cityFacts,
   cityPlural,
   distanceLabel,
   factsLine,
   fmtRating,
+  heroSlogan,
+  heroStats,
   heroTitle,
   inviteText,
   pickNextQuest,
@@ -120,16 +121,6 @@ describe('ТЗ «Дизайн и юзабилити» helpers', () => {
     expect(distanceLabel(5)).toBe('5 км');
   });
 
-  it('gives the hero one value when the city agrees and a range when it does not', () => {
-    const qs = [
-      { duration: null, duration_min: 60, distance_km: 5 },
-      { duration: null, duration_min: 90, distance_km: 5 },
-    ];
-    expect(cityFacts(qs, true)).toEqual({ time: '≈ 60–90 мин', distance: '5 км' });
-    expect(cityFacts([{ duration: '≈ 60 мин' }, { duration: '≈ 60 мин' }], false)).toEqual({ time: '≈ 60 мин', distance: null });
-    expect(cityFacts([{ duration: 'час' }, { duration: 'два' }], false).time).toBeNull();
-  });
-
   it('declines only the cities it knows', () => {
     expect(heroTitle('Нови Сад')).toBe('Нови Сад, о котором не расскажет экскурсовод');
     expect(heroTitle('Москва')).toBe('Москва, о которой не расскажет экскурсовод');
@@ -185,5 +176,40 @@ describe('ТЗ «Дизайн и юзабилити» helpers', () => {
     expect(pickNextQuest(qs, 'b', 'Нови Сад', new Set())?.quest_id).toBe('c');
     expect(pickNextQuest(qs, 'b', 'Нови Сад', new Set(['c']))?.quest_id).toBe('d');
     expect(pickNextQuest(qs, 'a', 'Белград', new Set())).toBeNull();
+  });
+});
+
+describe('main banner by city', () => {
+  it('counts quests, completions, the average time and length', () => {
+    const qs = [q({ players: 477 }), q({ players: 1 }), q({ players: 0, duration_min: 90, distance_km: 3 })];
+    expect(heroStats(qs, true)).toEqual([
+      { value: '3', label: 'квеста' },
+      { value: '478', label: 'прохождений' },
+      { value: '70 мин', label: 'в среднем' },
+      { value: '4,5 км', label: 'пешком' },
+    ]);
+  });
+
+  it('shows completions always, even none; time and length only with quest_facts', () => {
+    expect(heroStats([q({ players: 0 })], true)).toEqual([
+      { value: '1', label: 'квест' },
+      { value: '0', label: 'прохождений' },
+      { value: '60 мин', label: 'в среднем' },
+      { value: '5 км', label: 'пешком' },
+    ]);
+    expect(heroStats([q({ players: 1201 })], false)).toEqual([
+      { value: '1', label: 'квест' },
+      { value: '1\u00a0201', label: 'прохождение' },
+    ]);
+    expect(heroStats([], true)).toEqual([]);
+  });
+
+  it('a slogan that continues the city follows its name; none falls back to the old title', () => {
+    expect(heroSlogan('Стамбул', ', путешествие в прошлое')).toBe('Стамбул, путешествие в прошлое');
+    expect(heroSlogan('Нови Сад', ' , город с которого всё началось! ')).toBe('Нови Сад, город с которого всё началось!');
+    expect(heroSlogan('Кралево', '— город роз')).toBe('Кралево — город роз');
+    expect(heroSlogan('Белград', 'Город на двух реках')).toBe('Город на двух реках');
+    expect(heroSlogan('Белград', '  ')).toBe(heroTitle('Белград'));
+    expect(heroSlogan(null, ', что-то')).toBe(heroTitle(null));
   });
 });

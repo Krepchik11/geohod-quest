@@ -214,16 +214,6 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .user-menu__name { font-size:13px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; max-width:220px; }
 .user-menu__role { font-size:11.5px; color:var(--muted); }
 
-.hero { position:relative; height:480px; background:center/cover no-repeat; }
-/* The copy sits on the photo's left half, so the scrim fades out before the
-   people on the right — a flat tint over the whole frame would grey them out. */
-.hero::before { content:""; position:absolute; inset:0;
-  background:linear-gradient(90deg, rgba(250,247,241,.96) 0%, rgba(250,247,241,.88) 28%, rgba(250,247,241,.5) 46%, rgba(250,247,241,0) 64%); }
-.hero__inner { position:relative; height:100%; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:0; text-align:left; }
-.hero__title { font-size:52px; font-weight:700; line-height:1.02; letter-spacing:.02em; }
-.hero__subtitle { margin-top:14px; font-size:17px; color:var(--text); }
-.hero__inner .btn { margin-top:30px; width:272px; }
-
 .section-title { font-size:20px; line-height:28px; text-align:center; }
 .features { display:grid; grid-template-columns:repeat(2,360px); gap:48px; justify-content:center; }
 .feature { display:flex; gap:16px; padding:16px; height:120px; }
@@ -282,8 +272,6 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .quest-card__mine { margin-right:auto; font-size:13px; font-weight:600; line-height:1.25; color:var(--text); }
 .quest-card__mine--done { color:var(--green); }
 .quest-card__footer .btn.quest-card__cta--mine { min-width:120px; }
-.hero__inner .btn.hero__cta--continue { width:auto; min-width:272px; max-width:min(440px, 100%); }
-.hero__cta-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rm-sheet__text { font-size:14px; line-height:1.45; color:var(--text); }
 .rm-sheet__actions { display:flex; flex-wrap:wrap; gap:10px; }
 .shop-note { text-align:center; margin-top:48px; font-size:14px; color:var(--muted); }
@@ -358,24 +346,10 @@ a.contact:hover .contact__tile { background:var(--blue-hover); }
   .site-nav.is-open .user-menu__head { padding:10px 18px 8px; border-bottom:1px solid rgba(18,41,71,.08); }
   .site-nav.is-open .user-menu__name { font-size:13.5px; max-width:none; }
   .site-nav.is-open .user-menu__inline button { font-family:var(--font-display); font-size:15px; font-weight:500; color:var(--text); background:none; border:0; padding:12px 18px; text-align:left; cursor:pointer; }
-  /* Phone: the photo is cropped too tight for a side-by-side, so the scrim
-     turns vertical and the whole block sits on the readable top half. */
-  /* cover crops hard at phone width: bias right so the people stay in frame */
-  .hero { height:auto; min-height:430px; padding-block:34px; background-position:78% center; }
-  .hero::before { background:linear-gradient(180deg, rgba(250,247,241,.95) 0%, rgba(250,247,241,.86) 46%, rgba(250,247,241,.3) 100%); }
-  .hero__inner { justify-content:flex-start; }
-  .hero__title { font-size:30px; line-height:1.08; }
-  .hero__subtitle { margin-top:10px; font-size:15px; }
-  .hero__inner .btn { margin-top:24px; width:100%; }
-  .hero__inner .btn.hero__cta--continue { width:100%; min-width:0; }
   .section-title { font-size:16px; }
   .quest-grid { gap:20px; grid-template-columns:minmax(0, 1fr); }
   .site-footer__grid { grid-template-columns:1fr; gap:20px; }
   .site-footer__links { justify-self:start; }
-}
-@media (max-width: 420px) {
-  .hero { min-height:410px; }
-  .hero__title { font-size:27px; }
 }
 
 .info-tile { display:flex; gap:8px; width:156px; }

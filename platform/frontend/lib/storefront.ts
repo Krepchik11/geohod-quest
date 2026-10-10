@@ -24,6 +24,8 @@ export const cityPlural = (n: number) => plural(n, 'город', 'города',
 export const reviewPlural = (n: number) => plural(n, 'отзыв', 'отзыва', 'отзывов');
 export const playerCountPlural = (n: number) => plural(n, 'игрок', 'игрока', 'игроков');
 export const taskPlural = (n: number) => plural(n, 'задание', 'задания', 'заданий');
+export const completionPlural = (n: number) => plural(n, 'прохождение', 'прохождения', 'прохождений');
+
 
 /**
  * Rating to the hundredth with a decimal comma, never fewer than one decimal
@@ -100,36 +102,54 @@ export function pickNextQuest<T extends { quest_id: string; city: string | null;
   return best;
 }
 
-/** «≈ 60 мин» or «≈ 60–90 мин» over a set of values; null when there is none. */
-function span(values: number[], label: (v: number) => string, range: (lo: number, hi: number) => string): string | null {
-  if (values.length === 0) return null;
-  let lo = values[0];
-  let hi = values[0];
-  for (const v of values) {
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
-  }
-  return lo === hi ? label(lo) : range(lo, hi);
+/** One number on the city banner: «6» over «квестов». */
+export interface HeroStat {
+  value: string;
+  label: string;
 }
 
-const km = (v: number) => String(Math.round(v * 10) / 10).replace('.', ',');
+/**
+ * The main banner's numbers for the quests of one city: how many quests, how
+ * many completions (always, even none — owner, 2026-10-10), the average walk
+ * time and length — the quest settings' minutes and kilometres
+ * (`quest_facts`), averaged, so the banner never disagrees with the cards
+ * under it. A time or length nothing backs is left out.
+ */
+export function heroStats(
+  quests: Array<Pick<PublishedQuestWire, 'players'> & QuestFactsSource>,
+  factsOn: boolean,
+): HeroStat[] {
+  const stats: HeroStat[] = [];
+  if (quests.length === 0) return stats;
+  stats.push({ value: String(quests.length), label: questPlural(quests.length) });
+  const completions = quests.reduce((n, q) => n + q.players, 0);
+  stats.push({ value: completions.toLocaleString('ru-RU'), label: completionPlural(completions) });
+  if (!factsOn) return stats;
+  const minutes = quests.map((q) => q.duration_min).filter((v): v is number => typeof v === 'number');
+  if (minutes.length > 0) {
+    const avg = Math.round(minutes.reduce((a, b) => a + b, 0) / minutes.length / 5) * 5;
+    stats.push({ value: `${avg} мин`, label: 'в среднем' });
+  }
+  const kms = quests.map((q) => q.distance_km).filter((v): v is number => typeof v === 'number');
+  if (kms.length > 0) {
+    const avg = Math.round((kms.reduce((a, b) => a + b, 0) / kms.length) * 2) / 2;
+    stats.push({ value: distanceLabel(avg), label: 'пешком' });
+  }
+  return stats;
+}
 
 /**
- * The hero's time and distance for the quests of one city: a single value when
- * they agree, a range when they don't. Without `quest_facts` only a legacy label
- * every quest shares is shown, and no distance is claimed.
+ * The banner's slogan for a city. The admin writes it on the «Города» page,
+ * often as the city's own sentence continued — «, путешествие в прошлое» —
+ * so a slogan opening with punctuation follows the city name; one opening
+ * with a dash gets a space before it. No slogan: the banner's old title.
  */
-export function cityFacts(quests: QuestFactsSource[], factsOn: boolean): { time: string | null; distance: string | null } {
-  if (!factsOn) {
-    const labels = new Set(quests.map((q) => q.duration?.trim()).filter((l): l is string => !!l));
-    return { time: labels.size === 1 ? [...labels][0] : null, distance: null };
-  }
-  const minutes = quests.map((q) => q.duration_min).filter((v): v is number => typeof v === 'number');
-  const kms = quests.map((q) => q.distance_km).filter((v): v is number => typeof v === 'number');
-  return {
-    time: span(minutes, durationLabel, (lo, hi) => `≈ ${lo}–${hi} мин`),
-    distance: span(kms, distanceLabel, (lo, hi) => `${km(lo)}–${km(hi)} км`),
-  };
+export function heroSlogan(city: string | null, slogan?: string | null): string {
+  const s = slogan?.trim();
+  if (!s || !city) return heroTitle(city);
+  if (/^[,.:;!?…]/.test(s)) return `${city}${s}`;
+  if (/^[—–-]/.test(s)) return `${city} ${s}`;
+  return s;
 }
 
 /** One city of the catalog and how many quests it has. */

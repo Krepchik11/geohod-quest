@@ -11,10 +11,12 @@ import React from 'react';
  * is only a draft over it, and «Показать N квестов» promises exactly the number
  * of cards that appear. One apply = one history entry.
  */
-const { listQuestsMock, listGrantsMock, mineFlag, citiesFlag, ownedStatusMock, inProgressMock, shelfMock } = vi.hoisted(() => ({
+const { listQuestsMock, listGrantsMock, listCitiesMock, mineFlag, citiesFlag, factsFlag, ownedStatusMock, inProgressMock, shelfMock } = vi.hoisted(() => ({
   listQuestsMock: vi.fn(),
   listGrantsMock: vi.fn(),
+  listCitiesMock: vi.fn(),
   mineFlag: { on: false },
+  factsFlag: { on: false },
   citiesFlag: { on: false, soon: [] as string[] },
   ownedStatusMock: vi.fn(),
   inProgressMock: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('../../lib/api', () => ({
   api: {
     listQuests: listQuestsMock,
     listGrants: listGrantsMock,
+    listCities: listCitiesMock,
     me: vi.fn(async () => ({ role: 'player', display_name: null })),
     checkout: vi.fn(),
     getBundle: vi.fn(),
@@ -40,7 +43,7 @@ vi.mock('../../lib/identity', () => ({
 }));
 vi.mock('../../lib/download', () => ({ downloadBundle: vi.fn(async () => {}) }));
 vi.mock('../../lib/client-features', () => ({
-  useClientFeature: () => false,
+  useClientFeature: (key: string) => key === 'quest_facts' && factsFlag.on,
   useRememberedClientFeature: (key: string) =>
     (key === 'store_my_quests' && mineFlag.on) || (key === 'store_cities' && citiesFlag.on),
   useUniversalAnswer: () => null,
@@ -102,6 +105,9 @@ beforeEach(() => {
   mineFlag.on = false;
   citiesFlag.on = false;
   citiesFlag.soon = [];
+  factsFlag.on = false;
+  listCitiesMock.mockReset();
+  listCitiesMock.mockResolvedValue([]);
   ownedStatusMock.mockResolvedValue(FRESH_STATUS);
   inProgressMock.mockResolvedValue(null);
   shelfMock.mockReset();
@@ -260,15 +266,18 @@ describe('store_my_quests: the shop is the player\'s own shelf', () => {
     await waitFor(() => expect(cardNames()).toEqual(['Ярость Земуна']));
   });
 
-  it('the hero goes straight back into the quest in progress', async () => {
+  it('the banner leads back into the quest in progress, under «Выбрать квест»', async () => {
     inProgressMock.mockResolvedValue({ questId: 'c', name: 'Шифры Ниша', downloaded: true });
     await mountStore();
-    expect(await screen.findByRole('link', { name: 'Продолжить «Шифры Ниша»' })).toHaveAttribute('href', '/quest/c');
+    expect(await screen.findByRole('link', { name: 'Продолжить «Шифры Ниша» →' })).toHaveAttribute('href', '/quest/c');
+    expect(screen.getByRole('link', { name: 'Выбрать квест' })).toHaveAttribute('href', '#shop');
   });
 
-  it('with own quests and none running, the hero points down at them', async () => {
+  it('with own quests and none running, the button is still «Выбрать квест»', async () => {
     await mountStore();
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Мои квесты' })).toHaveAttribute('href', '#shop'));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Выбрать квест' })).toHaveAttribute('href', '#shop'));
+    expect(screen.queryByRole('link', { name: 'Мои квесты' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Продолжить/ })).toBeNull();
   });
 
   it('offline: only own quests from the device, under a note; nothing to buy', async () => {
@@ -310,7 +319,7 @@ describe('store_cities: a feed of cities, the picked one first (ТЗ, задач
   const runCounts = () =>
     Array.from(document.querySelectorAll('.store__count')).map((c) => c.textContent?.replace(/\s+/g, ' '));
 
-  it('opens on the busiest city, names it in the hero and runs on through the other cities', async () => {
+  it('opens on the busiest city, names it in the banner and runs on through the other cities', async () => {
     citiesFlag.on = true;
     listQuestsMock.mockResolvedValue(FOUR);
     render(<GeoQuestHome />);
@@ -320,9 +329,9 @@ describe('store_cities: a feed of cities, the picked one first (ТЗ, задач
     // Each city under its own heading and count: the busiest first, then by count (ties in ru order).
     expect(runTitles()).toEqual(['Квесты · Земун', 'Квесты в Белграде', 'Квесты · Ниш']);
     expect(runCounts()).toEqual(['2 квеста', '1 квест', '1 квест']);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Земун, о котором не расскажет экскурсовод');
+    expect(document.querySelector('.hero3__slogan')).toHaveTextContent('Земун, о котором не расскажет экскурсовод');
     const chips = screen.getByRole('group', { name: 'Город' });
-    expect(within(chips).getByRole('button', { name: 'Земун' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(chips).getByRole('button', { name: 'Земун 2' })).toHaveAttribute('aria-pressed', 'true');
     // Four quests: no filters, only the sort — and one toolbar for the whole feed on a desktop.
     expect(screen.queryByRole('button', { name: /^Фильтры/ })).toBeNull();
     expect(screen.getAllByRole('button', { name: /^Сортировка/ })).toHaveLength(1);
@@ -332,7 +341,7 @@ describe('store_cities: a feed of cities, the picked one first (ТЗ, задач
     citiesFlag.on = true;
     render(<GeoQuestHome />);
     await waitFor(() => expect(cards()).toHaveLength(3));
-    fireEvent.click(within(screen.getByRole('group', { name: 'Город' })).getByRole('button', { name: 'Ниш' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Город' })).getByRole('button', { name: 'Ниш 1' }));
     expect(cardNames()).toEqual(['Шифры Ниша', 'Ад Калемегдана', 'Ярость Земуна']);
     expect(runTitles()).toEqual(['Квесты · Ниш', 'Квесты в Белграде', 'Квесты · Земун']);
     expect(search()).toBe('?city=Ниш');
@@ -399,5 +408,82 @@ describe('store_cities: a feed of cities, the picked one first (ТЗ, задач
     expect(within(screen.getByRole('heading', { level: 2, name: 'Квесты' })).queryByRole('button')).toBeNull();
     expect(screen.queryByText('Скоро в новых городах')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Вместе веселее' })).toBeTruthy();
+  });
+});
+
+describe('the main banner shows the picked city (owner, 2026-10-10)', () => {
+  const FEED = [
+    ...CATALOG,
+    quest({ quest_id: 'd', name: 'Тайны Земуна', city: 'Земун', players: 30, rating_avg: 5, rating_count: 20 }),
+  ];
+  const slogan = () => document.querySelector('.hero3__slogan')?.textContent;
+  const photo = () => document.querySelector<HTMLImageElement>('.hero3__photo img');
+  const stats = () =>
+    Array.from(document.querySelectorAll('.hero3__stats li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim());
+
+  beforeEach(() => {
+    factsFlag.on = true;
+    citiesFlag.on = true;
+    listQuestsMock.mockResolvedValue(FEED);
+    listCitiesMock.mockResolvedValue([
+      { name: 'Земун', image: 'https://api.example/api/media/zemun', slogan: ', город на Дунае' },
+      { name: 'Белград', image: null, slogan: null },
+    ]);
+  });
+
+  it('one title, the city buttons busiest first, the city photo with its slogan and numbers', async () => {
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(slogan()).toBe('Земун, город на Дунае'));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Городские квесты в смартфоне');
+    const chips = within(screen.getByRole('group', { name: 'Город' })).getAllByRole('button');
+    expect(chips.map((c) => c.textContent)).toEqual(['Земун 2', 'Белград 1', 'Ниш 1']);
+    expect(chips[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(photo()).toHaveAttribute('src', 'https://api.example/api/media/zemun');
+    // 100 + 30 completions; both quests are 60 min / 5 km.
+    expect(stats()).toEqual(['2 квеста', '130 прохождений', '60 мин в среднем', '5 км пешком']);
+    expect(document.querySelector('.hero3__under')).toHaveTextContent('4,98 · 25 оценок');
+    expect(screen.getByRole('link', { name: 'Выбрать квест' })).toHaveAttribute('href', '#shop');
+  });
+
+  it('a button switches the photo, slogan and numbers; a city without a photo gets the plate', async () => {
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(slogan()).toBe('Земун, город на Дунае'));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Город' })).getByRole('button', { name: 'Белград 1' }));
+    await waitFor(() => expect(slogan()).toBe('Белград, о котором не расскажет экскурсовод'));
+    expect(photo()).toBeNull();
+    expect(document.querySelector('.hero3__photo')).toHaveClass('is-empty');
+    expect(stats()).toEqual(['1 квест', '100 прохождений', '60 мин в среднем', '5 км пешком']);
+    expect(document.querySelector('.hero3__under')).toHaveTextContent('4,8 · 32 оценки');
+    expect(search()).toBe('?city=Белград');
+  });
+
+  it('completions and ratings show always — none and one alike', async () => {
+    window.history.replaceState(null, '', '/?city=Ниш');
+    listQuestsMock.mockResolvedValue([
+      ...FEED.slice(0, 2),
+      quest({ quest_id: 'c', name: 'Шифры Ниша', city: 'Ниш', players: 0, rating_count: 1 }),
+    ]);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(stats()).toEqual(['1 квест', '0 прохождений', '60 мин в среднем', '5 км пешком']));
+    expect(document.querySelector('.hero3__proof')).toHaveTextContent('4,5 · 1 оценка');
+  });
+
+  it('a city none rated has no average to show', async () => {
+    window.history.replaceState(null, '', '/?city=Ниш');
+    listQuestsMock.mockResolvedValue([
+      ...FEED.slice(0, 2),
+      quest({ quest_id: 'c', name: 'Шифры Ниша', city: 'Ниш', rating_avg: 0, rating_count: 0 }),
+    ]);
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(stats()).toHaveLength(4));
+    expect(document.querySelector('.hero3__proof')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Как играть →' })).toHaveAttribute('href', '/rules');
+  });
+
+  it('without the city rows (offline, an old backend) the banner keeps the plate and the old title', async () => {
+    listCitiesMock.mockRejectedValue(new Error('offline'));
+    render(<GeoQuestHome />);
+    await waitFor(() => expect(slogan()).toBe('Земун, о котором не расскажет экскурсовод'));
+    expect(photo()).toBeNull();
   });
 });

@@ -29,37 +29,48 @@
 .city-chip.is-on { background:var(--navy); border-color:var(--navy); color:var(--white); }
 .city-chip small { font-size:12px; font-weight:400; color:var(--muted); }
 
-/* ---------- Hero (задача 13) ----------
-   One grid: on a phone everything stacks with the photo between the subtitle
-   and the facts; on a desktop the copy is the left column and the photo spans
-   the right one. */
-.hero2 { padding-top:8px; }
-.hero2__inner { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); column-gap:48px; align-items:start;
+/* ---------- Main banner by city (owner, 2026-10-10) ----------
+   One title for every city, the city buttons under it, the picked city's
+   photo with its slogan on top and its numbers at the bottom. Desktop: the
+   copy is the left column, centred against the photo by the empty rows. */
+.hero3 { padding-top:8px; }
+.hero3__inner { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 7fr); column-gap:48px;
+  grid-template-rows:1fr auto auto auto auto 1fr;
   grid-template-areas:
-    "over  photo"
+    ".     photo"
     "title photo"
-    "sub   photo"
-    "facts photo"
+    "chips photo"
     "cta   photo"
-    "under photo"; }
-.hero2__over { grid-area:over; margin:24px 0 0; font-family:var(--font-display); font-weight:500; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); }
-.hero2__title { grid-area:title; margin:10px 0 0; font-family:var(--font-display); font-weight:700; font-size:44px; line-height:48px; color:var(--navy); }
-.hero2__sub { grid-area:sub; margin:14px 0 0; font-size:17px; line-height:26px; color:var(--text); max-width:520px; }
-.hero2__photo { grid-area:photo; align-self:center; display:block; margin-top:24px; }
-.hero2__photo img { display:block; width:100%; height:380px; object-fit:cover; object-position:72% 40%; border-radius:var(--r-card); }
-.hero2__facts { grid-area:facts; display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 0; padding:0; list-style:none; }
-.hero2__facts li { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 13px; border-radius:17px; background:var(--white); border:1px solid var(--border-2); font-size:14px; font-weight:500; }
-.hero2__facts .ic { width:16px; height:16px; }
-.hero2__facts li.is-free { background:color-mix(in srgb, var(--green) 10%, var(--white)); border-color:color-mix(in srgb, var(--green) 30%, var(--white)); color:var(--green); }
-.hero2__cta { grid-area:cta; margin-top:22px; }
-.hero2__cta .btn { width:300px; }
-.hero2__cta .btn.hero__cta--continue { width:auto; min-width:300px; max-width:min(440px, 100%); }
-.hero2__under { grid-area:under; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; max-width:520px; margin:14px 0 0; font-size:14px; color:var(--muted-2); }
-.hero2__proof { display:inline-flex; align-items:center; gap:4px; }
-.hero2__proof .ic { width:16px; height:16px; }
-.hero2__proof b { color:var(--text); }
-.hero2__how { color:var(--blue); font-weight:600; }
-.hero2__how:hover { text-decoration:underline; }
+    "under photo"
+    ".     photo"; }
+.hero3__title { grid-area:title; margin:0; font-family:var(--font-display); font-weight:700; font-size:52px; line-height:58px; color:var(--navy); text-wrap:balance; }
+.hero3__chips { grid-area:chips; flex-wrap:wrap; margin-top:24px; padding:0; overflow:visible; }
+.hero3__photo { grid-area:photo; position:relative; height:440px; margin-top:24px; border-radius:var(--r-card); overflow:hidden; background:var(--navy); }
+.hero3__photo.is-empty { background:linear-gradient(140deg, color-mix(in srgb, var(--blue) 35%, var(--navy)), var(--navy) 70%); }
+.hero3__photo img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+/* Light skies and bright water: the words sit on navy washes, not on the picture. */
+.hero3__photo::before, .hero3__photo::after { content:""; position:absolute; left:0; right:0; z-index:1; height:50%; pointer-events:none; }
+.hero3__photo::before { top:0; background:linear-gradient(to bottom, color-mix(in srgb, var(--navy) 72%, transparent), transparent); }
+.hero3__photo::after { bottom:0; background:linear-gradient(to top, color-mix(in srgb, var(--navy) 78%, transparent), transparent); }
+.hero3__slogan { position:absolute; top:24px; left:28px; right:28px; z-index:2; margin:0; font-family:var(--font-serif); font-size:30px; line-height:38px; color:var(--white); text-wrap:balance;
+  text-shadow:0 1px 8px color-mix(in srgb, var(--ink) 35%, transparent);
+  display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+.hero3__stats { position:absolute; left:28px; right:28px; bottom:22px; z-index:2; display:flex; margin:0; padding:0; list-style:none; }
+.hero3__stats li { display:grid; gap:2px; padding:0 22px; border-left:1px solid color-mix(in srgb, var(--white) 35%, transparent); }
+.hero3__stats li:first-child { padding-left:0; border-left:0; }
+.hero3__stats li:last-child { padding-right:0; }
+.hero3__stats b { font-family:var(--font-display); font-weight:700; font-size:30px; line-height:34px; color:var(--white); white-space:nowrap; }
+.hero3__stats span { font-size:14px; line-height:18px; color:color-mix(in srgb, var(--white) 85%, transparent); white-space:nowrap; }
+.hero3__cta { grid-area:cta; display:flex; flex-direction:column; align-items:flex-start; gap:12px; margin-top:28px; }
+.hero3__cta .btn { width:300px; }
+.hero3__continue { color:var(--blue); font-weight:600; }
+.hero3__continue:hover { text-decoration:underline; }
+.hero3__proof { display:inline-flex; align-items:center; gap:4px; }
+.hero3__proof .ic { width:16px; height:16px; }
+.hero3__proof b { color:var(--text); }
+.hero3__how { color:var(--blue); font-weight:600; }
+.hero3__how:hover { text-decoration:underline; }
+.hero3__under { grid-area:under; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; max-width:520px; margin:16px 0 0; font-size:14px; color:var(--muted-2); }
 
 /* ---------- Shop head + grid (задачи 9, 34) ---------- */
 .store { padding-top:56px; }
@@ -114,21 +125,29 @@
 .store-block__cta .ic { width:18px; height:18px; }
 
 @media (max-width: 1023px) {
-  .hero2__title { font-size:36px; line-height:40px; }
-  .hero2__photo img { height:300px; }
+  .hero3__title { font-size:40px; line-height:44px; }
+  .hero3__photo { height:360px; }
+  .hero3__slogan { font-size:26px; line-height:32px; }
+  .hero3__stats b { font-size:26px; line-height:30px; }
+  .hero3__stats li { padding:0 16px; }
 }
 @media (max-width: 767px) {
-  .hero2__inner { grid-template-columns:minmax(0, 1fr); grid-template-areas:"over" "title" "sub" "photo" "facts" "cta" "under"; }
-  .hero2__over { margin-top:6px; font-size:12px; }
-  .hero2__title { font-size:30px; line-height:33px; }
-  .hero2__sub { font-size:16px; line-height:23px; }
-  .hero2__photo { margin-top:14px; }
-  .hero2__photo img { height:132px; }
-  .hero2__facts { margin-top:12px; }
-  .hero2__facts li { height:32px; font-size:13px; }
-  .hero2__cta { margin-top:14px; }
-  .hero2__cta .btn, .hero2__cta .btn.hero__cta--continue { width:100%; min-width:0; }
-  .hero2__under { margin-top:12px; font-size:13px; }
+  .hero3__inner { grid-template-columns:minmax(0, 1fr); grid-template-rows:none; grid-template-areas:"title" "chips" "photo" "cta" "under"; }
+  .hero3__title { margin-top:6px; font-size:30px; line-height:33px; }
+  /* One row to the screen's edge, swiped sideways; the last button fades out
+     there, so a city past the edge reads as «more». */
+  .hero3__chips { flex-wrap:nowrap; overflow-x:auto; margin:12px calc(-1 * var(--gutter)) 0 0; padding:2px var(--gutter) 2px 0;
+    -webkit-mask-image:linear-gradient(to right, black calc(100% - 32px), transparent); mask-image:linear-gradient(to right, black calc(100% - 32px), transparent); }
+  .hero3__photo { height:270px; margin-top:14px; }
+  .hero3__slogan { top:16px; left:16px; right:16px; font-size:21px; line-height:27px; }
+  .hero3__stats { left:16px; right:16px; bottom:14px; }
+  .hero3__stats li { padding:0 10px; }
+  .hero3__stats b { font-size:20px; line-height:24px; }
+  .hero3__stats span { font-size:12px; line-height:16px; }
+  .hero3__cta { margin-top:16px; align-items:stretch; }
+  .hero3__cta .btn { width:100%; }
+  .hero3__continue { text-align:center; }
+  .hero3__under { margin-top:12px; font-size:13px; }
   .store { padding-top:28px; }
   /* Pinned right under the header while the shop scrolls by, then it leaves
      with the section. Full-bleed, so no card peeks past its edges. */
@@ -209,3 +228,10 @@
 .pf-start { display:flex; flex-direction:column; gap:12px; }
 .pf-start__text { margin:0; font-size:14.5px; line-height:21px; color:var(--text); }
 .pf-start__login { display:flex; flex-direction:column; gap:10px; margin-top:4px; padding-top:12px; border-top:1px solid var(--border-2); }
+
+/* The smallest phones (360 px): four numbers still on one line over the photo. */
+@media (max-width: 380px) {
+  .hero3__stats li { padding:0 7px; }
+  .hero3__stats b { font-size:18px; line-height:22px; }
+  .hero3__stats span { font-size:11px; line-height:15px; }
+}
