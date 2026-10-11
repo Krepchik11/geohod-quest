@@ -22,11 +22,22 @@ pub enum Setting {
     /// `store_cities` feature flag is on — a comma-separated list (see
     /// [`soon_cities`]).
     SoonCities,
+    /// The Telegram channel the «Афиша» is read from — its public name
+    /// (`serbia_progulki`; `@name` and a t.me link are read too).
+    AfishaChannel,
+    /// Where the «Афиша» reader mails the admin: posts it could not read,
+    /// deleted posts, a channel page it cannot fetch.
+    AfishaAdminEmail,
 }
 
 impl Setting {
     /// Every registered setting.
-    pub const ALL: [Self; 2] = [Self::UniversalAnswer, Self::SoonCities];
+    pub const ALL: [Self; 4] = [
+        Self::UniversalAnswer,
+        Self::SoonCities,
+        Self::AfishaChannel,
+        Self::AfishaAdminEmail,
+    ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new setting —
     /// a stale row would silently become its value.
@@ -34,6 +45,8 @@ impl Setting {
         match self {
             Self::UniversalAnswer => "universal_answer",
             Self::SoonCities => "soon_cities",
+            Self::AfishaChannel => "afisha_channel",
+            Self::AfishaAdminEmail => "afisha_admin_email",
         }
     }
 

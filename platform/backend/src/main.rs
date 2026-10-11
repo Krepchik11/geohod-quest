@@ -25,6 +25,8 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod admin_stats;
+mod afisha;
+mod afisha_reader;
 mod auth;
 mod authz;
 mod backfill;
@@ -53,8 +55,8 @@ use std::sync::{Arc, Mutex};
 use config::AppConfig;
 use media::MediaStores;
 use store::{
-    AuthStores, CityStores, ConstructorStores, CouponStores, FactStores, FlagStores, GrantStores,
-    ModerationStores, PaymentStores, SettingsStores, Storage,
+    AfishaStores, AuthStores, CityStores, ConstructorStores, CouponStores, FactStores, FlagStores,
+    GrantStores, ModerationStores, PaymentStores, SettingsStores, Storage,
 };
 use yookassa::YookassaGateway;
 
@@ -86,6 +88,13 @@ pub struct AppState {
     /// What the admin saved per city — banner picture and slogan (the «Города»
     /// page; the city list itself is assembled in `cities.rs`).
     pub cities: CityStores,
+    /// «Афиша» announcements read from the Telegram channel (`afisha.rs`).
+    pub afisha: AfishaStores,
+    /// How the «Афиша» reader reaches the channel's public pages (the saved
+    /// pages under test).
+    pub afisha_http: afisha_reader::ChannelHttp,
+    /// The «Афиша» reader's lock and last result.
+    pub afisha_reader: Arc<afisha_reader::ReaderState>,
     /// YooKassa transport. `None` (credentials unset) → `provider=yookassa` is
     /// disabled (501, fail-closed); tests inject the scripted fake.
     pub yookassa: Option<YookassaGateway>,
@@ -139,6 +148,9 @@ fn app_state(config: AppConfig, media: MediaStores, storage: Storage) -> AppStat
         settings: storage.settings,
         moderation: storage.moderation,
         cities: storage.cities,
+        afisha: storage.afisha,
+        afisha_http: afisha_reader::ChannelHttp::for_build(),
+        afisha_reader: Arc::new(afisha_reader::ReaderState::default()),
         yookassa,
         mailer,
         rate_limiter: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -156,6 +168,7 @@ fn build_router(state: AppState) -> Router {
         .merge(handlers::payments::router())
         .merge(handlers::admin::router())
         .merge(handlers::auth::router())
+        .merge(handlers::afisha::router())
         .layer(TraceLayer::new_for_http())
         .layer(build_cors_layer(&state.config.cors_allowed_origins))
         .with_state(state)
@@ -304,6 +317,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(addr = %config.addr, build_id = %config.build_id, "starting geohod-backend");
 
+    // The «Афиша» timer reads the channel while the feature is on (afisha_reader.rs).
+    tokio::spawn(afisha_reader::run(state.clone()));
+
     let app = build_router(state).layer(tower_http::timeout::TimeoutLayer::with_status_code(
         StatusCode::REQUEST_TIMEOUT,
         Duration::from_secs(30),
@@ -434,6 +450,13 @@ mod tests {
             admin_stats::OverviewResponse,
             admin_stats::FunnelStep,
             admin_stats::QuestStatsResponse,
+            handlers::afisha::AfishaEventWire,
+            handlers::afisha::AdminAfishaWire,
+            handlers::afisha::AdminAfishaResponse,
+            handlers::afisha::AfishaSaveRequest,
+            handlers::afisha::AfishaVisibilityRequest,
+            handlers::afisha::AfishaImportRequest,
+            handlers::afisha::AfishaArchiveRequest,
         );
         let list = |dir: &std::path::Path| -> Vec<String> {
             let mut names: Vec<String> = std::fs::read_dir(dir)
@@ -5467,6 +5490,9 @@ mod tests {
             payment_rows: storage.payments,
             moderation: storage.moderation,
             cities: storage.cities,
+            afisha: storage.afisha,
+            afisha_http: afisha_reader::ChannelHttp::for_build(),
+            afisha_reader: Arc::new(afisha_reader::ReaderState::default()),
             flags: storage.flags,
             settings: storage.settings,
             yookassa: None,
@@ -6202,6 +6228,7 @@ mod tests {
         admin_user_management_list_and_roles = ids scenario_admin_users / "users";
         admin_surfaces_name_quests_from_the_authoring_registry = ids scenario_admin_quest_labels / "labels";
         admin_cities_list_rename_merge_delete = ids scenario_admin_cities / "cities";
+        afisha_reads_the_channel_and_serves_pages = ids scenario_afisha / "afisha";
         admin_coupons_crud_validation_and_gating = ids scenario_admin_coupons / "cpncrud";
         coupon_validate_previews_without_consuming = ids scenario_coupon_validate / "cpnprev";
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
@@ -6759,6 +6786,7 @@ mod tests {
                 ("quest_facts", true),
                 ("purchase_inline_login", true),
                 ("ctor_city_list", true),
+                ("afisha", true),
             ]
         );
     }
@@ -6783,6 +6811,7 @@ mod tests {
                     "quest_facts": false,
                     "purchase_inline_login": false,
                     "ctor_city_list": false,
+                    "afisha": false,
                 },
                 "universal_answer": null,
                 "soon_cities": [],
@@ -6810,6 +6839,7 @@ mod tests {
                 "quest_facts": false,
                 "purchase_inline_login": false,
                 "ctor_city_list": false,
+                "afisha": false,
             })
         );
     }
@@ -7910,5 +7940,400 @@ mod tests {
             let (st, _) = get_json_h(&app, uri, &admin).await;
             assert_eq!(st, StatusCode::BAD_REQUEST, "{uri}");
         }
+    }
+
+    // ---- «Афиша» (afisha.rs, afisha_reader.rs, handlers/afisha.rs) ---------
+
+    /// A channel name of its own per run: the Postgres suite shares one
+    /// database, and announcements are keyed by channel.
+    fn afisha_channel(ids: &Ids) -> String {
+        ids.quest
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .take(32)
+            .collect()
+    }
+
+    /// The admin list's entry for one post.
+    fn afisha_entry(page: &Value, post_id: i64) -> Option<Value> {
+        page["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .find(|e| e["post_id"] == post_id)
+            .cloned()
+    }
+
+    /// The «Афиша» end to end over the saved channel pages: off by default,
+    /// the admin's settings and buttons, the public pages, the click counter,
+    /// hand edits, hiding, the import by link and the archive.
+    async fn scenario_afisha(app: &Router, ids: &Ids) {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let channel = afisha_channel(ids);
+        let flag = |on: bool| {
+            post_json_h(
+                app,
+                "/api/admin/features/afisha",
+                json!({ "enabled": on }),
+                &admin,
+            )
+        };
+        // Off by default, and explicitly so for a shared database a previous
+        // run switched on.
+        assert_eq!(flag(false).await.0, StatusCode::OK);
+        for (key, value) in [
+            ("afisha_channel", format!("https://t.me/{channel}")),
+            ("afisha_admin_email", "admin@example.com".to_string()),
+        ] {
+            let uri = format!("/api/admin/settings/{key}");
+            let (st, _) = post_json_h(app, &uri, json!({ "value": value }), &admin).await;
+            assert_eq!(st, StatusCode::OK, "{key}");
+        }
+        let (st, _) = get_json(app, "/api/afisha").await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "off: the public sees nothing");
+
+        // The admin reads the channel before switching the pages on.
+        let (st, page) = post_json_h(app, "/api/admin/afisha/sync", json!({}), &admin).await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        assert_eq!(page["channel"], channel.as_str());
+        assert_eq!(page["admin_email"], "admin@example.com");
+        assert_eq!(page["enabled"], false);
+        assert_eq!(page["report"]["read"], 6);
+        assert_eq!(page["report"]["created"], 3);
+        let status = |page: &Value, id: i64| afisha_entry(page, id).map(|e| e["status"].clone());
+        assert_eq!(status(&page, 1110), Some(json!("published")));
+        assert_eq!(status(&page, 1111), Some(json!("published")));
+        assert_eq!(
+            status(&page, 1109),
+            Some(json!("untagged")),
+            "own event, no tag"
+        );
+        assert_eq!(
+            status(&page, 1112),
+            None,
+            "a partner post is no announcement"
+        );
+        assert_eq!(flag(true).await.0, StatusCode::OK);
+
+        // Both walks are public, as upcoming or past by the current date.
+        let mut public: Vec<i64> = Vec::new();
+        for when in ["upcoming", "past"] {
+            let (st, list) = get_json(app, &format!("/api/afisha?when={when}")).await;
+            assert_eq!(st, StatusCode::OK);
+            let ids = list.as_array().expect("list").iter();
+            public.extend(ids.map(|e| e["post_id"].as_i64().expect("id")));
+        }
+        public.sort_unstable();
+        assert_eq!(public, [1110, 1111]);
+        let (st, walk) = get_json(app, "/api/afisha/1110").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(walk["title"], "Прогуляемся к римской башне Врдничка кула");
+        assert_eq!(walk["kind"], "hiking");
+        assert_eq!(walk["city"], "Нови Сад");
+        assert_eq!(walk["city_slug"], "novi-sad");
+        assert_eq!(walk["starts_at"], "2026-10-11T12:45:00+02:00");
+        assert_eq!(walk["ends_at"], "2026-10-11T17:45:00+02:00");
+        assert_eq!(
+            walk["slug"],
+            "2026-10-11-progulyaemsya-k-rimskoy-bashne-vrdnichka-kula-1110"
+        );
+        assert_eq!(walk["post_url"], format!("https://t.me/{channel}/1110"));
+        assert!(
+            walk["image"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("http://test.local/api/media/")),
+            "the picture is copied to the site: {walk}"
+        );
+        let (st, _) = get_json(app, "/api/afisha/1109").await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "untagged stays off the site");
+
+        // «Записаться» counts the click on its way to the bot.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/afisha/1110/go")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            res.headers()[axum::http::header::LOCATION],
+            "https://t.me/geohodton_bot?startapp=AuBzZx4JZ00fgAgfWuYVL7E"
+        );
+        let (_, page) = get_json_h(app, "/api/admin/afisha", &admin).await;
+        let entry = afisha_entry(&page, 1110).expect("1110");
+        assert_eq!(entry["clicks"], 1);
+
+        // A hand correction sticks and shows; a malformed one is refused.
+        let mut fields = entry["fields"].clone();
+        fields["title"] = json!("Врдничка кула");
+        let save = |fields: &Value| {
+            let body = json!({ "post_id": 1110, "kind": "hiking", "fields": fields });
+            post_json_h(app, "/api/admin/afisha/save", body, &admin)
+        };
+        let (st, page) = save(&fields).await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        let entry = afisha_entry(&page, 1110).expect("1110");
+        assert_eq!(entry["edited"], json!(["title"]));
+        let (_, walk) = get_json(app, "/api/afisha/1110").await;
+        assert_eq!(walk["title"], "Врдничка кула");
+        fields["date"] = json!("11.10.2026");
+        assert_eq!(save(&fields).await.0, StatusCode::BAD_REQUEST);
+
+        // «Скрыть» takes the page off, «Показать» brings it back.
+        for (hidden, expected) in [(true, StatusCode::NOT_FOUND), (false, StatusCode::OK)] {
+            let body = json!({ "post_id": 1111, "hidden": hidden });
+            let (st, _) = post_json_h(app, "/api/admin/afisha/visibility", body, &admin).await;
+            assert_eq!(st, StatusCode::OK);
+            assert_eq!(
+                get_json(app, "/api/afisha/1111").await.0,
+                expected,
+                "{hidden}"
+            );
+        }
+
+        // Import by link: an old untagged group quest is filed as a quest.
+        let import = |url: String| {
+            post_json_h(
+                app,
+                "/api/admin/afisha/import",
+                json!({ "url": url }),
+                &admin,
+            )
+        };
+        let (st, page) = import(format!("https://t.me/{channel}/1087")).await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        assert_eq!(page["report"]["created"], 1);
+        let (st, quest) = get_json(app, "/api/afisha/1087").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(quest["kind"], "quest");
+        assert_eq!(quest["past"], true);
+        let foreign = import("https://t.me/other_channel/1087".into()).await;
+        assert_eq!(foreign.0, StatusCode::BAD_REQUEST);
+        let deleted = import(format!("https://t.me/{channel}/999")).await;
+        assert_eq!(deleted.0, StatusCode::NOT_FOUND);
+
+        // The archive pages back through the feed until there is no older page:
+        // the newest page holds nothing new, the older one three past walks.
+        let archive = |before: Value| {
+            post_json_h(
+                app,
+                "/api/admin/afisha/archive",
+                json!({ "before": before }),
+                &admin,
+            )
+        };
+        let (st, page) = archive(Value::Null).await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        assert_eq!(page["report"]["read"], 6);
+        assert_eq!(
+            page["report"]["created"], 0,
+            "partners and the digest stay out"
+        );
+        assert_eq!(page["report"]["next_before"], 1108);
+        let (_, page) = archive(json!(1108)).await;
+        assert_eq!(page["report"]["read"], 3);
+        assert_eq!(page["report"]["created"], 3);
+        assert_eq!(page["report"]["next_before"], 1078);
+        let (_, page) = archive(json!(1078)).await;
+        assert_eq!(page["report"]["read"], 0);
+        assert!(page["report"]["next_before"].is_null());
+        assert_eq!(get_json(app, "/api/afisha/1078").await.0, StatusCode::OK);
+
+        // Only an admin reaches the admin page; switching off hides it all.
+        assert_eq!(
+            get_json(app, "/api/admin/afisha").await.0,
+            StatusCode::FORBIDDEN
+        );
+        let sync = post_json(app, "/api/admin/afisha/sync", json!({})).await;
+        assert_eq!(sync.0, StatusCode::FORBIDDEN);
+        assert_eq!(flag(false).await.0, StatusCode::OK);
+        assert_eq!(
+            get_json(app, "/api/afisha/1110").await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    const AFISHA_CHANNEL: &str = "serbia_progulki";
+    const AFISHA_FEED: &str = include_str!("../fixtures/afisha/feed.html");
+
+    /// The saved feed with one post cut out: the way a deleted post leaves.
+    fn feed_without(html: &str, post_id: i64) -> String {
+        const WRAP: &str = "<div class=\"tgme_widget_message_wrap";
+        let at = html
+            .find(&format!("data-post=\"{AFISHA_CHANNEL}/{post_id}\""))
+            .expect("post on the page");
+        let start = html[..at].rfind(WRAP).expect("post start");
+        let end = html[at..].find(WRAP).map_or(html.len(), |n| at + n);
+        format!("{}{}", &html[..start], &html[end..])
+    }
+
+    /// State with the channel and the admin's mail set, the outbox recorded.
+    async fn afisha_state(config: AppConfig) -> (AppState, Outbox) {
+        let (state, outbox) = TestApp {
+            mail_recorder: true,
+            ..TestApp::default()
+        }
+        .state_with(config);
+        let set = [
+            (settings::Setting::AfishaChannel, AFISHA_CHANNEL),
+            (settings::Setting::AfishaAdminEmail, "admin@example.com"),
+        ];
+        for (setting, value) in set {
+            state
+                .settings
+                .set(setting.key(), value.to_string())
+                .await
+                .expect("setting");
+        }
+        (state, outbox.expect("recorder outbox"))
+    }
+
+    fn fake_channel(state: &AppState) -> Arc<afisha_reader::FakeChannel> {
+        match &state.afisha_http {
+            afisha_reader::ChannelHttp::Fake(fake) => fake.clone(),
+            afisha_reader::ChannelHttp::Live => panic!("a test never reads the real channel"),
+        }
+    }
+
+    async fn afisha_event(state: &AppState, post_id: i64) -> afisha::AfishaEvent {
+        state
+            .afisha
+            .get(AFISHA_CHANNEL, post_id)
+            .await
+            .expect("store")
+            .expect("stored")
+    }
+
+    fn mails_with_subject(outbox: &Outbox, subject: &str) -> Vec<mailer::OutgoingMail> {
+        outbox
+            .lock()
+            .expect("outbox")
+            .iter()
+            .filter(|m| m.subject == subject)
+            .cloned()
+            .collect()
+    }
+
+    /// The reader follows the channel: an edited post updates its page, a
+    /// deleted one comes off, a tagged post it cannot read becomes a draft,
+    /// and the admin hears about the last two. An unchanged page writes nothing.
+    #[tokio::test]
+    async fn afisha_follows_edited_deleted_and_unreadable_posts() {
+        let (state, outbox) = afisha_state(test_config()).await;
+        let first = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("first read");
+        assert_eq!((first.created, first.updated, first.removed), (3, 0, 0));
+        let again = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("same page");
+        assert_eq!((again.created, again.updated, again.removed), (0, 0, 0));
+
+        let edited = feed_without(AFISHA_FEED, 1111)
+            .replace("12:45", "13:15")
+            .replace(
+                "В субботу <b>10.10.2026</b> <b>гуляем по вечернему лесу на Фрушке горе</b>",
+                "В субботу <b>гуляем по вечернему лесу на Фрушке горе</b> #hiking",
+            );
+        *fake_channel(&state).feed.lock().expect("fake") = Some(edited);
+        let report = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("edited read");
+        assert_eq!((report.created, report.updated, report.removed), (0, 2, 1));
+        let walk = afisha_event(&state, 1110).await;
+        assert_eq!(walk.fields.time.as_deref(), Some("13:15"));
+        let deleted = afisha_event(&state, 1111).await;
+        assert_eq!(deleted.status, afisha::AfishaStatus::Removed);
+        let draft = afisha_event(&state, 1109).await;
+        assert_eq!(draft.status, afisha::AfishaStatus::Draft);
+        assert_eq!(draft.problem.as_deref(), Some("нет даты"));
+
+        let drafts = mails_with_subject(&outbox, "Афиша: пост не разобран");
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].to, "admin@example.com");
+        assert!(drafts[0].body.contains("Пост 1109") && drafts[0].body.contains("нет даты"));
+        let removed = mails_with_subject(&outbox, "Афиша: пост удалён из канала");
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].body.contains("Пост 1111"));
+    }
+
+    /// A channel page with no posts is a failed read; the second failure in a
+    /// row mails the admin, once.
+    #[tokio::test]
+    async fn afisha_mails_the_admin_once_when_the_channel_cannot_be_read() {
+        let (state, outbox) = afisha_state(test_config()).await;
+        *fake_channel(&state).feed.lock().expect("fake") = Some("<html></html>".into());
+        for _ in 0..3 {
+            let read = afisha_reader::sync_feed(&state, AFISHA_CHANNEL).await;
+            assert!(
+                afisha_reader::record(&state, AFISHA_CHANNEL, read)
+                    .await
+                    .is_err()
+            );
+        }
+        let failures = mails_with_subject(&outbox, "Афиша: не удаётся прочитать канал");
+        assert_eq!(failures.len(), 1);
+        assert!(state.afisha_reader.status().last_error.is_some());
+        *fake_channel(&state).feed.lock().expect("fake") = None;
+        let read = afisha_reader::sync_feed(&state, AFISHA_CHANNEL).await;
+        assert!(
+            afisha_reader::record(&state, AFISHA_CHANNEL, read)
+                .await
+                .is_ok()
+        );
+        assert_eq!(state.afisha_reader.status().last_error, None);
+    }
+
+    /// Upcoming announcements outside the feed are checked on their own post
+    /// pages: a deleted post takes its announcement off.
+    #[tokio::test]
+    async fn afisha_daily_check_takes_deleted_upcoming_posts_off() {
+        let (state, _) = afisha_state(test_config()).await;
+        afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        let mut walk = afisha_event(&state, 1110).await;
+        walk.fields.date = Some("2099-05-02".into());
+        state.afisha.upsert(walk).await.expect("store");
+        let fake = fake_channel(&state);
+        *fake.feed.lock().expect("fake") = Some(feed_without(AFISHA_FEED, 1110));
+        let report = afisha_reader::check_upcoming(&state, AFISHA_CHANNEL)
+            .await
+            .expect("check");
+        assert_eq!(report.removed, 1);
+        let removed = afisha_event(&state, 1110).await;
+        assert_eq!(removed.status, afisha::AfishaStatus::Removed);
+        let fetched = fake.fetched.lock().expect("fake").clone();
+        assert!(fetched.iter().any(|u| u.contains("/1110?embed=1")));
+    }
+
+    /// A public site tells search engines about every page that changed.
+    #[tokio::test]
+    async fn afisha_pings_indexnow_for_a_public_site() {
+        let config = AppConfig {
+            frontend_base: "https://quest.example".to_string(),
+            ..test_config()
+        };
+        let (state, _) = afisha_state(config).await;
+        afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        let pings = fake_channel(&state).pinged.lock().expect("fake").clone();
+        assert_eq!(pings.len(), 1);
+        assert_eq!(pings[0]["host"], "quest.example");
+        assert_eq!(pings[0]["key"], afisha_reader::INDEXNOW_KEY);
+        let urls: Vec<&str> = pings[0]["urlList"]
+            .as_array()
+            .expect("urls")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(urls.contains(&"https://quest.example/afisha"));
+        assert!(urls.iter().any(|u| u.ends_with("-1110")));
+        assert!(urls.iter().any(|u| u.ends_with("-1111")));
     }
 }
