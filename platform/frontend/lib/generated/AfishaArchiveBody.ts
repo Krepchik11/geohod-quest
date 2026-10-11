@@ -3,4 +3,8 @@
 /**
  * Body for one archive page: start before this post; `null` = the newest.
  */
-export type AfishaArchiveBody = { before: number | null, };
+export type AfishaArchiveBody = { before: number | null, 
+/**
+ * Only posts published from this year on; `null` = the whole channel.
+ */
+since_year: number | null, };

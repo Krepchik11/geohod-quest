@@ -59,7 +59,10 @@ const PAGE: AdminAfishaResponse = {
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
   mocks.page.mockResolvedValue(PAGE);
-  mocks.sync.mockResolvedValue({ ...PAGE, report: { read: 20, created: 2, updated: 1, removed: 0, next_before: null } });
+  mocks.sync.mockResolvedValue({
+    ...PAGE,
+    report: { read: 20, created: 2, updated: 1, removed: 0, images_stored: 0, images_reused: 0, next_before: null },
+  });
   mocks.visibility.mockResolvedValue(PAGE);
   mocks.save.mockResolvedValue(PAGE);
   mocks.setSetting.mockResolvedValue({ key: 'afisha_channel', value: 'serbia_progulki' });
@@ -110,14 +113,20 @@ describe('AdminAfishaPage', () => {
   it('loads the archive page by page until there is no next page', async () => {
     const report = (created: number, next: number | null) => ({
       ...PAGE,
-      report: { read: 20, created, updated: 0, removed: 0, next_before: next },
+      report: { read: 20, created, updated: 0, removed: 0, images_stored: created > 10 ? 9 : 2, images_reused: 4, next_before: next },
     });
     mocks.archive.mockResolvedValueOnce(report(20, 1050)).mockResolvedValueOnce(report(5, null));
     render(<AdminAfishaPage />);
     await rowOf('Врдничка кула');
+    fireEvent.change(screen.getByLabelText('Год'), { target: { value: '2026' } });
     fireEvent.click(screen.getByRole('button', { name: 'Загрузить архив' }));
-    expect(await screen.findByText('Архив загружен: 25 новых анонсов')).toBeTruthy();
-    expect(mocks.archive.mock.calls.map((c) => c[0])).toEqual([{ before: null }, { before: 1050 }]);
+    expect(
+      await screen.findByText('Архив за 2026 загружен: 25 новых анонсов; картинок сохранено 11, повторов не сохранено 8'),
+    ).toBeTruthy();
+    expect(mocks.archive.mock.calls.map((c) => c[0])).toEqual([
+      { before: null, since_year: 2026 },
+      { before: 1050, since_year: 2026 },
+    ]);
   });
 
   it('saves the channel and the mail', async () => {

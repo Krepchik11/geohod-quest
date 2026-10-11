@@ -268,6 +268,10 @@ pub struct AfishaEvent {
     pub edited: BTreeSet<String>,
     /// Media URL of the post's picture, copied into the site's media store.
     pub image: Option<String>,
+    /// What the picture looks like — how another post with the same photo
+    /// finds it and reuses it instead of storing a second copy.
+    #[serde(default)]
+    pub image_print: Option<ImagePrint>,
     pub register_url: Option<String>,
     /// The post text as last read: the same text again changes nothing.
     pub post_text: String,
@@ -291,6 +295,7 @@ impl AfishaEvent {
             fields: EventFields::default(),
             edited: BTreeSet::new(),
             image: None,
+            image_print: None,
             register_url: None,
             post_text: String::new(),
             posted_at: post.posted_at.clone(),
@@ -410,21 +415,82 @@ pub struct ChannelPost {
 }
 
 impl ChannelPost {
-    /// An announcement of the owner's template — «Место встречи» and a date
-    /// in its first line — and no partner's post: what the archive takes.
-    pub fn is_announcement(&self) -> bool {
-        let lower = self.text.to_lowercase();
-        let first_line = self.text.lines().map(str::trim).find(|l| !l.is_empty());
-        lower.contains("место встречи")
-            && !lower.contains("#партнерский")
-            && first_line.is_some_and(|line| find_date(line).is_some())
+    /// An announcement of the owner's own walk or game: it links the
+    /// registration mini app. What the archive import takes.
+    pub fn is_own_event(&self) -> bool {
+        register_link(&self.links).is_some()
     }
 
-    /// Worth storing at all: tagged, or announcing an own event (the link to
-    /// the registration bot) whose tag the admin may have forgotten.
+    /// Worth storing at all: tagged, or an own event whose tag the admin may
+    /// have forgotten.
     pub fn is_candidate(&self) -> bool {
-        AfishaKind::from_text(&self.text).is_some() || register_link(&self.links).is_some()
+        AfishaKind::from_text(&self.text).is_some() || self.is_own_event()
     }
+}
+
+/// How far two prints may differ and still be one picture. Telegram
+/// re-compresses a photo each time it is posted, which moves a few hash bits
+/// and a few grey levels everywhere; a badge drawn on the photo («NEW») moves
+/// a patch of the grey copy a lot, which the per-cell check catches even when
+/// the average barely moves.
+const PRINT_MAX_HASH_BITS: u32 = 4;
+const PRINT_MAX_MEAN_GREY_DIFF: usize = 6;
+const PRINT_CELL_GREY_DIFF: u8 = 32;
+const PRINT_MAX_CHANGED_CELLS: usize = 2;
+
+/// What a picture looks like, small enough to keep beside an announcement: a
+/// difference hash (9×8 grey copy, a bit per «left pixel brighter») to find a
+/// candidate, and a 16×16 grey copy to confirm it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImagePrint {
+    pub dhash: u64,
+    /// The 16×16 grey copy, hex.
+    pub thumb: String,
+}
+
+impl ImagePrint {
+    /// The print of an encoded picture; `None` when it does not decode.
+    pub fn of(bytes: &[u8]) -> Option<Self> {
+        use image::imageops::{FilterType, resize};
+        let grey = image::load_from_memory(bytes).ok()?.to_luma8();
+        let small = resize(&grey, 9, 8, FilterType::Triangle);
+        let mut dhash = 0u64;
+        for y in 0..8 {
+            for x in 0..8 {
+                let brighter = small.get_pixel(x, y)[0] > small.get_pixel(x + 1, y)[0];
+                dhash = (dhash << 1) | u64::from(brighter);
+            }
+        }
+        let thumb = resize(&grey, 16, 16, FilterType::Triangle);
+        Some(Self {
+            dhash,
+            thumb: hex::encode(thumb.as_raw()),
+        })
+    }
+
+    /// Whether both prints are of one picture (re-compressed, re-scaled).
+    pub fn same_picture(&self, other: &Self) -> bool {
+        if (self.dhash ^ other.dhash).count_ones() > PRINT_MAX_HASH_BITS {
+            return false;
+        }
+        let (Ok(a), Ok(b)) = (hex::decode(&self.thumb), hex::decode(&other.thumb)) else {
+            return false;
+        };
+        if a.is_empty() || a.len() != b.len() {
+            return false;
+        }
+        let diffs = a.iter().zip(&b).map(|(x, y)| x.abs_diff(*y));
+        let total: usize = diffs.clone().map(usize::from).sum();
+        let changed = diffs.filter(|d| *d > PRINT_CELL_GREY_DIFF).count();
+        total <= PRINT_MAX_MEAN_GREY_DIFF * a.len() && changed <= PRINT_MAX_CHANGED_CELLS
+    }
+}
+
+/// A post's picture as the media store holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PostImage {
+    pub url: String,
+    pub print: Option<ImagePrint>,
 }
 
 /// Every post on a channel page — the feed (`t.me/s/<channel>`), a search
@@ -1090,7 +1156,7 @@ fn truncate_slug(slug: &str, max: usize) -> &str {
 /// * `channel` - The channel the post was read from
 /// * `post` - The post as read
 /// * `known_cities` - The site's cities ([`parse_fields`])
-/// * `image` - The post's picture copied to the media store; `None` keeps the
+/// * `image` - The post's picture in the media store; `None` keeps the
 ///   stored one while the post still has a picture (a failed copy), and
 ///   clears it once the post has none
 pub fn apply_post(
@@ -1098,7 +1164,7 @@ pub fn apply_post(
     channel: &str,
     post: &ChannelPost,
     known_cities: &[String],
-    image: Option<String>,
+    image: Option<PostImage>,
 ) -> AfishaEvent {
     let mut event = existing
         .cloned()
@@ -1112,8 +1178,14 @@ pub fn apply_post(
     event.post_text = post.text.clone();
     event.posted_at = post.posted_at.clone();
     match (image, post.photo.is_some()) {
-        (Some(url), _) => event.image = Some(url),
-        (None, false) => event.image = None,
+        (Some(stored), _) => {
+            event.image = Some(stored.url);
+            event.image_print = stored.print;
+        }
+        (None, false) => {
+            event.image = None;
+            event.image_print = None;
+        }
         (None, true) => {}
     }
     if event.status == AfishaStatus::Removed {
@@ -1133,12 +1205,11 @@ pub fn file_imported(event: &mut AfishaEvent) {
     }
 }
 
-/// An old post from the archive import: a complete untagged post of a past
-/// event is filed like an imported one. An upcoming one still waits for its
-/// hashtag, and an incomplete one stays untagged — the archive makes no
-/// drafts for the admin to chase.
-pub fn file_archived(event: &mut AfishaEvent, now_secs: i64) {
-    if event.is_past(now_secs) && missing_fields(&event.fields).is_none() {
+/// A post from the archive import (an own event, no hashtag): a complete one
+/// is filed like an imported one; an incomplete one stays untagged — the
+/// archive makes no drafts for the admin to chase.
+pub fn file_archived(event: &mut AfishaEvent) {
+    if missing_fields(&event.fields).is_none() {
         file_imported(event);
     }
 }
@@ -1324,11 +1395,11 @@ mod tests {
             older.iter().map(|p| p.id).collect::<Vec<_>>(),
             [1078, 1079, 1081]
         );
-        assert!(older.iter().all(ChannelPost::is_announcement));
+        assert!(older.iter().all(ChannelPost::is_own_event));
         let feed = parse_channel_page(FEED);
         let taken: Vec<i64> = feed
             .iter()
-            .filter(|p| p.is_announcement())
+            .filter(|p| p.is_own_event())
             .map(|p| p.id)
             .collect();
         // 1108 and 1112 are partners' posts, 1113 the weekend digest.
@@ -1447,7 +1518,10 @@ mod tests {
             "ch",
             post(&posts, 1110),
             &cities(),
-            Some("/m/1".into()),
+            Some(PostImage {
+                url: "/m/1".into(),
+                print: None,
+            }),
         );
         assert_eq!(walk.status, AfishaStatus::Published);
         assert_eq!(walk.kind, Some(AfishaKind::Hiking));
@@ -1476,7 +1550,16 @@ mod tests {
     fn rereading_keeps_hand_edits_hidden_status_and_the_picture() {
         let posts = parse_channel_page(FEED);
         let walk = post(&posts, 1110);
-        let mut event = apply_post(None, "ch", walk, &cities(), Some("/m/1".into()));
+        let mut event = apply_post(
+            None,
+            "ch",
+            walk,
+            &cities(),
+            Some(PostImage {
+                url: "/m/1".into(),
+                print: None,
+            }),
+        );
         let mut fields = event.fields.clone();
         fields.title = "Врдничка кула".into();
         event
@@ -1549,25 +1632,62 @@ mod tests {
     }
 
     #[test]
-    fn archived_untagged_past_post_is_filed_under_a_guessed_kind() {
+    fn archived_untagged_post_is_filed_under_a_guessed_kind() {
         let posts = parse_channel_page(EMBED_1087);
         let mut event = apply_post(None, "ch", post(&posts, 1087), &cities(), None);
         assert_eq!(event.status, AfishaStatus::Untagged);
-        let now = parse_day("2026-10-11").expect("day");
-        file_archived(&mut event, now);
+        file_archived(&mut event);
         assert_eq!(event.kind, Some(AfishaKind::Quest));
         assert_eq!(event.status, AfishaStatus::Published);
-        assert!(event.is_past(now));
 
         let mut cityless = apply_post(None, "ch", post(&posts, 1087), &[], None);
         cityless.fields.city = None;
-        file_archived(&mut cityless, now);
+        file_archived(&mut cityless);
         assert_eq!(
             cityless.status,
             AfishaStatus::Untagged,
             "no draft from the archive"
         );
         assert_eq!(cityless.kind, None);
+    }
+
+    /// A test picture: soft diagonal bands, plus a bright corner badge when asked.
+    fn picture(badge: bool) -> image::RgbImage {
+        image::RgbImage::from_fn(160, 120, |x, y| {
+            if badge && x < 40 && y < 30 {
+                return image::Rgb([230, 20, 30]);
+            }
+            let v = ((x + 2 * y) % 120) as u8 * 2;
+            image::Rgb([v, v / 2 + 40, 255 - v])
+        })
+    }
+
+    fn jpeg(img: &image::RgbImage, quality: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+            .encode_image(img)
+            .expect("encode");
+        out
+    }
+
+    #[test]
+    fn a_recompressed_or_rescaled_photo_has_the_same_print() {
+        let original = picture(false);
+        let a = ImagePrint::of(&jpeg(&original, 92)).expect("decodes");
+        let b = ImagePrint::of(&jpeg(&original, 55)).expect("decodes");
+        let smaller =
+            image::imageops::resize(&original, 120, 90, image::imageops::FilterType::Triangle);
+        let c = ImagePrint::of(&jpeg(&smaller, 80)).expect("decodes");
+        assert_ne!(jpeg(&original, 92), jpeg(&original, 55), "different bytes");
+        assert!(a.same_picture(&b) && a.same_picture(&c));
+    }
+
+    #[test]
+    fn a_badge_drawn_on_the_photo_makes_another_picture() {
+        let plain = ImagePrint::of(&jpeg(&picture(false), 90)).expect("decodes");
+        let badged = ImagePrint::of(&jpeg(&picture(true), 90)).expect("decodes");
+        assert!(!plain.same_picture(&badged));
+        assert_eq!(ImagePrint::of(b"not a picture"), None);
     }
 
     #[test]
