@@ -7,7 +7,11 @@ import { vi } from 'vitest';
  *   vi.mock('../../../lib/api', async () => (await import('./chrome-mocks')).apiMock);
  */
 export const apiMock = {
-  api: { me: vi.fn(async () => ({ role: 'player', display_name: null })) },
+  api: {
+    me: vi.fn(async () => ({ role: 'player', display_name: null })),
+    // The header reads the client flags (the «Афиша» link): all off.
+    getPublicFeatures: vi.fn(async () => ({ flags: {}, universal_answer: null, soon_cities: [] })),
+  },
   ApiError: class extends Error {
     status = 0;
   },

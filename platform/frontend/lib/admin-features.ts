@@ -45,6 +45,7 @@ export const FEATURE_KEYS = [
   'quest_facts',
   'purchase_inline_login',
   'ctor_city_list',
+  'afisha',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -123,6 +124,12 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
     description:
       'В настройках квеста город выбирается из списка на странице «Города» админки, а не вводится вручную — ' +
       'у одного города одно написание. Новый город добавляет администратор.',
+  },
+  afisha: {
+    label: 'Афиша',
+    description:
+      'Страницы /afisha с анонсами групповых прогулок и квестов из Telegram-канала и пункт «Афиша» в шапке сайта; ' +
+      'сайт читает канал каждые 10 минут. Канал, почта для писем и сами анонсы — на вкладке «Афиша».',
   },
 };
 

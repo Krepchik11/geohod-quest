@@ -8,10 +8,14 @@ import React from 'react';
  * reviews + open feedback) — red when a new low rating is among them; anyone
  * else never triggers the admin read.
  */
-const { meMock, countsMock } = vi.hoisted(() => ({ meMock: vi.fn(), countsMock: vi.fn() }));
+const { meMock, countsMock, featuresMock } = vi.hoisted(() => ({
+  meMock: vi.fn(),
+  countsMock: vi.fn(),
+  featuresMock: vi.fn(),
+}));
 vi.mock('../../lib/use-me', () => ({ useMe: meMock }));
 vi.mock('../../lib/api', () => ({
-  api: { adminModerationCounts: countsMock },
+  api: { adminModerationCounts: countsMock, getPublicFeatures: featuresMock },
   hasAdminToken: () => false,
 }));
 vi.mock('../components/UserMenu', () => ({ default: () => null }));
@@ -19,6 +23,8 @@ vi.mock('../components/UserMenu', () => ({ default: () => null }));
 import SiteHeader from '../SiteHeader';
 
 beforeEach(() => {
+  featuresMock.mockReset();
+  featuresMock.mockResolvedValue({ flags: {}, universal_answer: null, soon_cities: [] });
   countsMock.mockReset();
   countsMock.mockResolvedValue({ reviews_new: 3, reviews_new_low: 1, feedback_open: 2 });
 });
@@ -36,5 +42,16 @@ describe('SiteHeader «админка» counter', () => {
     render(<SiteHeader />);
     await waitFor(() => expect(screen.queryByText('Админка')).toBeNull());
     expect(countsMock).not.toHaveBeenCalled();
+  });
+
+  it('links the «Афиша» once its flag is on', async () => {
+    // The flags are read once per module load: a fresh header module reads them anew.
+    vi.resetModules();
+    featuresMock.mockResolvedValue({ flags: { afisha: true }, universal_answer: null, soon_cities: [] });
+    meMock.mockReturnValue({ role: 'player', session: null, displayName: null });
+    const { default: FreshHeader } = await import('../SiteHeader');
+    render(<FreshHeader />);
+    const link = await screen.findByRole('link', { name: 'Афиша' });
+    expect(link.getAttribute('href')).toBe('/afisha');
   });
 });

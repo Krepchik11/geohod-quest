@@ -10,7 +10,12 @@
 
 import { authHeaders, type Session } from './identity';
 import type {
+  AdminAfishaResponse,
   AdminCityWire,
+  AfishaArchiveBody,
+  AfishaImportBody,
+  AfishaSaveBody,
+  AfishaVisibilityBody,
   AdminCouponWire,
   AdminFeatureWire,
   AdminFeedbackResponse,
@@ -346,6 +351,42 @@ export const api = {
     }),
   adminDeleteCity: (body: CityDeleteBody) =>
     apiFetch<AdminCityWire[]>('/api/admin/cities/delete', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+
+  // Admin «Афиша» (backend handlers/afisha.rs) — same gating. Every call
+  // answers with the whole page (settings, reader state, announcements); a
+  // read of the channel answers 409 while another one runs.
+  adminAfisha: () =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha', { headers: adminHeaders() }),
+  adminAfishaSave: (body: AfishaSaveBody) =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha/save', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminAfishaVisibility: (body: AfishaVisibilityBody) =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha/visibility', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminAfishaImport: (body: AfishaImportBody) =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha/import', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    }),
+  adminAfishaSync: () =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha/sync', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: '{}',
+    }),
+  adminAfishaArchive: (body: AfishaArchiveBody) =>
+    apiFetch<AdminAfishaResponse>('/api/admin/afisha/archive', {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify(body),

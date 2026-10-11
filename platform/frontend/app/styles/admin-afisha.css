@@ -1,0 +1,69 @@
+/*
+ * Admin «Афиша» screen (app/admin/afisha): two settings panels, status
+ * filters and the announcement list under the unified admin shell. Rows and
+ * the inline form follow admin-cities.css; scaffolding is the shared `ap-*`
+ * layer (styles/admin-page.css + app/admin/ui.tsx).
+ */
+
+.aaf-head-btn { flex:none; white-space:nowrap; }
+
+.aaf-panel {
+  margin-top: 20px;
+  padding: 20px 28px;
+  background: var(--white);
+  border: 1px solid var(--border-2);
+  border-radius: 16px;
+  display: grid;
+  gap: 12px;
+}
+.aaf-settings { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 16px; }
+.aaf-field { display:grid; gap:6px; flex:1 1 220px; min-width:0; }
+.aaf-field > span { font-size:13px; font-weight:600; color:var(--muted-2); }
+.aaf-field--wide { flex-basis:100%; grid-column:1 / -1; }
+.aaf-settings .aaf-field--wide { flex:1 1 320px; }
+.aaf-hint { font-size:13px; line-height:18px; color:var(--muted-2); }
+.aaf-error { color:var(--red); }
+.aaf-state { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; font-size:14px; color:var(--text); }
+.aaf-dot { width:10px; height:10px; border-radius:50%; background:var(--track); }
+.aaf-dot.is-on { background:var(--green); }
+
+.aaf-filters { display:flex; flex-wrap:wrap; gap:8px; margin-top:28px; }
+.aaf-filter { height:36px; padding:0 14px; border-radius:var(--r-pill); background:var(--white); box-shadow:inset 0 0 0 1px var(--border); font-size:14px; font-weight:600; color:var(--text); }
+.aaf-filter span { margin-left:4px; color:var(--muted); font-weight:500; }
+.aaf-filter.is-active { background:var(--blue-tint); box-shadow:inset 0 0 0 1px var(--blue); color:var(--blue); }
+
+.aaf-list {
+  margin-top: 16px;
+  background: var(--white);
+  border: 1px solid var(--border-2);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.aaf-empty { padding:36px 28px; font-size:14px; text-align:center; color:var(--muted-2); }
+
+.aaf-row { display:flex; align-items:center; gap:20px; padding:16px 28px; }
+.aaf-row + .aaf-row, .aaf-row + .aaf-form, .aaf-form + .aaf-row { border-top:1px solid var(--border-2); }
+.aaf-row__info { flex:1; min-width:0; }
+.aaf-row__top { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:12px; color:var(--muted-2); }
+.aaf-row__title { margin-top:4px; font-size:15px; font-weight:600; color:var(--ink); }
+.aaf-row__meta { margin-top:2px; font-size:13px; color:var(--muted-2); }
+.aaf-row__problem { margin-top:4px; font-size:13px; color:var(--amber); }
+.aaf-row__edited { margin-top:4px; font-size:12px; color:var(--muted); }
+.aaf-row__actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px 12px; }
+@media (max-width: 767px) {
+  .aaf-row { flex-direction:column; align-items:stretch; padding:16px; }
+  .aaf-row__actions { justify-content:flex-start; }
+  .aaf-panel { padding:16px; }
+}
+
+.aaf-status { padding:2px 8px; border-radius:var(--r-pill); font-weight:700; background:var(--bg-subtle); color:var(--muted-2); }
+.aaf-status--published { background:var(--blue-tint); color:var(--blue); }
+.aaf-status--draft { color:var(--amber); box-shadow:inset 0 0 0 1px var(--amber); background:var(--white); }
+.aaf-status--untagged { color:var(--text); box-shadow:inset 0 0 0 1px var(--border); background:var(--white); }
+.aaf-status--removed { color:var(--red); }
+
+.aaf-form { display:grid; gap:12px; padding:20px 28px; background:var(--bg-subtle); }
+.aaf-form__title { font-size:15px; font-weight:700; color:var(--ink); }
+.aaf-form__grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px 16px; }
+.aaf-form__actions { display:flex; justify-content:flex-end; gap:8px; }
+@media (max-width: 767px) { .aaf-form { padding:16px; } }
