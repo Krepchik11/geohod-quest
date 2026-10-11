@@ -7,7 +7,7 @@ import StoreToolbar from './components/StoreToolbar';
 import CityTitle from './components/CityTitle';
 import CityHero from './components/CityHero';
 import ShopSection, { HEADER_PIN_PX } from './components/ShopSection';
-import { PlayerQuote, SoonBlock, TogetherBlock } from './components/StoreBlocks';
+import { SoonBlock, TogetherBlock } from './components/StoreBlocks';
 import { api, type CityWire, type PublishedQuestWire } from '../lib/api';
 import { coverSrc } from '../lib/cover';
 import { useClientFeature, useRememberedClientFeature, useSoonCities } from '../lib/client-features';
@@ -215,16 +215,6 @@ export default function GeoQuestHome() {
     const f = catalogFacts(cityQuests);
     return f.avg == null ? null : { avg: f.avg, ratings: f.ratings };
   }, [cityQuests]);
-  /** The quote comes from the city's most-rated quest — the likeliest to have one. */
-  const quoteQuest = useMemo(
-    () =>
-      cityQuests.reduce<PublishedQuestWire | null>(
-        (best, q) => (!best || q.rating_count > best.rating_count ? q : best),
-        null,
-      ),
-    [cityQuests],
-  );
-
   useEffect(() => {
     let cancelled = false;
     api.listCities().then((rows) => { if (!cancelled) setCityRows(rows); }, () => {});
@@ -416,7 +406,6 @@ export default function GeoQuestHome() {
 
       {!offline && (
         <div className="container store-after">
-          {quoteQuest && <PlayerQuote questId={quoteQuest.quest_id} questName={quoteQuest.name} />}
           <TogetherBlock />
           {soon.length > 0 && <SoonBlock cities={soon} />}
         </div>

@@ -249,11 +249,13 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
    line whatever the card above it says (ТЗ, задача 6). */
 .quest-card__divider { margin:auto 0 0; border:0; border-top:1px solid rgba(18,41,71,.12); }
 .quest-card__footer { position:relative; z-index:2; margin-top:14px; display:flex; align-items:center; gap:10px; }
-.quest-card__price { margin-right:auto; font-weight:700; font-size:20px; white-space:nowrap; }
+/* One size for what the card footer says about the price: «500 ₽», «Бесплатно», «Куплен». */
+.quest-card__price { margin-right:auto; font-weight:700; font-size:18px; white-space:nowrap; }
 .quest-card__footer .btn.quest-card__cta { flex:none; width:auto; min-width:136px; height:44px; padding:0 22px; }
 .quest-card__owned-badge { position:absolute; left:12px; top:12px; display:inline-flex; align-items:center; height:24px; padding:0 10px; border-radius:12px; background:rgba(255,255,255,.92); color:var(--green); font-size:11px; font-weight:700; }
 .quest-card__players { margin-top:10px; font-size:13px; font-weight:500; }
-.quest-card__price--owned { color:var(--green); font-size:14px; }
+.quest-card__price--owned { color:var(--green); }
+.quest-card__price--note { font-size:14px; }
 .quest-card__error { margin-top:10px; font-size:12px; color:var(--red); }
 .quest-card__cta.is-pending { background:#9DB6F8; display:inline-flex; gap:8px; }
 /* store_my_quests: an own-quest card — state on the cover, ONE offline chip
@@ -271,6 +273,7 @@ select.input { appearance:none; cursor:pointer; padding-right:44px; background:v
 .quest-card__strip i { display:block; height:100%; background:var(--blue); transition:width .3s ease; }
 .quest-card__mine { margin-right:auto; font-size:13px; font-weight:600; line-height:1.25; color:var(--text); }
 .quest-card__mine--done { color:var(--green); }
+.quest-card__mine--owned { font-size:18px; font-weight:700; color:var(--green); }
 .quest-card__footer .btn.quest-card__cta--mine { min-width:120px; }
 .rm-sheet__text { font-size:14px; line-height:1.45; color:var(--text); }
 .rm-sheet__actions { display:flex; flex-wrap:wrap; gap:10px; }

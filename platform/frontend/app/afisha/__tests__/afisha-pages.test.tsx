@@ -101,11 +101,26 @@ describe('city page', () => {
 });
 
 describe('hub', () => {
-  it('lists upcoming announcements and links their cities', async () => {
+  it('lists upcoming announcements and jumps to the walks and the quests', async () => {
     render(await AfishaPage());
     expect(screen.getByRole('heading', { level: 1, name: 'Афиша' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Нови Сад' }).getAttribute('href')).toBe('/afisha/novi-sad');
+    const sections = screen.getByRole('navigation', { name: 'Разделы афиши' });
+    expect(within(sections).getByRole('link', { name: 'Прогулки' }).getAttribute('href')).toBe('#afi-walks');
+    expect(within(sections).getByRole('link', { name: 'Квесты' }).getAttribute('href')).toBe('#afi-quests');
+    expect(document.getElementById('afi-walks')?.textContent).toBe('Прогулки');
+    expect(document.getElementById('afi-quests')?.textContent).toBe('Групповые квесты');
     expect(screen.getByRole('heading', { level: 3, name: WALK.title })).toBeTruthy();
+  });
+
+  it('shows on a card the city, length, distance, difficulty and guide', async () => {
+    render(await AfishaPage());
+    const card = screen.getByRole('heading', { level: 3, name: WALK.title }).closest('article') as HTMLElement;
+    expect(within(card).getByText('Нови Сад')).toBeTruthy();
+    expect(within(card).getByText('5 часов')).toBeTruthy();
+    expect(within(card).getByText('7 км')).toBeTruthy();
+    expect(within(card).getByText('Сложность: средняя (дети от 10 лет)')).toBeTruthy();
+    expect(within(card).getByText('Ведущий: Марьяна Постриган')).toBeTruthy();
+    expect(within(card).queryByText(/Лиманский парк/)).toBeNull();
   });
 
   it('files walks and group quests under their own sections, each with its slogan', async () => {

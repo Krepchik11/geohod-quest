@@ -5,7 +5,7 @@ import SiteShell from '../components/SiteShell';
 import JsonLd from '../components/JsonLd';
 import { AfishaGrid, ChannelNote } from './parts';
 import { PartnerInvite, QUESTS_LEDE, QUESTS_SLOGAN, WALKS_LEDE, WALKS_SLOGAN, WalkRules } from './walks';
-import { citiesOf, cityPath, fetchAfisha, listJsonLd } from '../../lib/afisha';
+import { fetchAfisha, listJsonLd } from '../../lib/afisha';
 import { CLUB_CHANNEL } from '../../lib/contacts';
 
 /** Rendered on the server and refreshed every five minutes (lib/afisha REVALIDATE_SECONDS). */
@@ -31,7 +31,6 @@ const RECENT_PAST = 6;
 export default async function AfishaPage() {
   const [upcoming, past] = await Promise.all([fetchAfisha('upcoming'), fetchAfisha('past', RECENT_PAST)]);
   if (!upcoming || !past) notFound();
-  const cities = citiesOf([...upcoming, ...past]);
   const walks = upcoming.filter((e) => e.kind === 'hiking');
   const quests = upcoming.filter((e) => e.kind === 'quest');
   return (
@@ -44,15 +43,14 @@ export default async function AfishaPage() {
           <p className="afi-lede">
             Групповые прогулки, походы и квесты с организатором. Записаться можно в один клик — через Telegram.
           </p>
-          {cities.length > 0 && (
-            <nav className="afi-cities" aria-label="Города">
-              {cities.map((c) => (
-                <Link key={c.slug} className="afi-chip" href={cityPath(c.slug)}>
-                  {c.name}
-                </Link>
-              ))}
-            </nav>
-          )}
+          <nav className="afi-cities" aria-label="Разделы афиши">
+            <a className="afi-chip" href="#afi-walks">
+              Прогулки
+            </a>
+            <a className="afi-chip" href="#afi-quests">
+              Квесты
+            </a>
+          </nav>
         </header>
 
         <section className="afi-section" aria-labelledby="afi-walks">

@@ -228,7 +228,11 @@ export default function QuestCard({
         <div className="quest-card__footer">
           {own ? (
             <>
-              <span className={`quest-card__mine${status.state === 'done' ? ' quest-card__mine--done' : ''}`}>{mineLine}</span>
+              <span
+                className={`quest-card__mine${status.state === 'done' ? ' quest-card__mine--done' : ''}${mineLine === 'Куплен' ? ' quest-card__mine--owned' : ''}`}
+              >
+                {mineLine}
+              </span>
               {offline && !downloaded ? (
                 <button className="btn quest-card__cta quest-card__cta--mine" type="button" disabled>Нужна сеть</button>
               ) : offline ? (
@@ -242,7 +246,7 @@ export default function QuestCard({
             </>
           ) : owned ? (
             <>
-              <span className="quest-card__price quest-card__price--owned">
+              <span className={`quest-card__price quest-card__price--owned${justBought ? ' quest-card__price--note' : ''}`}>
                 {justBought ? '✓ Квест в «Моих квестах»' : 'Куплен'}
               </span>
               <Link className="btn quest-card__cta" href={playUrl}>Играть</Link>

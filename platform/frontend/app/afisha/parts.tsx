@@ -28,7 +28,26 @@ export function AfishaCard({ event }: { event: AfishaEventWire }) {
           <p className="afi-kind">{KIND_LABEL[event.kind]}</p>
           <h3 className="afi-card__title">{event.title}</h3>
           <p className="afi-card__when">{shortWhen(event)}</p>
-          <p className="afi-card__where">{event.place ? `${event.city}, ${event.place}` : event.city}</p>
+          <p className="afi-card__facts">
+            <span>
+              <span className="ic ic-pin" aria-hidden />
+              {event.city}
+            </span>
+            {event.duration && (
+              <span>
+                <span className="ic ic-clock" aria-hidden />
+                {event.duration}
+              </span>
+            )}
+            {event.distance && (
+              <span>
+                <span className="ic ic-route" aria-hidden />
+                {event.distance}
+              </span>
+            )}
+          </p>
+          {event.difficulty && <p className="afi-card__line">Сложность: {event.difficulty}</p>}
+          {event.guide && <p className="afi-card__line">Ведущий: {event.guide}</p>}
           {event.price && <p className="afi-card__price">{event.price}</p>}
         </div>
       </Link>
