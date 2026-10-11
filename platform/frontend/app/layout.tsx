@@ -3,6 +3,8 @@ import { Geist, Geist_Mono, Jost, Prata } from "next/font/google";
 import SwRegister from "./components/SwRegister";
 import { siteUrl } from "../lib/share";
 import Toaster from "./components/Toaster";
+import JsonLd from "./components/JsonLd";
+import { organizationJsonLd } from "../lib/seo";
 import "./globals.css"; // canonical design system (primitives live here)
 // §0 (v2): one token layer + canonical primitives live in globals.css
 // (.btn + variants/sizes, .input/.textarea, .link, .panel, .card). The legacy
@@ -24,6 +26,8 @@ import "./styles/admin-features.css";
 import "./styles/admin-cities.css";
 import "./styles/admin-stats.css";
 import "./styles/admin-moderation.css";
+import "./styles/afisha.css";
+import "./styles/admin-afisha.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -91,6 +95,7 @@ export default function RootLayout({
           the public pages, app/admin/layout.tsx (.ash-root) for the admin space.
           Per react.md: RSC shell thin, no shared mutable state, lang=ru from design. */}
       <body className="min-h-full flex flex-col">
+        <JsonLd data={organizationJsonLd()} />
         {children}
         <Toaster />
         <SwRegister />

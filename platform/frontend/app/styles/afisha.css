@@ -1,0 +1,56 @@
+/* «Афиша» — the public announcement pages (app/afisha). Tokens only (globals.css §0). */
+
+.afi { padding-block:40px 72px; }
+.afi-crumbs { margin-bottom:16px; font-size:14px; color:var(--muted-2); }
+.afi-crumbs a { color:var(--blue); font-weight:600; }
+
+.afi-head { max-width:760px; margin-bottom:8px; }
+.afi-title { margin-top:8px; font-size:36px; line-height:42px; }
+@media (max-width: 767px) { .afi-title { font-size:28px; line-height:34px; } }
+.afi-lede { margin-top:16px; font-size:17px; line-height:26px; color:var(--text); }
+
+.afi-cities { display:flex; flex-wrap:wrap; gap:8px; margin-top:24px; }
+.afi-chip { display:inline-flex; align-items:center; height:40px; padding:0 18px; border-radius:var(--r-pill); background:var(--white); box-shadow:inset 0 0 0 1px var(--border); color:var(--text); font-weight:600; font-size:14px; }
+.afi-chip:hover { box-shadow:inset 0 0 0 2px var(--blue); color:var(--blue); }
+
+.afi-section { margin-top:48px; }
+.afi-section__title { margin-bottom:20px; font-family:var(--font-display); font-weight:500; font-size:24px; line-height:30px; color:var(--navy); }
+.afi-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:24px; }
+
+.afi-card { overflow:hidden; }
+.afi-card.is-past .afi-card__photo { filter:grayscale(.6); }
+.afi-card__link { display:flex; flex-direction:column; height:100%; color:inherit; }
+.afi-card__photo { aspect-ratio:16 / 10; display:grid; place-items:center; overflow:hidden; background:var(--bg-subtle); }
+.afi-card__photo img { width:100%; height:100%; object-fit:cover; }
+.afi-card__mark { font-family:var(--font-display); font-size:44px; color:var(--muted); }
+.afi-card__body { display:flex; flex-direction:column; gap:6px; padding:16px 20px 20px; }
+.afi-card__title { font-size:18px; line-height:24px; font-weight:700; color:var(--navy); }
+.afi-card__link:hover .afi-card__title { color:var(--blue); }
+.afi-card__when { font-weight:600; color:var(--text); }
+.afi-card__where, .afi-card__price { font-size:14px; line-height:20px; color:var(--muted-2); }
+
+.afi-kind { font-size:12px; line-height:16px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--blue); }
+
+.afi-more { display:inline-block; margin-top:20px; color:var(--blue); font-weight:600; }
+.afi-note { margin-top:24px; color:var(--muted-2); line-height:24px; }
+.afi-note a, .afi-quests a, .afi-event__past a { color:var(--blue); font-weight:600; }
+.afi-quests { margin-top:56px; padding:24px 28px; }
+.afi-quests__title { margin-bottom:8px; font-family:var(--font-display); font-weight:500; font-size:20px; color:var(--navy); }
+.afi-quests p { line-height:24px; color:var(--text); }
+
+/* One announcement: the story on the left, the facts and «Записаться» on the right. */
+.afi-event__grid { display:grid; grid-template-columns:minmax(0, 1fr) 360px; gap:40px; align-items:start; }
+@media (max-width: 899px) { .afi-event__grid { grid-template-columns:1fr; gap:24px; } }
+.afi-event__title { margin-top:8px; font-size:34px; line-height:40px; }
+@media (max-width: 767px) { .afi-event__title { font-size:26px; line-height:32px; } }
+.afi-event__when { margin-top:12px; font-size:17px; line-height:24px; font-weight:600; color:var(--text); }
+.afi-event__photo { display:block; width:100%; margin-top:24px; border-radius:var(--r-card); }
+.afi-event__desc { display:grid; gap:12px; margin-top:24px; font-size:16px; line-height:26px; color:var(--text); }
+.afi-event__side { display:grid; gap:16px; padding:24px; position:sticky; top:24px; }
+@media (max-width: 899px) { .afi-event__side { position:static; } }
+.afi-facts { display:grid; gap:14px; margin:0; }
+.afi-facts dt { font-size:12px; line-height:16px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.afi-facts dd { margin:2px 0 0; line-height:22px; color:var(--text); }
+.afi-event__hint { margin-top:-8px; font-size:13px; text-align:center; color:var(--muted-2); }
+.afi-event__post { font-size:14px; font-weight:600; text-align:center; color:var(--blue); }
+.afi-event__past { line-height:22px; color:var(--muted-2); }

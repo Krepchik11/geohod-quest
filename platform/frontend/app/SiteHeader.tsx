@@ -5,6 +5,7 @@ import Link from 'next/link';
 import UserMenu from './components/UserMenu';
 import { hasAdminToken } from '../lib/api';
 import { SUPPORT_TG_URL } from '../lib/contacts';
+import { useClientFeature } from '../lib/client-features';
 import { useModerationCounts, waitingTotal } from '../lib/moderation-counts';
 import { canEditQuests, isAdmin } from '../lib/roles';
 import { useMe } from '../lib/use-me';
@@ -42,6 +43,7 @@ export default function SiteHeader() {
   const admin = isAdmin(role) || hasAdminToken();
   const counts = useModerationCounts(admin);
   const waiting = waitingTotal(counts);
+  const afishaOn = useClientFeature('afisha');
 
   // Click-outside closes the panel, as in UserMenu.
   useEffect(() => {
@@ -85,6 +87,7 @@ export default function SiteHeader() {
         {/* Three sections, three destinations (ТЗ, задача 12): the logo is the
             way home, and support is the Telegram chat the footer also links. */}
         <Link href="/#shop">Квесты</Link>
+        {afishaOn && <Link href="/afisha">Афиша</Link>}
         <Link href="/rules">Как играть</Link>
         <a href={SUPPORT_TG_URL} target="_blank" rel="noopener">Поддержка</a>
         {(canEditQuests(role) || hasAdminToken()) && (

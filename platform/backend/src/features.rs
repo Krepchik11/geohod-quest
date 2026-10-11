@@ -57,11 +57,15 @@ pub enum Feature {
     /// Constructor: the quest city is picked from the admin's city list
     /// (the «Города» page) instead of typed, so one city has one spelling.
     CtorCityList,
+    /// «Афиша»: the public pages of the announcements read from the Telegram
+    /// channel, the «Афиша» link in the site header, and the reader's timer
+    /// (the channel is the `afisha_channel` runtime setting).
+    Afisha,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -74,6 +78,7 @@ impl Feature {
         Self::QuestFacts,
         Self::PurchaseInlineLogin,
         Self::CtorCityList,
+        Self::Afisha,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -92,6 +97,7 @@ impl Feature {
             Self::QuestFacts => "quest_facts",
             Self::PurchaseInlineLogin => "purchase_inline_login",
             Self::CtorCityList => "ctor_city_list",
+            Self::Afisha => "afisha",
         }
     }
 
@@ -110,6 +116,7 @@ impl Feature {
                 | Self::QuestFacts
                 | Self::PurchaseInlineLogin
                 | Self::CtorCityList
+                | Self::Afisha
         )
     }
 
@@ -165,6 +172,9 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         Feature::PurchaseInlineLogin => true,
         // A dropdown over data the server already serves.
         Feature::CtorCityList => true,
+        // Reads a public web page — nothing to configure but the channel,
+        // which is a runtime setting the admin page asks for.
+        Feature::Afisha => true,
     }
 }
 
@@ -250,6 +260,7 @@ mod tests {
             "store_cities",
             "quest_facts",
             "purchase_inline_login",
+            "afisha",
         ] {
             let f = Feature::parse(key).expect("registered");
             assert!(f.client_visible(), "{key} must be client visible");

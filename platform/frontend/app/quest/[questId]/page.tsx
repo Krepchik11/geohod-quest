@@ -11,7 +11,11 @@ import { parseTheme, themeVars, type QuestTheme } from '../../../lib/quest-theme
 /** §5: the player links the per-quest manifest so installs scope to this quest. */
 export async function generateMetadata({ params }: { params: Promise<{ questId: string }> }) {
   const { questId } = await params;
-  return { manifest: `/quest/${encodeURIComponent(questId)}/manifest.webmanifest` };
+  // The player itself is no page to find: search engines get the product page.
+  return {
+    manifest: `/quest/${encodeURIComponent(questId)}/manifest.webmanifest`,
+    robots: { index: false },
+  };
 }
 
 export const viewport: Viewport = {

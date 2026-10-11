@@ -13,6 +13,7 @@
 
 use sqlx::{PgPool, Row};
 
+use crate::afisha::AfishaEvent;
 use crate::auth::{UserAccount, UserRecord};
 use crate::coupons::{Coupon, CouponRedemption, CouponUsage, Discount};
 use crate::errors::AppError;
@@ -23,10 +24,10 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::store::{
-    AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, CityRecord, CityStore,
-    ConstructorQuest, ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore, FlagStore,
-    GrantStore, KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes, QuestLabel,
-    ReviewCheck, now_rfc3339, now_secs,
+    AfishaStore, AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, CityRecord,
+    CityStore, ConstructorQuest, ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore,
+    FlagStore, GrantStore, KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes,
+    QuestLabel, ReviewCheck, now_rfc3339, now_secs,
 };
 
 /// The `AND author_id = $n` half of a guarded per-quest statement, or nothing.
@@ -2936,6 +2937,87 @@ impl CityStore for PgCityStore {
             .execute(&self.pool)
             .await
             .map_err(internal)?;
+        Ok(res.rows_affected() > 0)
+    }
+}
+
+/// «Афиша» announcements on PostgreSQL (`afisha_events`, migration 0012):
+/// the announcement is the JSON body, the click counter a column of its own.
+#[derive(Clone, Debug)]
+pub struct PgAfishaStore {
+    pool: PgPool,
+}
+
+impl PgAfishaStore {
+    /// Wrap an existing pool (migrations are run by the caller at startup).
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+/// One `afisha_events` row as the announcement it stores.
+fn afisha_row(row: &sqlx::postgres::PgRow) -> Result<AfishaEvent, AppError> {
+    let body: serde_json::Value = row.try_get("body").map_err(internal)?;
+    let clicks: i64 = row.try_get("clicks").map_err(internal)?;
+    let mut event: AfishaEvent = serde_json::from_value(body).map_err(internal)?;
+    event.clicks = u64::try_from(clicks).unwrap_or_default();
+    Ok(event)
+}
+
+#[async_trait::async_trait]
+impl AfishaStore for PgAfishaStore {
+    /// See [`crate::store::InMemoryAfishaStore::list`].
+    async fn list(&self, channel: &str) -> Result<Vec<AfishaEvent>, AppError> {
+        let rows = sqlx::query("SELECT body, clicks FROM afisha_events WHERE channel = $1")
+            .bind(channel)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(internal)?;
+        rows.iter().map(afisha_row).collect()
+    }
+
+    /// See [`crate::store::InMemoryAfishaStore::get`].
+    async fn get(&self, channel: &str, post_id: i64) -> Result<Option<AfishaEvent>, AppError> {
+        let row = sqlx::query(
+            "SELECT body, clicks FROM afisha_events WHERE channel = $1 AND post_id = $2",
+        )
+        .bind(channel)
+        .bind(post_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.as_ref().map(afisha_row).transpose()
+    }
+
+    /// See [`crate::store::InMemoryAfishaStore::upsert`].
+    async fn upsert(&self, event: AfishaEvent) -> Result<(), AppError> {
+        let body = serde_json::to_value(&event).map_err(internal)?;
+        sqlx::query(
+            "INSERT INTO afisha_events (channel, post_id, body, updated_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (channel, post_id) DO UPDATE
+             SET body = EXCLUDED.body, updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&event.channel)
+        .bind(event.post_id)
+        .bind(body)
+        .bind(now_rfc3339())
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryAfishaStore::add_click`].
+    async fn add_click(&self, channel: &str, post_id: i64) -> Result<bool, AppError> {
+        let res = sqlx::query(
+            "UPDATE afisha_events SET clicks = clicks + 1 WHERE channel = $1 AND post_id = $2",
+        )
+        .bind(channel)
+        .bind(post_id)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
         Ok(res.rows_affected() > 0)
     }
 }

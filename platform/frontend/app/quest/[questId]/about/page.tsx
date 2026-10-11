@@ -1,8 +1,24 @@
 import type { Metadata } from 'next';
 import SiteShell from '../../../components/SiteShell';
+import JsonLd from '../../../components/JsonLd';
 import { API_BASE, type ProductPageWire } from '../../../../lib/api';
+import { productJsonLd } from '../../../../lib/seo';
 import { questShareUrl } from '../../../../lib/share';
 import AboutClient from './AboutClient';
+
+/**
+ * The product payload for the server render — the metadata and the page's
+ * structured data share this one request (Next dedupes the same fetch within a
+ * render). `null` when the API cannot serve it: the page then degrades to the
+ * generic tags and loads its own data client-side anyway.
+ */
+async function loadProduct(questId: string): Promise<ProductPageWire | null> {
+  const res = await fetch(`${API_BASE}/api/quests/${encodeURIComponent(questId)}`, {
+    next: { revalidate: 300 },
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return (await res.json()) as ProductPageWire;
+}
 
 /** Fallback description when the author left the store description blank. */
 function fallbackDescription(p: ProductPageWire): string {
@@ -29,13 +45,10 @@ export async function generateMetadata({
   const { questId } = await params;
   const manifest = `/quest/${encodeURIComponent(questId)}/manifest.webmanifest`;
 
-  const res = await fetch(`${API_BASE}/api/quests/${encodeURIComponent(questId)}`, {
-    next: { revalidate: 300 },
-  }).catch(() => null);
-  if (!res || !res.ok) {
+  const p = await loadProduct(questId);
+  if (!p) {
     return { title: 'О квесте — GEOHOD QUEST', manifest };
   }
-  const p = (await res.json()) as ProductPageWire;
   const title = `${p.name} — GEOHOD QUEST`;
   const description = p.description?.trim() || fallbackDescription(p);
   const url = questShareUrl(questId);
@@ -82,8 +95,11 @@ export default async function QuestAboutPage({
   params: Promise<{ questId: string }>;
 }) {
   const { questId } = await params;
+  // Structured data for crawlers: the page body itself renders client-side.
+  const product = await loadProduct(questId);
   return (
     <SiteShell>
+      {product && <JsonLd data={productJsonLd(product)} />}
       <AboutClient questId={questId} />
     </SiteShell>
   );

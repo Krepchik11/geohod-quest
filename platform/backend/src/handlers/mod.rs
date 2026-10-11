@@ -3,6 +3,7 @@
 //! merges them and applies the shared middleware.
 
 pub mod admin;
+pub mod afisha;
 pub mod auth;
 pub mod constructor;
 pub mod media;

@@ -25,6 +25,7 @@ const TABS = [
   { key: 'coupons', label: 'Купоны', href: '/admin/coupons' },
   { key: 'features', label: 'Функции', href: '/admin/features' },
   { key: 'cities', label: 'Города', href: '/admin/cities' },
+  { key: 'afisha', label: 'Афиша', href: '/admin/afisha' },
   { key: 'stats', label: 'Статистика', href: '/admin/stats' },
   { key: 'reviews', label: 'Отзывы', href: '/admin/reviews' },
   { key: 'feedback', label: 'Обратная связь', href: '/admin/feedback' },

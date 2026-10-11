@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::afisha::AfishaEvent;
 use crate::auth::{UserAccount, UserRecord};
 use crate::coupons::{Coupon, CouponRedemption, CouponUsage, check_redeemable, discount_amount};
 use crate::errors::AppError;
@@ -27,8 +28,8 @@ use crate::facts::{
 use crate::grants::{AccessGrant, GrantSource, create_grant_idemp};
 use crate::payments::{PendingPayment, PendingStatus};
 use crate::pg_store::{
-    PgAuthStore, PgCityStore, PgConstructorStore, PgCouponStore, PgFactStore, PgFlagStore,
-    PgGrantStore, PgModerationStore, PgPaymentStore, PgSettingsStore,
+    PgAfishaStore, PgAuthStore, PgCityStore, PgConstructorStore, PgCouponStore, PgFactStore,
+    PgFlagStore, PgGrantStore, PgModerationStore, PgPaymentStore, PgSettingsStore,
 };
 
 /// Unix seconds (0 on clock error; informational only).
@@ -3426,6 +3427,87 @@ impl CityStore for std::sync::Mutex<InMemoryCityStore> {
     }
 }
 
+/// In-memory «Афиша» announcements, keyed by channel and post number.
+#[derive(Debug, Default)]
+pub struct InMemoryAfishaStore {
+    rows: HashMap<(String, i64), AfishaEvent>,
+}
+
+impl InMemoryAfishaStore {
+    /// A fresh store holds no announcements.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every announcement read from `channel`, in no particular order.
+    pub fn list(&self, channel: &str) -> Vec<AfishaEvent> {
+        self.rows
+            .values()
+            .filter(|e| e.channel == channel)
+            .cloned()
+            .collect()
+    }
+
+    /// The announcement of one post.
+    pub fn get(&self, channel: &str, post_id: i64) -> Option<AfishaEvent> {
+        self.rows.get(&(channel.to_string(), post_id)).cloned()
+    }
+
+    /// Insert or replace the announcement; its click counter stays as stored.
+    pub fn upsert(&mut self, event: AfishaEvent) {
+        let key = (event.channel.clone(), event.post_id);
+        let clicks = self.rows.get(&key).map_or(0, |e| e.clicks);
+        self.rows.insert(key, AfishaEvent { clicks, ..event });
+    }
+
+    /// Count one click on «Записаться»; `false` when there is no such post.
+    pub fn add_click(&mut self, channel: &str, post_id: i64) -> bool {
+        self.rows
+            .get_mut(&(channel.to_string(), post_id))
+            .map(|e| e.clicks += 1)
+            .is_some()
+    }
+}
+
+/// «Афиша» storage backend (see [`FactStore`] for the pattern).
+#[async_trait::async_trait]
+pub trait AfishaStore: Send + Sync {
+    /// See [`InMemoryAfishaStore::list`].
+    async fn list(&self, channel: &str) -> Result<Vec<AfishaEvent>, AppError>;
+
+    /// See [`InMemoryAfishaStore::get`].
+    async fn get(&self, channel: &str, post_id: i64) -> Result<Option<AfishaEvent>, AppError>;
+
+    /// See [`InMemoryAfishaStore::upsert`].
+    async fn upsert(&self, event: AfishaEvent) -> Result<(), AppError>;
+
+    /// See [`InMemoryAfishaStore::add_click`].
+    async fn add_click(&self, channel: &str, post_id: i64) -> Result<bool, AppError>;
+}
+
+/// Shared «Афиша» storage handle.
+pub type AfishaStores = std::sync::Arc<dyn AfishaStore>;
+
+#[async_trait::async_trait]
+impl AfishaStore for std::sync::Mutex<InMemoryAfishaStore> {
+    async fn list(&self, channel: &str) -> Result<Vec<AfishaEvent>, AppError> {
+        Ok(lock(self, "afisha")?.list(channel))
+    }
+
+    async fn get(&self, channel: &str, post_id: i64) -> Result<Option<AfishaEvent>, AppError> {
+        Ok(lock(self, "afisha")?.get(channel, post_id))
+    }
+
+    async fn upsert(&self, event: AfishaEvent) -> Result<(), AppError> {
+        lock(self, "afisha")?.upsert(event);
+        Ok(())
+    }
+
+    async fn add_click(&self, channel: &str, post_id: i64) -> Result<bool, AppError> {
+        Ok(lock(self, "afisha")?.add_click(channel, post_id))
+    }
+}
+
 /// One «Проверено» mark on a `(user_id, quest_id)` review: the review version it
 /// covers (`through` — the rating's `rated_at` the admin saw), when, and by whom.
 /// The review reads unchecked again once its `rated_at` moves past `through`.
@@ -3674,6 +3756,7 @@ pub struct Storage {
     pub settings: SettingsStores,
     pub moderation: ModerationStores,
     pub cities: CityStores,
+    pub afisha: AfishaStores,
 }
 
 impl Storage {
@@ -3691,6 +3774,7 @@ impl Storage {
             settings: Arc::new(Mutex::new(InMemorySettingsStore::new())),
             moderation: Arc::new(Mutex::new(InMemoryModerationStore::new())),
             cities: Arc::new(Mutex::new(InMemoryCityStore::new())),
+            afisha: Arc::new(Mutex::new(InMemoryAfishaStore::new())),
         }
     }
 
@@ -3707,7 +3791,8 @@ impl Storage {
             flags: Arc::new(PgFlagStore::new(pool.clone())),
             settings: Arc::new(PgSettingsStore::new(pool.clone())),
             moderation: Arc::new(PgModerationStore::new(pool.clone())),
-            cities: Arc::new(PgCityStore::new(pool)),
+            cities: Arc::new(PgCityStore::new(pool.clone())),
+            afisha: Arc::new(PgAfishaStore::new(pool)),
         }
     }
 }
