@@ -54,3 +54,34 @@
 .afi-event__hint { margin-top:-8px; font-size:13px; text-align:center; color:var(--muted-2); }
 .afi-event__post { font-size:14px; font-weight:600; text-align:center; color:var(--blue); }
 .afi-event__past { line-height:22px; color:var(--muted-2); }
+
+/* Walks: the slogan under a section heading, the rules, «Перед прогулкой», the organizers' invitation. */
+.afi-slogan { margin:-12px 0 8px; font-family:var(--font-serif); font-size:20px; line-height:28px; color:var(--navy); }
+.afi-head .afi-slogan { margin:12px 0 0; }
+.afi-section__lede { max-width:760px; margin-bottom:24px; font-size:16px; line-height:24px; color:var(--text); }
+.afi-section__lede a { color:var(--blue); font-weight:600; }
+
+.afi-rules { margin-top:40px; }
+.afi-rules__title { margin-bottom:16px; font-size:18px; line-height:24px; font-weight:700; color:var(--navy); }
+.afi-rules__grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:16px; margin:0; padding:0; list-style:none; }
+.afi-rule { padding:20px; border-radius:var(--r-card); background:var(--white); box-shadow:inset 0 0 0 1px var(--border-2); }
+.afi-rule__title { margin:0 0 6px; font-size:15px; line-height:20px; font-weight:700; color:var(--navy); }
+.afi-rule p { font-size:14px; line-height:21px; color:var(--text); }
+.afi-links { display:flex; flex-wrap:wrap; gap:8px 24px; margin-top:16px; }
+.afi-links a { color:var(--blue); font-weight:600; font-size:14px; }
+
+.afi-before { margin-top:32px; padding:20px 24px; border-radius:var(--r-card); background:var(--white); box-shadow:inset 0 0 0 1px var(--border-2); }
+.afi-before__title { margin-bottom:10px; font-size:18px; line-height:24px; font-weight:700; color:var(--navy); }
+.afi-before ul { display:grid; gap:6px; margin:0; padding-left:20px; list-style:disc; font-size:15px; line-height:22px; color:var(--text); }
+
+.afi-partner { margin-top:56px; padding:32px; }
+.afi-partner__title { margin-top:8px; font-family:var(--font-serif); font-weight:400; font-size:28px; line-height:34px; color:var(--navy); }
+.afi-partner__lede { max-width:760px; margin-top:12px; font-size:16px; line-height:24px; color:var(--text); }
+.afi-partner__steps { display:grid; gap:10px; max-width:760px; margin:20px 0 0; padding-left:22px; list-style:decimal; font-size:15px; line-height:22px; color:var(--text); }
+.afi-partner__actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; margin-top:24px; }
+.afi-partner__actions a:not(.btn) { color:var(--blue); font-weight:600; }
+.afi-partner__note { margin-top:12px; font-size:13px; color:var(--muted-2); }
+@media (max-width: 767px) {
+  .afi-partner { padding:24px 20px; }
+  .afi-partner__title { font-size:24px; line-height:30px; }
+}

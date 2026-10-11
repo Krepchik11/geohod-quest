@@ -46,11 +46,15 @@ export function AfishaGrid({ events }: { events: readonly AfishaEventWire[] }) {
   );
 }
 
-/** Where the announcements come from, and where to follow them. */
-export function ChannelNote({ empty = false }: { empty?: boolean }) {
+/**
+ * Where the announcements come from, and where to follow them; `empty` is
+ * the sentence saying a list has nothing upcoming (`true` for the generic one).
+ */
+export function ChannelNote({ empty = false }: { empty?: boolean | string }) {
+  const lead = empty === true ? 'Ближайших анонсов пока нет.' : empty || '';
   return (
     <p className="afi-note">
-      {empty ? 'Ближайших анонсов пока нет. ' : ''}
+      {lead ? `${lead} ` : ''}
       Новые прогулки и квесты сначала появляются в Telegram-канале{' '}
       <a href={CLUB_CHANNEL_URL} target="_blank" rel="noopener">
         {CLUB_CHANNEL}

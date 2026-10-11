@@ -4,6 +4,7 @@ import { notFound, permanentRedirect } from 'next/navigation';
 import SiteShell from '../../components/SiteShell';
 import JsonLd from '../../components/JsonLd';
 import { AfishaGrid, ChannelNote, QuestsNote } from '../parts';
+import { BeforeWalk, WALKS_SLOGAN, WalkRules } from '../walks';
 import {
   ARCHIVE_LIMIT,
   KIND_LABEL,
@@ -134,6 +135,7 @@ function EventPage({ event }: { event: AfishaEventWire }) {
                 {event.description.split('\n').map((line, i) => (line.trim() ? <p key={i}>{line}</p> : null))}
               </div>
             )}
+            {!event.past && <BeforeWalk />}
           </div>
           <aside className="afi-event__side card" aria-label="Подробности">
             <dl className="afi-facts">
@@ -187,9 +189,10 @@ function CityPageView({ city }: { city: CityPage }) {
         </nav>
         <header className="afi-head">
           <h1 className="afi-title heading">{city.name}: групповые прогулки и квесты</h1>
+          <p className="afi-slogan">{WALKS_SLOGAN}</p>
           <p className="afi-lede">
             Прогулки, походы и квесты с организатором — {city.name}. Место встречи, время и маршрут в каждом
-            анонсе, запись в один клик через Telegram.
+            анонсе, участие бесплатное, запись в один клик через Telegram.
           </p>
         </header>
         <section className="afi-section" aria-labelledby="afi-city-upcoming">
@@ -197,6 +200,7 @@ function CityPageView({ city }: { city: CityPage }) {
             Ближайшие
           </h2>
           {city.upcoming.length > 0 ? <AfishaGrid events={city.upcoming} /> : <ChannelNote empty />}
+          <WalkRules />
         </section>
         {city.past.length > 0 && (
           <section className="afi-section" aria-labelledby="afi-city-past">

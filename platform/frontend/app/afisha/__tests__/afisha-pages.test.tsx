@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import React from 'react';
 import { WALK } from '../../../lib/__tests__/afisha-fixtures';
 
@@ -57,6 +57,11 @@ describe('announcement page', () => {
     const [event] = jsonLd(container);
     expect(event).toMatchObject({ '@type': 'Event', name: WALK.title, startDate: WALK.starts_at });
     expect(eventMock).toHaveBeenCalledWith(1110);
+    const before = screen.getByRole('region', { name: 'Перед прогулкой' });
+    expect(within(before).getByText(/Участие бесплатное/)).toBeTruthy();
+    expect(within(before).getByRole('link', { name: 'Памятка: что взять и надеть' }).getAttribute('href')).toBe(
+      'https://telegra.ph/PAMYATKA-05-06-3',
+    );
   });
 
   it('says a past walk is over and offers no registration', async () => {
@@ -64,6 +69,7 @@ describe('announcement page', () => {
     render(await AfishaSlugPage(params(WALK.slug)));
     expect(screen.getByText(/Прогулка уже прошла/)).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Записаться' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Перед прогулкой' })).toBeNull();
   });
 
   it('redirects an outdated slug to the current one and 404s a missing post', async () => {
@@ -100,6 +106,40 @@ describe('hub', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Афиша' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Нови Сад' }).getAttribute('href')).toBe('/afisha/novi-sad');
     expect(screen.getByRole('heading', { level: 3, name: WALK.title })).toBeTruthy();
+  });
+
+  it('files walks and group quests under their own sections, each with its slogan', async () => {
+    const quest = { ...WALK, post_id: 1087, kind: 'quest' as const, title: 'Тайна крепости', slug: '2026-10-12-tayna-1087' };
+    listMock.mockImplementation(async (when: string) => (when === 'upcoming' ? [WALK, quest] : []));
+    render(await AfishaPage());
+    const walks = screen.getByRole('region', { name: 'Прогулки' });
+    expect(within(walks).getByText('Сербия пешком — в хорошей компании')).toBeTruthy();
+    expect(within(walks).getByRole('heading', { level: 3, name: WALK.title })).toBeTruthy();
+    expect(within(walks).queryByRole('heading', { level: 3, name: 'Тайна крепости' })).toBeNull();
+    const quests = screen.getByRole('region', { name: 'Групповые квесты' });
+    expect(within(quests).getByText('Вместе играть веселее')).toBeTruthy();
+    expect(within(quests).getByRole('heading', { level: 3, name: 'Тайна крепости' })).toBeTruthy();
+  });
+
+  it('explains the walk rules and invites organizers', async () => {
+    render(await AfishaPage());
+    const rules = screen.getByRole('region', { name: 'Как устроены прогулки' });
+    expect(within(rules).getByRole('heading', { name: 'Участие бесплатное' })).toBeTruthy();
+    expect(within(rules).getByRole('link', { name: 'Правила участия' }).getAttribute('href')).toBe(
+      'https://telegra.ph/Pravila-uchastiya-v-progulkah-06-29',
+    );
+    const partner = screen.getByRole('region', { name: 'Покажите свою Сербию' });
+    expect(within(partner).getByRole('link', { name: 'Написать @geohod' }).getAttribute('href')).toBe('https://t.me/geohod');
+    expect(within(partner).getByRole('link', { name: 'Условия партнёрской программы' }).getAttribute('href')).toBe(
+      'https://telegra.ph/Partnyorskaya-programma-GeoHod-11-01',
+    );
+  });
+
+  it('says so when a kind has nothing upcoming', async () => {
+    listMock.mockImplementation(async () => []);
+    render(await AfishaPage());
+    expect(screen.getByText(/Ближайших прогулок пока нет\./)).toBeTruthy();
+    expect(screen.getByText(/Ближайших групповых квестов пока нет\./)).toBeTruthy();
   });
 
   it('is a 404 while the «Афиша» is off', async () => {
