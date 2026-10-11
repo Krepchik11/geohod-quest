@@ -1,22 +1,22 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
-import { api, type ReviewWire } from '../../lib/api';
+import { useClientFeature } from '../../lib/client-features';
 import { CLUB_CHANNEL, CLUB_CHANNEL_URL } from '../../lib/contacts';
-import { SUBSTANTIVE_REVIEW_CHARS } from '../../lib/storefront';
 
 /**
- * The storefront blocks around the shop grid (ТЗ «Дизайн и юзабилити», этап 2):
- * «Вместе веселее», «Скоро в новых городах» (`store_cities`) and one player's
- * quote. Everything they show is real: the
- * cities come from the catalog and the `soon_cities` setting, the quote from the
- * quest's own reviews — a block with nothing real to show renders nothing.
+ * The storefront blocks under the shop grid (ТЗ «Дизайн и юзабилити», этап 2):
+ * «Вместе веселее» and «Скоро в новых городах» (`store_cities`). Everything
+ * they show is real: the cities come from the `soon_cities` setting — a block
+ * with nothing real to show renders nothing.
  */
 
 /** «Вместе веселее»: one quest serves the whole company (the /rules FAQ says
- *  so); the group walks themselves are announced in the club's channel. */
+ *  so); the group walks and games are on the «Афиша» (`afisha`) and announced
+ *  in the club's channel. */
 export function TogetherBlock() {
+  const afishaOn = useClientFeature('afisha');
   return (
     <section className="store-block store-block--white" aria-labelledby="together-title">
       <div className="store-block__row">
@@ -24,15 +24,24 @@ export function TogetherBlock() {
         <div>
           <h3 className="store-block__title" id="together-title">Вместе веселее</h3>
           <p className="store-block__text">
-            Один квест — на всю компанию: идите с одним телефоном и решайте задания вместе. Групповые
-            прогулки с организатором анонсируем в канале {CLUB_CHANNEL}.
+            Один квест — на всю компанию: идите с одним телефоном и решайте задания вместе.{' '}
+            {afishaOn
+              ? `Групповые прогулки и квесты с организатором — в афише, анонсы выходят в канале ${CLUB_CHANNEL}.`
+              : `Групповые прогулки с организатором анонсируем в канале ${CLUB_CHANNEL}.`}
           </p>
         </div>
       </div>
-      <a className="btn btn--secondary btn--md store-block__cta" href={CLUB_CHANNEL_URL} target="_blank" rel="noopener">
-        <span className="ic ic-tg-blue" aria-hidden />
-        Все игры в канале
-      </a>
+      <div className="store-block__actions">
+        {afishaOn && (
+          <Link className="btn btn--md store-block__cta" href="/afisha">
+            Афиша
+          </Link>
+        )}
+        <a className="btn btn--secondary btn--md store-block__cta" href={CLUB_CHANNEL_URL} target="_blank" rel="noopener">
+          <span className="ic ic-tg-blue" aria-hidden />
+          Все игры в канале
+        </a>
+      </div>
     </section>
   );
 }
@@ -51,48 +60,5 @@ export function SoonBlock({ cities }: { cities: string[] }) {
         Узнать о запуске
       </a>
     </section>
-  );
-}
-
-/** The product payloads already asked for this page load, by quest id. */
-const quoteCache = new Map<string, Promise<ReviewWire | null>>();
-
-/** The quest's first review, when it is a substantive one: the backend serves
- *  substantive reviews first, so a short first review means there is none. */
-function firstSubstantive(questId: string): Promise<ReviewWire | null> {
-  let pending = quoteCache.get(questId);
-  if (!pending) {
-    // Inside the chain, so even a client that throws on the call stays a «no quote».
-    pending = Promise.resolve()
-      .then(() => api.getQuestProduct(questId))
-      .then((p) => p.reviews.find((r) => r.text.trim().length >= SUBSTANTIVE_REVIEW_CHARS) ?? null)
-      .catch(() => null);
-    quoteCache.set(questId, pending);
-  }
-  return pending;
-}
-
-/** One player's words about a quest of this city, under the shop. */
-export function PlayerQuote({ questId, questName }: { questId: string; questName: string }) {
-  const [quote, setQuote] = useState<{ questId: string; review: ReviewWire | null } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void firstSubstantive(questId).then((review) => {
-      if (!cancelled) setQuote({ questId, review });
-    });
-    return () => { cancelled = true; };
-  }, [questId]);
-
-  const review = quote?.questId === questId ? quote.review : null;
-  if (!review) return null;
-  return (
-    <figure className="store-quote">
-      <blockquote>«{review.text.trim()}»</blockquote>
-      <figcaption>
-        {review.author}, квест{' '}
-        <Link href={`/quest/${encodeURIComponent(questId)}/about`}>«{questName}»</Link>
-      </figcaption>
-    </figure>
   );
 }

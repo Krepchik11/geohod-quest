@@ -122,6 +122,7 @@ describe('QuestCard', () => {
     render(<QuestCard quest={quest({ price: 0 })} owned={false} />);
     fireEvent.click(screen.getByRole('button', { name: 'Получить' }));
     await waitFor(() => expect(screen.getByText('✓ Квест в «Моих квестах»')).toBeTruthy());
+    expect(screen.getByText('✓ Квест в «Моих квестах»').className).toContain('quest-card__price--note');
     expect(screen.getByRole('link', { name: 'Играть' }).getAttribute('href')).toBe('/quest/q1');
     expect(checkoutMock).toHaveBeenCalledWith({ user_id: 'dev:test', quest_id: 'q1' });
   });
@@ -138,6 +139,7 @@ describe('QuestCard', () => {
   it('owned quest shows the badge and «Играть» to the player', () => {
     render(<QuestCard quest={quest({})} owned />);
     expect(screen.getByText('✓ Куплен')).toBeTruthy();
+    expect(screen.getByText('Куплен').className).toBe('quest-card__price quest-card__price--owned');
     expect(screen.getByRole('link', { name: 'Играть' }).getAttribute('href')).toBe('/quest/q1');
   });
 
@@ -175,14 +177,15 @@ describe('QuestCard — own quest (store_my_quests)', () => {
   it('not started: the badge, «Куплен», «Начать» into the player', () => {
     render(<QuestCard quest={quest({})} owned mine={mine({})} />);
     expect(screen.getByText('Не начат')).toBeTruthy();
-    expect(screen.getByText('Куплен')).toBeTruthy();
+    // «Куплен» wears the price's size (one size with «500 ₽» and «Бесплатно»).
+    expect(screen.getByText('Куплен').className).toContain('quest-card__mine--owned');
     expect(screen.getByRole('link', { name: 'Начать' }).getAttribute('href')).toBe('/quest/q1');
   });
 
   it('in progress: the step in the price slot and «Продолжить»', () => {
     render(<QuestCard quest={quest({})} owned mine={mine({ state: 'progress', pos: 3, total: 12 })} />);
     expect(screen.getByText('В процессе')).toBeTruthy();
-    expect(screen.getByText('шаг 3 из 12')).toBeTruthy();
+    expect(screen.getByText('шаг 3 из 12').className).not.toContain('quest-card__mine--owned');
     expect(screen.getByRole('link', { name: 'Продолжить' }).getAttribute('href')).toBe('/quest/q1');
   });
 

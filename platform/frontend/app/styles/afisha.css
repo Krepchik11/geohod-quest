@@ -14,7 +14,7 @@
 .afi-chip:hover { box-shadow:inset 0 0 0 2px var(--blue); color:var(--blue); }
 
 .afi-section { margin-top:48px; }
-.afi-section__title { margin-bottom:20px; font-family:var(--font-display); font-weight:500; font-size:24px; line-height:30px; color:var(--navy); }
+.afi-section__title { scroll-margin-top:96px; margin-bottom:20px; font-family:var(--font-display); font-weight:500; font-size:24px; line-height:30px; color:var(--navy); }
 .afi-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:24px; }
 
 .afi-card { overflow:hidden; }
@@ -27,7 +27,10 @@
 .afi-card__title { font-size:18px; line-height:24px; font-weight:700; color:var(--navy); }
 .afi-card__link:hover .afi-card__title { color:var(--blue); }
 .afi-card__when { font-weight:600; color:var(--text); }
-.afi-card__where, .afi-card__price { font-size:14px; line-height:20px; color:var(--muted-2); }
+.afi-card__facts { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:14px; line-height:20px; color:var(--text); }
+.afi-card__facts > span { display:inline-flex; align-items:center; gap:5px; }
+.afi-card__facts .ic { width:16px; height:16px; }
+.afi-card__line, .afi-card__price { font-size:14px; line-height:20px; color:var(--muted-2); }
 
 .afi-kind { font-size:12px; line-height:16px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--blue); }
 
