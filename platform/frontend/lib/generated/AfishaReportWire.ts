@@ -9,6 +9,14 @@ export type AfishaReportWire = {
  */
 read: number, created: number, updated: number, removed: number, 
 /**
+ * Pictures copied into the media store.
+ */
+images_stored: number, 
+/**
+ * Pictures another announcement already held — reused, not stored again.
+ */
+images_reused: number, 
+/**
  * Archive import: the next page starts before this post; `null` = done.
  */
 next_before: number | null, };

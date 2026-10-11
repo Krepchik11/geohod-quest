@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  archiveYears,
   countByFilter,
   draftOf,
   editedLabel,
+  picturesText,
   reportText,
   saveBodyOf,
   whenLabel,
@@ -47,8 +49,15 @@ describe('admin «Афиша» view-model', () => {
   });
 
   it('reports a read of the channel', () => {
-    expect(reportText({ read: 21, created: 3, updated: 1, removed: 0, next_before: null })).toBe(
-      'Прочитано 21 пост: новых 3, обновлено 1, снято 0',
+    const report = { read: 21, created: 3, updated: 1, removed: 0, images_stored: 0, images_reused: 0, next_before: null };
+    expect(reportText(report)).toBe('Прочитано 21 пост: новых 3, обновлено 1, снято 0');
+    expect(reportText({ ...report, images_stored: 2, images_reused: 5 })).toBe(
+      'Прочитано 21 пост: новых 3, обновлено 1, снято 0; картинок сохранено 2, повторов не сохранено 5',
     );
+    expect(picturesText(0, 0)).toBe('');
+  });
+
+  it('offers this year, the three before it and the whole channel for the archive', () => {
+    expect(archiveYears(new Date('2026-10-11T12:00:00Z'))).toEqual([2026, 2025, 2024, 2023, null]);
   });
 });

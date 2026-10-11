@@ -17,7 +17,7 @@ use bytes::Bytes;
 use serde_json::json;
 
 use crate::AppState;
-use crate::afisha::{self, AfishaEvent, AfishaStatus, ChannelPost};
+use crate::afisha::{self, AfishaEvent, AfishaStatus, ChannelPost, ImagePrint, PostImage};
 use crate::errors::AppError;
 use crate::features::{Feature, feature_enabled};
 use crate::settings::Setting;
@@ -153,6 +153,10 @@ fn fetch_err(url: &str, e: &dyn std::fmt::Display) -> AppError {
 
 /// The channel as the saved pages show it. The feed can be swapped to play
 /// an edited or a deleted post; every fetch and every ping is recorded.
+///
+/// Every photo is one picture, JPEG-encoded at a quality that depends on its
+/// URL — different bytes for every post, as when Telegram re-compresses a
+/// photo posted again — unless `distinct_photos` gives each URL its own.
 #[cfg(test)]
 #[derive(Default)]
 pub struct FakeChannel {
@@ -160,6 +164,7 @@ pub struct FakeChannel {
     pub feed: Mutex<Option<String>>,
     pub fetched: Mutex<Vec<String>>,
     pub pinged: Mutex<Vec<serde_json::Value>>,
+    pub distinct_photos: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(test)]
@@ -168,6 +173,20 @@ impl FakeChannel {
     const OLDER: &str = include_str!("../fixtures/afisha/feed-older.html");
     const EMBED_1087: &str = include_str!("../fixtures/afisha/embed-1087.html");
     const EMBED_MISSING: &str = include_str!("../fixtures/afisha/embed-missing.html");
+
+    /// A 160×120 photo: soft bands whose angle follows `picture`, as JPEG.
+    fn photo(picture: u32, quality: u8) -> Vec<u8> {
+        let tilt = 1 + picture % 7;
+        let img = image::RgbImage::from_fn(160, 120, |x, y| {
+            let v = ((x * tilt + 2 * y) % 120) as u8 * 2;
+            image::Rgb([v, v / 2 + 40, 255 - v])
+        });
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+            .encode_image(&img)
+            .expect("encode the fake photo");
+        out
+    }
 
     fn get(&self, url: &str) -> Fetched {
         self.fetched
@@ -180,10 +199,16 @@ impl FakeChannel {
             body: html.as_bytes().to_vec(),
         };
         if url.contains("telesco.pe") {
+            let seed = url.bytes().fold(0u32, |acc, b| {
+                acc.wrapping_mul(31).wrapping_add(u32::from(b))
+            });
+            let distinct = self
+                .distinct_photos
+                .load(std::sync::atomic::Ordering::Relaxed);
             return Fetched {
                 status: 200,
                 content_type: "image/jpeg".into(),
-                body: vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16],
+                body: Self::photo(if distinct { seed } else { 0 }, 60 + (seed % 35) as u8),
             };
         }
         let feed = self
@@ -233,6 +258,10 @@ pub struct Report {
     pub created: u32,
     pub updated: u32,
     pub removed: u32,
+    /// Pictures copied into the media store.
+    pub images_stored: u32,
+    /// Pictures another announcement already held — reused, not stored again.
+    pub images_reused: u32,
     /// Archive import: the next page starts before this post; `null` = done.
     #[cfg_attr(test, ts(type = "number | null"))]
     pub next_before: Option<i64>,
@@ -310,15 +339,49 @@ struct Pass<'a> {
     drafts: Vec<AfishaEvent>,
     /// Published announcements whose post was deleted.
     removed: Vec<AfishaEvent>,
+    /// The channel's stored announcements, by post number.
+    known: HashMap<i64, AfishaEvent>,
+    /// The pictures already in the media store, by print — a post with one of
+    /// them reuses its URL.
+    pictures: Vec<(ImagePrint, String)>,
+    /// Pictures downloaded ahead by [`Pass::prefetch`], by post; `None` = failed.
+    prefetched: HashMap<i64, Option<Photo>>,
 }
 
 impl<'a> Pass<'a> {
+    /// Load what the pass reads against: the cities, the channel's stored
+    /// announcements and their pictures. A picture stored before prints
+    /// existed gets its print now, once.
     async fn new(state: &'a AppState, channel: &'a str) -> Result<Self, AppError> {
         let cities = crate::cities::load_rows(state)
             .await?
             .into_iter()
             .map(|row| row.record.name)
             .collect();
+        let mut known: HashMap<i64, AfishaEvent> = state
+            .afisha
+            .list(channel)
+            .await?
+            .into_iter()
+            .map(|e| (e.post_id, e))
+            .collect();
+        let mut pictures: Vec<(ImagePrint, String)> = Vec::new();
+        for event in known.values_mut() {
+            let Some(url) = event.image.clone() else {
+                continue;
+            };
+            if event.image_print.is_none()
+                && let Some(print) = stored_print(state, &url).await
+            {
+                event.image_print = Some(print);
+                state.afisha.upsert(event.clone()).await?;
+            }
+            if let Some(print) = &event.image_print
+                && !pictures.iter().any(|(_, held)| *held == url)
+            {
+                pictures.push((print.clone(), url));
+            }
+        }
         Ok(Self {
             state,
             channel,
@@ -328,51 +391,69 @@ impl<'a> Pass<'a> {
             changed_urls: Vec::new(),
             drafts: Vec::new(),
             removed: Vec::new(),
+            known,
+            pictures,
+            prefetched: HashMap::new(),
         })
     }
 
     /// Apply one post and store the result when anything changed.
-    async fn read(
-        &mut self,
-        existing: Option<&AfishaEvent>,
-        post: &ChannelPost,
-        mode: Mode,
-    ) -> Result<(), AppError> {
-        match existing {
-            None => {
-                let wanted = match mode {
-                    Mode::Feed => post.is_candidate(),
-                    Mode::Archive => post.is_announcement(),
-                    Mode::Import => true,
-                };
-                if !wanted {
-                    return Ok(());
-                }
-            }
+    /// Whether the pass applies this post at all.
+    fn wants(&self, post: &ChannelPost, mode: Mode) -> bool {
+        match (self.known.get(&post.id), mode) {
+            (None, Mode::Feed) => post.is_candidate(),
+            (None, Mode::Archive) => post.is_own_event(),
+            (_, Mode::Import) => true,
             // The archive leaves what is on the site alone; it only files the
-            // past posts the feed met without a hashtag.
-            Some(event)
-                if mode == Mode::Archive
-                    && (event.status != AfishaStatus::Untagged
-                        || event.edited.contains("kind")) =>
-            {
-                return Ok(());
+            // posts the feed met without a hashtag.
+            (Some(event), Mode::Archive) => {
+                event.status == AfishaStatus::Untagged && !event.edited.contains("kind")
             }
-            Some(_) if mode == Mode::Archive => {}
-            Some(event) => {
+            (Some(event), Mode::Feed) => {
                 let unchanged = event.status != AfishaStatus::Removed
                     && event.post_text == post.text
                     && (event.image.is_some() || post.photo.is_none());
-                if unchanged && mode == Mode::Feed {
-                    return Ok(());
+                !unchanged
+            }
+        }
+    }
+
+    /// Download, a few at a time, the pictures of the posts this pass will
+    /// apply — on a page of 20 posts the downloads are the slow part. The
+    /// matching against stored pictures stays in `copy_photo`, in post order.
+    async fn prefetch(&mut self, posts: &[ChannelPost], mode: Mode) {
+        let wanted: Vec<(i64, String)> = posts
+            .iter()
+            .filter(|p| self.wants(p, mode))
+            .filter_map(|p| p.photo.clone().map(|url| (p.id, url)))
+            .collect();
+        for chunk in wanted.chunks(PARALLEL_DOWNLOADS) {
+            let mut downloads = tokio::task::JoinSet::new();
+            for (post_id, url) in chunk.iter().cloned() {
+                let http = self.state.afisha_http.clone();
+                downloads
+                    .spawn(async move { (post_id, download_photo(&http, post_id, &url).await) });
+            }
+            while let Some(done) = downloads.join_next().await {
+                if let Ok((post_id, photo)) = done {
+                    self.prefetched.insert(post_id, photo);
                 }
             }
         }
+    }
+
+    /// Apply one post and store the result when anything changed.
+    async fn read(&mut self, post: &ChannelPost, mode: Mode) -> Result<(), AppError> {
+        if !self.wants(post, mode) {
+            return Ok(());
+        }
+        let existing = self.known.get(&post.id).cloned();
+        let existing = existing.as_ref();
         let image = self.copy_photo(post).await;
         let mut event = afisha::apply_post(existing, self.channel, post, &self.cities, image);
         match mode {
             Mode::Feed => {}
-            Mode::Archive => afisha::file_archived(&mut event, self.now),
+            Mode::Archive => afisha::file_archived(&mut event),
             Mode::Import => afisha::file_imported(&mut event),
         }
         let was_published = existing.is_some_and(|e| e.status == AfishaStatus::Published);
@@ -389,6 +470,12 @@ impl<'a> Pass<'a> {
         } else {
             self.report.created += 1;
         }
+        self.store(event).await
+    }
+
+    /// Store an announcement and remember it for the rest of the pass.
+    async fn store(&mut self, event: AfishaEvent) -> Result<(), AppError> {
+        self.known.insert(event.post_id, event.clone());
         self.state.afisha.upsert(event).await
     }
 
@@ -400,36 +487,45 @@ impl<'a> Pass<'a> {
         }
         event.remove();
         self.report.removed += 1;
-        self.state.afisha.upsert(event).await
+        self.store(event).await
     }
 
-    /// The post's picture copied into the site's media store; `None` when it
-    /// has none or the copy failed (logged — the text still goes up).
-    async fn copy_photo(&self, post: &ChannelPost) -> Option<String> {
+    /// The post's picture in the site's media store; `None` when it has none
+    /// or the copy failed (logged — the text still goes up). A picture another
+    /// announcement already holds — the same photo, however Telegram
+    /// re-compressed it for this post — is reused, not stored again.
+    async fn copy_photo(&mut self, post: &ChannelPost) -> Option<PostImage> {
         let url = post.photo.as_deref()?;
-        let fetched = match self.state.afisha_http.get(url).await {
-            Ok(fetched) if fetched.status == 200 => fetched,
-            Ok(fetched) => {
-                tracing::warn!(
-                    status = fetched.status,
-                    post = post.id,
-                    "afisha: picture not served"
-                );
-                return None;
-            }
-            Err(e) => {
-                tracing::warn!(error = ?e, post = post.id, "afisha: picture download failed");
-                return None;
-            }
+        let photo = match self.prefetched.remove(&post.id) {
+            Some(photo) => photo,
+            None => download_photo(&self.state.afisha_http, post.id, url).await,
         };
-        let content_type = crate::media::normalized_media_type(&fetched.content_type)?;
-        match self
-            .state
-            .media
-            .put(Bytes::from(fetched.body), &content_type)
-            .await
-        {
-            Ok(stored) => Some(stored.url),
+        let Photo {
+            bytes,
+            content_type,
+            print,
+        } = photo?;
+        if let Some(print) = &print {
+            let held = self.pictures.iter().find(|(p, _)| p.same_picture(print));
+            if let Some((_, url)) = held {
+                self.report.images_reused += 1;
+                return Some(PostImage {
+                    url: url.clone(),
+                    print: Some(print.clone()),
+                });
+            }
+        }
+        match self.state.media.put(bytes, &content_type).await {
+            Ok(stored) => {
+                self.report.images_stored += 1;
+                if let Some(print) = &print {
+                    self.pictures.push((print.clone(), stored.url.clone()));
+                }
+                Some(PostImage {
+                    url: stored.url,
+                    print,
+                })
+            }
             Err(e) => {
                 tracing::warn!(error = ?e, post = post.id, "afisha: picture not stored");
                 None
@@ -507,6 +603,60 @@ fn embed_url(channel: &str, post_id: i64) -> String {
     format!("https://t.me/{channel}/{post_id}?embed=1&mode=tme")
 }
 
+/// Pictures downloaded at once by [`Pass::prefetch`].
+const PARALLEL_DOWNLOADS: usize = 6;
+
+/// A post's picture as downloaded: the bytes, their media type, the print.
+struct Photo {
+    bytes: Bytes,
+    content_type: String,
+    print: Option<ImagePrint>,
+}
+
+/// Download a post's picture and print it; `None` when it is not served or
+/// not an image the media store keeps (logged — the text still goes up).
+async fn download_photo(http: &ChannelHttp, post_id: i64, url: &str) -> Option<Photo> {
+    let fetched = match http.get(url).await {
+        Ok(fetched) if fetched.status == 200 => fetched,
+        Ok(fetched) => {
+            tracing::warn!(
+                status = fetched.status,
+                post = post_id,
+                "afisha: picture not served"
+            );
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!(error = ?e, post = post_id, "afisha: picture download failed");
+            return None;
+        }
+    };
+    let content_type = crate::media::normalized_media_type(&fetched.content_type)?;
+    let bytes = Bytes::from(fetched.body);
+    let print = print_of(bytes.clone()).await;
+    Some(Photo {
+        bytes,
+        content_type,
+        print,
+    })
+}
+
+/// The print of a picture, decoded off the async runtime; `None` when it does
+/// not decode (the picture is then stored without one).
+async fn print_of(bytes: Bytes) -> Option<ImagePrint> {
+    tokio::task::spawn_blocking(move || ImagePrint::of(&bytes))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// The print of a picture already in the media store, read back by its URL.
+async fn stored_print(state: &AppState, url: &str) -> Option<ImagePrint> {
+    let hash = crate::media::media_hash_in_ref(url)?;
+    let blob = state.media.get(hash).await.ok()??;
+    print_of(blob.bytes).await
+}
+
 async fn fetch_page(state: &AppState, url: &str) -> Result<String, AppError> {
     let fetched = state.afisha_http.get(url).await?;
     if fetched.status != 200 {
@@ -541,14 +691,8 @@ pub async fn sync_feed(state: &AppState, channel: &str) -> Result<Report, AppErr
             "на странице канала t.me/s/{channel} не нашлось постов — возможно, Telegram изменил её вёрстку"
         )));
     }
-    let known: HashMap<i64, AfishaEvent> = state
-        .afisha
-        .list(channel)
-        .await?
-        .into_iter()
-        .map(|e| (e.post_id, e))
-        .collect();
-    if let Some(&newest_known) = known.keys().max() {
+    let mut pass = Pass::new(state, channel).await?;
+    if let Some(&newest_known) = pass.known.keys().max() {
         for _ in 0..MAX_CATCH_UP_PAGES {
             let oldest = posts.iter().map(|p| p.id).min().unwrap_or(newest_known);
             if oldest <= newest_known + 1 {
@@ -563,19 +707,24 @@ pub async fn sync_feed(state: &AppState, channel: &str) -> Result<Report, AppErr
             posts.extend(older);
         }
     }
-    let mut pass = Pass::new(state, channel).await?;
     pass.report.read = u32::try_from(posts.len()).unwrap_or(u32::MAX);
+    pass.prefetch(&posts, Mode::Feed).await;
     for post in &posts {
-        pass.read(known.get(&post.id), post, Mode::Feed).await?;
+        pass.read(post, Mode::Feed).await?;
     }
     let seen: HashSet<i64> = posts.iter().map(|p| p.id).collect();
     let covered = posts.iter().map(|p| p.id).min().unwrap_or(0)
         ..=posts.iter().map(|p| p.id).max().unwrap_or(0);
-    let deleted = known.into_values().filter(|e| {
-        covered.contains(&e.post_id)
-            && !seen.contains(&e.post_id)
-            && e.status != AfishaStatus::Removed
-    });
+    let deleted: Vec<AfishaEvent> = pass
+        .known
+        .values()
+        .filter(|e| {
+            covered.contains(&e.post_id)
+                && !seen.contains(&e.post_id)
+                && e.status != AfishaStatus::Removed
+        })
+        .cloned()
+        .collect();
     for event in deleted {
         pass.remove(event).await?;
     }
@@ -590,13 +739,12 @@ pub async fn sync_feed(state: &AppState, channel: &str) -> Result<Report, AppErr
 /// A post page cannot be fetched, or a storage failure.
 pub async fn check_upcoming(state: &AppState, channel: &str) -> Result<Report, AppError> {
     let mut pass = Pass::new(state, channel).await?;
-    let upcoming: Vec<AfishaEvent> = state
-        .afisha
-        .list(channel)
-        .await?
-        .into_iter()
+    let upcoming: Vec<AfishaEvent> = pass
+        .known
+        .values()
         .filter(|e| matches!(e.status, AfishaStatus::Published | AfishaStatus::Draft))
         .filter(|e| !e.is_past(pass.now))
+        .cloned()
         .collect();
     for event in upcoming {
         let html = fetch_page(state, &embed_url(channel, event.post_id)).await?;
@@ -609,7 +757,7 @@ pub async fn check_upcoming(state: &AppState, channel: &str) -> Result<Report, A
             .into_iter()
             .find(|p| p.id == event.post_id);
         if let Some(post) = post {
-            pass.read(Some(&event), &post, Mode::Feed).await?;
+            pass.read(&post, Mode::Feed).await?;
         }
     }
     Ok(pass.finish().await)
@@ -635,18 +783,19 @@ pub async fn import_link(state: &AppState, channel: &str, link: &str) -> Result<
         .into_iter()
         .find(|p| p.id == post_id)
         .ok_or_else(|| AppError::BadRequest(format!("в посте {post_id} нет текста")))?;
-    let existing = state.afisha.get(channel, post_id).await?;
     let mut pass = Pass::new(state, channel).await?;
     pass.report.read = 1;
-    pass.read(existing.as_ref(), &post, Mode::Import).await?;
+    pass.read(&post, Mode::Import).await?;
     Ok(pass.finish().await)
 }
 
 /// One page (20 posts) of the archive: the feed paged back from `before`
-/// (the newest page without it), taking every own announcement of the
-/// template ([`ChannelPost::is_announcement`]) — the channel's own search
-/// only reaches recent posts. Posts already on the site are left as they are;
-/// the report names where the next page starts.
+/// (the newest page without it), taking every announcement of an own event —
+/// a post linking the registration mini app ([`ChannelPost::is_own_event`]);
+/// the channel's own search only reaches recent posts. With `since_year` only
+/// posts published from that year on count, and the import ends at the
+/// year's start. Posts already on the site are left as they are; the report
+/// names where the next page starts.
 ///
 /// # Errors
 ///
@@ -655,21 +804,28 @@ pub async fn import_archive_page(
     state: &AppState,
     channel: &str,
     before: Option<i64>,
+    since_year: Option<i32>,
 ) -> Result<Report, AppError> {
     let posts = afisha::parse_channel_page(&fetch_page(state, &feed_url(channel, before)).await?);
-    let known: HashMap<i64, AfishaEvent> = state
-        .afisha
-        .list(channel)
-        .await?
-        .into_iter()
-        .map(|e| (e.post_id, e))
-        .collect();
+    let year_start = since_year.map(|year| format!("{year:04}-01-01"));
+    let in_range = |post: &ChannelPost| {
+        year_start
+            .as_deref()
+            .is_none_or(|start| post.posted_at.as_str() >= start)
+    };
+    let in_year: Vec<ChannelPost> = posts.iter().filter(|p| in_range(p)).cloned().collect();
     let mut pass = Pass::new(state, channel).await?;
-    pass.report.read = u32::try_from(posts.len()).unwrap_or(u32::MAX);
-    for post in &posts {
-        pass.read(known.get(&post.id), post, Mode::Archive).await?;
+    pass.report.read = u32::try_from(in_year.len()).unwrap_or(u32::MAX);
+    pass.prefetch(&in_year, Mode::Archive).await;
+    for post in &in_year {
+        pass.read(post, Mode::Archive).await?;
     }
-    pass.report.next_before = posts.iter().map(|p| p.id).min();
+    let reached_start = posts.iter().any(|p| !in_range(p));
+    pass.report.next_before = if reached_start {
+        None
+    } else {
+        posts.iter().map(|p| p.id).min()
+    };
     Ok(pass.finish().await)
 }
 

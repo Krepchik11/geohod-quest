@@ -8142,6 +8142,13 @@ mod tests {
         assert_eq!(page["report"]["read"], 0);
         assert!(page["report"]["next_before"].is_null());
         assert_eq!(get_json(app, "/api/afisha/1078").await.0, StatusCode::OK);
+        // A year bound ends the import at the year's start: nothing from 2026
+        // is wanted when the bound is 2027.
+        let body = json!({ "before": 1108, "since_year": 2027 });
+        let (st, page) = post_json_h(app, "/api/admin/afisha/archive", body, &admin).await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        assert_eq!(page["report"]["read"], 0);
+        assert!(page["report"]["next_before"].is_null());
 
         // Only an admin reaches the admin page; switching off hides it all.
         assert_eq!(
@@ -8309,6 +8316,55 @@ mod tests {
         assert_eq!(removed.status, afisha::AfishaStatus::Removed);
         let fetched = fake.fetched.lock().expect("fake").clone();
         assert!(fetched.iter().any(|u| u.contains("/1110?embed=1")));
+    }
+
+    /// One photo posted again — re-compressed, so with other bytes — is
+    /// stored once: the later posts reuse the stored picture.
+    #[tokio::test]
+    async fn afisha_stores_one_copy_of_a_photo_posted_again() {
+        let (state, _) = afisha_state(test_config()).await;
+        let report = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        assert_eq!((report.images_stored, report.images_reused), (1, 2));
+        let mut urls = Vec::new();
+        for id in [1109, 1110, 1111] {
+            let event = afisha_event(&state, id).await;
+            assert!(event.image_print.is_some(), "{id} keeps the print");
+            urls.push(event.image.expect("picture"));
+        }
+        urls.dedup();
+        assert_eq!(urls.len(), 1, "one stored picture for three posts");
+    }
+
+    /// Different photos stay different pictures.
+    #[tokio::test]
+    async fn afisha_keeps_different_photos_apart() {
+        let (state, _) = afisha_state(test_config()).await;
+        fake_channel(&state)
+            .distinct_photos
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let report = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        assert_eq!((report.images_stored, report.images_reused), (3, 0));
+    }
+
+    /// A picture stored before prints existed gets its print on the next pass,
+    /// so a later post with the same photo still finds it.
+    #[tokio::test]
+    async fn afisha_prints_pictures_stored_without_one() {
+        let (state, _) = afisha_state(test_config()).await;
+        afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        let mut walk = afisha_event(&state, 1110).await;
+        walk.image_print = None;
+        state.afisha.upsert(walk).await.expect("store");
+        afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read again");
+        assert!(afisha_event(&state, 1110).await.image_print.is_some());
     }
 
     /// A public site tells search engines about every page that changed.

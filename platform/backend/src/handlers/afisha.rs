@@ -446,11 +446,15 @@ async fn admin_sync_handler(
 pub(crate) struct AfishaArchiveRequest {
     #[cfg_attr(test, ts(type = "number | null"))]
     before: Option<i64>,
+    /// Only posts published from this year on; `null` = the whole channel.
+    #[serde(default)]
+    #[cfg_attr(test, ts(type = "number | null"))]
+    since_year: Option<i32>,
 }
 
-/// POST /api/admin/afisha/archive — import one page (20 posts) of past
-/// announcements; the page calls again with `report.next_before` until it is
-/// `null`.
+/// POST /api/admin/afisha/archive — import one page (20 posts) of the
+/// channel's own announcements (optionally from `since_year` on); the page
+/// calls again with `report.next_before` until it is `null`.
 async fn admin_archive_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -460,7 +464,7 @@ async fn admin_archive_handler(
     let channel = admin_channel(&state).await?;
     let report = {
         let _running = state.afisha_reader.try_run().ok_or_else(busy)?;
-        afisha_reader::import_archive_page(&state, &channel, req.before).await?
+        afisha_reader::import_archive_page(&state, &channel, req.before, req.since_year).await?
     };
     admin_page(&state, Some(report)).await
 }

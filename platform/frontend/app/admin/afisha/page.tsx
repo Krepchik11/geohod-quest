@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, apiErrorMessage, type AdminAfishaResponse } from '../../../lib/api';
 import {
   FORM_FIELDS,
+  archiveYears,
+  picturesText,
   STATUS_FILTERS,
   STATUS_LABEL,
   countByFilter,
@@ -88,20 +90,28 @@ export default function AdminAfishaPage() {
 
   const sync = () => run(() => api.adminAfishaSync(), (p) => (p.report ? reportText(p.report) : 'Канал прочитан'));
 
-  const loadArchive = async () => {
+  const loadArchive = async (year: number | null) => {
     setBusy(true);
     let before: number | null = null;
     let created = 0;
+    let stored = 0;
+    let reused = 0;
     try {
       for (let pages = 0; pages < ARCHIVE_MAX_PAGES; pages += 1) {
-        const next: AdminAfishaResponse = await api.adminAfishaArchive({ before });
+        const next: AdminAfishaResponse = await api.adminAfishaArchive({ before, since_year: year });
         setPage(next);
         created += next.report?.created ?? 0;
+        stored += next.report?.images_stored ?? 0;
+        reused += next.report?.images_reused ?? 0;
         setProgress(`Загружаем архив… добавлено ${created}`);
         before = next.report?.next_before ?? null;
         if (before === null) break;
       }
-      notify(`Архив загружен: ${pluralCount(created, 'новый анонс', 'новых анонса', 'новых анонсов')}`);
+      const label = year ? `Архив за ${year} загружен` : 'Архив загружен';
+      const pictures = picturesText(stored, reused);
+      notify(
+        `${label}: ${pluralCount(created, 'новый анонс', 'новых анонса', 'новых анонсов')}${pictures ? `; ${pictures}` : ''}`,
+      );
     } catch (err) {
       notify(apiErrorMessage(err, 'Не удалось загрузить архив'), true);
     } finally {
@@ -152,7 +162,7 @@ export default function AdminAfishaPage() {
                   (p) => (p.report?.created ? 'Пост добавлен в афишу' : 'Пост обновлён'),
                 )
               }
-              onArchive={() => void loadArchive()}
+              onArchive={(year) => void loadArchive(year)}
             />
 
             <div className="aaf-filters" role="tablist" aria-label="Статус">
@@ -294,9 +304,10 @@ function ToolsPanel({
   busy: boolean;
   progress: string | null;
   onImport: (url: string) => Promise<boolean>;
-  onArchive: () => void;
+  onArchive: (year: number | null) => void;
 }) {
   const [url, setUrl] = useState('');
+  const [year, setYear] = useState<number | null>(() => archiveYears()[0]);
   const disabled = busy || !page.channel;
   return (
     <section className="aaf-panel" aria-label="Импорт">
@@ -322,11 +333,22 @@ function ToolsPanel({
         Для поста без хештега или для старого анонса. Пост без хештега получит тип по тексту — его можно поменять.
       </p>
       <div className="aaf-state">
-        <button type="button" className="btn btn--quiet btn--sm" disabled={disabled} onClick={onArchive}>
+        <button type="button" className="btn btn--quiet btn--sm" disabled={disabled} onClick={() => onArchive(year)}>
           Загрузить архив
         </button>
+        <label className="aaf-year">
+          <span className="visually-hidden">Год</span>
+          <select className="input" value={year ?? ''} disabled={disabled} onChange={(e) => setYear(e.target.value ? Number(e.target.value) : null)}>
+            {archiveYears().map((y) => (
+              <option key={y ?? 'all'} value={y ?? ''}>
+                {y ? `за ${y}` : 'за все годы'}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className="aaf-hint">
-          {progress ?? 'Все прошедшие анонсы канала — лента листается до самого начала. Уже загруженные посты не меняются.'}
+          {progress ??
+            'Посты канала со ссылкой на регистрацию в мини-приложении. Уже загруженные не меняются, одинаковые картинки хранятся один раз.'}
         </span>
       </div>
     </section>

@@ -131,5 +131,19 @@ export function editedLabel(event: AdminAfishaWire): string | null {
 /** What a read of the channel did, for the toast. */
 export function reportText(report: AfishaReportWire): string {
   const read = pluralCount(report.read, 'пост', 'поста', 'постов');
-  return `Прочитано ${read}: новых ${report.created}, обновлено ${report.updated}, снято ${report.removed}`;
+  const posts = `Прочитано ${read}: новых ${report.created}, обновлено ${report.updated}, снято ${report.removed}`;
+  const pictures = picturesText(report.images_stored, report.images_reused);
+  return pictures ? `${posts}; ${pictures}` : posts;
+}
+
+/** «картинок сохранено 44, повторов не сохранено 59» — empty when no picture moved. */
+export function picturesText(stored: number, reused: number): string {
+  if (stored === 0 && reused === 0) return '';
+  return `картинок сохранено ${stored}, повторов не сохранено ${reused}`;
+}
+
+/** The years the archive import offers, newest first; `null` is the whole channel. */
+export function archiveYears(now: Date = new Date()): (number | null)[] {
+  const year = now.getFullYear();
+  return [year, year - 1, year - 2, year - 3, null];
 }

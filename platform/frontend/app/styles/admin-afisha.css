@@ -24,6 +24,7 @@
 .aaf-hint { font-size:13px; line-height:18px; color:var(--muted-2); }
 .aaf-error { color:var(--red); }
 .aaf-state { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; font-size:14px; color:var(--text); }
+.aaf-year select { height:36px; width:auto; padding:0 12px; font-size:14px; }
 .aaf-dot { width:10px; height:10px; border-radius:50%; background:var(--track); }
 .aaf-dot.is-on { background:var(--green); }
 
