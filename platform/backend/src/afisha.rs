@@ -2,10 +2,11 @@
 //! the public web page of the Telegram channel they are announced in.
 //!
 //! The channel stays the one place announcements are written and checked:
-//! organizers send a post to the channel admin, the admin publishes it and
-//! adds `#hiking` (a walk) or `#quest` (a group quest). The site reads the
-//! channel's public page (`t.me/s/<channel>`, see `crate::afisha_reader`) and
-//! turns every tagged post into a page. Nothing in this module talks to the
+//! organizers send a post to the channel admin, who checks and publishes it.
+//! A post linking the registration mini app announces an own walk or game;
+//! the site reads the channel's public page (`t.me/s/<channel>`, see
+//! `crate::afisha_reader`) and turns every such post into a page — a group
+//! quest when the post speaks of a quest, a walk otherwise. Nothing in this module talks to the
 //! network — it is the pure part: reading the page markup, reading a post's
 //! template, and deciding what an announcement looks like after a (re-)read.
 
@@ -33,58 +34,28 @@ const MAX_TITLE_CHARS: usize = 200;
 const MAX_LINE_CHARS: usize = 300;
 const MAX_DESCRIPTION_CHARS: usize = 5000;
 
-/// What an announcement is about — the hashtag the admin adds to the post.
+/// What an announcement is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(rename = "AfishaKind"))]
 #[serde(rename_all = "snake_case")]
 pub enum AfishaKind {
-    /// A walk or a hike (`#hiking`).
+    /// A walk or a hike.
     Hiking,
-    /// A group quest (`#quest`).
+    /// A group quest.
     Quest,
 }
 
 impl AfishaKind {
-    const ALL: [Self; 2] = [Self::Hiking, Self::Quest];
-
-    /// The hashtag that files a post under this kind.
-    pub fn hashtag(self) -> &'static str {
-        match self {
-            Self::Hiking => "#hiking",
-            Self::Quest => "#quest",
-        }
-    }
-
-    /// The kind the post's hashtag names; the earlier tag wins when both appear.
-    pub fn from_text(text: &str) -> Option<Self> {
-        let lower = text.to_lowercase();
-        Self::ALL
-            .into_iter()
-            .filter_map(|kind| find_tag(&lower, kind.hashtag()).map(|at| (at, kind)))
-            .min_by_key(|(at, _)| *at)
-            .map(|(_, kind)| kind)
-    }
-
-    /// The kind of an old, untagged post: a group quest when it says so.
-    pub fn guess(text: &str) -> Self {
+    /// The kind a post speaks of: a group quest when it says «квест», a walk
+    /// otherwise. The admin corrects it on the admin page when it is wrong.
+    pub fn of_text(text: &str) -> Self {
         if text.to_lowercase().contains("квест") {
             Self::Quest
         } else {
             Self::Hiking
         }
     }
-}
-
-/// Byte position of `tag` in `lower` as a whole hashtag, not the start of a
-/// longer one (`#hikingclub`).
-fn find_tag(lower: &str, tag: &str) -> Option<usize> {
-    lower.match_indices(tag).map(|(at, _)| at).find(|&at| {
-        lower[at + tag.len()..]
-            .chars()
-            .next()
-            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
-    })
 }
 
 /// Where an announcement stands.
@@ -95,11 +66,12 @@ fn find_tag(lower: &str, tag: &str) -> Option<usize> {
 pub enum AfishaStatus {
     /// On the site.
     Published,
-    /// Tagged, but the date, time or city did not parse: waits for the admin.
+    /// An own event whose date, time or city did not parse: waits for the admin.
     Draft,
     /// Taken off the site by the admin; a re-read never brings it back.
     Hidden,
-    /// Has a registration link but no hashtag: listed for the admin only.
+    /// Not published and not chased: a post without the registration link
+    /// (none of the reader's business), or an incomplete one from the archive.
     Untagged,
     /// The post is gone from the channel.
     Removed,
@@ -259,7 +231,8 @@ pub struct AfishaEvent {
     /// The post's number in the channel.
     pub post_id: i64,
     pub status: AfishaStatus,
-    /// `None` until a hashtag (or the admin) says what it is.
+    /// `None` for a post that is no own event (no registration link), until
+    /// the admin says what it is.
     pub kind: Option<AfishaKind>,
     pub fields: EventFields,
     /// Field names (plus `kind`) the admin set by hand; a re-read post never
@@ -419,12 +392,6 @@ impl ChannelPost {
     /// registration mini app. What the archive import takes.
     pub fn is_own_event(&self) -> bool {
         register_link(&self.links).is_some()
-    }
-
-    /// Worth storing at all: tagged, or an own event whose tag the admin may
-    /// have forgotten.
-    pub fn is_candidate(&self) -> bool {
-        AfishaKind::from_text(&self.text).is_some() || self.is_own_event()
     }
 }
 
@@ -954,7 +921,7 @@ fn is_separator(line: &str) -> bool {
 }
 
 /// The description: what the 〰️ frame holds, or else the lines between the
-/// title and the first labelled line. Hashtags and leading emoji go.
+/// title and the first labelled line. Leading emoji go.
 fn description(lines: &[&str], title_at: usize, first_label: Option<usize>) -> Option<String> {
     let separators: Vec<usize> = (0..lines.len())
         .filter(|&i| is_separator(lines[i]))
@@ -963,17 +930,9 @@ fn description(lines: &[&str], title_at: usize, first_label: Option<usize>) -> O
         Some(&open) => &lines[open + 1..separators.get(1).copied().unwrap_or(lines.len())],
         None => &lines[title_at + 1..first_label.unwrap_or(title_at + 1).max(title_at + 1)],
     };
-    let kept: Vec<String> = body
+    let kept: Vec<&str> = body
         .iter()
-        .map(|line| {
-            let words: Vec<&str> = line
-                .split_whitespace()
-                .filter(|w| AfishaKind::from_text(w).is_none())
-                .collect();
-            let line = words.join(" ");
-            line.trim_start_matches(|c: char| !(c.is_alphanumeric() || "«(\"".contains(c)))
-                .to_string()
-        })
+        .map(|line| line.trim_start_matches(|c: char| !(c.is_alphanumeric() || "«(\"".contains(c))))
         .collect();
     let text = kept.join("\n");
     let text = text.trim();
@@ -1146,7 +1105,7 @@ fn truncate_slug(slug: &str, max: usize) -> &str {
 }
 
 /// Apply a (re-)read post to its announcement: the fields the admin did not
-/// edit follow the text, the kind follows the hashtag unless the admin set
+/// edit follow the text, the kind follows the text unless the admin set
 /// it, and the status follows from both (a hidden one stays hidden, a removed
 /// one that shows up again comes back).
 ///
@@ -1172,7 +1131,7 @@ pub fn apply_post(
     let fresh = parse_fields(&post.text, known_cities);
     event.fields.keep_edited(fresh, &event.edited);
     if !event.edited.contains("kind") {
-        event.kind = AfishaKind::from_text(&post.text);
+        event.kind = post.is_own_event().then(|| AfishaKind::of_text(&post.text));
     }
     event.register_url = register_link(&post.links);
     event.post_text = post.text.clone();
@@ -1195,22 +1154,23 @@ pub fn apply_post(
     event
 }
 
-/// A post the admin imported by its link: an untagged one is filed under a
-/// guessed kind, marked as set by hand so a re-read keeps it.
+/// A post the admin imported by its link: one without the registration link
+/// gets the kind its text speaks of, marked as set by hand so a re-read keeps
+/// it.
 pub fn file_imported(event: &mut AfishaEvent) {
     if event.kind.is_none() {
-        event.kind = Some(AfishaKind::guess(&event.post_text));
+        event.kind = Some(AfishaKind::of_text(&event.post_text));
         event.edited.insert("kind".to_string());
         event.settle();
     }
 }
 
-/// A post from the archive import (an own event, no hashtag): a complete one
-/// is filed like an imported one; an incomplete one stays untagged — the
-/// archive makes no drafts for the admin to chase.
+/// A post from the archive import: an incomplete one stays unpublished
+/// instead of becoming a draft — the archive makes no drafts for the admin to
+/// chase.
 pub fn file_archived(event: &mut AfishaEvent) {
-    if missing_fields(&event.fields).is_none() {
-        file_imported(event);
+    if event.status == AfishaStatus::Draft {
+        event.status = AfishaStatus::Untagged;
     }
 }
 
@@ -1300,20 +1260,7 @@ mod tests {
             register_link(&walk.links).as_deref(),
             Some("https://t.me/geohodton_bot?startapp=AuBzZx4JZ00fgAgfWuYVL7E")
         );
-        assert_eq!(AfishaKind::from_text(&walk.text), Some(AfishaKind::Hiking));
-    }
-
-    #[test]
-    fn only_tagged_posts_and_own_events_are_candidates() {
-        let posts = parse_channel_page(FEED);
-        let candidates: Vec<i64> = posts
-            .iter()
-            .filter(|p| p.is_candidate())
-            .map(|p| p.id)
-            .collect();
-        // 1109 links to the registration bot but has no tag; the partner
-        // posts and the weekend digest are neither.
-        assert_eq!(candidates, [1109, 1110, 1111]);
+        assert_eq!(AfishaKind::of_text(&walk.text), AfishaKind::Hiking);
     }
 
     #[test]
@@ -1377,8 +1324,7 @@ mod tests {
             f.description.as_deref(),
             Some("Возрастных ограничений нет. Приходите с детьми.")
         );
-        assert_eq!(AfishaKind::from_text(&quest.text), None);
-        assert_eq!(AfishaKind::guess(&quest.text), AfishaKind::Quest);
+        assert_eq!(AfishaKind::of_text(&quest.text), AfishaKind::Quest);
     }
 
     #[test]
@@ -1389,7 +1335,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_takes_own_announcements_only() {
+    fn own_events_are_the_posts_linking_the_registration_app() {
         let older = parse_channel_page(OLDER);
         assert_eq!(
             older.iter().map(|p| p.id).collect::<Vec<_>>(),
@@ -1435,20 +1381,6 @@ mod tests {
             Some("Нови Сад"),
             "a known city is found anywhere"
         );
-    }
-
-    #[test]
-    fn hashtags_are_whole_words_and_the_first_wins() {
-        assert_eq!(
-            AfishaKind::from_text("текст #Quest"),
-            Some(AfishaKind::Quest)
-        );
-        assert_eq!(
-            AfishaKind::from_text("#hiking и #quest"),
-            Some(AfishaKind::Hiking)
-        );
-        assert_eq!(AfishaKind::from_text("#hikingclub"), None);
-        assert_eq!(AfishaKind::from_text("без тегов"), None);
     }
 
     #[test]
@@ -1511,7 +1443,7 @@ mod tests {
     }
 
     #[test]
-    fn tagged_complete_post_publishes_and_untagged_waits() {
+    fn an_own_event_publishes_and_another_post_waits() {
         let posts = parse_channel_page(FEED);
         let walk = apply_post(
             None,
@@ -1528,20 +1460,19 @@ mod tests {
         assert_eq!(walk.image.as_deref(), Some("/m/1"));
         assert_eq!(walk.post_url(), "https://t.me/ch/1110");
 
-        let untagged = apply_post(None, "ch", post(&posts, 1109), &cities(), None);
-        assert_eq!(untagged.status, AfishaStatus::Untagged);
-        assert_eq!(untagged.kind, None);
+        let evening = apply_post(None, "ch", post(&posts, 1109), &cities(), None);
+        assert_eq!(evening.status, AfishaStatus::Published, "no hashtag needed");
+
+        let partner = apply_post(None, "ch", post(&posts, 1112), &cities(), None);
+        assert_eq!(partner.status, AfishaStatus::Untagged);
+        assert_eq!(partner.kind, None);
     }
 
     #[test]
-    fn tagged_post_without_a_date_is_a_draft_with_the_reason() {
-        let event = apply_post(
-            None,
-            "ch",
-            &text_post("Скоро прогулка #hiking\nМесто встречи: Белград"),
-            &cities(),
-            None,
-        );
+    fn an_own_event_without_a_date_is_a_draft_with_the_reason() {
+        let mut soon = text_post("Скоро прогулка\nМесто встречи: Белград");
+        soon.links = vec!["https://t.me/geohodton_bot?startapp=x".into()];
+        let event = apply_post(None, "ch", &soon, &cities(), None);
         assert_eq!(event.status, AfishaStatus::Draft);
         assert_eq!(event.problem.as_deref(), Some("нет даты, времени"));
     }
@@ -1591,13 +1522,13 @@ mod tests {
     }
 
     #[test]
-    fn removing_the_hashtag_takes_the_post_off_the_site() {
+    fn removing_the_registration_link_takes_the_post_off_the_site() {
         let posts = parse_channel_page(FEED);
         let walk = post(&posts, 1110);
         let event = apply_post(None, "ch", walk, &cities(), None);
-        let mut untagged = walk.clone();
-        untagged.text = untagged.text.replace("#hiking", "");
-        let again = apply_post(Some(&event), "ch", &untagged, &cities(), None);
+        let mut unlinked = walk.clone();
+        unlinked.links.retain(|l| !l.contains(REGISTER_BOT));
+        let again = apply_post(Some(&event), "ch", &unlinked, &cities(), None);
         assert_eq!(again.status, AfishaStatus::Untagged);
     }
 
@@ -1632,23 +1563,38 @@ mod tests {
     }
 
     #[test]
-    fn archived_untagged_post_is_filed_under_a_guessed_kind() {
+    fn the_archive_publishes_complete_posts_and_leaves_incomplete_ones() {
         let posts = parse_channel_page(EMBED_1087);
         let mut event = apply_post(None, "ch", post(&posts, 1087), &cities(), None);
-        assert_eq!(event.status, AfishaStatus::Untagged);
         file_archived(&mut event);
         assert_eq!(event.kind, Some(AfishaKind::Quest));
         assert_eq!(event.status, AfishaStatus::Published);
 
-        let mut cityless = apply_post(None, "ch", post(&posts, 1087), &[], None);
-        cityless.fields.city = None;
-        file_archived(&mut cityless);
+        let mut cancelled = post(&posts, 1087).clone();
+        cancelled.text = "Мероприятие отменено".into();
+        let mut event = apply_post(None, "ch", &cancelled, &cities(), None);
+        assert_eq!(event.status, AfishaStatus::Draft);
+        file_archived(&mut event);
         assert_eq!(
-            cityless.status,
+            event.status,
             AfishaStatus::Untagged,
             "no draft from the archive"
         );
-        assert_eq!(cityless.kind, None);
+    }
+
+    #[test]
+    fn a_post_imported_without_the_registration_link_gets_its_kind() {
+        let mut event = apply_post(
+            None,
+            "ch",
+            &text_post("В субботу 03.10.2026 проходим квест"),
+            &cities(),
+            None,
+        );
+        assert_eq!(event.kind, None);
+        file_imported(&mut event);
+        assert_eq!(event.kind, Some(AfishaKind::Quest));
+        assert!(event.edited.contains("kind"));
     }
 
     /// A test picture: soft diagonal bands, plus a bright corner badge when asked.

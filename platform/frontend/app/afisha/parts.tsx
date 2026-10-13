@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { KIND_LABEL, eventPath, shortWhen, type AfishaEventWire } from '../../lib/afisha';
+import { KIND_LABEL, eventPath, isDonation, shortWhen, type AfishaEventWire } from '../../lib/afisha';
 import { CLUB_CHANNEL, CLUB_CHANNEL_URL } from '../../lib/contacts';
 import { monogram } from '../../lib/cover';
 
@@ -48,7 +48,7 @@ export function AfishaCard({ event }: { event: AfishaEventWire }) {
           </p>
           {event.difficulty && <p className="afi-card__line">Сложность: {event.difficulty}</p>}
           {event.guide && <p className="afi-card__line">Ведущий: {event.guide}</p>}
-          {event.price && <p className="afi-card__price">{event.price}</p>}
+          {event.price && !isDonation(event.price) && <p className="afi-card__price">{event.price}</p>}
         </div>
       </Link>
     </article>

@@ -123,6 +123,16 @@ describe('hub', () => {
     expect(within(card).queryByText(/Лиманский парк/)).toBeNull();
   });
 
+  it('leaves the donation off a card but shows a set price', async () => {
+    listMock.mockImplementation(async (when: string) =>
+      when === 'upcoming' ? [WALK, { ...WALK, post_id: 2001, slug: 'paid-2001', title: 'Платная прогулка', price: '1500 динаров' }] : [],
+    );
+    render(await AfishaPage());
+    const card = (title: string) => screen.getByRole('heading', { level: 3, name: title }).closest('article') as HTMLElement;
+    expect(within(card(WALK.title)).queryByText(/донат/i)).toBeNull();
+    expect(within(card('Платная прогулка')).getByText('1500 динаров')).toBeTruthy();
+  });
+
   it('files walks and group quests under their own sections, each with its slogan', async () => {
     const quest = { ...WALK, post_id: 1087, kind: 'quest' as const, title: 'Тайна крепости', slug: '2026-10-12-tayna-1087' };
     listMock.mockImplementation(async (when: string) => (when === 'upcoming' ? [WALK, quest] : []));

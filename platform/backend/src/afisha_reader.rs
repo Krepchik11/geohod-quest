@@ -397,23 +397,19 @@ impl<'a> Pass<'a> {
         })
     }
 
-    /// Apply one post and store the result when anything changed.
     /// Whether the pass applies this post at all.
     fn wants(&self, post: &ChannelPost, mode: Mode) -> bool {
         match (self.known.get(&post.id), mode) {
-            (None, Mode::Feed) => post.is_candidate(),
-            (None, Mode::Archive) => post.is_own_event(),
+            (None, Mode::Feed | Mode::Archive) => post.is_own_event(),
             (_, Mode::Import) => true,
             // The archive leaves what is on the site alone; it only files the
-            // posts the feed met without a hashtag.
-            (Some(event), Mode::Archive) => {
-                event.status == AfishaStatus::Untagged && !event.edited.contains("kind")
-            }
+            // posts stored unfiled — read when a hashtag still decided.
+            (Some(event), Mode::Archive) => unfiled(event, post),
             (Some(event), Mode::Feed) => {
                 let unchanged = event.status != AfishaStatus::Removed
                     && event.post_text == post.text
                     && (event.image.is_some() || post.photo.is_none());
-                !unchanged
+                !unchanged || unfiled(event, post)
             }
         }
     }
@@ -550,7 +546,7 @@ impl<'a> Pass<'a> {
                 })
                 .collect();
             let body = format!(
-                "Пост с хештегом попал в черновики сайта: в нём не нашлось нужных строк.\n\n{}\n\n\
+                "Анонс попал в черновики сайта: в посте не нашлось нужных строк.\n\n{}\n\n\
                  Исправьте пост в канале (сайт перечитает его в течение 10 минут) или заполните \
                  поля в админке: {}",
                 posts.join("\n"),
@@ -601,6 +597,15 @@ fn feed_url(channel: &str, before: Option<i64>) -> String {
 
 fn embed_url(channel: &str, post_id: i64) -> String {
     format!("https://t.me/{channel}/{post_id}?embed=1&mode=tme")
+}
+
+/// An own event stored without a kind — read back when a hashtag still
+/// decided, so it waits to be filed by the registration link.
+fn unfiled(event: &AfishaEvent, post: &ChannelPost) -> bool {
+    event.status == AfishaStatus::Untagged
+        && event.kind.is_none()
+        && !event.edited.contains("kind")
+        && post.is_own_event()
 }
 
 /// Pictures downloaded at once by [`Pass::prefetch`].
@@ -763,8 +768,8 @@ pub async fn check_upcoming(state: &AppState, channel: &str) -> Result<Report, A
     Ok(pass.finish().await)
 }
 
-/// Take one post by the link the admin pasted — a post without a hashtag
-/// too (filed under a guessed kind).
+/// Take one post by the link the admin pasted — one without the
+/// registration link too (filed under the kind its text speaks of).
 ///
 /// # Errors
 ///

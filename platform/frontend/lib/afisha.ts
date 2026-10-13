@@ -158,6 +158,11 @@ export function isFree(price: string | null): boolean {
   return !!price && /бесплатн|донат|free/i.test(price);
 }
 
+/** Whether the price line asks for a donation — the card leaves such a line out. */
+export function isDonation(price: string | null): boolean {
+  return !!price && /донат/i.test(price);
+}
+
 /** ISO country of a city — Serbia unless the channel goes abroad. */
 function countryOf(city: string): string {
   const key = city.toLowerCase();

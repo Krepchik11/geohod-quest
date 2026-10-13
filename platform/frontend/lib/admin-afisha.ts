@@ -24,7 +24,7 @@ export const STATUS_LABEL: Record<AfishaStatus, string> = {
   published: 'На сайте',
   draft: 'Черновик',
   hidden: 'Скрыт',
-  untagged: 'Без хештега',
+  untagged: 'Пропущен',
   removed: 'Удалён из канала',
 };
 
