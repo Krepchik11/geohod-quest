@@ -5,6 +5,7 @@ import {
   eventFacts,
   eventJsonLd,
   eventSummary,
+  isDonation,
   isFree,
   listJsonLd,
   longWhen,
@@ -61,6 +62,14 @@ describe('lists', () => {
     expect(isFree('Бесплатно')).toBe(true);
     expect(isFree('1500 динаров')).toBe(false);
     expect(isFree(null)).toBe(false);
+  });
+
+  it('tells a donation from a set price', () => {
+    expect(isDonation('донат по желанию')).toBe(true);
+    expect(isDonation('Донат')).toBe(true);
+    expect(isDonation('Бесплатно')).toBe(false);
+    expect(isDonation('1500 динаров')).toBe(false);
+    expect(isDonation(null)).toBe(false);
   });
 });
 

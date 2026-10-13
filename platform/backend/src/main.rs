@@ -8001,13 +8001,10 @@ mod tests {
         assert_eq!(page["report"]["read"], 6);
         assert_eq!(page["report"]["created"], 3);
         let status = |page: &Value, id: i64| afisha_entry(page, id).map(|e| e["status"].clone());
-        assert_eq!(status(&page, 1110), Some(json!("published")));
-        assert_eq!(status(&page, 1111), Some(json!("published")));
-        assert_eq!(
-            status(&page, 1109),
-            Some(json!("untagged")),
-            "own event, no tag"
-        );
+        // Every post linking the registration mini app is an own event.
+        for id in [1109, 1110, 1111] {
+            assert_eq!(status(&page, id), Some(json!("published")), "{id}");
+        }
         assert_eq!(
             status(&page, 1112),
             None,
@@ -8015,7 +8012,7 @@ mod tests {
         );
         assert_eq!(flag(true).await.0, StatusCode::OK);
 
-        // Both walks are public, as upcoming or past by the current date.
+        // The three walks are public, as upcoming or past by the current date.
         let mut public: Vec<i64> = Vec::new();
         for when in ["upcoming", "past"] {
             let (st, list) = get_json(app, &format!("/api/afisha?when={when}")).await;
@@ -8024,7 +8021,7 @@ mod tests {
             public.extend(ids.map(|e| e["post_id"].as_i64().expect("id")));
         }
         public.sort_unstable();
-        assert_eq!(public, [1110, 1111]);
+        assert_eq!(public, [1109, 1110, 1111]);
         let (st, walk) = get_json(app, "/api/afisha/1110").await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(walk["title"], "Прогуляемся к римской башне Врдничка кула");
@@ -8044,8 +8041,12 @@ mod tests {
                 .is_some_and(|u| u.starts_with("http://test.local/api/media/")),
             "the picture is copied to the site: {walk}"
         );
-        let (st, _) = get_json(app, "/api/afisha/1109").await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "untagged stays off the site");
+        let (st, _) = get_json(app, "/api/afisha/1112").await;
+        assert_eq!(
+            st,
+            StatusCode::NOT_FOUND,
+            "a partner post stays off the site"
+        );
 
         // «Записаться» counts the click on its way to the bot.
         let res = app
@@ -8095,7 +8096,7 @@ mod tests {
             );
         }
 
-        // Import by link: an old untagged group quest is filed as a quest.
+        // Import by link: an old group quest comes in as a quest.
         let import = |url: String| {
             post_json_h(
                 app,
@@ -8244,7 +8245,7 @@ mod tests {
             .replace("12:45", "13:15")
             .replace(
                 "В субботу <b>10.10.2026</b> <b>гуляем по вечернему лесу на Фрушке горе</b>",
-                "В субботу <b>гуляем по вечернему лесу на Фрушке горе</b> #hiking",
+                "В субботу <b>гуляем по вечернему лесу на Фрушке горе</b>",
             );
         *fake_channel(&state).feed.lock().expect("fake") = Some(edited);
         let report = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
@@ -8365,6 +8366,27 @@ mod tests {
             .await
             .expect("read again");
         assert!(afisha_event(&state, 1110).await.image_print.is_some());
+    }
+
+    /// An own event stored unfiled while a hashtag still decided gets filed by
+    /// its registration link on the next read — the post itself unchanged.
+    #[tokio::test]
+    async fn afisha_files_own_events_stored_while_hashtags_decided() {
+        let (state, _) = afisha_state(test_config()).await;
+        afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read");
+        let mut walk = afisha_event(&state, 1110).await;
+        walk.status = afisha::AfishaStatus::Untagged;
+        walk.kind = None;
+        state.afisha.upsert(walk).await.expect("store");
+        let report = afisha_reader::sync_feed(&state, AFISHA_CHANNEL)
+            .await
+            .expect("read again");
+        assert_eq!(report.updated, 1);
+        let walk = afisha_event(&state, 1110).await;
+        assert_eq!(walk.status, afisha::AfishaStatus::Published);
+        assert_eq!(walk.kind, Some(afisha::AfishaKind::Hiking));
     }
 
     /// A public site tells search engines about every page that changed.

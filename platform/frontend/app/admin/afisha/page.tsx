@@ -27,8 +27,9 @@ import { AdminPageHead, AdminToast, useToast } from '../ui';
 /**
  * Admin · Афиша: the announcements the site reads from the Telegram channel.
  *
- * The admin publishes posts in the channel as always and adds #hiking or
- * #quest; the backend reads the channel every 10 minutes (afisha_reader.rs).
+ * The admin publishes posts in the channel as always; every post linking the
+ * registration mini app is an announcement, and the backend reads the channel
+ * every 10 minutes (afisha_reader.rs).
  * Here: the channel and the mail for the reader's letters, the switch of the
  * public pages, «Проверить канал» now, a post by its link, the archive, and
  * per announcement a correction form and «Скрыть» / «Показать». Every action
@@ -135,7 +136,7 @@ export default function AdminAfishaPage() {
         <AdminPageHead
           eyebrow="АФИША"
           title="Анонсы из канала"
-          lede="Посты канала с хештегом #hiking (прогулка) или #quest (групповой квест) сайт забирает сам каждые 10 минут. Здесь — настройки, ручная проверка и правка анонсов."
+          lede="Посты канала со ссылкой на мини-приложение регистрации сайт забирает сам каждые 10 минут. Пост о квесте попадает в «Групповые квесты», остальные — в «Прогулки». Здесь — настройки, ручная проверка и правка анонсов."
         >
           <button
             type="button"
@@ -330,7 +331,7 @@ function ToolsPanel({
         </button>
       </div>
       <p className="aaf-hint">
-        Для поста без хештега или для старого анонса. Пост без хештега получит тип по тексту — его можно поменять.
+        Для поста без ссылки на регистрацию или для старого анонса. Тип берётся по тексту — его можно поменять.
       </p>
       <div className="aaf-state">
         <button type="button" className="btn btn--quiet btn--sm" disabled={disabled} onClick={() => onArchive(year)}>
