@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   adoptCover,
   computeGates,
+  draftFingerprint,
   duplicateQuest,
   duplicateStep as modelDuplicate,
   insertionIndex,
@@ -11,6 +12,7 @@ import {
   newQuest,
   newStep,
   publishVersion,
+  questDurationLabel,
   questUpsert,
   removeStep as modelRemove,
   reorderSteps,
@@ -22,6 +24,7 @@ import {
 } from '../../lib/constructor-model';
 import {
   api,
+  ApiError,
   classify,
   isAuthFailure,
   type ConstructorAuthorWire,
@@ -33,6 +36,8 @@ import { isAdmin } from '../../lib/roles';
 import { useMe } from '../../lib/use-me';
 import { BuilderScreen, type CityOptions } from './Builder';
 import Dashboard from './Dashboard';
+import QuestTiles from './QuestTiles';
+import type { QuickSettingsPatch } from './QuickSettings';
 import { TestOverlay } from './TestPlayer';
 
 const AUTOSAVE_DEBOUNCE_MS = 350;
@@ -93,6 +98,8 @@ export default function Workspace() {
   // null — ещё грузится; без флага список не запрашивается вовсе, и город в
   // настройках вводится вручную.
   const cityList = useClientFeature('ctor_city_list');
+  // Плитки вместо строк в списке квестов (флаг ctor_tiles).
+  const tilesOn = useClientFeature('ctor_tiles');
   const [cityNames, setCityNames] = useState<readonly string[] | 'failed' | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -246,7 +253,9 @@ export default function Workspace() {
   const transferQuest = async (questId: string, userId: string) => {
     try {
       const row = await api.setConstructorAuthor(questId, userId);
-      setList((l) => l.map((q) => (q.quest_id === row.quest_id ? row : q)));
+      setList((l) =>
+        l.map((q) => (q.quest_id === row.quest_id ? { ...row, revenue: row.revenue ?? q.revenue } : q)),
+      );
       showToast(`Квест передан: ${row.author}`);
     } catch (e) {
       throw new Error(errMessage(e));
@@ -282,10 +291,68 @@ export default function Workspace() {
       const copy = duplicateQuest(src, `q-${uid()}`);
       await api.createConstructorQuest({ quest_id: copy.id, ...questUpsert(copy) });
       await refreshList();
-      showToast('Квест дублирован — копия создана как «Проект»');
+      showToast('Квест дублирован — копия создана как «Черновик»');
     } catch (e) {
       showToast(errMessage(e));
     }
+  };
+
+  // ---- Плитки (флаг ctor_tiles) ----
+
+  /** Свежий черновик с сервера — для листа быстрых настроек. */
+  const loadQuest = async (id: string): Promise<CtorQuest> => {
+    const full = await api.getConstructorQuest(id);
+    const q = bodyToQuest(full.body, full.quest_id);
+    if (!q) throw new Error('Повреждённый черновик — откройте квест в редакторе.');
+    return q;
+  };
+
+  /**
+   * Быстрые настройки: черновик перечитывается прямо перед записью и сохраняется
+   * тем же путём, что автосейв, — с колонками списка и сводкой плитки. Подпись
+   * длительности, как и в редакторе, выводится из минут.
+   */
+  const saveSettings = async (row: ConstructorQuestWire, patch: QuickSettingsPatch) => {
+    try {
+      const q = await loadQuest(row.quest_id);
+      const next: CtorQuest = {
+        ...q,
+        meta: { ...q.meta, ...patch, duration: questDurationLabel(patch.durationMin) },
+      };
+      await api.saveConstructorQuest(next.id, questUpsert(next));
+      await refreshList();
+      showToast(
+        row.published_version != null
+          ? `Сохранено в черновик — до игроков дойдёт с версией ${row.published_version + 1}`
+          : 'Настройки сохранены',
+      );
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      // Из полей листа сервер проверяет только теги (закрытые наборы — наши).
+      const f = classify(e);
+      throw new Error(
+        f.kind === 'rejected' && f.status === 400
+          ? 'Сервер не принял настройки — проверьте теги: не больше 20, каждый до 40 знаков.'
+          : errMessage(e),
+      );
+    }
+  };
+
+  /** Ссылка на страницу квеста в магазине — для поста в канал. */
+  const copyLink = async (row: ConstructorQuestWire) => {
+    const url = `${window.location.origin}/quest/${encodeURIComponent(row.quest_id)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast(`Ссылка скопирована: ${url}`);
+    } catch {
+      showToast(`Не удалось скопировать — ссылка: ${url}`);
+    }
+  };
+
+  /** Передача автору живёт в настройках квеста в редакторе — открываем их. */
+  const transferFromTile = async (row: ConstructorQuestWire) => {
+    await openQuest(row.quest_id);
+    setSel({ type: 'settings' });
   };
 
   const deleteQuest = async (row: ConstructorQuestWire) => {
@@ -305,13 +372,17 @@ export default function Workspace() {
     setList((l) => l.map((q) => (q.quest_id === row.quest_id ? { ...q, status } : q))); // optimistic
     try {
       const updated = await api.setConstructorStatus(row.quest_id, status);
-      setList((l) => l.map((q) => (q.quest_id === updated.quest_id ? updated : q)));
+      // Выручку отдаёт только общий список (и только администратору) — строка
+      // одного квеста её не несёт, поэтому сохраняем прежнее значение.
+      setList((l) =>
+        l.map((q) => (q.quest_id === updated.quest_id ? { ...updated, revenue: updated.revenue ?? q.revenue } : q)),
+      );
     } catch (e) {
       setList(prev); // rollback
-      // «Тест»/«Опубликован» need a published version first: the backend coherence
+      // «Тест»/«В магазине» need a published version first: the backend coherence
       // guard returns 400 when no frozen snapshot exists. A bare status flip can't
       // put a quest in the store — publishing is the gated action in the editor — so
-      // open the quest there instead of failing silently. (Delisting to «Проект»
+      // open the quest there instead of failing silently. (Delisting to «Черновик»
       // never hits this.)
       const f = classify(e);
       if (f.kind === 'rejected' && f.status === 400 && status !== 'draft') {
@@ -423,8 +494,12 @@ export default function Workspace() {
       });
       const sizeLabel = computeGates(active).sizeLabel;
       const date = new Date().toLocaleDateString('ru-RU');
+      // Отпечаток того, что ушло в магазин: по нему плитка узнаёт правки,
+      // ещё не дошедшие до игроков.
+      const publishedFp = draftFingerprint(active);
       const withVersion = (q: CtorQuest): CtorQuest => ({
         ...q,
+        publishedFp,
         versions: [
           { n: version, date, pages: q.steps.length, size: sizeLabel, live: true, attempts: 0 },
           ...q.versions.map((v) => ({ ...v, live: false })),
@@ -448,15 +523,16 @@ export default function Workspace() {
   // Full backup download (record + steps + media), same zip the
   // backend export endpoint builds — triggers a normal browser file save via a
   // throwaway object URL, no navigation.
-  const exportQuest = async () => {
-    if (!active || exporting) return;
+  // Из билдера — активный квест, с плитки — любой.
+  const exportQuest = async (questId: string | undefined = active?.id) => {
+    if (!questId || exporting) return;
     setExporting(true);
     try {
-      const blob = await api.exportConstructorQuest(active.id);
+      const blob = await api.exportConstructorQuest(questId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `quest-${active.id}.zip`;
+      a.download = `quest-${questId}.zip`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -514,21 +590,46 @@ export default function Workspace() {
         </div>
       ) : (
         <>
-          <Dashboard
-            quests={list}
-            loading={listLoading}
-            error={listError}
-            toast={toast}
-            actions={{
-              onCreate: () => void createQuest(),
-              onEdit: (id) => void openQuest(id),
-              onRun: (q) => void runQuest(q),
-              onDuplicate: (q) => void duplicate(q),
-              onDelete: (q) => void deleteQuest(q),
-              onStatusChange: (q, status) => void changeStatus(q, status),
-              onOpenPublish: (q) => void openPublish(q.quest_id),
-            }}
-          />
+          {tilesOn ? (
+            <QuestTiles
+              quests={list}
+              loading={listLoading}
+              error={listError}
+              toast={toast}
+              isAdmin={isAdmin(role)}
+              cities={cities?.state === 'ready' ? cities.names : undefined}
+              actions={{
+                onCreate: () => void createQuest(),
+                onEdit: (id) => void openQuest(id),
+                onRun: (q) => void runQuest(q),
+                onDuplicate: (q) => void duplicate(q),
+                onDelete: (q) => void deleteQuest(q),
+                onStatusChange: (q, status) => void changeStatus(q, status),
+                onOpenPublish: (q) => void openPublish(q.quest_id),
+                onCopyLink: (q) => void copyLink(q),
+                onExport: (q) => void exportQuest(q.quest_id),
+                onTransfer: isAdmin(role) ? ((q) => void transferFromTile(q)) : undefined,
+                loadQuest,
+                saveSettings,
+              }}
+            />
+          ) : (
+            <Dashboard
+              quests={list}
+              loading={listLoading}
+              error={listError}
+              toast={toast}
+              actions={{
+                onCreate: () => void createQuest(),
+                onEdit: (id) => void openQuest(id),
+                onRun: (q) => void runQuest(q),
+                onDuplicate: (q) => void duplicate(q),
+                onDelete: (q) => void deleteQuest(q),
+                onStatusChange: (q, status) => void changeStatus(q, status),
+                onOpenPublish: (q) => void openPublish(q.quest_id),
+              }}
+            />
+          )}
           {test ? (
             <div className="admin wsp">
               <TestOverlay quest={test.quest} startPos={test.startPos} onClose={() => setTest(null)} />

@@ -20,12 +20,14 @@ export interface StatusControlProps {
   onStatusChange: (status: CtorStatus) => void;
   /** Route into the editor's publish panel (gated publication path). */
   onOpenPublish: () => void;
+  /** Плитки (флаг ctor_tiles): номер живой версии на плашке — «В магазине · v3». */
+  showVersion?: boolean;
 }
 
 const CHIP: Record<CtorStatus, { label: string; className: string }> = {
-  published: { label: 'Опубликован', className: 'status-chip--published' },
+  published: { label: 'В магазине', className: 'status-chip--published' },
   test: { label: 'Тест', className: 'status-chip--test' },
-  draft: { label: 'Проект', className: 'status-chip--draft' },
+  draft: { label: 'Черновик', className: 'status-chip--draft' },
 };
 
 type Action = {
@@ -47,7 +49,7 @@ export function actionsFor(status: CtorStatus, hasSnapshot: boolean): Action[] {
   if (status === 'test') {
     return [
       { key: 'to-published', title: 'Опубликовать', subtitle: 'версия уже собрана — квест вернётся в магазин', run: hasSnapshot ? 'direct-published' : 'publish-panel' },
-      { key: 'to-draft', title: 'Перевести в «Проект»', subtitle: 'скроется и от тестеров', run: 'direct-draft' },
+      { key: 'to-draft', title: 'Перевести в «Черновик»', subtitle: 'скроется и от тестеров', run: 'direct-draft' },
     ];
   }
   return [
@@ -56,7 +58,7 @@ export function actionsFor(status: CtorStatus, hasSnapshot: boolean): Action[] {
   ];
 }
 
-export default function StatusControl({ quest, onStatusChange, onOpenPublish }: StatusControlProps) {
+export default function StatusControl({ quest, onStatusChange, onOpenPublish, showVersion }: StatusControlProps) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const chip = CHIP[quest.status];
@@ -91,6 +93,7 @@ export default function StatusControl({ quest, onStatusChange, onOpenPublish }: 
       >
         <span className="status-chip__dot" aria-hidden />
         {chip.label}
+        {showVersion && hasSnapshot ? <span className="status-chip__version">· v{quest.published_version}</span> : null}
         <span className="status-chip__caret" aria-hidden>▾</span>
       </button>
 

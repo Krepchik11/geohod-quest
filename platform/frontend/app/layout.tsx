@@ -18,6 +18,7 @@ import "./styles/myquests.css";
 import "./styles/admin-ctor.css";
 import "./styles/ctor-workspace.css";
 import "./styles/ctor-dashboard.css";
+import "./styles/ctor-tiles.css";
 import "./styles/admin-users.css";
 import "./styles/admin-shell.css";
 import "./styles/admin-page.css";

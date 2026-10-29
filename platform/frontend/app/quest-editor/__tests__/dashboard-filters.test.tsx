@@ -29,6 +29,18 @@ function quest(over: Partial<ConstructorQuestWire>): ConstructorQuestWire {
     cover: null,
     created_at: 1,
     updated_at: 1,
+    city: null,
+    price: null,
+    duration_min: 60,
+    distance_km: 5,
+    tasks: null,
+    gate_errors: null,
+    gate_warnings: null,
+    unpublished_changes: null,
+    rating_avg: 0,
+    rating_count: 0,
+    players: 0,
+    revenue: null,
     ...over,
   };
 }
