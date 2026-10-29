@@ -28,9 +28,9 @@ import { useEscape } from './controls';
  */
 
 const STATUS_LABEL: Record<CtorStatus, string> = {
-  published: 'Опубликован',
+  published: 'В магазине',
   test: 'Тест',
-  draft: 'Проект',
+  draft: 'Черновик',
 };
 /** Детерминированный градиент-«обложка» по названию (как в дизайне). */
 function thumbBg(name: string): string {
@@ -61,7 +61,7 @@ function CoverThumb({ name, cover }: { name: string; cover: string | null }) {
  * «безвозвратно» стоит в самом вопросе (ТЗ «доработка Редактора», задача 1).
  * Фокус встаёт на «Отмена»: случайный Enter не должен стереть квест.
  */
-function DeleteQuestModal({ quest, onCancel, onConfirm }: {
+export function DeleteQuestModal({ quest, onCancel, onConfirm }: {
   quest: ConstructorQuestWire;
   onCancel: () => void;
   onConfirm: () => void;
@@ -204,7 +204,7 @@ export default function Dashboard({
           value={filters}
           onChange={setFilters}
           tags={allTags}
-          statusOptions={['Все', 'Опубликован', 'Тест', 'Проект']}
+          statusOptions={['Все', 'В магазине', 'Тест', 'Черновик']}
         />
 
         {/* ===== Заголовок секции ===== */}

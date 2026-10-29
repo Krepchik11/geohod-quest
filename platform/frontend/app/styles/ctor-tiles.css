@@ -1,0 +1,335 @@
+/* GEOHOD QUEST — список квестов плитками (флаг ctor_tiles), главная конструктора.
+   Префикс .qct-*; общий каркас (.qcd-root, пустые состояния, тост, модалка
+   удаления) — из ctor-dashboard.css. Цвета только из токенов globals.css §0;
+   полупрозрачное — через color-mix от токенов. */
+
+.qct-main {
+  max-width: 1320px; margin: 0 auto; padding: 36px 40px 0;
+  display: grid; gap: 18px;
+}
+
+/* ---------- заголовок ---------- */
+.qct-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.qct-head h1 { font-size: 24px; font-weight: 600; color: var(--navy); }
+.qct-create {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 22px;
+  border: 0; border-radius: var(--r-pill); background: var(--blue); color: var(--white);
+  font-size: 13.5px; font-weight: 700; transition: background .15s;
+}
+.qct-create:hover { background: var(--blue-hover); }
+.qct-create__short { display: none; }
+
+/* ---------- вкладки статусов ---------- */
+.qct-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-2); overflow-x: auto; scrollbar-width: none; }
+.qct-tabs::-webkit-scrollbar { display: none; }
+.qct-tab {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 10px 12px 11px;
+  border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+  color: var(--muted-2); font-size: 14px; font-weight: 500; white-space: nowrap;
+}
+.qct-tab:hover { color: var(--navy); }
+.qct-tab[aria-selected="true"] { color: var(--navy); font-weight: 600; border-bottom-color: var(--blue); }
+.qct-tab__count {
+  font-size: 12px; font-weight: 600; color: var(--muted); background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 1px var(--border-2); border-radius: 10px; padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
+.qct-tab[aria-selected="true"] .qct-tab__count { background: var(--blue-tint); color: var(--blue); box-shadow: none; }
+.qct-tab--attention .qct-tab__count {
+  background: color-mix(in srgb, var(--amber) 12%, var(--white)); color: var(--amber); box-shadow: none;
+}
+
+/* ---------- поиск, город, сортировка, вид ---------- */
+.qct-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.qct-search {
+  position: relative; flex: 1 1 260px; max-width: 380px; display: flex; align-items: center;
+  color: var(--muted);
+}
+.qct-search svg { position: absolute; left: 14px; pointer-events: none; }
+.qct-search input {
+  width: 100%; height: 44px; padding: 0 14px 0 40px; border: 1px solid var(--border);
+  border-radius: var(--r-ctl); background: var(--white); font-size: 14px; color: var(--text); outline: none;
+}
+.qct-search input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 18%, transparent); }
+.qct-tools .input { width: auto; flex: none; }
+.qct-view {
+  margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-ctl);
+  overflow: hidden; background: var(--white);
+}
+.qct-view button {
+  width: 44px; height: 42px; border: 0; background: none; display: grid; place-items: center; color: var(--muted-2);
+}
+.qct-view button[aria-pressed="true"] { background: var(--blue-tint); color: var(--blue); }
+
+/* ---------- сетка ---------- */
+.qct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 18px; }
+.qct-grid--rows { grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: 14px; }
+.qct-skel { background: var(--white); border-radius: 16px; padding: 0 0 18px; display: grid; gap: 12px; box-shadow: var(--shadow-pop); }
+.qct-skel__cover { aspect-ratio: 3 / 2; border-radius: 16px 16px 0 0; }
+.qct-skel__line { height: 14px; margin: 0 14px; width: 70%; }
+.qct-skel__line--short { width: 45%; }
+.qct-grid--rows .qct-skel__cover { aspect-ratio: auto; height: 84px; }
+
+/* ---------- плитка ---------- */
+.qct-tile {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  background: var(--white); border-radius: 16px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent), 0 8px 22px color-mix(in srgb, var(--text) 7%, transparent);
+  transition: box-shadow .15s;
+}
+.qct-tile:hover { box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent), 0 14px 30px color-mix(in srgb, var(--text) 12%, transparent); }
+
+.qct-cover { position: relative; aspect-ratio: 3 / 2; border-radius: 16px 16px 0 0; background: var(--bg-subtle); }
+.qct-cover__btn {
+  position: absolute; inset: 0; display: block; padding: 0; border: 0; background: none;
+  border-radius: inherit; overflow: hidden; cursor: pointer;
+}
+.qct-cover__btn img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s; }
+.qct-cover__btn:hover img { transform: scale(1.03); }
+.qct-cover__btn:focus-visible { outline: 3px solid var(--blue); outline-offset: -3px; }
+.qct-mono { width: 100%; height: 100%; display: grid; place-items: center; }
+.qct-mono span { font-family: var(--font-serif); font-size: 56px; color: color-mix(in srgb, var(--white) 92%, transparent); }
+
+/* статус на обложке — нынешний StatusControl в «стеклянной» плашке */
+.qct-cover__status { position: absolute; left: 10px; top: 10px; z-index: 3; }
+.qct-cover__status .status-chip {
+  height: 28px; padding: 0 10px 0 9px; gap: 7px; font-size: 12px;
+  background: color-mix(in srgb, var(--white) 94%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
+  backdrop-filter: blur(6px);
+}
+.status-chip__version { font-weight: 500; opacity: .75; }
+.qct-tile .status-menu { left: 0; right: auto; top: 36px; max-width: calc(100vw - 32px); }
+
+/* плашка действия: правки не опубликованы / готов к публикации */
+.qct-cover__band { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 2; }
+.qct-cover__band:empty { display: none; }
+.qct-band {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 11px; border-radius: 11px;
+  background: color-mix(in srgb, var(--white) 94%, transparent); backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--ink) 14%, transparent);
+  font-size: 12.5px; font-weight: 600; color: var(--navy);
+}
+.qct-band__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--blue); }
+.qct-band--ready .qct-band__dot { background: var(--green); }
+.qct-band__text { flex: 1; min-width: 0; line-height: 1.25; }
+.qct-band button {
+  flex: none; height: 28px; padding: 0 11px; border: 0; border-radius: 8px;
+  background: var(--blue); color: var(--white); font-size: 12px; font-weight: 700; white-space: nowrap;
+}
+.qct-band button:hover { background: var(--blue-hover); }
+
+.qct-body { padding: 13px 14px 12px; display: flex; flex-direction: column; gap: 9px; flex: 1; min-width: 0; }
+.qct-headrow, .qct-bandrow { display: none; }
+.qct-name {
+  margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.3; color: var(--navy);
+  min-height: calc(2 * 1.3em);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.qct-name button { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.qct-name button:hover { color: var(--blue); }
+
+/* настройки карточки магазина — весь блок открывает быстрые настройки */
+.qct-set {
+  display: grid; gap: 4px; padding: 7px 9px; margin: 0 -9px; border: 0; border-radius: 10px;
+  background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; min-width: 0;
+}
+.qct-set:hover { background: var(--bg-subtle); box-shadow: inset 0 0 0 1px var(--border-2); }
+.qct-set:focus-visible { outline: 2px solid var(--blue); }
+.qct-set__r1 { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text); min-width: 0; }
+.qct-set__city { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qct-set__city svg { flex: none; }
+.qct-set__price { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qct-set__price.is-free { color: var(--green); }
+.qct-set__gear { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--muted); }
+.qct-set__price + .qct-set__gear { margin-left: 0; }
+.qct-set__city + .qct-set__gear { margin-left: auto; }
+.qct-set:hover .qct-set__gear { color: var(--blue); background: var(--blue-tint); }
+.qct-set__r2 { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qct-set__r3 { display: flex; gap: 5px; overflow: hidden; min-height: 21px; }
+.qct-chip {
+  font-size: 11.5px; font-weight: 500; color: var(--muted-2); white-space: nowrap;
+  background: var(--bg-subtle); box-shadow: inset 0 0 0 1px var(--border-2); border-radius: 6px; padding: 3px 7px;
+}
+.qct-chip--tag::before { content: "#"; opacity: .55; }
+
+/* индикаторы */
+.qct-ind {
+  display: flex; align-items: center; gap: 12px; min-height: 33px; padding-top: 10px; min-width: 0;
+  border-top: 1px solid var(--border-2); font-size: 13px; color: var(--muted-2); font-variant-numeric: tabular-nums;
+}
+.qct-ind__i { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.qct-ind b { color: var(--text); font-weight: 600; }
+.qct-ind__link { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; gap: 10px; }
+.qct-ind__link:hover { text-decoration: underline; }
+.qct-ind__bad { color: var(--red); font-weight: 600; }
+.qct-ind__warn { color: var(--amber); font-weight: 600; }
+.qct-ind__ok { color: var(--green); font-weight: 600; }
+.qct-ind__when { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.qct-money { font-size: 12.5px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.qct-money b { color: var(--text); font-weight: 600; }
+
+/* быстрые кнопки */
+.qct-act { display: flex; gap: 6px; padding: 0 14px 14px; }
+.qct-edit {
+  flex: 1; min-width: 0; height: 38px; padding: 0 10px; border: 0; border-radius: 10px;
+  background: var(--blue); color: var(--white); font-size: 13.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.qct-edit:hover { background: var(--blue-hover); }
+.qct-ic {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--white); color: var(--navy);
+}
+.qct-ic:hover { border-color: var(--blue); background: var(--blue-tint); color: var(--blue); }
+.qct-ic:disabled { opacity: .38; cursor: not-allowed; border-color: var(--border); background: var(--white); color: var(--navy); }
+.qct-ic[aria-expanded="true"] { border-color: var(--blue); background: var(--blue-tint); color: var(--blue); }
+.qct-more { position: relative; }
+
+.qct-menu {
+  position: absolute; right: 0; bottom: 46px; z-index: 40; width: 270px; padding: 6px;
+  display: grid; background: var(--white); border: 1px solid var(--border-2); border-radius: 14px;
+  box-shadow: 0 18px 44px color-mix(in srgb, var(--navy) 20%, transparent);
+}
+.qct-menu__item {
+  display: grid; gap: 1px; padding: 9px 10px; border: 0; border-radius: 9px; background: none;
+  text-align: left; font: inherit; color: inherit; text-decoration: none; cursor: pointer;
+}
+.qct-menu__item b { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.qct-menu__item span { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.qct-menu__item:hover, .qct-menu__item:focus-visible { background: var(--bg-subtle); outline: none; }
+.qct-menu__item--danger b { color: var(--red); }
+.qct-menu__sep { height: 1px; margin: 4px 6px; background: var(--border-2); }
+
+/* ---------- компактная плитка: вид «Строки» ... ---------- */
+.qct-grid--rows .qct-tile {
+  display: grid; grid-template-columns: 112px minmax(0, 1fr);
+  grid-template-areas: "cover body" "band band" "act act"; grid-template-rows: 1fr auto auto; column-gap: 14px; padding: 12px;
+}
+.qct-grid--rows .qct-cover { grid-area: cover; aspect-ratio: 4 / 3; border-radius: 10px; align-self: start; }
+.qct-grid--rows .qct-cover__status, .qct-grid--rows .qct-cover__band { display: none; }
+.qct-grid--rows .qct-mono span { font-size: 34px; }
+.qct-grid--rows .qct-body { grid-area: body; padding: 0; gap: 6px; }
+.qct-grid--rows .qct-headrow { display: flex; }
+.qct-grid--rows .qct-headrow .status-chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+.qct-grid--rows .qct-headrow .status-menu { left: 0; right: auto; top: 32px; }
+.qct-grid--rows .qct-name { min-height: 0; font-size: 15px; }
+.qct-grid--rows .qct-set { padding: 4px 9px; }
+.qct-grid--rows .qct-set__r3 { display: none; }
+.qct-grid--rows .qct-ind { padding-top: 0; border-top: 0; min-height: 0; gap: 2px 10px; flex-wrap: wrap; font-size: 12.5px; }
+.qct-grid--rows .qct-bandrow:not(:empty) { display: block; grid-area: band; margin-top: 10px; }
+.qct-grid--rows .qct-bandrow .qct-band { box-shadow: none; backdrop-filter: none; background: var(--blue-tint); padding: 4px 4px 4px 11px; border-radius: 10px; }
+.qct-grid--rows .qct-bandrow .qct-band--ready { background: color-mix(in srgb, var(--green) 10%, var(--white)); }
+.qct-grid--rows .qct-act { grid-area: act; padding: 0; margin-top: 10px; justify-content: flex-end; }
+.qct-grid--rows .qct-edit { flex: 0 1 220px; }
+.qct-grid--rows .qct-edit, .qct-grid--rows .qct-ic { height: 36px; }
+.qct-grid--rows .qct-ic { width: 42px; }
+
+/* ---------- ... и телефон: та же компактная раскладка ---------- */
+@media (max-width: 640px) {
+  .qct-main { padding: 20px 14px 0; gap: 14px; }
+  .qct-head h1 { font-size: 22px; }
+  .qct-create { height: 40px; padding: 0 16px 0 12px; }
+  .qct-create__long { display: none; }
+  .qct-create__short { display: inline; }
+  .qct-tools { flex-wrap: nowrap; }
+  .qct-tools__city, .qct-view { display: none; }
+  .qct-search { flex: 1 1 0; max-width: none; min-width: 0; }
+  .qct-tools__sort { max-width: 46%; }
+
+  .qct-grid, .qct-grid--rows { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .qct-grid .qct-tile {
+    display: grid; grid-template-columns: 96px minmax(0, 1fr);
+    grid-template-areas: "cover body" "band band" "act act"; grid-template-rows: 1fr auto auto;
+    column-gap: 12px; padding: 12px;
+  }
+  .qct-grid .qct-cover { grid-area: cover; aspect-ratio: 4 / 3; border-radius: 10px; align-self: start; }
+  .qct-grid .qct-cover__status, .qct-grid .qct-cover__band { display: none; }
+  .qct-grid .qct-mono span { font-size: 32px; }
+  .qct-grid .qct-body { grid-area: body; padding: 0; gap: 5px; }
+  .qct-grid .qct-headrow { display: flex; }
+  .qct-grid .qct-headrow .status-chip { height: 26px; padding: 0 10px; font-size: 11.5px; }
+  .qct-grid .qct-headrow .status-menu { left: 0; right: auto; top: 32px; width: min(300px, calc(100vw - 40px)); }
+  .qct-grid .qct-name { min-height: 0; font-size: 15px; }
+  .qct-grid .qct-set { padding: 3px 9px; }
+  .qct-grid .qct-set__r2, .qct-grid .qct-set__r3 { display: none; }
+  .qct-grid .qct-ind { padding-top: 0; border-top: 0; min-height: 0; gap: 2px 10px; flex-wrap: wrap; font-size: 12.5px; }
+  .qct-grid .qct-bandrow:not(:empty) { display: block; grid-area: band; margin-top: 10px; }
+  .qct-grid .qct-bandrow .qct-band { box-shadow: none; backdrop-filter: none; background: var(--blue-tint); padding: 4px 4px 4px 11px; border-radius: 10px; }
+  .qct-grid .qct-bandrow .qct-band--ready { background: color-mix(in srgb, var(--green) 10%, var(--white)); }
+  .qct-grid .qct-act { grid-area: act; padding: 0; margin-top: 10px; justify-content: stretch; }
+  .qct-grid .qct-edit { flex: 1; }
+  .qct-grid .qct-ic { width: 44px; }
+  .qct-grid .qct-skel__cover { aspect-ratio: auto; height: 84px; }
+}
+
+/* ---------- быстрые настройки ---------- */
+.qct-sheet-ovl {
+  position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; padding: 24px;
+  background: color-mix(in srgb, var(--ink) 50%, transparent); animation: qcdBgIn .2s ease;
+}
+.qct-sheet {
+  width: 560px; max-width: 100%; max-height: 100%; overflow: auto; background: var(--white);
+  border-radius: var(--r-modal); box-shadow: 0 30px 80px color-mix(in srgb, var(--ink) 35%, transparent);
+  animation: qcdCardIn .25s ease;
+}
+.qct-sheet__head {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center;
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--border-2);
+}
+.qct-sheet__thumb { width: 64px; height: 48px; border-radius: 9px; overflow: hidden; background: var(--bg-subtle); display: grid; place-items: center; }
+.qct-sheet__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.qct-sheet__thumb span { font-family: var(--font-serif); font-size: 22px; color: var(--muted); }
+.qct-sheet__titles { display: grid; gap: 2px; min-width: 0; }
+.qct-sheet__titles h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3; color: var(--navy); }
+.qct-sheet__titles span { font-size: 12.5px; color: var(--muted); }
+.qct-sheet__body { padding: 16px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.qct-sheet__loading { grid-column: 1 / -1; color: var(--muted); font-size: 14px; }
+.qct-sheet__error { margin: 0 22px; color: var(--red); font-size: 13.5px; font-weight: 600; }
+.qct-sheet__body .qct-sheet__error { margin: 0; grid-column: 1 / -1; }
+.qct-fld { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.qct-fld--full { grid-column: 1 / -1; }
+.qct-fld > label, .qct-fld__label {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.qct-fld .textarea { min-height: 88px; }
+.qct-fld__hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.qct-fld__err { font-size: 12px; color: var(--red); line-height: 1.4; }
+.qct-fld__admin {
+  margin-left: 4px; padding: 1px 5px; border-radius: 4px; font-size: 10px; letter-spacing: 0; text-transform: none;
+  color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, var(--white));
+}
+.qct-seg { display: flex; border: 1px solid var(--border); border-radius: var(--r-ctl); overflow: hidden; }
+.qct-seg button {
+  flex: 1; min-width: 0; height: 40px; padding: 0 6px; border: 0; border-right: 1px solid var(--border-2);
+  background: var(--white); font-size: 13px; color: var(--muted-2); white-space: nowrap;
+}
+.qct-seg button:last-child { border-right: 0; }
+.qct-seg button[aria-pressed="true"] { background: var(--blue-tint); color: var(--blue); font-weight: 600; }
+.qct-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.qct-quick button {
+  height: 26px; padding: 0 9px; border: 1px solid var(--border-2); border-radius: 13px;
+  background: var(--bg-subtle); font-size: 12px; color: var(--muted-2);
+}
+.qct-quick button:hover, .qct-quick button[aria-pressed="true"] { border-color: var(--blue); color: var(--blue); }
+.qct-sheet__note {
+  margin: 0 22px; padding: 10px 12px; border-radius: 10px; background: var(--blue-tint);
+  font-size: 13px; line-height: 1.5; color: var(--text);
+}
+.qct-sheet__foot {
+  position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px 18px;
+  background: var(--white); border-top: 1px solid var(--border-2); margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .qct-sheet-ovl { padding: 0; place-items: end stretch; }
+  .qct-sheet { width: 100%; max-height: 92vh; border-radius: var(--r-modal) var(--r-modal) 0 0; }
+  .qct-sheet__body { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+  .qct-sheet__head { padding: 16px; }
+  .qct-sheet__note, .qct-sheet__error { margin: 0 16px; }
+  .qct-sheet__foot { padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qct-cover__btn img, .qct-tile { transition: none; }
+}

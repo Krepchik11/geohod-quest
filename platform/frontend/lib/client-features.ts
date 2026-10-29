@@ -102,6 +102,7 @@ export const CLIENT_FEATURE_KEYS = [
   'quest_facts',
   'purchase_inline_login',
   'ctor_city_list',
+  'ctor_tiles',
   'afisha',
 ] as const;
 export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];

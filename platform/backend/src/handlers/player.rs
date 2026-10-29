@@ -294,31 +294,13 @@ async fn list_quests_handler(
         .into_iter()
         .filter(|meta| store::listed_in_store(&listings, &meta.quest_id))
         .collect();
-    // Ratings for EVERY visible quest: per-player, all-versions, hide-aware
-    // (content-moderation) — one effective rating per (player, quest), dropping
-    // hidden pairs. Ratings, completions, and the hidden set are independent reads,
-    // run concurrently; the fold then groups the rows by quest.
+    // Ratings for EVERY visible quest ([`store_ratings`]) and the completions
+    // counter are independent reads — run concurrently.
     let quest_ids: Vec<String> = visible.iter().map(|m| m.quest_id.clone()).collect();
-    let (rating_rows, completions, hidden) = tokio::join!(
-        state.store.quest_rating_rows(Some(&quest_ids)),
+    let (ratings, completions) = tokio::try_join!(
+        store_ratings(&state, &quest_ids),
         state.store.completions_by_quest(),
-        state.moderation.hidden_review_keys(),
-    );
-    let rating_rows = rating_rows?;
-    let completions = completions?;
-    let hidden = hidden?;
-    let mut rows_by_quest: std::collections::HashMap<String, Vec<facts::PlayerRatingRow>> =
-        std::collections::HashMap::new();
-    for row in rating_rows {
-        rows_by_quest
-            .entry(row.quest_id.clone())
-            .or_default()
-            .push(row);
-    }
-    let ratings: std::collections::HashMap<String, (f64, usize)> = rows_by_quest
-        .into_iter()
-        .map(|(q, rows)| (q, facts::fold_rating_rows(&rows, &hidden)))
-        .collect();
+    )?;
     let out: Vec<CatalogQuest> = visible
         .into_iter()
         .map(|meta| {
@@ -419,6 +401,34 @@ struct ReviewsQuery {
 
 /// GET /api/quests/{id}/reviews?offset=&limit= — visibility matches the
 /// product page (published only).
+/// Store ratings of the given quests, keyed by quest: per-player, all-versions,
+/// hide-aware (content-moderation) — one effective rating per (player, quest),
+/// hidden pairs dropped. THE fold the catalog shows; the constructor dashboard
+/// reuses it so an author sees exactly the shop's number. A quest with no
+/// ratings has no entry. The rating rows and the hidden set are independent
+/// reads, run concurrently.
+pub(crate) async fn store_ratings(
+    state: &AppState,
+    quest_ids: &[String],
+) -> Result<std::collections::HashMap<String, (f64, usize)>, AppError> {
+    let (rating_rows, hidden) = tokio::try_join!(
+        state.store.quest_rating_rows(Some(quest_ids)),
+        state.moderation.hidden_review_keys(),
+    )?;
+    let mut rows_by_quest: std::collections::HashMap<String, Vec<facts::PlayerRatingRow>> =
+        std::collections::HashMap::new();
+    for row in rating_rows {
+        rows_by_quest
+            .entry(row.quest_id.clone())
+            .or_default()
+            .push(row);
+    }
+    Ok(rows_by_quest
+        .into_iter()
+        .map(|(q, rows)| (q, facts::fold_rating_rows(&rows, &hidden)))
+        .collect())
+}
+
 async fn get_quest_reviews_handler(
     State(state): State<AppState>,
     axum::extract::Path(quest_id): axum::extract::Path<String>,

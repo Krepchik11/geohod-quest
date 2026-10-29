@@ -20,6 +20,7 @@ import {
   parseCoords,
   publishVersion,
   adoptCover,
+  questDash,
   questUpsert,
   removeStep,
   reorderSteps,
@@ -131,7 +132,8 @@ describe('questUpsert', () => {
     expect(p.complexity).toBe('low');
     expect(p.age_target).toBe('kids');
     expect(p.tags).toEqual(['приключения']);
-    expect(p.body).toBe(q);
+    // Тело — сам квест плюс сводка для плитки списка (флаг ctor_tiles).
+    expect(p.body).toEqual({ ...q, dash: questDash(q) });
   });
 });
 

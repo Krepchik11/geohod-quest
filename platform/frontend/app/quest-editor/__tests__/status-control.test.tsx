@@ -31,6 +31,18 @@ function quest(over: Partial<ConstructorQuestWire>): ConstructorQuestWire {
     cover: null,
     created_at: 1,
     updated_at: 1,
+    city: null,
+    price: null,
+    duration_min: 60,
+    distance_km: 5,
+    tasks: null,
+    gate_errors: null,
+    gate_warnings: null,
+    unpublished_changes: null,
+    rating_avg: 0,
+    rating_count: 0,
+    players: 0,
+    revenue: null,
     ...over,
   };
 }
@@ -45,19 +57,19 @@ function setup(over: Partial<ConstructorQuestWire>) {
 describe('StatusControl', () => {
   it('shows the current status as a chip', () => {
     setup({ status: 'published' });
-    expect(screen.getByRole('button', { name: /Опубликован/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /В магазине/ })).toBeTruthy();
   });
 
   it('published → «Перевести в „Тест“» fires directly (snapshot exists)', () => {
     const { onStatusChange } = setup({ status: 'published' });
-    fireEvent.click(screen.getByRole('button', { name: /Опубликован/ }));
+    fireEvent.click(screen.getByRole('button', { name: /В магазине/ }));
     fireEvent.click(screen.getByText('Перевести в «Тест»'));
     expect(onStatusChange).toHaveBeenCalledWith('test');
   });
 
   it('published → «Снять с публикации…» confirms with consequences before firing', () => {
     const { onStatusChange } = setup({ status: 'published', buyers: 18 });
-    fireEvent.click(screen.getByRole('button', { name: /Опубликован/ }));
+    fireEvent.click(screen.getByRole('button', { name: /В магазине/ }));
     fireEvent.click(screen.getByText('Снять с публикации…'));
     // Nothing fired yet — the confirm dialog is showing honest consequences.
     expect(onStatusChange).not.toHaveBeenCalled();
@@ -69,7 +81,7 @@ describe('StatusControl', () => {
 
   it('confirm «Отмена» closes without firing', () => {
     const { onStatusChange } = setup({ status: 'published' });
-    fireEvent.click(screen.getByRole('button', { name: /Опубликован/ }));
+    fireEvent.click(screen.getByRole('button', { name: /В магазине/ }));
     fireEvent.click(screen.getByText('Снять с публикации…'));
     fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
     expect(onStatusChange).not.toHaveBeenCalled();
@@ -78,7 +90,7 @@ describe('StatusControl', () => {
 
   it('draft WITHOUT snapshot routes test/publish into the publish panel', () => {
     const { onStatusChange, onOpenPublish } = setup({ status: 'draft', published_version: null });
-    fireEvent.click(screen.getByRole('button', { name: /Проект/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Черновик/ }));
     fireEvent.click(screen.getByText('Перевести в «Тест»'));
     expect(onStatusChange).not.toHaveBeenCalled();
     expect(onOpenPublish).toHaveBeenCalled();
@@ -86,14 +98,14 @@ describe('StatusControl', () => {
 
   it('draft WITH a live snapshot may flip directly', () => {
     const { onStatusChange } = setup({ status: 'draft', published_version: 3 });
-    fireEvent.click(screen.getByRole('button', { name: /Проект/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Черновик/ }));
     fireEvent.click(screen.getByText('Опубликовать'));
     expect(onStatusChange).toHaveBeenCalledWith('published');
   });
 
   it('menu explains that new versions go through the publish panel', () => {
     setup({ status: 'published' });
-    fireEvent.click(screen.getByRole('button', { name: /Опубликован/ }));
+    fireEvent.click(screen.getByRole('button', { name: /В магазине/ }));
     expect(screen.getByText(/Публикация новой версии — только через панель публикации/)).toBeTruthy();
   });
 });

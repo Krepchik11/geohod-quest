@@ -2228,6 +2228,85 @@ pub struct ConstructorQuest {
     pub body: serde_json::Value,
 }
 
+/// What the dashboard tile shows from the draft body (flag `ctor_tiles`): the
+/// store-card settings and the editor's own summary of the draft.
+///
+/// Two sources inside the opaque body, both written by the editor:
+/// - `meta.city / price / durationMin / distanceKm` — the settings, present in
+///   every body (old ones included), so the tile is filled without a resave;
+/// - `dash` (`fp`, `errors`, `warnings`, `tasks`) and `publishedFp` — computed by
+///   the editor on every save and on publish. A body saved before they existed has
+///   none, and the tile says nothing rather than guess.
+///
+/// Parsed by [`QuestCard::from_body`] for BOTH stores: the Postgres summary selects
+/// exactly these paths as one small `card` object (never the whole body), and the
+/// in-memory store passes the whole body, so one Rust definition decides what
+/// counts as a value.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct QuestCard {
+    pub city: Option<String>,
+    /// Whole rubles; 0 is an explicitly free quest.
+    pub price: Option<i64>,
+    pub duration_min: u32,
+    pub distance_km: f32,
+    /// Task pages (with or without an answer) in the draft.
+    pub tasks: Option<u32>,
+    /// Publish-gate errors / warnings of the draft at its last save.
+    pub gate_errors: Option<u32>,
+    pub gate_warnings: Option<u32>,
+    /// Fingerprint of what a publish would ship, at the last save.
+    pub draft_fp: Option<String>,
+    /// Fingerprint of the draft as it was last published from the editor.
+    pub published_fp: Option<String>,
+}
+
+impl QuestCard {
+    /// Read the card from a draft body (or the Postgres `card` subset of one).
+    /// Anything of the wrong JSON type is absent; duration and distance fall back
+    /// to the owner's defaults exactly as the editor's own migration does.
+    pub fn from_body(body: &serde_json::Value) -> Self {
+        let meta = &body["meta"];
+        let dash = &body["dash"];
+        let count = |v: &serde_json::Value| v.as_u64().and_then(|n| u32::try_from(n).ok());
+        let text = |v: &serde_json::Value| {
+            v.as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        Self {
+            city: text(&meta["city"]),
+            price: meta["price"]
+                .as_f64()
+                .filter(|p| p.is_finite() && *p >= 0.0)
+                .map(|p| p.round() as i64),
+            duration_min: meta["durationMin"]
+                .as_f64()
+                .filter(|m| m.is_finite() && *m > 0.0)
+                .map_or(DEFAULT_DURATION_MIN, |m| m.round() as u32),
+            distance_km: meta["distanceKm"]
+                .as_f64()
+                .filter(|k| k.is_finite() && *k > 0.0)
+                .map_or(DEFAULT_DISTANCE_KM, |k| k as f32),
+            tasks: count(&dash["tasks"]),
+            gate_errors: count(&dash["errors"]),
+            gate_warnings: count(&dash["warnings"]),
+            draft_fp: text(&dash["fp"]),
+            published_fp: text(&body["publishedFp"]),
+        }
+    }
+
+    /// Whether the draft differs from what was last published: `None` when either
+    /// fingerprint is missing (published before the editor kept one, or not saved
+    /// since) — unknown, not «no changes».
+    pub fn unpublished_changes(&self) -> Option<bool> {
+        match (&self.draft_fp, &self.published_fp) {
+            (Some(draft), Some(published)) => Some(draft != published),
+            _ => None,
+        }
+    }
+}
+
 /// Dashboard list row — everything in [`ConstructorQuest`] except the heavy
 /// `body`. The cover rides along verbatim: it is a media URL, because no write
 /// stores anything else and [`crate::backfill`] converted the rows written
@@ -2243,6 +2322,8 @@ pub struct ConstructorQuestSummary {
     pub steps_count: u32,
     /// Complexity / audience / tags — the dashboard's filterable columns.
     pub attrs: QuestAttributes,
+    /// Store settings and draft summary for the dashboard tile.
+    pub card: QuestCard,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -2390,6 +2471,7 @@ impl ConstructorQuest {
             cover: self.cover.clone(),
             steps_count: self.steps_count,
             attrs: self.attrs.clone(),
+            card: QuestCard::from_body(&self.body),
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -3132,6 +3214,19 @@ impl InMemoryPaymentStore {
             p.status = PendingStatus::Canceled;
         }
     }
+
+    /// Whole rubles paid per quest: the sum of SUCCEEDED payments (a pending or
+    /// canceled one charged nothing). Payments through this site only — sales
+    /// made before it (or by a full-discount coupon) have no payment row.
+    pub fn revenue_by_quest(&self) -> HashMap<String, i64> {
+        let mut out = HashMap::new();
+        for p in self.payments.values() {
+            if p.status == PendingStatus::Succeeded {
+                *out.entry(p.quest_id.clone()).or_insert(0) += p.amount;
+            }
+        }
+        out
+    }
 }
 
 /// Pending-payment storage backend (see [`FactStore`] for the pattern).
@@ -3161,6 +3256,9 @@ pub trait PaymentStore: Send + Sync {
 
     /// See [`InMemoryPaymentStore::mark_canceled`].
     async fn mark_canceled(&self, id: &str) -> Result<(), AppError>;
+
+    /// See [`InMemoryPaymentStore::revenue_by_quest`].
+    async fn revenue_by_quest(&self) -> Result<HashMap<String, i64>, AppError>;
 }
 
 /// Shared pending-payment storage handle.
@@ -3203,6 +3301,10 @@ impl PaymentStore for std::sync::Mutex<InMemoryPaymentStore> {
     async fn mark_canceled(&self, id: &str) -> Result<(), AppError> {
         lock(self, "payments")?.mark_canceled(id);
         Ok(())
+    }
+
+    async fn revenue_by_quest(&self) -> Result<HashMap<String, i64>, AppError> {
+        Ok(lock(self, "payments")?.revenue_by_quest())
     }
 }
 
@@ -4925,5 +5027,84 @@ mod feedback_report_tests {
             store.delete_identity("password", "dev:u").is_err(),
             "password is not unlinkable"
         );
+    }
+}
+
+#[cfg(test)]
+mod quest_card_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn card_reads_settings_and_the_editor_summary() {
+        let card = QuestCard::from_body(&json!({
+            "meta": { "city": "  Белград ", "price": 499.6, "durationMin": 90, "distanceKm": 4.5 },
+            "dash": { "fp": "abc", "errors": 3, "warnings": 1, "tasks": 6 },
+            "publishedFp": "abc"
+        }));
+        assert_eq!(card.city.as_deref(), Some("Белград"));
+        assert_eq!(card.price, Some(500));
+        assert_eq!((card.duration_min, card.distance_km), (90, 4.5));
+        assert_eq!(card.tasks, Some(6));
+        assert_eq!((card.gate_errors, card.gate_warnings), (Some(3), Some(1)));
+        assert_eq!(card.unpublished_changes(), Some(false));
+    }
+
+    #[test]
+    fn wrong_types_are_absent_and_defaults_match_the_editor() {
+        let card = QuestCard::from_body(&json!({
+            "meta": { "city": "   ", "price": "500", "durationMin": -5, "distanceKm": null },
+            "dash": { "fp": 7, "errors": -1, "tasks": 2.5 }
+        }));
+        assert_eq!(card.city, None, "blank city is absent");
+        assert_eq!(card.price, None, "a string is not a price");
+        assert_eq!(card.duration_min, DEFAULT_DURATION_MIN);
+        assert_eq!(card.distance_km, DEFAULT_DISTANCE_KM);
+        assert_eq!((card.tasks, card.gate_errors), (None, None));
+        assert_eq!(
+            card.unpublished_changes(),
+            None,
+            "no fingerprints — unknown"
+        );
+        assert_eq!(QuestCard::from_body(&json!({})).price, None);
+    }
+
+    #[test]
+    fn unpublished_changes_compares_fingerprints() {
+        let card = |draft: &str, published: Option<&str>| {
+            QuestCard::from_body(&json!({ "dash": { "fp": draft }, "publishedFp": published }))
+                .unpublished_changes()
+        };
+        assert_eq!(card("b", Some("a")), Some(true));
+        assert_eq!(card("a", Some("a")), Some(false));
+        assert_eq!(
+            card("a", None),
+            None,
+            "published before fingerprints existed"
+        );
+    }
+
+    #[test]
+    fn revenue_sums_only_succeeded_payments_per_quest() {
+        let pay = |id: &str, quest: &str, amount: i64, status: PendingStatus| PendingPayment {
+            id: id.into(),
+            provider_payment_id: format!("p-{id}"),
+            user_id: "u".into(),
+            quest_id: quest.into(),
+            coupon_code: None,
+            amount,
+            price: amount,
+            confirmation_url: String::new(),
+            status,
+            created_at: String::new(),
+        };
+        let mut s = InMemoryPaymentStore::new();
+        s.insert(pay("1", "q1", 500, PendingStatus::Succeeded));
+        s.insert(pay("2", "q1", 250, PendingStatus::Succeeded));
+        s.insert(pay("3", "q1", 900, PendingStatus::Pending));
+        s.insert(pay("4", "q2", 500, PendingStatus::Canceled));
+        let r = s.revenue_by_quest();
+        assert_eq!(r.get("q1"), Some(&750));
+        assert_eq!(r.get("q2"), None, "nothing charged");
     }
 }

@@ -200,6 +200,19 @@ export interface CtorQuest {
   steps: CtorStep[];
   versions: CtorVersion[];
   lastSaved: number | null;
+  /** Отпечаток ({@link draftFingerprint}) черновика в момент последней публикации
+   *  из редактора. Нет у квестов, опубликованных до появления поля: тогда плитка
+   *  не знает, есть ли неопубликованные правки, и молчит. */
+  publishedFp?: string | null;
+}
+
+/** Сводка черновика для плитки списка (флаг ctor_tiles): уходит в теле при каждом
+ *  сохранении, сервер читает её в строку списка, не загружая всё тело. */
+export interface CtorDash {
+  fp: string;
+  errors: number;
+  warnings: number;
+  tasks: number;
 }
 
 export type CtorSelection =
@@ -403,7 +416,7 @@ export function questUpsert(q: CtorQuest): {
   complexity: string;
   age_target: string;
   tags: string[];
-  body: CtorQuest;
+  body: CtorQuest & { dash: CtorDash };
 } {
   return {
     name: q.meta.title,
@@ -412,7 +425,58 @@ export function questUpsert(q: CtorQuest): {
     complexity: q.meta.complexity,
     age_target: q.meta.ageTarget,
     tags: q.meta.tags,
-    body: q,
+    body: { ...q, dash: questDash(q) },
+  };
+}
+
+/** cyrb53 — короткий детерминированный хэш строки (53 бита, hex). Не криптография:
+ *  нужен только признак «то же самое / другое». */
+function hash53(s: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
+
+/**
+ * Отпечаток того, что уйдёт в магазин при публикации: снапшот (тот же адаптер,
+ * что у публикации) и поля карточки, которые публикация замораживает. Сложность,
+ * возраст и теги сюда не входят — магазин берёт их из строки квеста сразу, без
+ * публикации. Черновик, который адаптер не может собрать, всё равно получает
+ * отпечаток — по сырому телу: публикацию такого остановят гейты.
+ */
+export function draftFingerprint(q: CtorQuest): string {
+  const m = q.meta;
+  let snapshot: unknown;
+  try {
+    // Номер версии — не содержание: он растёт с каждой публикацией сам.
+    const { snapshot_version: _version, ...content } = serializeDraft(q);
+    void _version;
+    snapshot = content;
+  } catch {
+    snapshot = { raw: q.steps };
+  }
+  return hash53(JSON.stringify({
+    snapshot,
+    card: [m.title, m.cover, m.city, m.duration, m.durationMin, m.distanceKm, m.price, m.desc, m.playersBonus],
+  }));
+}
+
+/** Сводка черновика для плитки: отпечаток, ошибки и замечания гейтов публикации,
+ *  число страниц-заданий. */
+export function questDash(q: CtorQuest): CtorDash {
+  const gates = computeGates(q);
+  return {
+    fp: draftFingerprint(q),
+    errors: gates.errors.length,
+    warnings: gates.warnings.length,
+    tasks: q.steps.filter((s) => isTaskTemplate(s.template)).length,
   };
 }
 
@@ -441,6 +505,9 @@ export function duplicateQuest(src: CtorQuest, newId: string): CtorQuest {
   copy.meta = { ...copy.meta, title: `${src.meta.title} (копия)` };
   copy.versions = [];
   copy.lastSaved = null;
+  // Копия ещё ни разу не публиковалась.
+  copy.publishedFp = null;
+  delete (copy as Partial<CtorQuest & { dash: CtorDash }>).dash;
   return copy;
 }
 
@@ -565,8 +632,13 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
         ? raw.meta.skipCost
         : SKIP_COST_DEFAULT,
   };
+  // Сводка плитки (`dash`) в рабочей копии не живёт: её заново считает каждое
+  // сохранение. Отпечаток публикации — только строка, иначе «неизвестно».
+  const { dash: _dash, ...rest } = raw as CtorQuest & { dash?: unknown };
+  void _dash;
+  const publishedFp = typeof raw.publishedFp === 'string' ? raw.publishedFp : null;
   // Гарантируем согласованность id тела с серверным id (на случай рассинхрона).
-  return { ...raw, meta, steps, id: serverId };
+  return { ...rest, meta, steps, id: serverId, publishedFp };
 }
 
 /* ---------- Гейты публикации (живой пересчёт по черновику) ---------- */

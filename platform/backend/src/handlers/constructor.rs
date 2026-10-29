@@ -257,6 +257,46 @@ pub(crate) struct ConstructorQuestWire {
     created_at: u64,
     #[cfg_attr(test, ts(type = "number"))]
     updated_at: u64,
+    // ---- Tile figures (flag `ctor_tiles`) ----
+    /// Store-card city from the draft settings; null when blank.
+    city: Option<String>,
+    /// Price in whole rubles from the draft settings; 0 = free, null = unset.
+    #[cfg_attr(test, ts(type = "number | null"))]
+    price: Option<i64>,
+    duration_min: u32,
+    distance_km: f32,
+    /// Task pages: the draft's own count when the editor has saved one, else the
+    /// published version's; null when neither is known.
+    tasks: Option<u32>,
+    /// Publish-gate errors / warnings of the draft at its last save; null for a
+    /// draft not saved since the editor started counting them.
+    gate_errors: Option<u32>,
+    gate_warnings: Option<u32>,
+    /// The draft differs from the version last published from the editor; null
+    /// when that is unknown (no published fingerprint yet).
+    unpublished_changes: Option<bool>,
+    /// The store rating — the same per-player, hide-aware fold as the catalog.
+    rating_avg: f64,
+    #[cfg_attr(test, ts(type = "number"))]
+    rating_count: usize,
+    /// The public players counter exactly as the shop shows it: distinct
+    /// completions plus the published version's marketing bonus.
+    #[cfg_attr(test, ts(type = "number"))]
+    players: i64,
+    /// Whole rubles paid through this site. ADMIN only, and only on the list —
+    /// single-quest responses carry null (keep the list's value).
+    #[cfg_attr(test, ts(type = "number | null"))]
+    revenue: Option<i64>,
+}
+
+/// The live figures a list row folds in next to the stored summary — each a
+/// projection over its own table, gathered per request.
+struct RowFigures<'a> {
+    completed: usize,
+    buyers: usize,
+    published: Option<&'a PublishedMeta>,
+    rating: (f64, usize),
+    revenue: Option<i64>,
 }
 
 /// A single quest with its full editable body (for opening in the builder).
@@ -285,12 +325,9 @@ pub(crate) struct ConstructorQuestFullWire {
     body: serde_json::Value,
 }
 
-fn ctor_wire(
-    s: ConstructorQuestSummary,
-    completed: usize,
-    buyers: usize,
-    published_version: Option<u32>,
-) -> ConstructorQuestWire {
+fn ctor_wire(s: ConstructorQuestSummary, f: RowFigures<'_>) -> ConstructorQuestWire {
+    let card = s.card;
+    let unpublished_changes = card.unpublished_changes();
     ConstructorQuestWire {
         quest_id: s.quest_id,
         name: s.name,
@@ -298,36 +335,55 @@ fn ctor_wire(
         author_id: s.author_id,
         status: s.status,
         steps: s.steps_count,
-        completed,
-        buyers,
-        published_version,
+        completed: f.completed,
+        buyers: f.buyers,
+        published_version: f.published.map(|m| m.snapshot_version),
         complexity: s.attrs.complexity,
         age_target: s.attrs.age_target,
         tags: s.attrs.tags,
         cover: s.cover,
         created_at: s.created_at,
         updated_at: s.updated_at,
+        city: card.city,
+        price: card.price,
+        duration_min: card.duration_min,
+        distance_km: card.distance_km,
+        tasks: card.tasks.or(f.published.and_then(|m| m.tasks)),
+        gate_errors: card.gate_errors,
+        gate_warnings: card.gate_warnings,
+        unpublished_changes,
+        rating_avg: f.rating.0,
+        rating_count: f.rating.1,
+        players: f.completed as i64 + f.published.map_or(0, |m| m.players_bonus),
+        revenue: f.revenue,
     }
 }
 
-/// The list row for ONE quest: the three live figures [`ctor_wire`] folds in are
-/// projections over three different tables, keyed only by `quest_id`, so they run
-/// concurrently — one round trip, not three. Every single-quest route answers
+/// The list row for ONE quest: the live figures [`ctor_wire`] folds in are
+/// projections over different tables, keyed only by `quest_id`, so they run
+/// concurrently — one round trip, not four. Every single-quest route answers
 /// through here, so a new column is added in one place instead of three.
 async fn ctor_row(
     state: &AppState,
     summary: ConstructorQuestSummary,
 ) -> Result<ConstructorQuestWire, AppError> {
-    let (completed, buyers, published) = tokio::try_join!(
+    let ids = [summary.quest_id.clone()];
+    let (completed, buyers, published, ratings) = tokio::try_join!(
         state.store.completions_for_quest(&summary.quest_id),
         state.grants.buyers_for_quest(&summary.quest_id),
         state.grants.get_published(&summary.quest_id),
+        super::player::store_ratings(state, &ids),
     )?;
+    let rating = ratings.get(&summary.quest_id).copied().unwrap_or((0.0, 0));
     Ok(ctor_wire(
         summary,
-        completed,
-        buyers,
-        published.map(|m| m.snapshot_version),
+        RowFigures {
+            completed,
+            buyers,
+            published: published.as_ref(),
+            rating,
+            revenue: None,
+        },
     ))
 }
 
@@ -348,23 +404,41 @@ async fn list_constructor_quests_handler(
             .list_summaries_for_author(&actor.author_id)
             .await?
     };
-    let completions = state.store.completions_by_quest().await?;
-    let buyers = state.grants.buyers_by_quest().await?;
-    let published_versions: std::collections::HashMap<String, u32> = state
-        .grants
-        .list_published()
-        .await?
+    let ids: Vec<String> = summaries.iter().map(|s| s.quest_id.clone()).collect();
+    // Independent projections over different tables — one concurrent round trip.
+    // Revenue is money: read only for an admin, never computed for an editor.
+    let revenue_read = async {
+        if actor.is_admin {
+            state.payment_rows.revenue_by_quest().await.map(Some)
+        } else {
+            Ok(None)
+        }
+    };
+    let (completions, buyers, published, ratings, revenue) = tokio::try_join!(
+        state.store.completions_by_quest(),
+        state.grants.buyers_by_quest(),
+        state.grants.list_published(),
+        super::player::store_ratings(&state, &ids),
+        revenue_read,
+    )?;
+    let published: std::collections::HashMap<String, PublishedMeta> = published
         .into_iter()
-        .map(|m| (m.quest_id, m.snapshot_version))
+        .map(|m| (m.quest_id.clone(), m))
         .collect();
     Ok(Json(
         summaries
             .into_iter()
             .map(|s| {
-                let c = completions.get(&s.quest_id).copied().unwrap_or(0);
-                let b = buyers.get(&s.quest_id).copied().unwrap_or(0);
-                let v = published_versions.get(&s.quest_id).copied();
-                ctor_wire(s, c, b, v)
+                let figures = RowFigures {
+                    completed: completions.get(&s.quest_id).copied().unwrap_or(0),
+                    buyers: buyers.get(&s.quest_id).copied().unwrap_or(0),
+                    published: published.get(&s.quest_id),
+                    rating: ratings.get(&s.quest_id).copied().unwrap_or((0.0, 0)),
+                    revenue: revenue
+                        .as_ref()
+                        .map(|r| r.get(&s.quest_id).copied().unwrap_or(0)),
+                };
+                ctor_wire(s, figures)
             })
             .collect(),
     ))

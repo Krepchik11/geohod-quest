@@ -27,7 +27,7 @@ use crate::store::{
     AfishaStore, AttemptMeta, AuthIdentity, AuthStore, AuthorGuard, CatalogListing, CityRecord,
     CityStore, ConstructorQuest, ConstructorQuestSummary, ConstructorStore, CouponStore, FactStore,
     FlagStore, GrantStore, KvStore, ModerationStore, PaymentStore, PublishedMeta, QuestAttributes,
-    QuestLabel, ReviewCheck, now_rfc3339, now_secs,
+    QuestCard, QuestLabel, ReviewCheck, now_rfc3339, now_secs,
 };
 
 /// The `AND author_id = $n` half of a guarded per-quest statement, or nothing.
@@ -1848,6 +1848,10 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
             age_target: row.try_get("age_target").map_err(internal)?,
             tags: row.try_get("tags").map_err(internal)?,
         },
+        card: QuestCard::from_body(
+            &row.try_get::<serde_json::Value, _>("card")
+                .map_err(internal)?,
+        ),
         created_at: created_at.max(0) as u64,
         updated_at: updated_at.max(0) as u64,
     })
@@ -1860,8 +1864,21 @@ fn ctor_summary_from_row(row: &sqlx::postgres::PgRow) -> Result<ConstructorQuest
 /// database wire on the dashboard list — no write has produced such a value
 /// since media was externalized, and [`crate::backfill`] converted the rows that
 /// still had one.
+///
+/// `card` is the one exception to «no body»: the few body paths
+/// [`QuestCard::from_body`] reads, built into one small jsonb object IN THE
+/// DATABASE, so the dashboard tile costs a handful of values per row, not the
+/// authoring body. SQL only navigates; Rust decides what counts as a value.
 const CTOR_SUMMARY_COLS: &str = "quest_id, author_id, author_name, name, status, cover, \
-     steps_count, complexity, age_target, tags, created_at, updated_at";
+     steps_count, complexity, age_target, tags, created_at, updated_at, \
+     jsonb_build_object(\
+     'meta', jsonb_build_object(\
+     'city', body -> 'meta' -> 'city', \
+     'price', body -> 'meta' -> 'price', \
+     'durationMin', body -> 'meta' -> 'durationMin', \
+     'distanceKm', body -> 'meta' -> 'distanceKm'), \
+     'dash', body -> 'dash', \
+     'publishedFp', body -> 'publishedFp') AS card";
 
 impl PgConstructorStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -2751,6 +2768,17 @@ impl PaymentStore for PgPaymentStore {
         .await
         .map_err(internal)?;
         Ok(())
+    }
+
+    /// See [`crate::store::InMemoryPaymentStore::revenue_by_quest`].
+    async fn revenue_by_quest(&self) -> Result<std::collections::HashMap<String, i64>, AppError> {
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT quest_id, SUM(amount)::BIGINT FROM pending_payments \n             WHERE status = 'succeeded' GROUP BY quest_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(rows.into_iter().collect())
     }
 }
 

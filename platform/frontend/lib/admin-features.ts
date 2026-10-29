@@ -45,6 +45,7 @@ export const FEATURE_KEYS = [
   'quest_facts',
   'purchase_inline_login',
   'ctor_city_list',
+  'ctor_tiles',
   'afisha',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -124,6 +125,13 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
     description:
       'В настройках квеста город выбирается из списка на странице «Города» админки, а не вводится вручную — ' +
       'у одного города одно написание. Новый город добавляет администратор.',
+  },
+  ctor_tiles: {
+    label: 'Плитки квестов в конструкторе',
+    description:
+      'Список квестов в конструкторе — плитками с обложкой, городом, ценой, рейтингом и игроками, ' +
+      'вкладки статусов, «Требуют внимания», переключатель «Плитки / Строки» и быстрые настройки квеста. ' +
+      'Выключено — прежний список строками.',
   },
   afisha: {
     label: 'Афиша',
