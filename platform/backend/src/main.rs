@@ -3943,6 +3943,128 @@ mod tests {
         }
     }
 
+    /// Dashboard tile figures (flag `ctor_tiles`): settings read from the draft
+    /// body, the editor's draft summary (gates, fingerprints), the shop's players
+    /// counter, and revenue for an admin only.
+    async fn scenario_ctor_tile_figures(app: &Router, ids: &Ids) {
+        let bearer = editor_bearer(app, &format!("tile-{}", ids.player)).await;
+        let h = [("authorization", bearer.as_str())];
+        let quest = ids.quest.as_str();
+        let body = |meta: serde_json::Value, extra: serde_json::Value| {
+            let mut b = json!({ "id": quest, "meta": meta, "steps": [], "versions": [] });
+            for (k, v) in extra.as_object().expect("extra object") {
+                b[k] = v.clone();
+            }
+            b
+        };
+        let settings = json!({
+            "title": "Плиточный квест", "city": " Нови Сад ", "price": 500,
+            "durationMin": 90, "distanceKm": 4.5, "playersBonus": 7
+        });
+        let save = |b: serde_json::Value| json!({ "name": "Плиточный квест", "cover": null, "steps_count": 3, "body": b });
+        let row = |list: &serde_json::Value| -> serde_json::Value {
+            list.as_array()
+                .expect("list array")
+                .iter()
+                .find(|q| q["quest_id"] == quest)
+                .cloned()
+                .expect("own quest listed")
+        };
+
+        // A body saved before the editor kept a summary: settings still read,
+        // the summary is unknown (null), never invented.
+        let (st, created) = post_json_h(
+            app,
+            "/api/constructor/quests",
+            json!({
+                "quest_id": quest, "name": "Плиточный квест", "cover": null, "steps_count": 3,
+                "body": body(json!({ "title": "Плиточный квест" }), json!({}))
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{created}");
+        assert!(created["city"].is_null() && created["price"].is_null());
+        assert_eq!(created["duration_min"], 60, "owner default");
+        assert_eq!(created["distance_km"], 5.0, "owner default");
+        for k in [
+            "tasks",
+            "gate_errors",
+            "gate_warnings",
+            "unpublished_changes",
+            "revenue",
+        ] {
+            assert!(
+                created[k].is_null(),
+                "{k} unknown on an old body: {created}"
+            );
+        }
+        assert_eq!(created["rating_count"], 0);
+        assert_eq!(created["players"], 0);
+
+        // The editor's save carries the summary; the city is trimmed.
+        let save_url = format!("/api/constructor/quests/{quest}/save");
+        let dash = json!({ "dash": { "fp": "fp-a", "errors": 2, "warnings": 1, "tasks": 3 } });
+        let (st, _) = post_json_h(app, &save_url, save(body(settings.clone(), dash)), &h).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(app, "/api/constructor/quests", &h).await;
+        let r = row(&list);
+        assert_eq!(r["city"], "Нови Сад");
+        assert_eq!(r["price"], 500);
+        assert_eq!(r["duration_min"], 90);
+        assert_eq!(r["distance_km"], 4.5);
+        assert_eq!(r["tasks"], 3);
+        assert_eq!(r["gate_errors"], 2);
+        assert_eq!(r["gate_warnings"], 1);
+        assert!(r["unpublished_changes"].is_null(), "nothing published yet");
+        assert!(r["revenue"].is_null(), "an editor never sees money");
+
+        // Publish (with the marketing bonus), then the editor records what it shipped.
+        let (st, pv) = post_json_h(
+            app,
+            "/api/quests/publish",
+            json!({
+                "quest_id": quest, "name": "Плиточный квест", "template_summary": "3 steps",
+                "snapshot_version": 1, "snapshot_id": ids.snap1, "snapshot": { "steps": [] },
+                "players_bonus": 7
+            }),
+            &h,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{pv}");
+        let shipped = json!({
+            "dash": { "fp": "fp-a", "errors": 0, "warnings": 0, "tasks": 3 },
+            "publishedFp": "fp-a"
+        });
+        let (st, _) = post_json_h(app, &save_url, save(body(settings.clone(), shipped)), &h).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(app, "/api/constructor/quests", &h).await;
+        let r = row(&list);
+        assert_eq!(r["unpublished_changes"], false);
+        assert_eq!(r["published_version"], 1);
+        assert_eq!(
+            r["players"], 7,
+            "completions 0 + bonus 7, as the shop shows"
+        );
+
+        // An edit after the publish: a different draft fingerprint.
+        let edited = json!({
+            "dash": { "fp": "fp-b", "errors": 0, "warnings": 0, "tasks": 3 },
+            "publishedFp": "fp-a"
+        });
+        let (st, _) = post_json_h(app, &save_url, save(body(settings, edited)), &h).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, list) = get_json_h(app, "/api/constructor/quests", &h).await;
+        assert_eq!(row(&list)["unpublished_changes"], true);
+
+        // An admin sees revenue — a number, 0 with no payments through the site.
+        let admin = role_bearer(app, "tileadm", &ids.player, "admin").await;
+        let ah = [("authorization", admin.as_str())];
+        let (st, list) = get_json_h(app, "/api/constructor/quests", &ah).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(row(&list)["revenue"], 0);
+    }
+
     /// §3.1/§12.9 — the product page endpoint returns ONLY model data: card
     /// meta + description, author attribution with on-sale count, and chips
     /// derived from the frozen snapshot. Visibility matches the catalog.
@@ -6234,6 +6356,7 @@ mod tests {
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
+        ctor_list_carries_tile_figures = ids scenario_ctor_tile_figures / "ctortile";
         authored_payloads_are_stored_without_pixels = ids scenario_media_externalized_on_write / "ctorcover";
         ctor_quest_transfers_between_authors = ids scenario_ctor_transfer_author / "ctorxfer";
         review_survives_star_only_rerate_and_pages = ids scenario_review_visibility / "reviews";
@@ -6786,6 +6909,7 @@ mod tests {
                 ("quest_facts", true),
                 ("purchase_inline_login", true),
                 ("ctor_city_list", true),
+                ("ctor_tiles", true),
                 ("afisha", true),
             ]
         );
@@ -6811,6 +6935,7 @@ mod tests {
                     "quest_facts": false,
                     "purchase_inline_login": false,
                     "ctor_city_list": false,
+                    "ctor_tiles": false,
                     "afisha": false,
                 },
                 "universal_answer": null,
@@ -6839,6 +6964,7 @@ mod tests {
                 "quest_facts": false,
                 "purchase_inline_login": false,
                 "ctor_city_list": false,
+                "ctor_tiles": false,
                 "afisha": false,
             })
         );

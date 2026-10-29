@@ -26,4 +26,41 @@ published_version: number | null, complexity: string, age_target: string, tags: 
  * Media URL. Never a `data:` blob — those bloated the list by megabytes;
  * every write externalizes ([`crate::media::MediaStores::externalize_tree`]).
  */
-cover: string | null, created_at: number, updated_at: number, };
+cover: string | null, created_at: number, updated_at: number, 
+/**
+ * Store-card city from the draft settings; null when blank.
+ */
+city: string | null, 
+/**
+ * Price in whole rubles from the draft settings; 0 = free, null = unset.
+ */
+price: number | null, duration_min: number, distance_km: number, 
+/**
+ * Task pages: the draft's own count when the editor has saved one, else the
+ * published version's; null when neither is known.
+ */
+tasks: number | null, 
+/**
+ * Publish-gate errors / warnings of the draft at its last save; null for a
+ * draft not saved since the editor started counting them.
+ */
+gate_errors: number | null, gate_warnings: number | null, 
+/**
+ * The draft differs from the version last published from the editor; null
+ * when that is unknown (no published fingerprint yet).
+ */
+unpublished_changes: boolean | null, 
+/**
+ * The store rating — the same per-player, hide-aware fold as the catalog.
+ */
+rating_avg: number, rating_count: number, 
+/**
+ * The public players counter exactly as the shop shows it: distinct
+ * completions plus the published version's marketing bonus.
+ */
+players: number, 
+/**
+ * Whole rubles paid through this site. ADMIN only, and only on the list —
+ * single-quest responses carry null (keep the list's value).
+ */
+revenue: number | null, };
