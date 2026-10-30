@@ -258,14 +258,15 @@ export interface FunnelStepVm {
 
 /** Short funnel chips per step template. Keyed by the SHARED template union
  *  (lib/shared-model.ts), so adding a template fails compilation here instead
- *  of silently rendering the raw key. */
+ *  of silently rendering the raw key. Слова — названия шаблонов в конструкторе
+ *  (constructor-model CTOR_TEMPLATES), иначе «задание» здесь и там — разные шаги. */
 const TEMPLATE_RU: Record<GameStep['template'], string> = {
   start: 'старт',
-  video: 'видео',
-  task_answer: 'вопрос',
-  task_no: 'задание',
+  video: 'приветствие',
+  task_answer: 'задание',
+  task_no: 'поиск',
   continue: 'переход',
-  route_video: 'маршрут',
+  route_video: 'видео',
   congrats: 'финал',
 };
 
