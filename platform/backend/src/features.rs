@@ -61,6 +61,10 @@ pub enum Feature {
     /// quick buttons), status tabs, a «Плитки / Строки» switch and the quick
     /// settings sheet, instead of the plain rows.
     CtorTiles,
+    /// Constructor: «+ Добавить страницу» opens a short template menu with a
+    /// live preview instead of the full-screen picker, and a «+» between rail
+    /// pages inserts a page exactly there.
+    CtorPageMenu,
     /// «Афиша»: the public pages of the announcements read from the Telegram
     /// channel, the «Афиша» link in the site header, and the reader's timer
     /// (the channel is the `afisha_channel` runtime setting).
@@ -69,7 +73,7 @@ pub enum Feature {
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -83,6 +87,7 @@ impl Feature {
         Self::PurchaseInlineLogin,
         Self::CtorCityList,
         Self::CtorTiles,
+        Self::CtorPageMenu,
         Self::Afisha,
     ];
 
@@ -103,6 +108,7 @@ impl Feature {
             Self::PurchaseInlineLogin => "purchase_inline_login",
             Self::CtorCityList => "ctor_city_list",
             Self::CtorTiles => "ctor_tiles",
+            Self::CtorPageMenu => "ctor_page_menu",
             Self::Afisha => "afisha",
         }
     }
@@ -116,6 +122,7 @@ impl Feature {
             self,
             Self::PlayerBackButton
                 | Self::CtorTiles
+                | Self::CtorPageMenu
                 | Self::PlayerUniversalAnswer
                 | Self::QuestShare
                 | Self::StoreMyQuests
@@ -181,6 +188,8 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         Feature::CtorCityList => true,
         // Client-side layout over the dashboard rows the server already serves.
         Feature::CtorTiles => true,
+        // Client-side editor UI — nothing to configure.
+        Feature::CtorPageMenu => true,
         // Reads a public web page — nothing to configure but the channel,
         // which is a runtime setting the admin page asks for.
         Feature::Afisha => true,
@@ -270,6 +279,7 @@ mod tests {
             "quest_facts",
             "purchase_inline_login",
             "ctor_tiles",
+            "ctor_page_menu",
             "afisha",
         ] {
             let f = Feature::parse(key).expect("registered");

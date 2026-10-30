@@ -46,6 +46,7 @@ export const FEATURE_KEYS = [
   'purchase_inline_login',
   'ctor_city_list',
   'ctor_tiles',
+  'ctor_page_menu',
   'afisha',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -132,6 +133,12 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
       'Список квестов в конструкторе — плитками с обложкой, городом, ценой, рейтингом и игроками, ' +
       'вкладки статусов, «Требуют внимания», переключатель «Плитки / Строки» и быстрые настройки квеста. ' +
       'Выключено — прежний список строками.',
+  },
+  ctor_page_menu: {
+    label: 'Меню «Новая страница» в конструкторе',
+    description:
+      'Кнопка «+ Добавить страницу» открывает короткое меню шаблонов с превью вместо большого окна, ' +
+      'а «+» между страницами в ленте вставляет страницу ровно туда. Выключено — прежнее окно выбора шаблона.',
   },
   afisha: {
     label: 'Афиша',

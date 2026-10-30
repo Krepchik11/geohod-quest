@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import {
   parseCoords,
   publishVersion,
+  unreachableSteps,
   type CtorQuest,
   type GateField,
   type Gates,
@@ -20,7 +21,8 @@ interface ChecklistRow {
 /** Чек-лист: зелёные строки за пройденные группы гейтов + все ошибки/предупреждения. */
 function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   const rows: ChecklistRow[] = [];
-  const structErr = gates.errors.some((e) => !e.pageId);
+  // Страницы после «Поздравления» — тоже ошибка структуры, хотя ведёт она к странице.
+  const structErr = gates.errors.some((e) => !e.pageId) || unreachableSteps(quest.steps).length > 0;
   if (!structErr) rows.push({ st: 'ok', text: 'Структура: «Первый экран» в начале, есть терминальное «Поздравление»' });
   const tasks = quest.steps.filter((s) => s.template === 'task_no' || s.template === 'task_answer');
   if (tasks.length && tasks.every((s) => s.image)) {

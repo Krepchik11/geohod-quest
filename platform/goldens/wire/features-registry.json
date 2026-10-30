@@ -15,7 +15,8 @@
     "purchase_inline_login",
     "ctor_city_list",
     "ctor_tiles",
+    "ctor_page_menu",
     "afisha"
   ],
-  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests", "store_cities", "quest_facts", "purchase_inline_login", "ctor_city_list", "ctor_tiles", "afisha"]
+  "client_visible": ["player_back_button", "player_universal_answer", "quest_share", "store_my_quests", "store_cities", "quest_facts", "purchase_inline_login", "ctor_city_list", "ctor_tiles", "ctor_page_menu", "afisha"]
 }

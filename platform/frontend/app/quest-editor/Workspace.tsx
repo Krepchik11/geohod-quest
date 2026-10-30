@@ -100,6 +100,8 @@ export default function Workspace() {
   const cityList = useClientFeature('ctor_city_list');
   // Плитки вместо строк в списке квестов (флаг ctor_tiles).
   const tilesOn = useClientFeature('ctor_tiles');
+  // Меню шаблонов и «+» между страницами вместо окна выбора (флаг ctor_page_menu).
+  const pageMenuOn = useClientFeature('ctor_page_menu');
   const [cityNames, setCityNames] = useState<readonly string[] | 'failed' | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -411,13 +413,15 @@ export default function Workspace() {
     setSel(s);
   };
 
-  const insertStep = (template: CtorTemplate) => {
+  /** `at` — место из «+» между страницами (флаг ctor_page_menu); без него —
+   *  после выбранной страницы. */
+  const insertStep = (template: CtorTemplate, at?: number) => {
     const step = newStep(template);
     setActive((q) => {
       if (!q) return q;
       const selectedId = sel?.type === 'page' ? sel.id : null;
       const arr = [...q.steps];
-      arr.splice(insertionIndex(arr, selectedId, template), 0, step);
+      arr.splice(insertionIndex(arr, selectedId, template, at), 0, step);
       return { ...q, steps: arr };
     });
     setSel({ type: 'page', id: step.id });
@@ -571,6 +575,7 @@ export default function Workspace() {
                 : undefined
             }
             cities={cities}
+            pageMenu={pageMenuOn}
             actions={{
               onSel: selectIn,
               onPatchQuest: patchQuest,
