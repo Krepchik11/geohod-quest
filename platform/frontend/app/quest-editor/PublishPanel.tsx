@@ -24,11 +24,11 @@ function buildChecklist(quest: CtorQuest, gates: Gates): ChecklistRow[] {
   if (!structErr) rows.push({ st: 'ok', text: 'Структура: «Первый экран» в начале, есть терминальное «Поздравление»' });
   const tasks = quest.steps.filter((s) => s.template === 'task_no' || s.template === 'task_answer');
   if (tasks.length && tasks.every((s) => s.image)) {
-    rows.push({ st: 'ok', text: `Комикс «задание» загружен у всех страниц-заданий (${tasks.length} из ${tasks.length})` });
+    rows.push({ st: 'ok', text: `Изображение загружено у всех страниц «Поиск» и «Задание» (${tasks.length} из ${tasks.length})` });
   }
   const answers = quest.steps.filter((s) => s.template === 'task_answer');
   if (answers.length && answers.every((s) => s.acceptable.some((a) => a.trim()))) {
-    rows.push({ st: 'ok', text: 'Списки ответов заполнены у всех «Заданий с ответом»' });
+    rows.push({ st: 'ok', text: 'Списки ответов заполнены у всех страниц «Задание»' });
   }
   const addresses = quest.steps.filter((s) => s.address.on);
   if (addresses.length && addresses.every((s) => s.address.name.trim() && parseCoords(s.address.coords))) {

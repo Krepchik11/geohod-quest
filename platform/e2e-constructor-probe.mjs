@@ -50,7 +50,7 @@ await page.locator('button', { hasText: '+ Добавить страницу' })
 const cells = page.locator('.wsp-tcell');
 (await cells.count()) === 7 ? ok('template picker: 7 live mini-previews') : fail(`picker cells: ${await cells.count()}`);
 (await page.locator('.wsp-tcell .pframe').count()) === 7 ? ok('mini-previews are real player frames') : fail('mini-previews not player frames');
-await cells.nth(3).click(); // Задание с ответом
+await cells.nth(3).click(); // «Задание» (task_answer)
 await page.waitForTimeout(300);
 (await railPages.count()) === 3 ? ok('page added') : fail('page not added');
 const names = await page.locator('.wsp-page .tp').allTextContents();

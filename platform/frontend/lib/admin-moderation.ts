@@ -96,13 +96,14 @@ export function identityContact(identity: AdminIdentityWire): Contact {
   return { glyph: '—', label: 'аноним · контакта нет', href: null };
 }
 
+/** Те же слова, что у воронки (admin-stats TEMPLATE_RU) — названия шаблонов в конструкторе. */
 const TEMPLATE_LABELS: Record<string, string> = {
   start: 'старт',
-  video: 'видео',
-  task_answer: 'вопрос',
-  task_no: 'задание',
+  video: 'приветствие',
+  task_answer: 'задание',
+  task_no: 'поиск',
   continue: 'переход',
-  route_video: 'маршрут',
+  route_video: 'видео',
   congrats: 'финал',
 };
 

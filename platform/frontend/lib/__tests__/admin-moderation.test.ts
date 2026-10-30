@@ -127,8 +127,11 @@ describe('formatAverage / templateLabel', () => {
     expect(formatAverage(4)).toBe('4,0');
     expect(formatAverage(14 / 3)).toBe('4,67');
   });
-  it('labels step templates', () => {
-    expect(templateLabel('task_answer')).toBe('вопрос');
+  it('labels step templates with the constructor names', () => {
+    expect(templateLabel('task_answer')).toBe('задание');
+    expect(templateLabel('task_no')).toBe('поиск');
+    expect(templateLabel('route_video')).toBe('видео');
+    expect(templateLabel('video')).toBe('приветствие');
     expect(templateLabel('congrats')).toBe('финал');
     expect(templateLabel(null)).toBe('');
   });

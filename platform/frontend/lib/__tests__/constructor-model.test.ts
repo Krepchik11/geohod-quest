@@ -10,6 +10,7 @@ import {
   BAD_THEME_CONTRAST_TEXT,
   CTOR_TEMPLATES,
   GIFT_COINS,
+  TPL_BY_KEY,
   computeGates,
   duplicateStep,
   insertionIndex,
@@ -41,6 +42,29 @@ describe('templates and presets', () => {
     expect(CTOR_TEMPLATES.map((t) => t.key)).toEqual([
       'start', 'video', 'task_no', 'task_answer', 'continue', 'route_video', 'congrats',
     ]);
+  });
+
+  it('names templates as the owner decided (2026-10-30); a new page takes that name', () => {
+    expect(TPL_BY_KEY.task_no.name).toBe('Поиск');
+    expect(TPL_BY_KEY.task_answer.name).toBe('Задание');
+    expect(TPL_BY_KEY.route_video.name).toBe('Видео');
+    expect(newStep('task_no').name).toBe('Поиск');
+    expect(newStep('task_answer').name).toBe('Задание');
+    expect(newStep('route_video').name).toBe('Видео');
+  });
+
+  it('keeps the stored page names of older and Bubble-imported drafts', () => {
+    const names = ['Тайна крепости', 'Задание с ответом 3', 'Задание без ответа', 'Видео маршрута', 'Квест пройден!'];
+    const tpls = ['start', 'task_answer', 'task_no', 'route_video', 'congrats'] as const;
+    const body = {
+      ...newQuest({ title: 'Импорт' }),
+      steps: tpls.map((t, i) => ({ ...newStep(t), name: names[i] })),
+    };
+    const q = migrateQuest(JSON.parse(JSON.stringify(body)), body.id)!;
+    expect(q.steps.map((s) => s.name)).toEqual(names);
+    // Имя страницы едет в снапшот заголовком шага: у старых тел он прежний,
+    // значит не меняются ни воронка в админке, ни отпечаток публикации.
+    expect(serializeDraft(q).steps.slice(1, 4).map((s) => s.rich_content?.title)).toEqual(names.slice(1, 4));
   });
 
   it('prefills task_answer with an enabled-by-default hint and answer prompt (SPEC presets)', () => {
