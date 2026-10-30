@@ -6234,6 +6234,112 @@ mod tests {
         assert_eq!(steps, want["steps"], "only the names change, order kept");
     }
 
+    /// Migration 0013 renames the pages named after the old templates — the
+    /// exact old name or it plus « …» — on pages of that very template only, and
+    /// leaves written names, other templates, bodies without steps and
+    /// `updated_at` alone. Replayed inside a rolled-back transaction, like 0010.
+    #[tokio::test]
+    async fn pg_template_page_names_migration_renames_old_template_names() {
+        use sqlx::Row as _;
+        dotenv().ok();
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("pg_template_page_names_migration: skipped (DATABASE_URL not set)");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let run = store::now_secs() * 1_000_000 + (std::process::id() as u64 % 1_000_000);
+        let qid = format!("q-tpl-{run}");
+        let bare = format!("q-tpl-bare-{run}");
+        let body = json!({
+            "meta": { "title": "Импорт" },
+            "steps": [
+                { "id": "s0", "template": "start", "name": "Тайна крепости" },
+                { "id": "s1", "template": "task_answer", "name": "Задание с ответом 3" },
+                { "id": "s2", "template": "task_no", "name": "Задание без ответа 4" },
+                { "id": "s3", "template": "task_answer", "name": "Задание с ответом" },
+                { "id": "s4", "template": "task_no", "name": "Задание без ответа 2 (копия)" },
+                { "id": "s5", "template": "route_video", "name": "Видео маршрута" },
+                { "id": "s6", "template": "task_answer", "name": "Вопрос про знак" },
+                { "id": "s7", "template": "task_answer", "name": "Задание с ответами" },
+                { "id": "s8", "template": "continue", "name": "Задание с ответом 5" },
+                { "id": "s9", "template": "task_no" },
+                { "id": "s10", "template": "congrats", "name": "Квест пройден!" },
+            ],
+        });
+        let bare_body = json!({ "meta": { "title": "Без страниц" } });
+
+        let migration = include_str!("../migrations/0013_template_page_names.sql");
+        let mut tx = pool.begin().await.expect("begin");
+        for (id, body) in [(&qid, &body), (&bare, &bare_body)] {
+            sqlx::query(
+                "INSERT INTO constructor_quests
+                     (quest_id, author_id, author_name, name, body, created_at, updated_at)
+                 VALUES ($1, 'a-tpl', 'Автор', 'Импорт', $2, 1, 7)",
+            )
+            .bind(id)
+            .bind(body)
+            .execute(&mut *tx)
+            .await
+            .expect("insert a draft");
+        }
+        sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0013");
+        let again = sqlx::raw_sql(migration)
+            .execute(&mut *tx)
+            .await
+            .expect("replay 0013 again");
+        let rows = sqlx::query(
+            "SELECT quest_id, body, updated_at FROM constructor_quests
+             WHERE quest_id = ANY($1) ORDER BY quest_id",
+        )
+        .bind(vec![qid.clone(), bare.clone()])
+        .fetch_all(&mut *tx)
+        .await
+        .expect("read back");
+        tx.rollback().await.expect("rollback");
+
+        assert_eq!(again.rows_affected(), 0, "a second run changes nothing");
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row.get::<i64, _>("updated_at"), 7, "not an author's edit");
+        }
+        let got = |id: &str| -> Value {
+            rows.iter()
+                .find(|r| r.get::<String, _>("quest_id") == id)
+                .expect("row")
+                .get("body")
+        };
+        assert_eq!(got(&bare), bare_body, "a body without steps is left as is");
+        let steps = got(&qid)["steps"].clone();
+        let renamed = [
+            (1, "Задание 3"),
+            (2, "Поиск 4"),
+            (3, "Задание"),
+            (4, "Поиск 2 (копия)"),
+            (5, "Видео"),
+        ];
+        let mut want = body.clone();
+        for (i, name) in renamed {
+            want["steps"][i]["name"] = json!(name);
+        }
+        // s6–s10 keep theirs: a written name, a longer word, another template,
+        // no name at all, the finale.
+        assert_eq!(
+            steps, want["steps"],
+            "only the old template names change, order kept"
+        );
+    }
+
     /// Everything a per-scenario Postgres test needs: the router over a real
     /// pool (migrations applied) and a run-unique tag so scenarios tolerate a
     /// shared, pre-populated database. `None` means "skip: no DATABASE_URL".
@@ -6910,6 +7016,7 @@ mod tests {
                 ("purchase_inline_login", true),
                 ("ctor_city_list", true),
                 ("ctor_tiles", true),
+                ("ctor_page_menu", true),
                 ("afisha", true),
             ]
         );
@@ -6936,6 +7043,7 @@ mod tests {
                     "purchase_inline_login": false,
                     "ctor_city_list": false,
                     "ctor_tiles": false,
+                    "ctor_page_menu": false,
                     "afisha": false,
                 },
                 "universal_answer": null,
@@ -6965,6 +7073,7 @@ mod tests {
                 "purchase_inline_login": false,
                 "ctor_city_list": false,
                 "ctor_tiles": false,
+                "ctor_page_menu": false,
                 "afisha": false,
             })
         );
