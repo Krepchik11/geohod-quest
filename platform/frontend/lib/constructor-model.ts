@@ -244,21 +244,37 @@ export interface Gates {
  *  прежние были «Задание без ответа», «Задание с ответом», «Видео маршрута».
  *  Имя страницы при создании берётся отсюда и дальше хранится в теле, поэтому
  *  страницы, созданные раньше (и импортированные из Bubble «Задание с ответом 3»),
- *  сохраняют старые имена — переименование их не трогает. */
-export const CTOR_TEMPLATES: Array<{ key: CtorTemplate; name: string; desc: string; fill: string }> = [
-  { key: 'start', name: 'Первый экран', desc: 'Обложка квеста: название, город, длительность.', fill: 'кнопка «начать квест», мета из настроек квеста' },
-  { key: 'video', name: 'Приветственное видео', desc: 'Знакомство с автором или сюжетом через видео.', fill: 'видео-блок + кнопка «продолжить»' },
-  { key: 'task_no', name: 'Поиск', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», подарок 5 монет' },
-  { key: 'task_answer', name: 'Задание', desc: 'Вопрос с проверкой по списку ответов.', fill: 'поле ответа, подсказка 5 монет, подарок 5 монет' },
-  { key: 'continue', name: 'Продолжить', desc: 'Развитие сюжета: диалог, факт, переход.', fill: 'кнопка «продолжить»' },
-  { key: 'route_video', name: 'Видео', desc: 'Видео-навигация до следующей точки.', fill: 'видео-блок + «в путь»' },
-  { key: 'congrats', name: 'Поздравление', desc: 'Финал: бонус, итоги, оценка квеста.', fill: 'бонус +5 монет, встроенный блок оценки' },
+ *  сохраняют старые имена (импорт переименовала миграция 0013). `short` — строка
+ *  под названием в меню «+ Добавить страницу» (флаг ctor_page_menu). */
+export const CTOR_TEMPLATES: Array<{ key: CtorTemplate; name: string; desc: string; fill: string; short: string }> = [
+  { key: 'start', name: 'Первый экран', desc: 'Обложка квеста: название, город, длительность.', fill: 'кнопка «начать квест», мета из настроек квеста', short: 'Обложка квеста' },
+  { key: 'video', name: 'Приветственное видео', desc: 'Знакомство с автором или сюжетом через видео.', fill: 'видео-блок + кнопка «продолжить»', short: 'Видео и кнопка «Продолжить»' },
+  { key: 'task_no', name: 'Поиск', desc: 'Дойти до места, иногда выполнить действие. Подтверждение на честность.', fill: '«Я на месте», подарок 5 монет', short: 'Дойти до места, «Я на месте»' },
+  { key: 'task_answer', name: 'Задание', desc: 'Вопрос с проверкой по списку ответов.', fill: 'поле ответа, подсказка 5 монет, подарок 5 монет', short: 'Вопрос с вводом ответа' },
+  { key: 'continue', name: 'Продолжить', desc: 'Развитие сюжета: диалог, факт, переход.', fill: 'кнопка «продолжить»', short: 'Сюжет, история, факт' },
+  { key: 'route_video', name: 'Видео', desc: 'Видео с текстом: маршрут, история места, обращение автора.', fill: 'видео-блок + кнопка «продолжить»', short: 'Видео и кнопка «Продолжить»' },
+  { key: 'congrats', name: 'Поздравление', desc: 'Финал: бонус, итоги, оценка квеста.', fill: 'бонус +5 монет, встроенный блок оценки', short: 'Финал: итоги и оценка' },
 ];
 
 export const TPL_BY_KEY = Object.fromEntries(CTOR_TEMPLATES.map((t) => [t.key, t])) as Record<
   CtorTemplate,
   (typeof CTOR_TEMPLATES)[number]
 >;
+
+/**
+ * Шаблоны, которые предлагает выбор новой страницы, — решение владельца
+ * (2026-10-30): три рабочих по частоте; «Первый экран» и «Поздравление» есть в
+ * каждом квесте с создания и предлагаются, только если автор их удалил; оба
+ * видеошаблона скрыты, пока видео нельзя загрузить. Скрытый шаблон остаётся в
+ * {@link CTOR_TEMPLATES}: старые страницы с ним открываются и играются.
+ */
+export function pickerTemplates(steps: CtorStep[]): CtorTemplate[] {
+  const has = (t: CtorTemplate) => steps.some((s) => s.template === t);
+  const out: CtorTemplate[] = ['continue', 'task_answer', 'task_no'];
+  if (!has('congrats')) out.push('congrats');
+  if (!has('start')) out.push('start');
+  return out;
+}
 
 /** Шаблоны со своим изображением страницы (обязательно для заданий). */
 export const IMAGE_TEMPLATES: Partial<Record<CtorTemplate, { label: string; req?: boolean }>> = {
@@ -343,7 +359,7 @@ export function newStep(template: CtorTemplate): CtorStep {
   if (template === 'start') s.kicker = 'Городской квест';
   if (template === 'video') s.video = { dur: '0:00', label: 'видео-приветствие' };
   if (template === 'route_video') {
-    s.video = { dur: '0:00', label: 'видео маршрута' };
+    s.video = { dur: '0:00', label: 'видео' };
   }
   if (template === 'task_answer') {
     s.prompt = 'Введите ответ';
@@ -650,6 +666,13 @@ export function migrateQuest(body: unknown, serverId: string): CtorQuest | null 
 
 const isTaskTemplate = (t: CtorTemplate) => t === 'task_no' || t === 'task_answer';
 
+/** Страницы после первого «Поздравления»: плеер кончает квест на нём
+ *  (play-loop isTerminalStep), до них игрок не дойдёт. */
+export function unreachableSteps(steps: CtorStep[]): CtorStep[] {
+  const fin = steps.findIndex((s) => s.template === 'congrats');
+  return fin < 0 ? [] : steps.slice(fin + 1);
+}
+
 export function computeGates(quest: CtorQuest): Gates {
   const errors: GateMessage[] = [];
   const warnings: GateMessage[] = [];
@@ -665,8 +688,15 @@ export function computeGates(quest: CtorQuest): Gates {
   }
   if (!steps.some((s) => s.template === 'congrats')) {
     add(null, 'err', 'Нет терминальной страницы «Поздравление»');
-  } else if (steps[steps.length - 1].template !== 'congrats') {
-    add(null, 'warn', '«Поздравление» — не последняя страница');
+  }
+  // Квест кончается на первом «Поздравлении» — всё после него игрок не увидит
+  // (решение владельца 2026-10-30: ошибка, а не прежнее предупреждение).
+  // Ошибка ведёт к первой такой странице, отметку получает каждая.
+  const lost = unreachableSteps(steps);
+  if (lost.length) {
+    const text = `Страницы после «Поздравления» игрок не увидит: «${lost[0].name}»${lost.length > 1 ? ` и ещё ${lost.length - 1}` : ''}`;
+    add(lost[0].id, 'err', text);
+    for (const s of lost.slice(1)) (perPage[s.id] = perPage[s.id] || []).push({ kind: 'err', text });
   }
 
   steps.forEach((s, i) => {
@@ -790,7 +820,9 @@ export function stepToGameStep(s: CtorStep, meta: CtorQuestMeta): GameStep {
       break;
     case 'video':
     case 'route_video':
-      g.rich_content.button_text = s.template === 'route_video' ? 'в путь' : 'продолжить';
+      // «Видео» (route_video) больше не только маршрут — кнопка та же, что у
+      // приветственного (решение владельца 2026-10-30; было «в путь»).
+      g.rich_content.button_text = 'продолжить';
       g.rich_content.place_text = placeTextOf(s);
       if (nav) sup.navigator = nav;
       break;
@@ -871,14 +903,19 @@ export function serializeDraft(quest: CtorQuest): QuestSnapshot {
 /* ---------- Структурные правки ---------- */
 
 /**
- * Куда вставлять новую страницу: после выбранной, но не позже финального
- * «Поздравления» (вставляемое «Поздравление» ограничение не получает).
+ * Куда вставлять новую страницу: после выбранной (или в место `at` — «+» между
+ * страницами, флаг ctor_page_menu), но не позже финального «Поздравления».
+ * «Первый экран» и «Поздравление» предлагаются, только когда их нет, и встают
+ * на своё единственное законное место — в начало и в конец.
  */
-export function insertionIndex(steps: CtorStep[], selectedId: string | null, template: CtorTemplate): number {
+export function insertionIndex(steps: CtorStep[], selectedId: string | null, template: CtorTemplate, at?: number): number {
+  if (template === 'start') return 0;
+  if (template === 'congrats') return steps.length;
+  if (at !== undefined) return Math.max(0, Math.min(at, steps.length));
   const selIdx = selectedId ? steps.findIndex((s) => s.id === selectedId) : -1;
   let i = selIdx >= 0 ? selIdx + 1 : steps.length;
   const last = steps[steps.length - 1];
-  if (i === steps.length && last && last.template === 'congrats' && template !== 'congrats') {
+  if (i === steps.length && last && last.template === 'congrats') {
     i = steps.length - 1;
   }
   return i;

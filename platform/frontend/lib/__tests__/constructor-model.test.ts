@@ -18,6 +18,7 @@ import {
   newQuest,
   newStep,
   nextVersionNumber,
+  pickerTemplates,
   parseCoords,
   publishVersion,
   adoptCover,
@@ -235,6 +236,23 @@ describe('computeGates', () => {
     expect(fieldOf('список ответов пуст')).toBe('answers');
     expect(fieldOf('координаты не заданы')).toBe('address');
     expect(fieldOf('название не задано')).toBe('address');
+  });
+
+  it('errors on pages after the first «Поздравление» — the player never reaches them', () => {
+    const q = quest();
+    const after = { ...newStep('continue'), name: 'Эпилог' };
+    q.steps = [q.steps[0], q.steps[1], after, newStep('congrats')];
+    const g = computeGates(q);
+    const text = 'Страницы после «Поздравления» игрок не увидит: «Эпилог» и ещё 1';
+    expect(g.errors).toContainEqual({ pageId: after.id, text, field: undefined });
+    // Каждая недостижимая страница помечена в ленте, а ошибка одна.
+    expect(g.perPage[q.steps[3].id]).toEqual([{ kind: 'err', text }]);
+    expect(g.errors.filter((e) => e.text === text)).toHaveLength(1);
+    expect(g.warnings.map((w) => w.text).join()).not.toContain('не последняя');
+  });
+
+  it('a single final «Поздравление» passes the order gate', () => {
+    expect(computeGates(quest()).errors.map((e) => e.text).join()).not.toContain('после «Поздравления»');
   });
 
   it('errors when there is no terminal «Поздравление»', () => {
@@ -469,6 +487,12 @@ describe('stepToGameStep → toDesignStep (production render path)', () => {
     expect(GIFT_COINS).toBe(5);
   });
 
+  it('«Видео» (route_video) starts as a plain video with «продолжить», like the welcome one', () => {
+    const s = newStep('route_video');
+    expect(s.video).toEqual({ dur: '0:00', label: 'видео' });
+    expect(stepToGameStep(s, newQuest({}).meta).rich_content.button_text).toBe('продолжить');
+  });
+
   it('non-task steps carry no gift', () => {
     for (const tpl of ['start', 'video', 'continue', 'route_video', 'congrats'] as const) {
       expect(stepToGameStep(newStep(tpl), newQuest({}).meta).supporting?.gift).toBeUndefined();
@@ -647,6 +671,22 @@ describe('structural edits', () => {
   it('insertionIndex places after the selected page', () => {
     const q = quest();
     expect(insertionIndex(q.steps, q.steps[0].id, 'continue')).toBe(1);
+  });
+
+  it('insertionIndex honours a «+» place, and puts «Первый экран» first and «Поздравление» last', () => {
+    const q = quest();
+    q.steps = [q.steps[0], newStep('continue'), newStep('task_no'), q.steps[1]];
+    expect(insertionIndex(q.steps, q.steps[2].id, 'task_answer', 1)).toBe(1);
+    expect(insertionIndex(q.steps, null, 'start')).toBe(0);
+    expect(insertionIndex(q.steps, q.steps[1].id, 'congrats')).toBe(4);
+    expect(insertionIndex(q.steps, null, 'congrats', 2)).toBe(4);
+  });
+
+  it('pickerTemplates: three working templates; start/congrats only when missing; videos hidden', () => {
+    const q = quest();
+    expect(pickerTemplates(q.steps)).toEqual(['continue', 'task_answer', 'task_no']);
+    expect(pickerTemplates([q.steps[0]])).toEqual(['continue', 'task_answer', 'task_no', 'congrats']);
+    expect(pickerTemplates([])).toEqual(['continue', 'task_answer', 'task_no', 'congrats', 'start']);
   });
 
   it('insertionIndex never inserts after the final congrats', () => {

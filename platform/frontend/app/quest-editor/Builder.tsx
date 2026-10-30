@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AGE_TARGET_OPTIONS,
   BAD_SKIP_COST_TEXT,
@@ -15,8 +15,10 @@ import {
   badStartCoords,
   computeGates,
   fmtTime,
+  insertionIndex,
   newQuest,
   newStep,
+  pickerTemplates,
   QUEST_DISTANCE_KM_MAX,
   QUEST_DURATION_MIN_MAX,
   questDurationLabel,
@@ -44,6 +46,7 @@ import { PLAYER_COPY } from '../../lib/player-copy';
 import { PlayerFrame, PREVIEW_HANDLERS, StepView, TopBar, type DesignStep } from '../player/PlayerComponents';
 import { GateNote, QuestCoverZone, WspBlock, WspToggle, gateAnchor, useGateHighlight } from './controls';
 import { PageEditor } from './PageEditor';
+import { PageMenu } from './PageMenu';
 import { PublishPanel } from './PublishPanel';
 import { WspHeader } from './QuestList';
 
@@ -69,7 +72,7 @@ const PREVIEW_TEXT: Record<CtorTemplate, string> = {
   task_no: 'дойдите до указанной точки и осмотритесь',
   task_answer: 'рассмотрите место и ответьте на вопрос',
   continue: 'развитие сюжета между заданиями',
-  route_video: 'видео-навигация до следующей точки',
+  route_video: 'видео с текстом под ним',
   congrats: 'поздравляем с прохождением!',
 };
 
@@ -104,14 +107,19 @@ function MiniTemplatePreview({ template }: { template: CtorTemplate }) {
   );
 }
 
-function TemplatePickerModal({ onClose, onPick }: { onClose: () => void; onPick: (key: CtorTemplate) => void }) {
+function TemplatePickerModal({ templates, onClose, onPick }: {
+  /** Что предлагать — {@link pickerTemplates}: скрытые шаблоны сюда не попадают. */
+  templates: CtorTemplate[];
+  onClose: () => void;
+  onPick: (key: CtorTemplate) => void;
+}) {
   return (
     <div className="wsp-ovl" onClick={onClose}>
       <div className="wsp-tpick" onClick={(e) => e.stopPropagation()}>
         <h3>Новая страница — выберите шаблон</h3>
         <p className="sub">Страница добавится после текущей, но не позже финального «Поздравления». Превью отрисованы настоящими компонентами плеера.</p>
         <div className="wsp-tgrid">
-          {CTOR_TEMPLATES.map((t) => (
+          {templates.map((k) => TPL_BY_KEY[k]).map((t) => (
             <div key={t.key} className="wsp-tcell" onClick={() => onPick(t.key)} role="button" tabIndex={0}
               onKeyDown={(e) => { if (e.key === 'Enter') onPick(t.key); }}>
               <div className="frame"><MiniTemplatePreview template={t.key} /></div>
@@ -631,7 +639,8 @@ export interface BuilderActions {
   onBack: () => void;
   onTest: (startPos: number) => void;
   onExport: () => void;
-  insertStep: (template: CtorTemplate) => void;
+  /** `at` — место из «+» между страницами; без него — после выбранной. */
+  insertStep: (template: CtorTemplate, at?: number) => void;
   removeStep: (id: string) => void;
   duplicateStep: (id: string) => void;
   reorder: (from: number, to: number) => void;
@@ -650,6 +659,7 @@ export function BuilderScreen({
   exporting,
   transfer,
   cities,
+  pageMenu,
   actions,
 }: {
   quest: CtorQuest;
@@ -669,6 +679,8 @@ export function BuilderScreen({
   transfer?: AuthorTransfer;
   /** Выбор города из списка администратора (флаг ctor_city_list). */
   cities?: CityOptions;
+  /** Меню шаблонов и «+» между страницами вместо окна выбора (флаг ctor_page_menu). */
+  pageMenu?: boolean;
   actions: BuilderActions;
 }) {
   const gates: Gates = useMemo(() => computeGates(quest), [quest]);
@@ -677,6 +689,33 @@ export function BuilderScreen({
   const view = sel && (sel.type === 'settings' || sel.type === 'publish') ? sel.type : selStep ? 'page' : 'settings';
   const selIdx = selStep ? steps.indexOf(selStep) : 0;
   const [picker, setPicker] = useState(false);
+  // Открытое меню «Новая страница»: где нарисовать и куда вставлять (`at` —
+  // «+» между страницами; без него — после выбранной, как у кнопки).
+  const [menu, setMenu] = useState<{ x: number; y: number; at?: number } | null>(null);
+  const menuTrigger = useRef<HTMLElement | null>(null);
+  // Esc и клик мимо возвращают фокус туда, откуда меню открыли.
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    menuTrigger.current?.focus({ preventScroll: true });
+  }, []);
+  const openMenu = (trigger: HTMLElement, at?: number) => {
+    menuTrigger.current = trigger;
+    if (menu && menu.at === at) {
+      setMenu(null);
+      return;
+    }
+    const rail = trigger.closest('.wsp-rail')?.getBoundingClientRect();
+    const r = trigger.getBoundingClientRect();
+    setMenu({ x: (rail?.right ?? r.right) + 8, y: at === undefined ? r.top - 120 : r.top - 24, at });
+  };
+  const templates = pickerTemplates(steps);
+  const selectedId = selStep ? selStep.id : null;
+  const where = (key: CtorTemplate): string => {
+    const i = insertionIndex(steps, selectedId, key, menu?.at);
+    if (i === 0) return 'Встанет первой страницей';
+    const prev = steps[i - 1];
+    return `Встанет после страницы ${i} «${prev.name || TPL_BY_KEY[prev.template].name}»`;
+  };
   // §9.2: which control the last «Исправить →» pointed at; nonce re-fires the
   // scroll/flash when the same field is clicked twice.
   const [highlight, setHighlight] = useState<{ pageId: string | null; field?: GateField; nonce: number } | null>(null);
@@ -738,10 +777,10 @@ export function BuilderScreen({
             {errN ? <span className="wsp-chip err">{errN}</span> : null}
           </div>
           <h5>Страницы ({steps.length})</h5>
-          <div>
+          <div className={dragFrom !== null ? 'wsp-pages--drag' : undefined}>
             {steps.map((s, i) => (
+              <React.Fragment key={s.id}>
               <PageRow
-                key={s.id}
                 step={s}
                 index={i}
                 active={!!(selStep && selStep.id === s.id)}
@@ -760,9 +799,33 @@ export function BuilderScreen({
                   },
                 }}
               />
+              {/* «+» между страницами: не после «Поздравления» — оттуда игрок
+                  страницу не увидит — и не после последней (там кнопка ниже). */}
+              {pageMenu && i < steps.length - 1 && s.template !== 'congrats' ? (
+                <div className="wsp-gap">
+                  <button
+                    type="button"
+                    className={'wsp-gap__btn' + (menu?.at === i + 1 ? ' on' : '')}
+                    data-pmenu-trigger
+                    aria-label={`Вставить страницу между ${i + 1} и ${i + 2}`}
+                    title={`Вставить страницу между ${i + 1} и ${i + 2}`}
+                    onClick={(e) => openMenu(e.currentTarget, i + 1)}
+                  />
+                </div>
+              ) : null}
+              </React.Fragment>
             ))}
           </div>
-          <button className="btn btn--secondary btn--sm wsp-addpage" type="button" onClick={() => setPicker(true)}>+ Добавить страницу</button>
+          <button
+            className="btn btn--secondary btn--sm wsp-addpage"
+            type="button"
+            data-pmenu-trigger
+            aria-haspopup={pageMenu ? 'menu' : 'dialog'}
+            aria-expanded={pageMenu ? !!menu && menu.at === undefined : picker}
+            onClick={(e) => (pageMenu ? openMenu(e.currentTarget) : setPicker(true))}
+          >
+            + Добавить страницу
+          </button>
           <div className="wsp-vers">
             {live
               ? <span className="wsp-ver"><b>v{live.n}</b>&nbsp;в магазине · {live.attempts} {plural(live.attempts, 'попытка', 'попытки', 'попыток')}</span>
@@ -812,8 +875,20 @@ export function BuilderScreen({
         <PreviewPanel quest={quest} idx={view === 'page' ? selIdx : 0} onTestFrom={actions.onTest} />
       </div>
 
+      {menu ? (
+        <PageMenu
+          at={{ x: menu.x, y: menu.y }}
+          templates={templates}
+          where={where}
+          preview={(key) => <MiniTemplatePreview template={key} />}
+          onPick={(key) => { setMenu(null); actions.insertStep(key, menu.at); }}
+          onClose={closeMenu}
+        />
+      ) : null}
+
       {picker ? (
         <TemplatePickerModal
+          templates={templates}
           onClose={() => setPicker(false)}
           onPick={(key) => { setPicker(false); actions.insertStep(key); }}
         />

@@ -45,12 +45,12 @@ await page.waitForTimeout(300);
 (await page.locator('.wsp-preview .pframe').textContent())?.includes('живое превью работает')
   ? ok('preview updates live from editor input') : fail('preview not live');
 
-/* 4. Пикер шаблонов: 7 живых мини-превью; вставка не позже финала */
+/* 4. Пикер шаблонов: 3 живых мини-превью (видео, «Первый экран» и второе «Поздравление» скрыты); вставка не позже финала */
 await page.locator('button', { hasText: '+ Добавить страницу' }).click();
 const cells = page.locator('.wsp-tcell');
-(await cells.count()) === 7 ? ok('template picker: 7 live mini-previews') : fail(`picker cells: ${await cells.count()}`);
-(await page.locator('.wsp-tcell .pframe').count()) === 7 ? ok('mini-previews are real player frames') : fail('mini-previews not player frames');
-await cells.nth(3).click(); // «Задание» (task_answer)
+(await cells.count()) === 3 ? ok('template picker: 3 live mini-previews') : fail(`picker cells: ${await cells.count()}`);
+(await page.locator('.wsp-tcell .pframe').count()) === 3 ? ok('mini-previews are real player frames') : fail('mini-previews not player frames');
+await cells.nth(1).click(); // «Задание» (task_answer)
 await page.waitForTimeout(300);
 (await railPages.count()) === 3 ? ok('page added') : fail('page not added');
 const names = await page.locator('.wsp-page .tp').allTextContents();
