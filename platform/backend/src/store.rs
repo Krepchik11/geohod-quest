@@ -501,6 +501,36 @@ impl InMemoryFactStore {
             .collect()
     }
 
+    /// Progress of the given `(user_id, quest_id)` pairs, one row per pair
+    /// that has an attempt (see [`crate::facts::QuestProgress`]); unstarted
+    /// pairs are absent. Row order is unspecified.
+    pub fn quest_progress(&self, pairs: &[(String, String)]) -> Vec<crate::facts::QuestProgress> {
+        let wanted: std::collections::HashSet<(&str, &str)> = pairs
+            .iter()
+            .map(|(user, quest)| (user.as_str(), quest.as_str()))
+            .collect();
+        let mut rows: HashMap<(&str, &str), crate::facts::QuestProgress> = HashMap::new();
+        for meta in self.attempts.values() {
+            let key = (meta.user_id.as_str(), meta.quest_id.as_str());
+            if !wanted.contains(&key) {
+                continue;
+            }
+            let row = rows
+                .entry(key)
+                .or_insert_with(|| crate::facts::QuestProgress {
+                    user_id: meta.user_id.clone(),
+                    quest_id: meta.quest_id.clone(),
+                    finished: false,
+                    rated: false,
+                });
+            for fact in self.fact_logs.get(&meta.attempt_id).into_iter().flatten() {
+                row.finished |= fact.kind == FactKind::AttemptCompleted;
+                row.rated |= fact.kind == FactKind::QuestRated;
+            }
+        }
+        rows.into_values().collect()
+    }
+
     /// Wire fact logs of every attempt bound to `snapshot_id` and STARTED in
     /// `[from, to_excl)` — the funnel input (zero-fact attempts included, so
     /// the funnel denominator is honest).
@@ -807,6 +837,17 @@ impl InMemoryGrantStore {
         self.grants
             .values()
             .filter(|g| g.user_id == user_id)
+            .cloned()
+            .collect()
+    }
+
+    /// Every grant of any of `user_ids` (the coupon funnel's purchases), in
+    /// unspecified order.
+    pub fn grants_for_users(&self, user_ids: &[String]) -> Vec<AccessGrant> {
+        let wanted: std::collections::HashSet<&str> = user_ids.iter().map(String::as_str).collect();
+        self.grants
+            .values()
+            .filter(|g| wanted.contains(g.user_id.as_str()))
             .cloned()
             .collect()
     }
@@ -1424,6 +1465,12 @@ pub trait FactStore: Send + Sync {
         quest: Option<&str>,
     ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError>;
 
+    /// See [`InMemoryFactStore::quest_progress`].
+    async fn quest_progress(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<crate::facts::QuestProgress>, AppError>;
+
     /// See [`InMemoryFactStore::funnel_logs`].
     async fn funnel_logs(
         &self,
@@ -1544,6 +1591,13 @@ impl FactStore for std::sync::Mutex<InMemoryFactStore> {
         quest: Option<&str>,
     ) -> Result<Vec<crate::admin_stats::StatEvent>, AppError> {
         Ok(lock(self, "store")?.stats_finish_events(from, to_excl, quest))
+    }
+
+    async fn quest_progress(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<crate::facts::QuestProgress>, AppError> {
+        Ok(lock(self, "store")?.quest_progress(pairs))
     }
 
     async fn funnel_logs(
@@ -1960,6 +2014,9 @@ pub trait GrantStore: Send + Sync {
     /// See [`InMemoryGrantStore::grants_for_user`].
     async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError>;
 
+    /// See [`InMemoryGrantStore::grants_for_users`].
+    async fn grants_for_users(&self, user_ids: &[String]) -> Result<Vec<AccessGrant>, AppError>;
+
     /// See [`InMemoryGrantStore::get_bundle`].
     async fn get_bundle(
         &self,
@@ -2051,6 +2108,10 @@ impl GrantStore for std::sync::Mutex<InMemoryGrantStore> {
 
     async fn grants_for_user(&self, user_id: &str) -> Result<Vec<AccessGrant>, AppError> {
         Ok(lock(self, "grants")?.grants_for_user(user_id))
+    }
+
+    async fn grants_for_users(&self, user_ids: &[String]) -> Result<Vec<AccessGrant>, AppError> {
+        Ok(lock(self, "grants")?.grants_for_users(user_ids))
     }
 
     async fn get_bundle(
@@ -2912,7 +2973,12 @@ impl ConstructorStore for std::sync::Mutex<InMemoryConstructorStore> {
 pub struct InMemoryCouponStore {
     coupons: HashMap<String, Coupon>,
     redemptions: Vec<CouponRedemption>,
+    /// QR scans per `(coupon_id, day)`.
+    scans: HashMap<(String, String), u64>,
 }
+
+/// Another coupon already holds the QR address — the caller draws a new one.
+pub const QR_SLUG_TAKEN: &str = "адрес QR-кода уже занят";
 
 impl InMemoryCouponStore {
     /// Create an empty store.
@@ -2960,14 +3026,16 @@ impl InMemoryCouponStore {
 
     /// Replace the editable fields of an existing coupon (created_at and the
     /// redemption log are preserved by construction — the handler builds the
-    /// updated record from the stored one).
-    pub fn update(&mut self, coupon: Coupon) -> Result<Coupon, AppError> {
-        if !self.coupons.contains_key(&coupon.coupon_id) {
+    /// updated record from the stored one). The QR address is not editable:
+    /// the stored one stays, whatever `coupon` carries.
+    pub fn update(&mut self, mut coupon: Coupon) -> Result<Coupon, AppError> {
+        let Some(stored) = self.coupons.get(&coupon.coupon_id) else {
             return Err(AppError::NotFound(format!(
                 "unknown coupon '{}'",
                 coupon.coupon_id
             )));
-        }
+        };
+        coupon.qr_slug = stored.qr_slug.clone();
         if self.code_taken(&coupon.code, &coupon.coupon_id) {
             return Err(AppError::Conflict(format!(
                 "купон с кодом '{}' уже существует",
@@ -2984,14 +3052,74 @@ impl InMemoryCouponStore {
         self.coupons.get(coupon_id).cloned()
     }
 
-    /// Delete a coupon and its redemption log. Grants stay — «уже применённые
-    /// скидки сохраняются». Returns NotFound for an unknown id.
+    /// Delete a coupon, its redemption log and its QR scans. Grants stay —
+    /// «уже применённые скидки сохраняются». Returns NotFound for an unknown id.
     pub fn delete(&mut self, coupon_id: &str) -> Result<(), AppError> {
         if self.coupons.remove(coupon_id).is_none() {
             return Err(AppError::NotFound(format!("unknown coupon '{coupon_id}'")));
         }
         self.redemptions.retain(|r| r.coupon_id != coupon_id);
+        self.scans.retain(|(id, _), _| id != coupon_id);
         Ok(())
+    }
+
+    /// Give the coupon the QR address `slug` unless it has one already — the
+    /// address is permanent, so the stored one then stays. Conflict
+    /// ([`QR_SLUG_TAKEN`]) when another coupon holds `slug`, NotFound for an
+    /// unknown coupon.
+    pub fn assign_qr_slug(&mut self, coupon_id: &str, slug: &str) -> Result<Coupon, AppError> {
+        let taken = self
+            .coupons
+            .values()
+            .any(|c| c.coupon_id != coupon_id && c.qr_slug.as_deref() == Some(slug));
+        let coupon = self
+            .coupons
+            .get_mut(coupon_id)
+            .ok_or_else(|| AppError::NotFound(format!("unknown coupon '{coupon_id}'")))?;
+        if coupon.qr_slug.is_none() {
+            if taken {
+                return Err(AppError::Conflict(QR_SLUG_TAKEN.into()));
+            }
+            coupon.qr_slug = Some(slug.to_string());
+        }
+        Ok(coupon.clone())
+    }
+
+    /// The coupon whose QR address is `slug`.
+    pub fn find_by_qr_slug(&self, slug: &str) -> Option<Coupon> {
+        self.coupons
+            .values()
+            .find(|c| c.qr_slug.as_deref() == Some(slug))
+            .cloned()
+    }
+
+    /// Count one QR scan of an existing coupon on `day` (`"YYYY-MM-DD"`); a
+    /// coupon deleted meanwhile counts nothing.
+    pub fn add_scan(&mut self, coupon_id: &str, day: &str) {
+        if self.coupons.contains_key(coupon_id) {
+            *self
+                .scans
+                .entry((coupon_id.to_string(), day.to_string()))
+                .or_default() += 1;
+        }
+    }
+
+    /// Every QR scan the coupon has had.
+    pub fn scans_total(&self, coupon_id: &str) -> u64 {
+        self.scans
+            .iter()
+            .filter(|((id, _), _)| id == coupon_id)
+            .map(|(_, scans)| scans)
+            .sum()
+    }
+
+    /// The coupon's redemption log (the funnel's «получили»), in no order.
+    pub fn redemptions_of(&self, coupon_id: &str) -> Vec<CouponRedemption> {
+        self.redemptions
+            .iter()
+            .filter(|r| r.coupon_id == coupon_id)
+            .cloned()
+            .collect()
     }
 
     /// All coupons with their folded usage, newest first (admin list).
@@ -3104,6 +3232,21 @@ pub trait CouponStore: Send + Sync {
         quest_id: &str,
         price: i64,
     ) -> Result<CouponRedemption, AppError>;
+
+    /// See [`InMemoryCouponStore::assign_qr_slug`].
+    async fn assign_qr_slug(&self, coupon_id: &str, slug: &str) -> Result<Coupon, AppError>;
+
+    /// See [`InMemoryCouponStore::find_by_qr_slug`].
+    async fn find_by_qr_slug(&self, slug: &str) -> Result<Option<Coupon>, AppError>;
+
+    /// See [`InMemoryCouponStore::add_scan`].
+    async fn add_scan(&self, coupon_id: &str, day: &str) -> Result<(), AppError>;
+
+    /// See [`InMemoryCouponStore::scans_total`].
+    async fn scans_total(&self, coupon_id: &str) -> Result<u64, AppError>;
+
+    /// See [`InMemoryCouponStore::redemptions_of`].
+    async fn redemptions_of(&self, coupon_id: &str) -> Result<Vec<CouponRedemption>, AppError>;
 }
 
 /// Shared coupon storage handle.
@@ -3154,6 +3297,27 @@ impl CouponStore for std::sync::Mutex<InMemoryCouponStore> {
         price: i64,
     ) -> Result<CouponRedemption, AppError> {
         lock(self, "coupons")?.redeem(code, user_id, quest_id, price)
+    }
+
+    async fn assign_qr_slug(&self, coupon_id: &str, slug: &str) -> Result<Coupon, AppError> {
+        lock(self, "coupons")?.assign_qr_slug(coupon_id, slug)
+    }
+
+    async fn find_by_qr_slug(&self, slug: &str) -> Result<Option<Coupon>, AppError> {
+        Ok(lock(self, "coupons")?.find_by_qr_slug(slug))
+    }
+
+    async fn add_scan(&self, coupon_id: &str, day: &str) -> Result<(), AppError> {
+        lock(self, "coupons")?.add_scan(coupon_id, day);
+        Ok(())
+    }
+
+    async fn scans_total(&self, coupon_id: &str) -> Result<u64, AppError> {
+        Ok(lock(self, "coupons")?.scans_total(coupon_id))
+    }
+
+    async fn redemptions_of(&self, coupon_id: &str) -> Result<Vec<CouponRedemption>, AppError> {
+        Ok(lock(self, "coupons")?.redemptions_of(coupon_id))
     }
 }
 
@@ -4219,7 +4383,62 @@ mod coupon_tests {
             quest_ids: None,
             paused: false,
             created_at: now_rfc3339(),
+            gift_from: None,
+            qr_slug: None,
         }
+    }
+
+    #[test]
+    fn qr_slug_is_permanent_unique_and_survives_saves() {
+        let mut s = InMemoryCouponStore::new();
+        s.create(coupon("c1", "GIFT-1")).expect("c1");
+        s.create(coupon("c2", "GIFT-2")).expect("c2");
+        let c1 = s.assign_qr_slug("c1", "ABCDEF").expect("assign");
+        assert_eq!(c1.qr_slug.as_deref(), Some("ABCDEF"));
+        // A second request keeps the first address — printed QRs stay valid.
+        let again = s.assign_qr_slug("c1", "GHJKMN").expect("idempotent");
+        assert_eq!(again.qr_slug.as_deref(), Some("ABCDEF"));
+        // Another coupon cannot take it; an unknown coupon is NotFound.
+        assert!(matches!(
+            s.assign_qr_slug("c2", "ABCDEF"),
+            Err(AppError::Conflict(_))
+        ));
+        assert!(matches!(
+            s.assign_qr_slug("ghost", "PQRSTU"),
+            Err(AppError::NotFound(_))
+        ));
+        // A save never touches the address, whatever it carries.
+        let mut edit = coupon("c1", "GIFT-RENAMED");
+        edit.qr_slug = None;
+        let saved = s.update(edit).expect("save");
+        assert_eq!(saved.qr_slug.as_deref(), Some("ABCDEF"));
+        let found = s.find_by_qr_slug("ABCDEF").expect("found by slug");
+        assert_eq!(
+            found.code, "GIFT-RENAMED",
+            "the QR follows the renamed code"
+        );
+        assert!(s.find_by_qr_slug("ZZZZZZ").is_none());
+    }
+
+    #[test]
+    fn scans_count_per_coupon_and_go_with_it() {
+        let mut s = InMemoryCouponStore::new();
+        s.create(coupon("c1", "GIFT-1")).expect("c1");
+        s.create(coupon("c2", "GIFT-2")).expect("c2");
+        s.add_scan("c1", "2026-10-30");
+        s.add_scan("c1", "2026-10-31");
+        s.add_scan("c1", "2026-10-31");
+        s.add_scan("c2", "2026-10-31");
+        s.add_scan("ghost", "2026-10-31");
+        assert_eq!(s.scans_total("c1"), 3);
+        assert_eq!(s.scans_total("c2"), 1);
+        assert_eq!(s.scans_total("ghost"), 0, "no coupon, no scan");
+        s.redeem("GIFT-1", "p1", "q1", 500).expect("redeem");
+        assert_eq!(s.redemptions_of("c1").len(), 1);
+        assert!(s.redemptions_of("c2").is_empty());
+        s.delete("c1").expect("delete");
+        assert_eq!(s.scans_total("c1"), 0);
+        assert_eq!(s.scans_total("c2"), 1, "other coupons keep theirs");
     }
 
     #[test]

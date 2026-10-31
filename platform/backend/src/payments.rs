@@ -3,8 +3,8 @@
 //! grant. Providers: the always-approving mock (dev/test, selectable at
 //! checkout) and YooKassa redirect payments (`yookassa.rs`). Checkout
 //! dispatches per request on `CheckoutRequest.provider`; a published free
-//! quest settles before dispatch, a coupon-100% inside it — in both cases
-//! there is nothing to charge and no provider is reached.
+//! quest and a coupon-100% settle before dispatch — there is nothing to
+//! charge, so no provider is reached and no provider toggle is consulted.
 
 use crate::AppState;
 use crate::auth;
@@ -117,9 +117,10 @@ pub struct RedirectPayment {
 ///
 /// With a coupon code the registry is consulted: the redemption is recorded
 /// atomically against the coupon's caps, and a discount that zeroes the price
-/// grants as CouponRedemption bypassing every provider; a partial discount
-/// still charges and grants as Payment. Idempotent (first grant + first audit
-/// ref win), and a re-checkout of an owned quest never consumes a coupon.
+/// grants as CouponRedemption before any provider gate (a QR gift works
+/// whichever payment methods are on); a partial discount still charges and
+/// grants as Payment. Idempotent (first grant + first audit ref win), and a
+/// re-checkout of an owned quest never consumes a coupon.
 pub async fn checkout(
     state: &AppState,
     user_id: &str,
@@ -162,6 +163,17 @@ pub async fn checkout(
         }
         None => None,
     };
+    // A coupon that zeroes the price leaves nothing to charge either: it
+    // settles here, like a free quest. Every other coupon outcome — partial,
+    // refused, unknown — takes the provider path below unchanged.
+    if let (Some(raw), Some((_, price))) = (&req.coupon_code, &priced)
+        && let Ok(code) = coupons::normalize_code(raw)
+        && let Ok((_, discount)) =
+            quote_coupon(state, &code, user_id, &req.quest_id, *price).await?
+        && discount >= *price
+    {
+        return mock_checkout(state, user_id, req, Some(*price)).await;
+    }
     require_provider_enabled(state, feature, provider).await?;
     match provider {
         "yookassa" => yookassa_checkout(state, user_id, req, priced).await,
@@ -236,19 +248,20 @@ pub(crate) async fn quest_price(state: &AppState, quest_id: &str) -> Result<Opti
 }
 
 /// Quote a normalized coupon against a priced quest: preview + redeemability +
-/// the priced discount. Never consumes the code. The inner `Err` is the
-/// player-facing reason (unknown and deleted codes read the same, by design);
-/// `Ok` carries the coupon's canonical code and the discount in rubles.
+/// the priced discount. Never consumes the code. The inner `Err` is why the
+/// code is refused (unknown and deleted codes read the same, by design); `Ok`
+/// carries the coupon (canonical code, validity, «От кого») and the discount
+/// in rubles.
 pub async fn quote_coupon(
     state: &AppState,
     code: &str,
     user_id: &str,
     quest_id: &str,
     price: i64,
-) -> Result<Result<(String, i64), &'static str>, AppError> {
+) -> Result<Result<(coupons::Coupon, i64), coupons::RedeemReject>, AppError> {
     let Some((coupon, used_total, used_by_player)) = state.coupons.preview(code, user_id).await?
     else {
-        return Ok(Err("промокод не найден"));
+        return Ok(Err(coupons::RedeemReject::NotFound));
     };
     if let Err(reject) = coupons::check_redeemable(
         &coupon,
@@ -257,10 +270,10 @@ pub async fn quote_coupon(
         used_by_player,
         &store::today_utc(),
     ) {
-        return Ok(Err(reject.message()));
+        return Ok(Err(reject));
     }
     let discount = coupons::discount_amount(&coupon.discount, price);
-    Ok(Ok((coupon.code, discount)))
+    Ok(Ok((coupon, discount)))
 }
 
 /// The configured YooKassa transport, or 501 (fail-closed) when absent.
@@ -301,14 +314,15 @@ async fn yookassa_checkout(
         priced.ok_or_else(|| AppError::NotFound("quest is not published".into()))?;
     // A coupon prices the charge now but is redeemed only at settlement — an
     // abandoned payment must not burn the code. Coupon-100% has nothing to
-    // charge, so it settles instantly through the synchronous path (redeem +
-    // CouponRedemption grant), never reaching the gateway.
+    // charge: `checkout` settles it before dispatch, and one that became full
+    // since then takes the same synchronous path (redeem + CouponRedemption
+    // grant) here — the gateway is never asked for a zero charge.
     let (coupon_code, amount) = match &req.coupon_code {
         Some(raw) => {
             let code = coupons::normalize_code(raw)?;
             let (_, discount) = quote_coupon(state, &code, user_id, &req.quest_id, price)
                 .await?
-                .map_err(|reason| AppError::Conflict(reason.into()))?;
+                .map_err(|reject| AppError::Conflict(reject.message().into()))?;
             if discount >= price {
                 return mock_checkout(state, user_id, req, Some(price)).await;
             }

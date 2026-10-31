@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { api, classify, type ProductPageWire, type ReviewWire } from '../../../../lib/api';
 import { authHref, BUY_PARAM, buyAgainPath } from '../../../../lib/auth-return';
-import { markOwned, useOwns } from '../../../../lib/collection';
-import { getSession, subscribeSession, currentUserId } from '../../../../lib/identity';
+import { markOwned, useOwned } from '../../../../lib/collection';
+import { getSession, setSession, subscribeSession, currentUserId } from '../../../../lib/identity';
 import { coverCss, coverSrc as coverSrcForSheet } from '../../../../lib/cover';
 import { COMPLEXITY_LABEL, type CtorComplexity } from '../../../../lib/constructor-model';
 import { downloadBundle, type DownloadStage } from '../../../../lib/download';
@@ -27,7 +27,10 @@ import { mapsSearchUrl } from '../../../../lib/maps';
 import PurchaseSheet from '../../../components/PurchaseSheet';
 import InstallQuestButton from '../../../components/InstallQuestButton';
 import ShareQuestButton from '../../../components/ShareQuestButton';
+import SocialAuthButtons from '../../../components/SocialAuthButtons';
 import { useClientFeature } from '../../../../lib/client-features';
+import { GiftOffer, PromoNoticeLine } from './PromoOffer';
+import { usePromoInvite } from './usePromoInvite';
 
 /**
  * §3 product page body: model data only, the order card (right sticky column on
@@ -39,6 +42,10 @@ import { useClientFeature } from '../../../../lib/client-features';
  * title sits «Коротко» — start, time, distance, tasks, company, offline — and
  * only then the description, folded to four lines. Reviews show the three most
  * useful (the backend orders substantive ones first) with the rest one tap away.
+ *
+ * A QR invitation (flag `promo_qr`, `?promo=`) turns the order card into
+ * «Квест в подарок» with one «Получить бесплатно» — the ordinary checkout with
+ * the code, no sheet — and offers the account only after the quest is theirs.
  */
 
 /** Reviews shown before «Все N отзывов» (ТЗ, задача 24). */
@@ -97,10 +104,21 @@ function Quote({ review, className }: { review: ReviewWire; className: string })
 export default function AboutClient({ questId }: { questId: string }) {
   const [product, setProduct] = useState<ProductPageWire | null>(null);
   const [failed, setFailed] = useState<'load' | 'notfound' | null>(null);
-  const owned = useOwns(questId);
+  const { owned: ownedIds, loaded: ownedKnown } = useOwned();
+  const owned = ownedIds.has(questId);
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const shareOn = useClientFeature('quest_share');
   const factsOn = useClientFeature('quest_facts');
+  const promoOn = useClientFeature('promo_qr');
+  // Priced only once the page knows the guest does not own the quest: an
+  // owner sees «Квест ваш», and the invitation is not spent.
+  const { invite: promo, forget: dropPromo, recheck: recheckPromo } = usePromoInvite(questId, {
+    ready: promoOn && ownedKnown && !owned && (product?.price ?? 0) > 0,
+    city: product?.city ?? null,
+  });
+  // The quest came as a QR gift on THIS page — the moment to offer an account.
+  const [gotGift, setGotGift] = useState(false);
+  const orderRef = useRef<HTMLDivElement>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState(false);
@@ -159,6 +177,7 @@ export default function AboutClient({ questId }: { questId: string }) {
   const acquired = () => {
     markOwned(questId);
     setJustGot(true);
+    dropPromo();
     startDownload();
   };
 
@@ -180,6 +199,30 @@ export default function AboutClient({ questId }: { questId: string }) {
       setGranting(false);
     }
   };
+
+  // «Получить бесплатно» (QR invitation): the ordinary checkout with the code.
+  // A refusal means it ran out after the page priced it — price it again, so
+  // the page says why instead of a generic error.
+  const claimGift = async (code: string) => {
+    setGranting(true);
+    setGrantError(false);
+    try {
+      await api.checkout({ user_id: currentUserId(), quest_id: questId, coupon_code: code });
+      setGotGift(true);
+      acquired();
+    } catch (e) {
+      const kind = classify(e).kind;
+      if (kind === 'rejected' || kind === 'not-found') recheckPromo();
+      else setGrantError(true);
+    } finally {
+      setGranting(false);
+    }
+  };
+
+  // On a phone the owned card sits below the story: bring the gift into view.
+  useEffect(() => {
+    if (gotGift) orderRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [gotGift]);
 
   // §3.3 results: each poll lets the backend settle against ЮKassa, so the
   // happy path needs no webhook. The param is stripped immediately — a reload
@@ -222,12 +265,21 @@ export default function AboutClient({ questId }: { questId: string }) {
 
   const p = product;
   const free = p.price === 0;
+  const offer = promo.kind === 'offer' ? promo : null;
+  // A QR invitation that zeroes the price: one tap, no purchase sheet.
+  const gift = offer?.finalPrice === 0;
   const facts = questFacts(p, factsOn);
   const allReviews = p.reviews.concat(moreReviews);
   const shownReviews = reviewsOpen ? allReviews : allReviews.slice(0, REVIEWS_FOLDED);
   const quote = bestQuote(p.reviews);
   const complexity = p.complexity && COMPLEXITY_LABEL[p.complexity as CtorComplexity];
-  const signInHref = authHref(free ? `/quest/${encodeURIComponent(questId)}/about` : buyAgainPath(questId));
+  const aboutPath = `/quest/${encodeURIComponent(questId)}/about`;
+  const signInHref = authHref(free ? aboutPath : buyAgainPath(questId));
+  const buy = () => {
+    if (free) void grantFree();
+    else if (gift) void claimGift(offer.code);
+    else setSheetOpen(true);
+  };
   const loadMoreReviews = () => {
     setLoadingMore(true);
     api
@@ -246,6 +298,7 @@ export default function AboutClient({ questId }: { questId: string }) {
   const orderCard = owned ? (
     <div className="qp-order card">
       {payResult === 'succeeded' && <p className="qp-payok">Оплата прошла — квест ваш навсегда.</p>}
+      {gotGift && <p className="qp-payok">Подарок получен — квест ваш навсегда.</p>}
       <span className="qp-owned">✓ Квест ваш</span>
       <Link className="btn btn--block" href={playUrl}>Пройти квест</Link>
       {dl && dl !== 'done' && (
@@ -258,6 +311,16 @@ export default function AboutClient({ questId }: { questId: string }) {
         </div>
       )}
       {dl === 'done' && <span className="qp-dl-done">⭳ Квест скачан — играйте офлайн</span>}
+      {gotGift && !session && (
+        /* The invitation asked nothing before the gift; now it is theirs, an
+           account keeps it beyond this phone (the same offer as the sheet's). */
+        <div className="psheet__account">
+          <b>Сохраните квест в аккаунте</b>
+          <p>Сейчас квест хранится только на этом устройстве. Со входом он откроется на любом телефоне, а прогресс не потеряется.</p>
+          <SocialAuthButtons onSession={setSession} />
+          <Link className="psheet__account-alt" href={authHref(aboutPath)}>или по почте</Link>
+        </div>
+      )}
       {justGot && (
         /* ТЗ, задача 28: the moment the quest is theirs is the moment to bring
            the company — one quest serves all of them. */
@@ -289,28 +352,31 @@ export default function AboutClient({ questId }: { questId: string }) {
           откроется, как только банк подтвердит оплату.
         </p>
       )}
-      <div className="qp-order__pricerow">
-        <span>Квест целиком</span>
-        <b>{free ? 'Бесплатно' : `${p.price ?? 0} ₽`}</b>
-      </div>
+      {promo.kind === 'refused' && <PromoNoticeLine invite={promo} />}
+      {offer ? (
+        <GiftOffer offer={offer} />
+      ) : (
+        <div className="qp-order__pricerow">
+          <span>Квест целиком</span>
+          <b>{free ? 'Бесплатно' : `${p.price ?? 0} ₽`}</b>
+        </div>
+      )}
       <Benefits p={p} />
       {quote && <Quote review={quote} className="qp-quote--desktop" />}
       {granting ? (
         <button className="btn btn--block is-pending psheet__confirm" type="button" disabled>
           <span className="psheet__spinner" aria-hidden />Оформляем…
         </button>
-      ) : free ? (
-        <button className="btn btn--block" type="button" onClick={() => void grantFree()}>Получить</button>
       ) : (
-        <button className="btn btn--block" type="button" onClick={() => setSheetOpen(true)}>
-          Купить за {p.price ?? 0} ₽
+        <button className="btn btn--block" type="button" onClick={buy}>
+          {free ? 'Получить' : gift ? 'Получить бесплатно' : `Купить за ${offer?.finalPrice ?? p.price ?? 0} ₽`}
         </button>
       )}
       {grantError && (
         <p className="quest-card__error">Не получилось оформить покупку — попробуйте ещё раз.</p>
       )}
-      {!free && <p className="qp-order__caption">Оплата картой российского банка.</p>}
-      {!session && (
+      {!free && !gift && <p className="qp-order__caption">Оплата картой российского банка.</p>}
+      {!session && !gift && (
         <p className="qp-order__caption">
           {free
             ? 'Квест привяжется к этому устройству; '
@@ -344,6 +410,14 @@ export default function AboutClient({ questId }: { questId: string }) {
               </p>
             )}
           </div>
+
+          {/* Phones and tablets: the invitation right under the title — the
+              order card is hidden on a phone, or far below on a tablet. */}
+          {!owned && promo.kind !== 'none' && (
+            <div className="qp-promo--mobile">
+              {offer ? <GiftOffer offer={offer} /> : promo.kind === 'refused' && <PromoNoticeLine invite={promo} />}
+            </div>
+          )}
 
           {/* ТЗ, задачи 19–22: what a player needs before going out, above the story. */}
           <section className="qp-brief card" aria-labelledby="qp-brief-title">
@@ -446,27 +520,32 @@ export default function AboutClient({ questId }: { questId: string }) {
           </div>
         </div>
 
-        <div className="qp-right">{orderCard}</div>
+        <div className="qp-right" ref={orderRef}>{orderCard}</div>
       </div>
 
       {/* §3.2 mobile: sticky purchase bar (the tab bar is hidden on this page) */}
       {!owned && (
         <div className="qp-buybar">
-          <span className="qp-buybar__price">
-            <b>{free ? 'Бесплатно' : `${p.price ?? 0} ₽`}</b>
-            <small>{free ? 'доступ навсегда' : 'навсегда · карты РФ'}</small>
-          </span>
+          {offer ? (
+            <span className="qp-buybar__price">
+              <b>{offer.finalPrice} ₽</b>
+              <small>
+                <s>{offer.price} ₽</s> · {gift ? 'в подарок' : 'по приглашению'}
+              </small>
+            </span>
+          ) : (
+            <span className="qp-buybar__price">
+              <b>{free ? 'Бесплатно' : `${p.price ?? 0} ₽`}</b>
+              <small>{free ? 'доступ навсегда' : 'навсегда · карты РФ'}</small>
+            </span>
+          )}
           {granting ? (
             <button className="btn qp-buybar__btn is-pending psheet__confirm" type="button" disabled>
               <span className="psheet__spinner" aria-hidden />Оформляем…
             </button>
           ) : (
-            <button
-              className="btn qp-buybar__btn"
-              type="button"
-              onClick={() => (free ? void grantFree() : setSheetOpen(true))}
-            >
-              {free ? 'Получить' : 'Купить'}
+            <button className="btn qp-buybar__btn" type="button" onClick={buy}>
+              {free ? 'Получить' : gift ? 'Получить бесплатно' : 'Купить'}
             </button>
           )}
         </div>
@@ -489,6 +568,7 @@ export default function AboutClient({ questId }: { questId: string }) {
             setBuyAgain(false);
           }}
           onPurchased={onPurchased}
+          initialPromo={offer?.code}
         />
       )}
     </main>

@@ -12,10 +12,21 @@
 //! the redemption log. The pure helpers here make every decision (validation,
 //! status, redeemability, discount math); the stores own the critical section
 //! and inject the wall clock, keeping this layer deterministic and testable.
+//!
+//! QR invitations (flag `promo_qr`): a coupon limited to ONE quest can carry a
+//! QR code — the short link `/go/<qr_slug>` opens that quest's page with the
+//! code applied. The slug is permanent and independent of the editable code;
+//! scans are counted per day, nothing personal stored. [`coupon_funnel`]
+//! follows the invited players from the scan to their next purchase.
 
+use std::collections::HashMap;
+
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::AppError;
+use crate::facts::QuestProgress;
+use crate::grants::{AccessGrant, GrantSource};
 
 /// The discount a coupon carries: a percentage of the price or a fixed ruble
 /// amount (clamped to the price at redemption — a 300 ₽ coupon on a 200 ₽
@@ -54,6 +65,12 @@ pub struct Coupon {
     pub quest_ids: Option<Vec<String>>,
     pub paused: bool,
     pub created_at: String,
+    /// Who hands the invitation out — the quest page a QR opens shows
+    /// «Подарок от …» with it; None = no such line.
+    pub gift_from: Option<String>,
+    /// The permanent address of the coupon's QR link (`/go/<qr_slug>`); None
+    /// until the admin makes the QR. Only the stores set it, never a save.
+    pub qr_slug: Option<String>,
 }
 
 /// One recorded redemption: who applied which coupon to which quest, when,
@@ -90,11 +107,17 @@ pub enum CouponStatus {
     Exhausted,
 }
 
-/// Why a redemption was refused; each maps to the player-facing message shown
-/// in the purchase sheet. The variants deliberately do not reveal more than a
-/// player may know (an unknown and a deleted code read the same).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Why a code was refused; each maps to the player-facing message shown in the
+/// purchase sheet, and travels as `reason` so the QR invitation picks its own
+/// wording. The variants deliberately do not reveal more than a player may
+/// know (an unknown and a deleted code read the same).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
 pub enum RedeemReject {
+    /// No coupon has this code (only a quote can say so — redemption runs on
+    /// a coupon already found).
+    NotFound,
     Paused,
     Expired,
     Exhausted,
@@ -106,6 +129,7 @@ impl RedeemReject {
     /// Player-facing Russian message (the UI shows it verbatim).
     pub fn message(self) -> &'static str {
         match self {
+            Self::NotFound => "промокод не найден",
             Self::Paused => "Промокод временно не действует",
             Self::Expired => "Срок действия промокода истёк",
             Self::Exhausted => "Промокод больше не действует — лимит исчерпан",
@@ -229,6 +253,158 @@ pub fn discount_amount(discount: &Discount, price: i64) -> i64 {
     }
 }
 
+/// Longest «От кого»: one line under the gift banner on a phone.
+pub const GIFT_FROM_MAX_CHARS: usize = 60;
+
+/// Validate «От кого»: trimmed, blank = no line, at most
+/// [`GIFT_FROM_MAX_CHARS`] characters.
+pub fn normalize_gift_from(raw: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(text) = raw.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if text.chars().count() > GIFT_FROM_MAX_CHARS {
+        return Err(AppError::BadRequest(format!(
+            "«От кого» — не длиннее {GIFT_FROM_MAX_CHARS} символов"
+        )));
+    }
+    Ok(Some(text.to_string()))
+}
+
+/// The one quest a coupon is limited to. Only such a coupon may carry a QR:
+/// the code of a wider coupon, read off the link, would open every paid quest.
+pub fn single_quest(coupon: &Coupon) -> Option<&str> {
+    match coupon.quest_ids.as_deref() {
+        Some([only]) => Some(only.as_str()),
+        _ => None,
+    }
+}
+
+/// Characters of a QR slug: no lookalikes (0/O, 1/I/L) — the slug is printed
+/// as text beside the QR and may be typed by hand. The admin's «Сгенерировать»
+/// codes use the same set.
+const QR_SLUG_ALPHABET: &[u8; 31] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/// Length of a QR slug: 31^6 ≈ 887 million addresses — a short link keeps
+/// the QR's modules big, and that many addresses cannot be guessed.
+pub const QR_SLUG_LEN: usize = 6;
+
+/// The slug random `bytes` spell, or None when they run out first. Bytes from
+/// 248 (= 8 × 31) up are skipped, so every character is equally likely.
+fn qr_slug_from(bytes: impl IntoIterator<Item = u8>) -> Option<String> {
+    let slug: String = bytes
+        .into_iter()
+        .filter(|b| *b < 248)
+        .take(QR_SLUG_LEN)
+        .map(|b| char::from(QR_SLUG_ALPHABET[usize::from(b % 31)]))
+        .collect();
+    (slug.len() == QR_SLUG_LEN).then_some(slug)
+}
+
+/// A fresh random QR slug; uniqueness is the store's to enforce.
+pub fn new_qr_slug() -> String {
+    loop {
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        if let Some(slug) = qr_slug_from(bytes) {
+            return slug;
+        }
+    }
+}
+
+/// Whether a visit of a QR link comes from a robot, not a person: messengers
+/// fetch a shared link for its preview card and crawlers follow links —
+/// neither is a scan. The markers are how such agents sign; «bot» alone is
+/// not one (a phone brand carries it). No agent at all is a script.
+pub fn is_robot(user_agent: &str) -> bool {
+    const MARKERS: [&str; 9] = [
+        "bot/",
+        "bot-",
+        "bot (",
+        "crawler",
+        "spider",
+        "facebookexternalhit",
+        "whatsapp/",
+        "vkshare",
+        "skypeuripreview",
+    ];
+    let agent = user_agent.trim().to_ascii_lowercase();
+    agent.is_empty() || MARKERS.iter().any(|m| agent.contains(m))
+}
+
+/// How long after getting a quest by invitation a purchase still counts as
+/// one the invitation brought.
+pub const FUNNEL_PURCHASE_DAYS: i64 = 30;
+
+/// What became of a coupon's invitations, step by step (the admin funnel).
+/// Every step after `scans` counts the players who got a quest with it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CouponFunnelWire"))]
+pub struct CouponFunnel {
+    /// Visits of the QR link by people (robots excluded).
+    #[cfg_attr(test, ts(type = "number"))]
+    pub scans: u64,
+    /// Got the quest with the coupon…
+    pub got: u32,
+    /// …started it…
+    pub started: u32,
+    /// …finished it…
+    pub finished: u32,
+    /// …rated it…
+    pub rated: u32,
+    /// …and paid for another quest within [`FUNNEL_PURCHASE_DAYS`] days.
+    pub bought: u32,
+}
+
+/// Fold the funnel: for each redemption, its player's progress on the quest
+/// they got, and whether they paid for ANOTHER quest in the purchase window.
+/// `progress` and `grants` may be wider than the redemptions (extra rows are
+/// ignored).
+pub fn coupon_funnel(
+    scans: u64,
+    redemptions: &[CouponRedemption],
+    progress: &[QuestProgress],
+    grants: &[AccessGrant],
+) -> CouponFunnel {
+    let progress: HashMap<(&str, &str), &QuestProgress> = progress
+        .iter()
+        .map(|p| ((p.user_id.as_str(), p.quest_id.as_str()), p))
+        .collect();
+    let mut paid: HashMap<&str, Vec<&AccessGrant>> = HashMap::new();
+    for grant in grants.iter().filter(|g| g.source == GrantSource::Payment) {
+        paid.entry(grant.user_id.as_str()).or_default().push(grant);
+    }
+    let mut funnel = CouponFunnel {
+        scans,
+        ..CouponFunnel::default()
+    };
+    for r in redemptions {
+        funnel.got += 1;
+        if let Some(p) = progress.get(&(r.user_id.as_str(), r.quest_id.as_str())) {
+            funnel.started += 1;
+            funnel.finished += u32::from(p.finished);
+            funnel.rated += u32::from(p.rated);
+        }
+        let bought = paid.get(r.user_id.as_str()).is_some_and(|grants| {
+            grants.iter().any(|g| {
+                g.quest_id != r.quest_id && in_purchase_window(&r.redeemed_at, &g.granted_at)
+            })
+        });
+        funnel.bought += u32::from(bought);
+    }
+    funnel
+}
+
+/// Whether `later` falls between `start` and [`FUNNEL_PURCHASE_DAYS`] days
+/// after it (both RFC3339 UTC, as the stores stamp them).
+fn in_purchase_window(start: &str, later: &str) -> bool {
+    use crate::admin_stats::parse_rfc3339_utc;
+    match (parse_rfc3339_utc(start), parse_rfc3339_utc(later)) {
+        (Some(s), Some(l)) => (s..=s + FUNNEL_PURCHASE_DAYS * 86_400).contains(&l),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +422,8 @@ mod tests {
             quest_ids: None,
             paused: false,
             created_at: "2026-06-01T00:00:00Z".into(),
+            gift_from: None,
+            qr_slug: None,
         }
     }
 
@@ -384,5 +562,165 @@ mod tests {
         assert_eq!(v["discount_value"], 300);
         let back: Coupon = serde_json::from_value(v).expect("deserialize");
         assert_eq!(back, c);
+    }
+
+    #[test]
+    fn gift_from_is_trimmed_optional_and_capped() {
+        assert_eq!(normalize_gift_from(None).unwrap(), None);
+        assert_eq!(
+            normalize_gift_from(Some("   ")).unwrap(),
+            None,
+            "blank = none"
+        );
+        assert_eq!(
+            normalize_gift_from(Some("  хостела Fortress ")).unwrap(),
+            Some("хостела Fortress".into())
+        );
+        let longest = "я".repeat(GIFT_FROM_MAX_CHARS);
+        assert_eq!(
+            normalize_gift_from(Some(&longest)).unwrap(),
+            Some(longest.clone()),
+            "the cap counts characters, not bytes"
+        );
+        assert!(normalize_gift_from(Some(&format!("{longest}я"))).is_err());
+    }
+
+    #[test]
+    fn only_a_one_quest_coupon_has_a_single_quest() {
+        let mut c = coupon(Discount::Percent(100));
+        assert_eq!(single_quest(&c), None, "all quests");
+        c.quest_ids = Some(vec!["q1".into(), "q2".into()]);
+        assert_eq!(single_quest(&c), None, "two quests");
+        c.quest_ids = Some(vec!["q1".into()]);
+        assert_eq!(single_quest(&c), Some("q1"));
+    }
+
+    #[test]
+    fn qr_slug_skips_biased_bytes_and_avoids_lookalikes() {
+        // 248..=255 would bias the modulo — skipped, the next bytes are used.
+        assert_eq!(
+            qr_slug_from([255, 0, 248, 1, 2, 30, 31, 62]),
+            Some("ABC9AA".into())
+        );
+        assert_eq!(qr_slug_from([0, 1, 2]), None, "too few bytes");
+        assert_eq!(qr_slug_from([250; 32]), None, "only skipped bytes");
+        for _ in 0..200 {
+            let slug = new_qr_slug();
+            assert_eq!(slug.len(), QR_SLUG_LEN);
+            assert!(
+                slug.bytes().all(|b| QR_SLUG_ALPHABET.contains(&b)),
+                "{slug}: outside the alphabet"
+            );
+            assert!(!slug.contains(['0', 'O', '1', 'I', 'L']), "{slug}");
+        }
+    }
+
+    #[test]
+    fn robots_are_told_from_people() {
+        for robot in [
+            "TelegramBot (like TwitterBot)",
+            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+            "facebookexternalhit/1.1",
+            "WhatsApp/2.23.20.0 A",
+            "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+            "vkShare; +http://vk.com/dev/Share",
+            "",
+            "   ",
+        ] {
+            assert!(is_robot(robot), "{robot:?} is a robot");
+        }
+        for person in [
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 \
+             (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Linux; Android 13; CUBOT KINGKONG 9) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 14; SM-A546B) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36 Telegram-Android/11.2.3",
+        ] {
+            assert!(!is_robot(person), "{person:?} is a person");
+        }
+    }
+
+    fn redemption(user: &str, quest: &str, at: &str) -> CouponRedemption {
+        CouponRedemption {
+            coupon_id: "cpn-1".into(),
+            user_id: user.into(),
+            quest_id: quest.into(),
+            amount_discounted: 900,
+            redeemed_at: at.into(),
+        }
+    }
+
+    fn progress(user: &str, quest: &str, finished: bool, rated: bool) -> QuestProgress {
+        QuestProgress {
+            user_id: user.into(),
+            quest_id: quest.into(),
+            finished,
+            rated,
+        }
+    }
+
+    fn grant(user: &str, quest: &str, at: &str, source: GrantSource) -> AccessGrant {
+        AccessGrant {
+            user_id: user.into(),
+            quest_id: quest.into(),
+            granted_at: at.into(),
+            source,
+            source_ref: None,
+        }
+    }
+
+    #[test]
+    fn funnel_follows_each_invited_player_to_the_next_purchase() {
+        let got_at = "2026-07-01T10:00:00Z";
+        let redemptions = [
+            redemption("a", "gift", got_at),
+            redemption("b", "gift", got_at),
+            redemption("c", "gift", got_at),
+            redemption("d", "gift", got_at),
+        ];
+        let progress = [
+            progress("a", "gift", true, true),
+            progress("b", "gift", true, false),
+            progress("c", "gift", false, false),
+            // Another player's play and another quest are not this funnel's.
+            progress("z", "gift", true, true),
+            progress("d", "other", true, true),
+        ];
+        let grants = [
+            // a: the gift itself, then a paid quest within the window.
+            grant("a", "gift", got_at, GrantSource::CouponRedemption),
+            grant("a", "next", "2026-07-31T09:59:59Z", GrantSource::Payment),
+            // b: paid too late; c: got another quest free; d: no purchase.
+            grant("b", "next", "2026-08-01T10:00:01Z", GrantSource::Payment),
+            grant("c", "next", "2026-07-02T10:00:00Z", GrantSource::FreeQuest),
+        ];
+        assert_eq!(
+            coupon_funnel(12, &redemptions, &progress, &grants),
+            CouponFunnel {
+                scans: 12,
+                got: 4,
+                started: 3,
+                finished: 2,
+                rated: 1,
+                bought: 1,
+            }
+        );
+        assert_eq!(
+            coupon_funnel(0, &[], &progress, &grants),
+            CouponFunnel::default(),
+            "no redemptions, an empty funnel"
+        );
+    }
+
+    #[test]
+    fn purchase_window_is_inclusive_and_forward_only() {
+        let start = "2026-07-01T10:00:00Z";
+        assert!(in_purchase_window(start, start));
+        assert!(in_purchase_window(start, "2026-07-31T10:00:00Z"), "day 30");
+        assert!(!in_purchase_window(start, "2026-07-31T10:00:01Z"));
+        assert!(!in_purchase_window(start, "2026-07-01T09:59:59Z"), "before");
+        assert!(!in_purchase_window(start, "not a date"));
     }
 }

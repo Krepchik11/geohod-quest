@@ -4,4 +4,8 @@
  * Body for coupon create/save: the editable fields exactly as the admin form
  * collects them. `quest_ids: null` = «Все квесты»; a list = «Выбранные».
  */
-export type CouponPayload = { code: string, valid_until: string | null, max_redemptions: number | null, per_user_limit: number | null, quest_ids: Array<string> | null, paused: boolean, } & ({ "discount_type": "percent", "discount_value": number } | { "discount_type": "fixed", "discount_value": number });
+export type CouponPayload = { code: string, valid_until: string | null, max_redemptions: number | null, per_user_limit: number | null, quest_ids: Array<string> | null, paused: boolean, 
+/**
+ * «От кого» of a QR invitation; absent or blank = none.
+ */
+gift_from: string | null, } & ({ "discount_type": "percent", "discount_value": number } | { "discount_type": "fixed", "discount_value": number });

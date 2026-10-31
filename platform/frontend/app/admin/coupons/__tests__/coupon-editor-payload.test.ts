@@ -14,9 +14,17 @@ const base = {
   allQuests: true,
   questIds: [],
   paused: false,
+  giftFrom: '',
 };
 
 describe('buildPayload', () => {
+  it('sends «От кого» trimmed, and a blank one as none', () => {
+    const named = buildPayload({ ...base, giftFrom: '  хостела Fortress ' });
+    expect('payload' in named && named.payload.gift_from).toBe('хостела Fortress');
+    const blank = buildPayload({ ...base, giftFrom: '   ' });
+    expect('payload' in blank && blank.payload.gift_from).toBeNull();
+  });
+
   it('accepts any non-empty code (no format restrictions)', () => {
     for (const code of ['ab', 'ЛЕТО 2026', '---', 'x'.repeat(64)]) {
       const built = buildPayload({ ...base, code });
