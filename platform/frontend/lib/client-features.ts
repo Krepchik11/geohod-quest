@@ -105,7 +105,6 @@ export const CLIENT_FEATURE_KEYS = [
   'ctor_tiles',
   'ctor_page_menu',
   'afisha',
-  'promo_qr',
 ] as const;
 export type ClientFeatureKey = (typeof CLIENT_FEATURE_KEYS)[number];
 

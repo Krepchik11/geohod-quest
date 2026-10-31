@@ -69,16 +69,11 @@ pub enum Feature {
     /// channel, the «Афиша» link in the site header, and the reader's timer
     /// (the channel is the `afisha_channel` runtime setting).
     Afisha,
-    /// QR invitations: the short link `/go/<slug>` of a one-quest coupon
-    /// (counts the scan, opens the quest page with the code applied), the
-    /// «Квест в подарок» offer there, and the coupon editor's «QR-код» card
-    /// with the invitation funnel.
-    PromoQr,
 }
 
 impl Feature {
     /// Every registered feature, in the order the admin panel lists them.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 15] = [
         Self::AuthGoogle,
         Self::AuthTelegram,
         Self::PaymentsMock,
@@ -94,7 +89,6 @@ impl Feature {
         Self::CtorTiles,
         Self::CtorPageMenu,
         Self::Afisha,
-        Self::PromoQr,
     ];
 
     /// Stable wire/storage key. Never reuse a retired key for a new feature —
@@ -116,7 +110,6 @@ impl Feature {
             Self::CtorTiles => "ctor_tiles",
             Self::CtorPageMenu => "ctor_page_menu",
             Self::Afisha => "afisha",
-            Self::PromoQr => "promo_qr",
         }
     }
 
@@ -138,7 +131,6 @@ impl Feature {
                 | Self::PurchaseInlineLogin
                 | Self::CtorCityList
                 | Self::Afisha
-                | Self::PromoQr
         )
     }
 
@@ -201,8 +193,6 @@ pub(crate) fn feature_available(state: &AppState, feature: Feature) -> bool {
         // Reads a public web page — nothing to configure but the channel,
         // which is a runtime setting the admin page asks for.
         Feature::Afisha => true,
-        // Coupons and the site's own short link — nothing to configure.
-        Feature::PromoQr => true,
     }
 }
 
@@ -291,7 +281,6 @@ mod tests {
             "ctor_tiles",
             "ctor_page_menu",
             "afisha",
-            "promo_qr",
         ] {
             let f = Feature::parse(key).expect("registered");
             assert!(f.client_visible(), "{key} must be client visible");

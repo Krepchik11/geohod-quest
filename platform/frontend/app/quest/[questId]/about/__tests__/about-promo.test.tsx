@@ -5,22 +5,20 @@ import React from 'react';
 import { resetCollectionForTests } from '../../../../../lib/collection';
 
 /**
- * QR invitation on the product page (flag promo_qr): `?promo=` turns the
- * order card into «Квест в подарок» with one «Получить бесплатно» — the
- * ordinary checkout with the code, no purchase sheet, no sign-in asked; the
- * account is offered only after. A partial discount opens the sheet with the
- * code applied. A refused invitation says why and the page still sells. An
- * owner sees «Квест ваш» and nothing is priced. With the flag off the code is
- * ignored.
+ * QR invitation on the product page: `?promo=` turns the order card into
+ * «Квест в подарок» with one «Получить бесплатно» — the ordinary checkout
+ * with the code, no purchase sheet, no sign-in asked; the account is offered
+ * only after. A partial discount opens the sheet with the code applied. A
+ * refused invitation says why and the page still sells. An owner sees
+ * «Квест ваш» and nothing is priced. No feature flag gates any of it.
  */
-const { getProductMock, listGrantsMock, checkoutMock, validateMock, listQuestsMock, flags } = vi.hoisted(
+const { getProductMock, listGrantsMock, checkoutMock, validateMock, listQuestsMock } = vi.hoisted(
   () => ({
     getProductMock: vi.fn(),
     listGrantsMock: vi.fn(),
     checkoutMock: vi.fn(),
     validateMock: vi.fn(),
     listQuestsMock: vi.fn(),
-    flags: { promo: true },
   }),
 );
 vi.mock('../../../../../lib/api', async (importOriginal) => ({
@@ -45,7 +43,8 @@ vi.mock('../../../../../lib/identity', () => ({
 vi.mock('../../../../../lib/download', () => ({ downloadBundle: vi.fn(async () => ({})) }));
 vi.mock('../../../../../lib/payment-return', () => ({ pollPaymentSettlement: vi.fn() }));
 vi.mock('../../../../../lib/client-features', () => ({
-  useClientFeature: (key: string) => key === 'promo_qr' && flags.promo,
+  // Every flag off: the invitation works without one.
+  useClientFeature: () => false,
   useUniversalAnswer: () => null,
 }));
 // The real buttons load provider scripts; the offer around them is what is pinned.
@@ -73,7 +72,6 @@ const GIFT = {
 const ENDED = { valid: false, message: 'Промокод больше не действует — лимит исчерпан', reason: 'exhausted' };
 
 beforeEach(() => {
-  flags.promo = true;
   resetCollectionForTests();
   window.sessionStorage.clear();
   getProductMock.mockReset().mockResolvedValue(PRODUCT);
@@ -162,8 +160,8 @@ describe('AboutClient — QR invitation', () => {
     expect(screen.queryByText('Квест в подарок')).toBeNull();
   });
 
-  it('with the flag off the code is ignored and the page sells as usual', async () => {
-    flags.promo = false;
+  it('without an invitation nothing is priced and the page sells as usual', async () => {
+    window.history.replaceState(null, '', '/quest/q1/about');
     render(<AboutClient questId="q1" />);
     await screen.findByRole('heading', { level: 1, name: 'Потерянный друг' });
     expect(screen.getByRole('button', { name: 'Купить за 900 ₽' })).toBeTruthy();

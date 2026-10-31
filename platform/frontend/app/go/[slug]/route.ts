@@ -2,12 +2,12 @@ import { API_BASE, type PromoLinkWire } from '../../../lib/api';
 import { PROMO_PARAM } from '../../../lib/promo';
 
 /**
- * /go/<slug> — the address a printed QR invitation holds (flag `promo_qr`).
+ * /go/<slug> — the address a printed QR invitation holds.
  * The API resolves the slug to the coupon's one quest and its current code
  * and counts the scan — the visitor's User-Agent goes along, so link previews
  * and crawlers are not counted. The guest lands on the quest page with the
- * code applied. Anything else — the flag off, an unknown or retired address,
- * the API unreachable — opens the shop instead of an error page.
+ * code applied. Anything else — an unknown or retired address, the API
+ * unreachable — opens the shop instead of an error page.
  */
 export async function GET(
   request: Request,

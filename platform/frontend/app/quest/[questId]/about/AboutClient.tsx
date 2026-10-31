@@ -43,7 +43,7 @@ import { usePromoInvite } from './usePromoInvite';
  * only then the description, folded to four lines. Reviews show the three most
  * useful (the backend orders substantive ones first) with the rest one tap away.
  *
- * A QR invitation (flag `promo_qr`, `?promo=`) turns the order card into
+ * A QR invitation (`?promo=`) turns the order card into
  * «Квест в подарок» with one «Получить бесплатно» — the ordinary checkout with
  * the code, no sheet — and offers the account only after the quest is theirs.
  */
@@ -109,11 +109,10 @@ export default function AboutClient({ questId }: { questId: string }) {
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const shareOn = useClientFeature('quest_share');
   const factsOn = useClientFeature('quest_facts');
-  const promoOn = useClientFeature('promo_qr');
   // Priced only once the page knows the guest does not own the quest: an
   // owner sees «Квест ваш», and the invitation is not spent.
   const { invite: promo, forget: dropPromo, recheck: recheckPromo } = usePromoInvite(questId, {
-    ready: promoOn && ownedKnown && !owned && (product?.price ?? 0) > 0,
+    ready: ownedKnown && !owned && (product?.price ?? 0) > 0,
     city: product?.city ?? null,
   });
   // The quest came as a QR gift on THIS page — the moment to offer an account.

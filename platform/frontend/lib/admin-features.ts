@@ -48,7 +48,6 @@ export const FEATURE_KEYS = [
   'ctor_tiles',
   'ctor_page_menu',
   'afisha',
-  'promo_qr',
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -146,13 +145,6 @@ const META: Record<FeatureKey, { label: string; description: string; setting?: F
     description:
       'Страницы /afisha с анонсами групповых прогулок и квестов из Telegram-канала и пункт «Афиша» в шапке сайта; ' +
       'сайт читает канал каждые 10 минут. Канал, почта для писем и сами анонсы — на вкладке «Афиша».',
-  },
-  promo_qr: {
-    label: 'QR-приглашения',
-    description:
-      'У купона на один квест — карточка «QR-код»: картинка для печати, короткая ссылка quest.geohod.ru/go/… ' +
-      'и воронка «сканы → получили → прошли → купили». Скан открывает страницу квеста с плашкой «Квест в подарок» ' +
-      'и кнопкой «Получить бесплатно». Выключено — ссылки /go/ ведут в магазин, код из ссылки не применяется.',
   },
 };
 

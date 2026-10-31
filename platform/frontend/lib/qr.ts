@@ -1,5 +1,5 @@
 /**
- * QR images for the coupon's «QR-код» card (flag `promo_qr`). The matrix
+ * QR images for the coupon's «QR-код» card. The matrix
  * comes from `qrcode-generator`, loaded on demand — only that admin card
  * needs it. The SVG (print shop) and the PNG (office printer) are drawn here
  * from the matrix: black on white with the standard quiet zone of four

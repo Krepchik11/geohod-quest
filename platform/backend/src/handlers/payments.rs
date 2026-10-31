@@ -12,7 +12,7 @@ use axum::{
 
 use crate::authz::{claimed_from_headers, resolve_user};
 use crate::errors::AppError;
-use crate::features::{Feature, feature_available, feature_enabled};
+use crate::features::{Feature, feature_available};
 use crate::grants::AccessGrant;
 use crate::{AppState, coupons, payments, store, yookassa};
 
@@ -203,18 +203,15 @@ pub(crate) struct PromoLinkWire {
 
 /// POST /api/go/{slug} — the site's `/go/<slug>` asks where a QR leads. A
 /// person's visit counts as a scan (robots — link previews, crawlers — do
-/// not; the site forwards the visitor's User-Agent). 404 while the
-/// `promo_qr` feature is off, for an unknown slug, and for a coupon no longer
-/// limited to one quest — the site then opens the shop.
+/// not; the site forwards the visitor's User-Agent). 404 for an unknown slug
+/// and for a coupon no longer limited to one quest — the site then opens the
+/// shop.
 async fn promo_link_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<PromoLinkWire>, AppError> {
     let not_found = || AppError::NotFound("приглашение не найдено".into());
-    if !feature_enabled(&state, Feature::PromoQr).await? {
-        return Err(not_found());
-    }
     let coupon = state
         .coupons
         .find_by_qr_slug(&slug.trim().to_ascii_uppercase())

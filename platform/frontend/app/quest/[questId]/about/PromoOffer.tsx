@@ -4,7 +4,7 @@ import { giftUntilLabel } from '../../../../lib/promo';
 import type { PromoInvite } from './usePromoInvite';
 
 /**
- * The QR invitation's price block (flag `promo_qr`): «Квест в подарок» with
+ * The QR invitation's price block: «Квест в подарок» with
  * the old price struck through and 0 ₽ — or, for a partial discount, the
  * discounted price — plus who gives it and until when. The plain promise
  * under a gift answers the guest's first fear: nothing to pay, ever.

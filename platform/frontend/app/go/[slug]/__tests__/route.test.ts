@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GET } from '../route';
 
 /**
- * /go/<slug> — a printed QR invitation (flag promo_qr): the API resolves the
+ * /go/<slug> — a printed QR invitation: the API resolves the
  * slug and counts the scan; the guest lands on the quest page with the code,
  * or in the shop when the link leads nowhere.
  */
