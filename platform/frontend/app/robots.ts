@@ -1,8 +1,9 @@
 import type { MetadataRoute } from 'next';
 import { siteUrl } from '../lib/share';
 
-/** Service sections nobody searches for: the admin, the editor, a player's own pages. */
-const PRIVATE = ['/admin', '/quest-editor', '/profile', '/my-quests', '/auth'];
+/** Service sections nobody searches for: the admin, the editor, a player's own
+ *  pages, and the QR invitation links (a crawler's visit is not a scan). */
+const PRIVATE = ['/admin', '/quest-editor', '/profile', '/my-quests', '/auth', '/go/'];
 
 /**
  * The search and AI crawlers named explicitly, so a blanket rule some host

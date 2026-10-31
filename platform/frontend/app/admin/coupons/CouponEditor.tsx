@@ -12,8 +12,10 @@ import {
   usagePercent,
   type AdminCoupon,
 } from '../../../lib/admin-coupons';
+import { useClientFeature } from '../../../lib/client-features';
 import { formatNumber } from '../../../lib/ru';
 import { AdminConfirmSheet, AdminToast } from '../ui';
+import CouponQrCard from './CouponQrCard';
 
 /**
  * Admin · Coupon editor (Admin Coupons.dc.html §1b/§1d/§1e) — one screen for
@@ -26,6 +28,11 @@ import { AdminConfirmSheet, AdminToast } from '../ui';
  * All rules live server-side (validation, uniqueness, redeem caps); the form
  * only keeps obvious slips from a round-trip and renders the backend's
  * Russian error messages verbatim.
+ *
+ * With QR invitations on (flag `promo_qr`): «От кого» in the form, the
+ * «QR-код» card beside the usage, and the code field suggests a random code —
+ * the code shows in the invitation's link, and a random one cannot be guessed
+ * from another place's QR.
  */
 
 /** One row of the applicability picker. */
@@ -93,6 +100,8 @@ interface FormState {
   allQuests: boolean;
   questIds: string[];
   paused: boolean;
+  /** «От кого» of a QR invitation; blank = none. */
+  giftFrom: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -108,6 +117,7 @@ const EMPTY_FORM: FormState = {
   allQuests: true,
   questIds: [],
   paused: false,
+  giftFrom: '',
 };
 
 function formFrom(c: AdminCoupon): FormState {
@@ -124,6 +134,7 @@ function formFrom(c: AdminCoupon): FormState {
     allQuests: c.questIds === null,
     questIds: c.questIds ?? [],
     paused: c.paused,
+    giftFrom: c.giftFrom ?? '',
   };
 }
 
@@ -162,9 +173,13 @@ export function buildPayload(f: FormState): { payload: CouponPayload } | { error
       per_user_limit: perUser,
       quest_ids: f.allQuests ? null : f.questIds,
       paused: f.paused,
+      gift_from: f.giftFrom.trim() || null,
     },
   };
 }
+
+/** The browser's cryptographic random source for «Сгенерировать». */
+const randomBytes = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 
 /** The backend's {"error": msg} body, or a generic fallback. */
 function serverMessage(err: unknown): string {
@@ -187,6 +202,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const qrOn = useClientFeature('promo_qr');
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -291,8 +307,7 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
     }
   };
 
-  const generate = () =>
-    set('code', generateCode((n) => crypto.getRandomValues(new Uint8Array(n))));
+  const generate = () => set('code', generateCode(randomBytes));
 
   const usage = coupon ? usagePercent(coupon) : null;
 
@@ -348,7 +363,9 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                     </button>
                   </div>
                   <div className="ac-field-hint">
-                    Любой непустой код. Игрок вводит его в окне покупки.
+                    {qrOn
+                      ? 'Любой непустой код. Для QR-приглашения лучше случайный — «Сгенерировать»: код виден в ссылке, и знакомое слово легко подобрать к другим точкам.'
+                      : 'Любой непустой код. Игрок вводит его в окне покупки.'}
                   </div>
                 </div>
                 <div className="ac-grid-2">
@@ -390,6 +407,23 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                     </span>
                   </div>
                 </div>
+                {qrOn && (
+                  <div className="ac-field">
+                    <label htmlFor="cpn-from">От кого — для QR-приглашения</label>
+                    <input
+                      id="cpn-from"
+                      className="ac-input"
+                      value={form.giftFrom}
+                      onChange={(e) => set('giftFrom', e.target.value)}
+                      placeholder="хостела Fortress"
+                      maxLength={60}
+                      autoComplete="off"
+                    />
+                    <div className="ac-field-hint">
+                      Гость увидит «Подарок от …» на странице квеста. Пусто — строки не будет.
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="ac-card">
@@ -624,6 +658,8 @@ export default function CouponEditor({ couponId }: { couponId?: string }) {
                     </div>
                   </div>
                 </section>
+
+                {qrOn && <CouponQrCard coupon={coupon} onCoupon={setCoupon} onToast={showToast} />}
 
                 <section className="ac-card ac-card--actions">
                   <div className="ac-card__label">ДЕЙСТВИЯ</div>

@@ -599,6 +599,49 @@ impl FactStore for PgFactStore {
             .collect()
     }
 
+    /// See [`crate::store::InMemoryFactStore::quest_progress`]. The pairs
+    /// arrive as two parallel arrays (`unnest` zips them back); the attempts
+    /// index on `(user_id, quest_id)` finds them, and only the two fact kinds
+    /// the funnel reads are joined.
+    async fn quest_progress(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<crate::facts::QuestProgress>, AppError> {
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (users, quests): (Vec<&str>, Vec<&str>) = pairs
+            .iter()
+            .map(|(user, quest)| (user.as_str(), quest.as_str()))
+            .unzip();
+        let rows = sqlx::query(
+            "SELECT a.user_id, a.quest_id,
+                    COALESCE(bool_or(f.data->>'type' = 'attempt_completed'), FALSE) AS finished,
+                    COALESCE(bool_or(f.data->>'type' = 'quest_rated'), FALSE) AS rated
+             FROM attempts a
+             LEFT JOIN facts f ON f.attempt_id = a.attempt_id
+                  AND f.data->>'type' IN ('attempt_completed', 'quest_rated')
+             WHERE (a.user_id, a.quest_id) IN
+                   (SELECT * FROM unnest($1::text[], $2::text[]))
+             GROUP BY a.user_id, a.quest_id",
+        )
+        .bind(&users)
+        .bind(&quests)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter()
+            .map(|r| {
+                Ok(crate::facts::QuestProgress {
+                    user_id: r.try_get("user_id").map_err(internal)?,
+                    quest_id: r.try_get("quest_id").map_err(internal)?,
+                    finished: r.try_get("finished").map_err(internal)?,
+                    rated: r.try_get("rated").map_err(internal)?,
+                })
+            })
+            .collect()
+    }
+
     /// See [`crate::store::InMemoryFactStore::funnel_logs`]. Same two-pass
     /// shape as [`Self::load_snapshot_logs`]: seed every in-range attempt with
     /// an empty log (zero-fact attempts count in the funnel denominator), then
@@ -1064,6 +1107,23 @@ impl GrantStore for PgGrantStore {
              FROM access_grants WHERE user_id = $1",
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter().map(grant_from_row).collect()
+    }
+
+    /// See [`crate::store::InMemoryGrantStore::grants_for_users`] — served by
+    /// the primary key, whose leading column is `user_id`.
+    async fn grants_for_users(&self, user_ids: &[String]) -> Result<Vec<AccessGrant>, AppError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT user_id, quest_id, granted_at, source, source_ref
+             FROM access_grants WHERE user_id = ANY($1)",
+        )
+        .bind(user_ids)
         .fetch_all(&self.pool)
         .await
         .map_err(internal)?;
@@ -2323,6 +2383,8 @@ fn coupon_from_row(row: &sqlx::postgres::PgRow) -> Result<Coupon, AppError> {
         quest_ids,
         paused: row.try_get("paused").map_err(internal)?,
         created_at: row.try_get("created_at").map_err(internal)?,
+        gift_from: row.try_get("gift_from").map_err(internal)?,
+        qr_slug: row.try_get("qr_slug").map_err(internal)?,
     })
 }
 
@@ -2337,7 +2399,8 @@ fn redemption_from_row(row: &sqlx::postgres::PgRow) -> Result<CouponRedemption, 
 }
 
 const COUPON_COLS: &str = "coupon_id, code, discount_type, discount_value, valid_until, \
-                           max_redemptions, per_user_limit, quest_ids, paused, created_at";
+                           max_redemptions, per_user_limit, quest_ids, paused, created_at, \
+                           gift_from, qr_slug";
 
 impl PgCouponStore {
     /// Wrap an existing pool (migrations are run by the caller at startup).
@@ -2361,6 +2424,8 @@ impl PgCouponStore {
             .bind(coupon.quest_ids.as_ref().map(|q| serde_json::json!(q)))
             .bind(coupon.paused)
             .bind(&coupon.created_at)
+            .bind(&coupon.gift_from)
+            .bind(&coupon.qr_slug)
     }
 }
 
@@ -2371,7 +2436,7 @@ impl CouponStore for PgCouponStore {
         let inserted = Self::bind_coupon(
             sqlx::query(&format!(
                 "INSERT INTO coupons ({COUPON_COLS})
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                  ON CONFLICT DO NOTHING
                  RETURNING {COUPON_COLS}"
             )),
@@ -2389,7 +2454,8 @@ impl CouponStore for PgCouponStore {
         }
     }
 
-    /// See [`crate::store::InMemoryCouponStore::update`].
+    /// See [`crate::store::InMemoryCouponStore::update`]. `qr_slug` is not in
+    /// the SET list — the address is permanent.
     async fn update(&self, coupon: Coupon) -> Result<Coupon, AppError> {
         let code_taken =
             sqlx::query("SELECT 1 AS one FROM coupons WHERE code = $1 AND coupon_id <> $2")
@@ -2408,7 +2474,7 @@ impl CouponStore for PgCouponStore {
         let updated = sqlx::query(&format!(
             "UPDATE coupons SET code = $2, discount_type = $3, discount_value = $4,
                     valid_until = $5, max_redemptions = $6, per_user_limit = $7,
-                    quest_ids = $8, paused = $9
+                    quest_ids = $8, paused = $9, gift_from = $10
              WHERE coupon_id = $1
              RETURNING {COUPON_COLS}"
         ))
@@ -2421,6 +2487,7 @@ impl CouponStore for PgCouponStore {
         .bind(coupon.per_user_limit.map(i64::from))
         .bind(coupon.quest_ids.as_ref().map(|q| serde_json::json!(q)))
         .bind(coupon.paused)
+        .bind(&coupon.gift_from)
         .fetch_optional(&self.pool)
         .await
         .map_err(internal)?;
@@ -2620,6 +2687,82 @@ impl CouponStore for PgCouponStore {
         .map_err(internal)?;
         tx.commit().await.map_err(internal)?;
         Ok(redemption)
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::assign_qr_slug`].
+    /// `COALESCE` keeps an address already there, so two concurrent requests
+    /// for one coupon both answer with the address that won.
+    async fn assign_qr_slug(&self, coupon_id: &str, slug: &str) -> Result<Coupon, AppError> {
+        let row = sqlx::query(&format!(
+            "UPDATE coupons SET qr_slug = COALESCE(qr_slug, $2)
+             WHERE coupon_id = $1
+             RETURNING {COUPON_COLS}"
+        ))
+        .bind(coupon_id)
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await;
+        match row {
+            Ok(Some(row)) => coupon_from_row(&row),
+            Ok(None) => Err(AppError::NotFound(format!("unknown coupon '{coupon_id}'"))),
+            Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
+                Err(AppError::Conflict(crate::store::QR_SLUG_TAKEN.into()))
+            }
+            Err(e) => Err(internal(e)),
+        }
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::find_by_qr_slug`].
+    async fn find_by_qr_slug(&self, slug: &str) -> Result<Option<Coupon>, AppError> {
+        let row = sqlx::query(&format!(
+            "SELECT {COUPON_COLS} FROM coupons WHERE qr_slug = $1"
+        ))
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(internal)?;
+        row.map(|r| coupon_from_row(&r)).transpose()
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::add_scan`]: the row comes
+    /// from the coupon itself, so a coupon deleted meanwhile adds nothing.
+    async fn add_scan(&self, coupon_id: &str, day: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO coupon_scans (coupon_id, day, scans)
+             SELECT coupon_id, $2, 1 FROM coupons WHERE coupon_id = $1
+             ON CONFLICT (coupon_id, day) DO UPDATE SET scans = coupon_scans.scans + 1",
+        )
+        .bind(coupon_id)
+        .bind(day)
+        .execute(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(())
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::scans_total`].
+    async fn scans_total(&self, coupon_id: &str) -> Result<u64, AppError> {
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(scans), 0)::BIGINT FROM coupon_scans WHERE coupon_id = $1",
+        )
+        .bind(coupon_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(internal)?;
+        Ok(u64::try_from(total).unwrap_or_default())
+    }
+
+    /// See [`crate::store::InMemoryCouponStore::redemptions_of`].
+    async fn redemptions_of(&self, coupon_id: &str) -> Result<Vec<CouponRedemption>, AppError> {
+        let rows = sqlx::query(
+            "SELECT coupon_id, user_id, quest_id, amount_discounted, redeemed_at
+             FROM coupon_redemptions WHERE coupon_id = $1",
+        )
+        .bind(coupon_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(internal)?;
+        rows.iter().map(redemption_from_row).collect()
     }
 }
 

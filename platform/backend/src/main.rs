@@ -406,6 +406,8 @@ mod tests {
             payments::CheckoutResponse,
             handlers::payments::PaymentStatusResponse,
             handlers::payments::CouponVerdict,
+            handlers::payments::PromoLinkWire,
+            coupons::CouponFunnel,
             snapshot::StartPointWire,
             handlers::constructor::ConstructorQuestWire,
             handlers::constructor::ConstructorQuestFullWire,
@@ -3500,6 +3502,264 @@ mod tests {
         assert_eq!(body["error"], "промокод не найден");
     }
 
+    /// QR invitations end to end (flag `promo_qr`): the short link resolves
+    /// only while the flag is on and only for a one-quest coupon, counts
+    /// people but not robots, follows a renamed code; the page's preview
+    /// prices the gift and names each refusal; the funnel follows the invited
+    /// player from the scan to their next purchase.
+    async fn scenario_promo_qr(app: &Router, ids: &Ids) {
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let person = [(
+            "user-agent",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1",
+        )];
+        let robot = [("user-agent", "TelegramBot (like TwitterBot)")];
+        let set_flag = |enabled: bool| async move {
+            let (st, _) = post_json_h(
+                app,
+                "/api/admin/features/promo_qr",
+                json!({ "enabled": enabled }),
+                &admin,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        };
+        let code = ids.quest.to_ascii_uppercase();
+        let gift = ids.quest.clone();
+        let next = format!("{}-next", ids.quest);
+        for (quest, snap, price) in [
+            (&gift, ids.snap1.clone(), 900),
+            (&next, format!("{}-next", ids.snap1), 500),
+        ] {
+            let (st, _) = publish(
+                app,
+                ids,
+                json!({"quest_id": quest, "name": "Q", "template_summary": "demo",
+                       "snapshot_version": 1, "snapshot_id": snap, "price": price}),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+
+        // The invitation: 100 % off ONE quest, two activations, one each.
+        let coupon = |code: &str| {
+            json!({"code": code, "discount_type": "percent", "discount_value": 100,
+                   "valid_until": "2099-12-31", "max_redemptions": 2, "per_user_limit": 1,
+                   "quest_ids": [gift], "gift_from": "  хостела Fortress  "})
+        };
+        let (st, created) = post_json_h(app, "/api/admin/coupons", coupon(&code), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(created["gift_from"], "хостела Fortress", "trimmed");
+        assert_eq!(created["qr_slug"], Value::Null, "no QR until asked for");
+        let id = created["coupon_id"].as_str().expect("id").to_string();
+        let qr_uri = format!("/api/admin/coupons/{id}/qr");
+
+        // Flag off: no QR is made.
+        set_flag(false).await;
+        let (st, _) = post_json_h(app, &qr_uri, json!({}), &admin).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        set_flag(true).await;
+
+        // Only a one-quest coupon gets a QR: a wider code would open any quest.
+        let (st, wide) = post_json_h(
+            app,
+            "/api/admin/coupons",
+            json!({"code": format!("{code}-ALL"), "discount_type": "percent",
+                   "discount_value": 100}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let wide_qr = format!(
+            "/api/admin/coupons/{}/qr",
+            wide["coupon_id"].as_str().expect("id")
+        );
+        let (st, _) = post_json_h(app, &wide_qr, json!({}), &admin).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+
+        // The address is made once and stays.
+        let (st, with_qr) = post_json_h(app, &qr_uri, json!({}), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        let slug = with_qr["qr_slug"].as_str().expect("slug").to_string();
+        assert_eq!(slug.len(), coupons::QR_SLUG_LEN);
+        let (_, again) = post_json_h(app, &qr_uri, json!({}), &admin).await;
+        assert_eq!(again["qr_slug"], slug.as_str(), "the same address again");
+
+        // A person's scan resolves and counts — a hand-typed lowercase link
+        // too; a robot's resolves without counting; an unknown slug is 404.
+        let go = format!("/api/go/{}", slug.to_ascii_lowercase());
+        let (st, link) = post_json_h(app, &go, json!({}), &person).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(link, json!({"quest_id": gift, "code": code}));
+        let (st, _) = post_json_h(app, &go, json!({}), &robot).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, _) = post_json_h(app, "/api/go/NOT-A-SLUG", json!({}), &person).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+
+        // The quest page prices the gift: free, valid till, from whom.
+        let guest = format!("dev:{}-qr-a", ids.player);
+        let validate =
+            |user: &str, code: &str| json!({"user_id": user, "quest_id": gift, "code": code});
+        let (_, v) = post_json(app, "/api/coupons/validate", validate(&guest, &code)).await;
+        assert_eq!(v["valid"], true);
+        assert_eq!(v["final_price"], 0);
+        assert_eq!(v["valid_until"], "2099-12-31");
+        assert_eq!(v["gift_from"], "хостела Fortress");
+
+        // One tap: the quest is the guest's, nothing paid.
+        let (st, out) = post_json(
+            app,
+            "/api/checkout",
+            json!({"user_id": guest, "quest_id": gift, "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(out["grant"]["source"], "CouponRedemption");
+        let (_, v) = post_json(app, "/api/coupons/validate", validate(&guest, &code)).await;
+        assert_eq!(v["reason"], "per_user_limit");
+
+        // The guest plays it to the end, rates it, then buys the next quest.
+        let (st, att) = post_json(
+            app,
+            "/api/attempts",
+            json!({"user_id": guest, "quest_id": gift}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let attempt = att["attempt_id"].as_str().expect("attempt id");
+        let (st, _) = post_json(
+            app,
+            &format!("/api/attempts/{attempt}/facts"),
+            json!({"facts": [
+                fact_json(FactKind::AttemptCompleted, 3, 0, "d1"),
+                {"type": "quest_rated", "step_position": 0, "submitted_value": "5",
+                 "local_is_correct": true, "coins_delta": 0, "note": null, "device_id": "d1"},
+            ]}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, bought) = post_json(
+            app,
+            "/api/checkout",
+            json!({"user_id": guest, "quest_id": next}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(bought["grant"]["source"], "Payment");
+
+        // A second guest takes the last activation; a third finds it over.
+        let (st, _) = post_json(
+            app,
+            "/api/checkout",
+            json!({"user_id": format!("dev:{}-qr-b", ids.player), "quest_id": gift,
+                   "coupon_code": code}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let third = format!("dev:{}-qr-c", ids.player);
+        let (_, v) = post_json(app, "/api/coupons/validate", validate(&third, &code)).await;
+        assert_eq!(v["valid"], false);
+        assert_eq!(v["reason"], "exhausted");
+        let (_, v) = post_json(app, "/api/coupons/validate", validate(&third, "NOPE-QR")).await;
+        assert_eq!(v["reason"], "not_found");
+
+        // The funnel: one person's scan; two got it; one went all the way.
+        let (st, funnel) =
+            get_json_h(app, &format!("/api/admin/coupons/{id}/funnel"), &admin).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            funnel,
+            json!({"scans": 1, "got": 2, "started": 1, "finished": 1, "rated": 1, "bought": 1})
+        );
+
+        // A renamed code: the printed QR keeps working and carries the new one.
+        let renamed = format!("{code}-NEW");
+        let (st, saved) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/save"),
+            coupon(&renamed),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(saved["qr_slug"], slug.as_str(), "a save keeps the address");
+        let (_, link) = post_json_h(app, &go, json!({}), &person).await;
+        assert_eq!(link["code"], renamed.as_str());
+
+        // Flag off, or the coupon gone: the link is dead (the site opens the shop).
+        set_flag(false).await;
+        let (st, _) = post_json_h(app, &go, json!({}), &person).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        set_flag(true).await;
+        let (st, _) = post_json_h(
+            app,
+            &format!("/api/admin/coupons/{id}/delete"),
+            json!({}),
+            &admin,
+        )
+        .await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (st, _) = post_json_h(app, &go, json!({}), &person).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    /// A 100 % coupon leaves nothing to charge, so it settles even with every
+    /// payment method switched off — a QR gift must not depend on them —
+    /// while a partial one still meets the closed gate. In-memory only: the
+    /// payment toggles are shared state in the Postgres suite.
+    #[tokio::test]
+    async fn full_coupon_settles_with_payment_providers_off() {
+        let app = test_app();
+        let ids = Ids::new("cpnoff");
+        let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
+        let (st, _) = publish(
+            &app,
+            &ids,
+            json!({"quest_id": ids.quest, "name": "Q", "template_summary": "demo",
+                   "snapshot_version": 1, "snapshot_id": ids.snap1, "price": 900}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        for (code, percent) in [("FULL-1", 100), ("HALF-1", 50)] {
+            let (st, _) = post_json_h(
+                &app,
+                "/api/admin/coupons",
+                json!({"code": code, "discount_type": "percent", "discount_value": percent}),
+                &admin,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        for key in ["payments_mock", "payments_yookassa"] {
+            let (st, _) = post_json_h(
+                &app,
+                &format!("/api/admin/features/{key}"),
+                json!({ "enabled": false }),
+                &admin,
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK);
+        }
+        for (player, provider) in [("dev:off-a", None), ("dev:off-b", Some("yookassa"))] {
+            let (st, out) = post_json(
+                &app,
+                "/api/checkout",
+                json!({"user_id": player, "quest_id": ids.quest, "coupon_code": "full-1",
+                       "provider": provider}),
+            )
+            .await;
+            assert_eq!(st, StatusCode::OK, "{provider:?}");
+            assert_eq!(out["grant"]["source"], "CouponRedemption");
+        }
+        let (st, _) = post_json(
+            &app,
+            "/api/checkout",
+            json!({"user_id": "dev:off-c", "quest_id": ids.quest, "coupon_code": "HALF-1"}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_IMPLEMENTED, "a charge needs a provider");
+    }
+
     /// v2 spec §9.1/§12.6 — the owner reports the dashboard status control fails
     /// on EVERY transition. The dashboard drives POST
     /// /api/constructor/quests/{id}/status with an EDITOR SESSION (Bearer), not
@@ -6460,6 +6720,7 @@ mod tests {
         admin_coupons_crud_validation_and_gating = ids scenario_admin_coupons / "cpncrud";
         coupon_validate_previews_without_consuming = ids scenario_coupon_validate / "cpnprev";
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
+        qr_invitation_link_counts_scans_and_funnel = ids scenario_promo_qr / "cpnqr";
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
         ctor_list_carries_tile_figures = ids scenario_ctor_tile_figures / "ctortile";
@@ -7018,6 +7279,7 @@ mod tests {
                 ("ctor_tiles", true),
                 ("ctor_page_menu", true),
                 ("afisha", true),
+                ("promo_qr", true),
             ]
         );
     }
@@ -7045,6 +7307,7 @@ mod tests {
                     "ctor_tiles": false,
                     "ctor_page_menu": false,
                     "afisha": false,
+                    "promo_qr": false,
                 },
                 "universal_answer": null,
                 "soon_cities": [],
@@ -7075,6 +7338,7 @@ mod tests {
                 "ctor_tiles": false,
                 "ctor_page_menu": false,
                 "afisha": false,
+                "promo_qr": false,
             })
         );
     }

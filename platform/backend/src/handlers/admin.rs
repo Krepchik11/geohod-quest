@@ -36,6 +36,14 @@ pub fn router() -> Router<AppState> {
             post(delete_coupon_handler),
         )
         .route(
+            "/api/admin/coupons/{coupon_id}/qr",
+            post(create_coupon_qr_handler),
+        )
+        .route(
+            "/api/admin/coupons/{coupon_id}/funnel",
+            get(coupon_funnel_handler),
+        )
+        .route(
             "/api/admin/versions/{snapshot_id}/stats",
             get(get_version_stats_handler),
         )
@@ -1351,6 +1359,9 @@ pub(crate) struct CouponPayload {
     quest_ids: Option<Vec<String>>,
     #[serde(default)]
     paused: bool,
+    /// «От кого» of a QR invitation; absent or blank = none.
+    #[serde(default)]
+    gift_from: Option<String>,
 }
 
 impl CouponPayload {
@@ -1372,6 +1383,7 @@ impl CouponPayload {
                 "выберите хотя бы один квест или переключитесь на «Все квесты»".into(),
             ));
         }
+        let gift_from = coupons::normalize_gift_from(self.gift_from.as_deref())?;
         Ok(Coupon {
             coupon_id,
             code,
@@ -1382,6 +1394,9 @@ impl CouponPayload {
             quest_ids: self.quest_ids,
             paused: self.paused,
             created_at,
+            gift_from,
+            // The stores own the QR address: none at creation, kept on a save.
+            qr_slug: None,
         })
     }
 }
@@ -1499,4 +1514,82 @@ async fn delete_coupon_handler(
     require_admin_actor(&state, &headers).await?;
     state.coupons.delete(&coupon_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// How many fresh addresses to draw before giving up on a QR: with 31^6
+/// addresses a second draw is already a curiosity.
+const QR_SLUG_ATTEMPTS: usize = 5;
+
+/// «Сделать QR-код»: give a one-quest coupon its permanent QR address (the
+/// existing one when it has it). 404 while `promo_qr` is off, 409 for a
+/// coupon not limited to exactly one quest.
+async fn create_coupon_qr_handler(
+    State(state): State<AppState>,
+    Path(coupon_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<AdminCouponWire>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    if !crate::features::feature_enabled(&state, Feature::PromoQr).await? {
+        return Err(AppError::NotFound("QR-приглашения выключены".into()));
+    }
+    let (coupon, usage) = state
+        .coupons
+        .get_with_usage(&coupon_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("unknown coupon '{coupon_id}'")))?;
+    if coupons::single_quest(&coupon).is_none() {
+        return Err(AppError::Conflict(
+            "QR-код можно сделать только для купона на один квест".into(),
+        ));
+    }
+    let today = store::today_utc();
+    if coupon.qr_slug.is_some() {
+        return Ok(Json(AdminCouponWire::build(coupon, usage, &today)));
+    }
+    for _ in 0..QR_SLUG_ATTEMPTS {
+        match state
+            .coupons
+            .assign_qr_slug(&coupon_id, &coupons::new_qr_slug())
+            .await
+        {
+            Ok(with_qr) => return Ok(Json(AdminCouponWire::build(with_qr, usage, &today))),
+            Err(AppError::Conflict(_)) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(AppError::Internal(anyhow::anyhow!(
+        "no free QR address in {QR_SLUG_ATTEMPTS} draws for coupon {coupon_id}"
+    )))
+}
+
+/// The coupon's invitation funnel: scans → got → started → finished → rated
+/// → bought another quest (see [`coupons::coupon_funnel`]).
+async fn coupon_funnel_handler(
+    State(state): State<AppState>,
+    Path(coupon_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<coupons::CouponFunnel>, AppError> {
+    require_admin_actor(&state, &headers).await?;
+    if state.coupons.get(&coupon_id).await?.is_none() {
+        return Err(AppError::NotFound(format!("unknown coupon '{coupon_id}'")));
+    }
+    let (scans, redemptions) = tokio::try_join!(
+        state.coupons.scans_total(&coupon_id),
+        state.coupons.redemptions_of(&coupon_id),
+    )?;
+    let pairs: Vec<(String, String)> = redemptions
+        .iter()
+        .map(|r| (r.user_id.clone(), r.quest_id.clone()))
+        .collect();
+    let players: Vec<String> = pairs.iter().map(|(user, _)| user.clone()).collect();
+    let (progress, grants) = tokio::try_join!(
+        state.store.quest_progress(&pairs),
+        state.grants.grants_for_users(&players),
+    )?;
+    Ok(Json(coupons::coupon_funnel(
+        scans,
+        &redemptions,
+        &progress,
+        &grants,
+    )))
 }

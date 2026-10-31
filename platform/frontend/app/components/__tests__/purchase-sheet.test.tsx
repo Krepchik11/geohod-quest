@@ -137,6 +137,27 @@ describe('PurchaseSheet', () => {
     expect(screen.getByRole('button', { name: 'Подтвердить — 890 ₽' })).toBeTruthy();
   });
 
+  it('applies a QR invitation’s code as it opens — the price it will charge, nothing typed', async () => {
+    validateMock.mockResolvedValue({
+      valid: true,
+      code: 'GEO-7KX2M9',
+      price: 890,
+      discount_amount: 445,
+      final_price: 445,
+      valid_until: null,
+      gift_from: null,
+    });
+    render(
+      <PurchaseSheet quest={QUEST} onClose={() => {}} onPurchased={() => {}} initialPromo="GEO-7KX2M9" />,
+    );
+    expect((screen.getByPlaceholderText('Промокод') as HTMLInputElement).value).toBe('GEO-7KX2M9');
+    expect(screen.getByRole('button', { name: 'Проверяем…' })).toBeTruthy();
+    await screen.findByText('Промокод −445 ₽');
+    expect(validateMock).toHaveBeenCalledWith({ user_id: 'dev:test', quest_id: 'q1', code: 'GEO-7KX2M9' });
+    expect(screen.getByRole('button', { name: 'Подтвердить — 445 ₽' })).toBeTruthy();
+    expect(checkoutMock).not.toHaveBeenCalled();
+  });
+
   it('confirm charges once and reports success', async () => {
     checkoutMock.mockResolvedValue({});
     const { onPurchased } = setup();

@@ -13,6 +13,8 @@
  *  - /api/: network-only. Quest data lives in IndexedDB — an SW cache of API
  *    responses would be a second, stale source of truth.
  *  - Non-GET requests are never intercepted; the fact queue owns sync.
+ *  - /go/ (QR invitation links) is never intercepted: each scan must reach the
+ *    server to be counted and redirected — a cached hop would do neither.
  *  - `quest-bundle-*` caches are never cleaned here — they are evicted only by
  *    explicit bundle deletion.
  */
@@ -129,8 +131,14 @@ async function handleFetch(request) {
   return fetch(request);
 }
 
+/** A QR invitation link — the browser takes it straight to the network. */
+function isInvitationLink(url) {
+  return url.origin === self.location.origin && url.pathname.startsWith('/go/');
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return; // never intercept mutations; the fact queue owns sync
+  if (isInvitationLink(new URL(request.url))) return;
   event.respondWith(handleFetch(request));
 });

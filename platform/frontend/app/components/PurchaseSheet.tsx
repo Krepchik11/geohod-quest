@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { api } from '../../lib/api';
@@ -44,20 +44,24 @@ export default function PurchaseSheet({
   quest,
   onClose,
   onPurchased,
+  initialPromo,
 }: {
   quest: PurchaseSheetQuest;
   onClose: () => void;
   /** §3.4: the caller flips its card to the owned state in place — no redirect. */
   onPurchased: () => void;
+  /** A code to apply as the sheet opens — a QR invitation's partial discount. */
+  initialPromo?: string;
 }) {
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const inlineLogin = useClientFeature('purchase_inline_login');
   const factsOn = useClientFeature('quest_facts');
-  const [promoOpen, setPromoOpen] = useState(false);
-  const [promoCode, setPromoCode] = useState('');
+  const [promoOpen, setPromoOpen] = useState(!!initialPromo);
+  const [promoCode, setPromoCode] = useState(initialPromo ?? '');
   const [applied, setApplied] = useState<AppliedPromo | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
-  const [promoChecking, setPromoChecking] = useState(false);
+  // An invitation's code is being checked from the first frame.
+  const [promoChecking, setPromoChecking] = useState(!!initialPromo);
   const [state, setState] = useState<'idle' | 'pending' | 'redirect' | 'settling' | 'error'>('idle');
   // The pending redirect payment, so a Back-button return can settle it.
   const [paymentId, setPaymentId] = useState<string | null>(null);
@@ -140,6 +144,29 @@ export default function PurchaseSheet({
     return () => window.removeEventListener('pageshow', onPageShow);
   }, [state, paymentId, onPurchased]);
 
+  /** Check `code` server-side and show the verdict (never consumes it). */
+  const checkPromo = (code: string) =>
+    api
+      .validateCoupon({ user_id: currentUserId(), quest_id: quest.quest_id, code })
+      .then((verdict) => {
+        if (verdict.valid) {
+          setApplied({
+            code: verdict.code,
+            discountAmount: verdict.discount_amount,
+            finalPrice: verdict.final_price,
+          });
+          setPromoError(null);
+        } else {
+          setApplied(null);
+          setPromoError(verdict.message);
+        }
+      })
+      .catch(() => {
+        setApplied(null);
+        setPromoError('Не удалось проверить промокод — попробуйте ещё раз.');
+      })
+      .finally(() => setPromoChecking(false));
+
   const applyPromo = async () => {
     const code = promoCode.trim();
     if (!code) {
@@ -148,30 +175,17 @@ export default function PurchaseSheet({
       return;
     }
     setPromoChecking(true);
-    try {
-      const verdict = await api.validateCoupon({
-        user_id: currentUserId(),
-        quest_id: quest.quest_id,
-        code,
-      });
-      if (verdict.valid) {
-        setApplied({
-          code: verdict.code,
-          discountAmount: verdict.discount_amount,
-          finalPrice: verdict.final_price,
-        });
-        setPromoError(null);
-      } else {
-        setApplied(null);
-        setPromoError(verdict.message);
-      }
-    } catch {
-      setApplied(null);
-      setPromoError('Не удалось проверить промокод — попробуйте ещё раз.');
-    } finally {
-      setPromoChecking(false);
-    }
+    await checkPromo(code);
   };
+
+  // An invitation's code is checked once, as the sheet opens — the same check
+  // as «Применить», so the sheet shows the discount it will charge.
+  const checkInitialPromo = useEffectEvent(() => {
+    if (initialPromo) void checkPromo(initialPromo);
+  });
+  useEffect(() => {
+    checkInitialPromo();
+  }, []);
 
   // The sheet locks while a charge, a gateway hand-off or a return-settlement
   // check is in flight.

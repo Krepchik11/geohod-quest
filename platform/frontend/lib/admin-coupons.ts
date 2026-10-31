@@ -51,6 +51,10 @@ export interface AdminCoupon {
   lastRedeemedAt: string | null;
   totalDiscounted: number;
   createdAt: string;
+  /** «От кого» of a QR invitation; null = none. */
+  giftFrom: string | null;
+  /** The QR link's permanent address (`/go/<slug>`); null until made. */
+  qrSlug: string | null;
 }
 
 /** Map a wire coupon to the view-model (unknown status degrades to active). */
@@ -71,7 +75,23 @@ export function toAdminCoupon(w: AdminCouponWire): AdminCoupon {
     lastRedeemedAt: w.last_redeemed_at,
     totalDiscounted: w.total_discounted,
     createdAt: w.created_at,
+    // A backend older than QR invitations serves neither field.
+    giftFrom: w.gift_from ?? null,
+    qrSlug: w.qr_slug ?? null,
   };
+}
+
+/**
+ * Whether the coupon may carry a QR: limited to exactly one quest. A wider
+ * coupon's code, read off the link, would open every paid quest.
+ */
+export function hasSingleQuest(c: Pick<AdminCoupon, 'questIds'>): boolean {
+  return c.questIds?.length === 1;
+}
+
+/** The QR's link on this site — `https://quest.geohod.ru/go/<slug>`. */
+export function qrLink(origin: string, slug: string): string {
+  return `${origin}/go/${slug}`;
 }
 
 /** Expired and exhausted coupons archive automatically («Архив»). */

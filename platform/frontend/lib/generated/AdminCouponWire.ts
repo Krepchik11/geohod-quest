@@ -21,4 +21,14 @@ per_user_limit: number | null,
 /**
  * Applicable quests; None = all paid quests (including future ones).
  */
-quest_ids: Array<string> | null, paused: boolean, created_at: string, } & ({ "discount_type": "percent", "discount_value": number } | { "discount_type": "fixed", "discount_value": number }) & { used: number, last_redeemed_at: string | null, total_discounted: number, };
+quest_ids: Array<string> | null, paused: boolean, created_at: string, 
+/**
+ * Who hands the invitation out — the quest page a QR opens shows
+ * «Подарок от …» with it; None = no such line.
+ */
+gift_from: string | null, 
+/**
+ * The permanent address of the coupon's QR link (`/go/<qr_slug>`); None
+ * until the admin makes the QR. Only the stores set it, never a save.
+ */
+qr_slug: string | null, } & ({ "discount_type": "percent", "discount_value": number } | { "discount_type": "fixed", "discount_value": number }) & { used: number, last_redeemed_at: string | null, total_discounted: number, };

@@ -1,20 +1,20 @@
 //! Payment routes: checkout, payment status/webhook settlement, provider
-//! discovery, and the purchase-sheet coupon preview. Thin HTTP shims over
-//! `crate::payments`.
+//! discovery, the purchase-sheet coupon preview, and the QR invitation's
+//! short link. Thin HTTP shims over `crate::payments` and `crate::coupons`.
 
 use axum::{
     Router,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::USER_AGENT},
     response::Json,
     routing::{get, post},
 };
 
 use crate::authz::{claimed_from_headers, resolve_user};
 use crate::errors::AppError;
-use crate::features::{Feature, feature_available};
+use crate::features::{Feature, feature_available, feature_enabled};
 use crate::grants::AccessGrant;
-use crate::{AppState, coupons, payments, yookassa};
+use crate::{AppState, coupons, payments, store, yookassa};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -26,6 +26,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/payments/{payment_id}", get(payment_status_handler))
         .route("/api/coupons/validate", post(validate_coupon_handler))
+        .route("/api/go/{slug}", post(promo_link_handler))
 }
 
 /// Thin HTTP shim over [`payments::checkout`]: resolve the identity, then let
@@ -138,45 +139,102 @@ pub(crate) enum CouponVerdict {
         discount_amount: i64,
         #[cfg_attr(test, ts(type = "number"))]
         final_price: i64,
+        /// Last valid day (`"YYYY-MM-DD"`), for «действует до …».
+        valid_until: Option<String>,
+        /// «Подарок от …» of a QR invitation.
+        gift_from: Option<String>,
     },
     Invalid {
         #[cfg_attr(test, ts(type = "false"))]
         valid: bool,
         message: String,
+        /// The same refusal as a key, for wording of the page's own.
+        reason: coupons::RedeemReject,
     },
 }
 
 /// Purchase-sheet promo preview: never mutates, always 200 with a verdict.
-/// `{valid: true, ...}` carries the priced discount; `{valid: false, message}`
-/// carries the player-facing reason (unknown and deleted codes read the same).
+/// `{valid: true, ...}` carries the priced discount; `{valid: false, message,
+/// reason}` the refusal (unknown and deleted codes read the same).
 async fn validate_coupon_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<ValidateCouponRequest>,
 ) -> Result<Json<CouponVerdict>, AppError> {
     let user_id = resolve_user(&state, &headers, &req.user_id).await?;
-    let invalid = |message: &str| CouponVerdict::Invalid {
-        valid: false,
-        message: message.to_string(),
+    let invalid = |reason: coupons::RedeemReject| {
+        Json(CouponVerdict::Invalid {
+            valid: false,
+            message: reason.message().to_string(),
+            reason,
+        })
     };
     let Ok(code) = coupons::normalize_code(&req.code) else {
-        return Ok(Json(invalid("промокод не найден")));
+        return Ok(invalid(coupons::RedeemReject::NotFound));
     };
     let Some(price) = payments::quest_price(&state, &req.quest_id).await? else {
-        return Ok(Json(invalid(
-            coupons::RedeemReject::NotApplicable.message(),
-        )));
+        return Ok(invalid(coupons::RedeemReject::NotApplicable));
     };
-    let (code, discount_amount) =
+    let (coupon, discount_amount) =
         match payments::quote_coupon(&state, &code, &user_id, &req.quest_id, price).await? {
             Ok(quote) => quote,
-            Err(reason) => return Ok(Json(invalid(reason))),
+            Err(reason) => return Ok(invalid(reason)),
         };
     Ok(Json(CouponVerdict::Valid {
         valid: true,
-        code,
+        code: coupon.code,
         price,
         discount_amount,
         final_price: price - discount_amount,
+        valid_until: coupon.valid_until,
+        gift_from: coupon.gift_from,
+    }))
+}
+
+/// Where a QR invitation leads: the one quest of its coupon and the coupon's
+/// current code, which the quest page applies.
+#[derive(serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PromoLinkWire"))]
+pub(crate) struct PromoLinkWire {
+    quest_id: String,
+    code: String,
+}
+
+/// POST /api/go/{slug} — the site's `/go/<slug>` asks where a QR leads. A
+/// person's visit counts as a scan (robots — link previews, crawlers — do
+/// not; the site forwards the visitor's User-Agent). 404 while the
+/// `promo_qr` feature is off, for an unknown slug, and for a coupon no longer
+/// limited to one quest — the site then opens the shop.
+async fn promo_link_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<PromoLinkWire>, AppError> {
+    let not_found = || AppError::NotFound("приглашение не найдено".into());
+    if !feature_enabled(&state, Feature::PromoQr).await? {
+        return Err(not_found());
+    }
+    let coupon = state
+        .coupons
+        .find_by_qr_slug(&slug.trim().to_ascii_uppercase())
+        .await?
+        .ok_or_else(not_found)?;
+    let quest_id = coupons::single_quest(&coupon)
+        .ok_or_else(not_found)?
+        .to_string();
+    let user_agent = headers
+        .get(USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if !coupons::is_robot(user_agent) {
+        state
+            .coupons
+            .add_scan(&coupon.coupon_id, &store::today_utc())
+            .await?;
+    }
+    Ok(Json(PromoLinkWire {
+        quest_id,
+        code: coupon.code,
     }))
 }

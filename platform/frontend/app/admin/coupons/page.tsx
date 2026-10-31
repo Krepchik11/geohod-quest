@@ -88,6 +88,8 @@ export default function AdminCouponsPage() {
         per_user_limit: c.perUserLimit,
         quest_ids: c.questIds,
         paused: !c.paused,
+        // A save writes every field — «От кого» goes along unchanged.
+        gift_from: c.giftFrom,
       });
       const next = toAdminCoupon(wire);
       setCoupons((list) => list.map((x) => (x.id === next.id ? next : x)));

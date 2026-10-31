@@ -392,6 +392,19 @@ pub struct PlayerRatingRow {
     pub text_ord: u64,
 }
 
+/// How far one player got with one quest, across all their attempts — the
+/// coupon funnel's «начали → прошли → оценили». A row exists only for a pair
+/// with at least one attempt (started); `finished` = some attempt holds an
+/// `attempt_completed` fact, `rated` = some attempt holds a `quest_rated` one
+/// (hidden reviews included — the funnel counts what players did).
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuestProgress {
+    pub user_id: String,
+    pub quest_id: String,
+    pub finished: bool,
+    pub rated: bool,
+}
+
 /// True when this row's `(user_id, quest_id)` is in the hidden overlay set.
 fn row_hidden(row: &PlayerRatingRow, hidden: &std::collections::HashSet<(String, String)>) -> bool {
     hidden.contains(&(row.user_id.clone(), row.quest_id.clone()))

@@ -3,10 +3,12 @@ import {
   discountLabel,
   filterCoupons,
   generateCode,
+  hasSingleQuest,
   isArchived,
   lastUsedLabel,
   pluralizeCoupons,
   pluralizeQuests,
+  qrLink,
   scopeLabel,
   toAdminCoupon,
   usageLabel,
@@ -31,32 +33,62 @@ function coupon(over: Partial<AdminCoupon> = {}): AdminCoupon {
     lastRedeemedAt: null,
     totalDiscounted: 0,
     createdAt: '2026-06-01T00:00:00Z',
+    giftFrom: null,
+    qrSlug: null,
     ...over,
   };
 }
 
 describe('toAdminCoupon', () => {
+  const wire = {
+    coupon_id: 'cpn-9',
+    code: 'GEOHOD300',
+    discount_type: 'fixed' as const,
+    discount_value: 300,
+    valid_until: null,
+    max_redemptions: null,
+    per_user_limit: null,
+    quest_ids: ['q1'],
+    paused: false,
+    status: 'weird' as never,
+    used: 7,
+    last_redeemed_at: '2026-07-14T10:00:00Z',
+    total_discounted: 2100,
+    created_at: '2026-06-01T00:00:00Z',
+    gift_from: 'хостела Fortress',
+    qr_slug: '7KX2M9',
+  };
+
   it('maps the wire shape and degrades unknown statuses to active', () => {
-    const c = toAdminCoupon({
-      coupon_id: 'cpn-9',
-      code: 'GEOHOD300',
-      discount_type: 'fixed',
-      discount_value: 300,
-      valid_until: null,
-      max_redemptions: null,
-      per_user_limit: null,
-      quest_ids: ['q1'],
-      paused: false,
-      status: 'weird' as never,
-      used: 7,
-      last_redeemed_at: '2026-07-14T10:00:00Z',
-      total_discounted: 2100,
-      created_at: '2026-06-01T00:00:00Z',
-    });
+    const c = toAdminCoupon(wire);
     expect(c.id).toBe('cpn-9');
     expect(c.discountType).toBe('fixed');
     expect(c.questIds).toEqual(['q1']);
     expect(c.status).toBe('active');
+    expect(c.giftFrom).toBe('хостела Fortress');
+    expect(c.qrSlug).toBe('7KX2M9');
+  });
+
+  it('reads a backend that predates QR invitations as «no QR»', () => {
+    const old: Record<string, unknown> = { ...wire };
+    delete old.gift_from;
+    delete old.qr_slug;
+    const c = toAdminCoupon(old as never);
+    expect(c.giftFrom).toBeNull();
+    expect(c.qrSlug).toBeNull();
+  });
+});
+
+describe('QR invitation helpers', () => {
+  it('allows a QR only for a coupon limited to exactly one quest', () => {
+    expect(hasSingleQuest(coupon({ questIds: ['q1'] }))).toBe(true);
+    expect(hasSingleQuest(coupon({ questIds: null }))).toBe(false);
+    expect(hasSingleQuest(coupon({ questIds: ['q1', 'q2'] }))).toBe(false);
+    expect(hasSingleQuest(coupon({ questIds: [] }))).toBe(false);
+  });
+
+  it('builds the short link on the given site', () => {
+    expect(qrLink('https://quest.geohod.ru', '7KX2M9')).toBe('https://quest.geohod.ru/go/7KX2M9');
   });
 });
 
