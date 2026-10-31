@@ -10,7 +10,7 @@ import {
   rememberPromo,
 } from '../promo';
 
-/** QR invitations, the guest's side (flag promo_qr): the pure rules + the tab memory. */
+/** QR invitations, the guest's side: the pure rules + the tab memory. */
 
 function quest(over: Partial<PublishedQuestWire>): PublishedQuestWire {
   return {

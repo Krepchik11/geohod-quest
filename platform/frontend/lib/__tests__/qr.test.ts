@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { QR_QUIET, qrMatrix, qrSvg } from '../qr';
 
-/** QR images of the coupon's «QR-код» card (flag promo_qr). */
+/** QR images of the coupon's «QR-код» card. */
 
 describe('qrMatrix', () => {
   it('encodes the short link as a square code with the three finder patterns', async () => {

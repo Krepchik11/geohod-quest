@@ -32,11 +32,11 @@ export type PromoInvite =
 const NONE: PromoInvite = { kind: 'none' };
 
 /**
- * The QR invitation on the quest page (flag `promo_qr`). The code arrives as
+ * The QR invitation on the quest page. The code arrives as
  * `?promo=` — remembered for this tab and dropped from the address bar, like
  * the page's other one-shot params — or was remembered on an earlier visit in
- * this tab. It is priced by the server preview once `ready` (the flag is on,
- * the quest is paid, the guest does not own it yet); nothing is spent until
+ * this tab. It is priced by the server preview once `ready` (the
+ * quest is paid, the guest does not own it yet); nothing is spent until
  * checkout. `forget` drops the code once the quest is the guest's; `recheck`
  * prices it again (it may have run out since).
  */

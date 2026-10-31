@@ -670,7 +670,7 @@
 .ac-side-note { font-size: 12px; line-height: 1.5; color: #9098a6; }
 .ac-card--actions { gap: 12px; }
 
-/* «QR-код» card (flag promo_qr): preview, its link, downloads, the funnel. */
+/* «QR-код» card: preview, its link, downloads, the funnel. */
 .ac-card--qr { gap: 14px; }
 .ac-qr { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .ac-qr__img { width: 200px; height: 200px; image-rendering: pixelated; }

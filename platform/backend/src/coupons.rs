@@ -13,7 +13,7 @@
 //! status, redeemability, discount math); the stores own the critical section
 //! and inject the wall clock, keeping this layer deterministic and testable.
 //!
-//! QR invitations (flag `promo_qr`): a coupon limited to ONE quest can carry a
+//! QR invitations: a coupon limited to ONE quest can carry a
 //! QR code — the short link `/go/<qr_slug>` opens that quest's page with the
 //! code applied. The slug is permanent and independent of the editable code;
 //! scans are counted per day, nothing personal stored. [`coupon_funnel`]

@@ -1,5 +1,5 @@
 /**
- * QR invitations (flag `promo_qr`), the guest's side. A QR opens
+ * QR invitations, the guest's side. A QR opens
  * `/go/<slug>`, which lands on the quest page with `?promo=<code>`; the page
  * prices the code through the ordinary preview (`api.validateCoupon`) and
  * gives the quest through the ordinary checkout. This module holds the pure

@@ -20,7 +20,7 @@ const FUNNEL_STEPS: ReadonlyArray<[keyof CouponFunnelWire, string]> = [
 ];
 
 /**
- * The coupon editor's «QR-код» card (flag `promo_qr`). A coupon limited to
+ * The coupon editor's «QR-код» card. A coupon limited to
  * one quest gets a QR invitation: the QR holds the coupon's permanent short
  * link, made once by «Сделать QR-код» and untouched by later saves — a
  * printed QR keeps working when the code is renamed. PNG for an office

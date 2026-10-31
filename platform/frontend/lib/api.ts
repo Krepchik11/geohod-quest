@@ -477,7 +477,7 @@ export const api = {
       headers: adminHeaders(),
       body: JSON.stringify({}),
     }),
-  // QR invitations (flag promo_qr): the coupon's permanent short-link address
+  // QR invitations: the coupon's permanent short-link address
   // — made once, then returned as is — and its scans-to-purchase funnel.
   adminCreateCouponQr: (couponId: string) =>
     apiFetch<AdminCouponWire>(`/api/admin/coupons/${encodeURIComponent(couponId)}/qr`, {

@@ -1521,17 +1521,14 @@ async fn delete_coupon_handler(
 const QR_SLUG_ATTEMPTS: usize = 5;
 
 /// «Сделать QR-код»: give a one-quest coupon its permanent QR address (the
-/// existing one when it has it). 404 while `promo_qr` is off, 409 for a
-/// coupon not limited to exactly one quest.
+/// existing one when it has it). 409 for a coupon not limited to exactly one
+/// quest.
 async fn create_coupon_qr_handler(
     State(state): State<AppState>,
     Path(coupon_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<AdminCouponWire>, AppError> {
     require_admin_actor(&state, &headers).await?;
-    if !crate::features::feature_enabled(&state, Feature::PromoQr).await? {
-        return Err(AppError::NotFound("QR-приглашения выключены".into()));
-    }
     let (coupon, usage) = state
         .coupons
         .get_with_usage(&coupon_id)

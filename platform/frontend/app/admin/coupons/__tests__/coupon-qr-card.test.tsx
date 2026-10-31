@@ -5,7 +5,7 @@ import React from 'react';
 import type { AdminCoupon } from '../../../../lib/admin-coupons';
 
 /**
- * The coupon editor's «QR-код» card (flag promo_qr): a QR only for a coupon
+ * The coupon editor's «QR-код» card: a QR only for a coupon
  * limited to one quest; «Сделать QR-код» asks the server for the permanent
  * address once; with it — the QR, its short link, the downloads and the
  * invitation funnel; a coupon widened past one quest warns that its printed

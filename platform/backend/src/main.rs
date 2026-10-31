@@ -3502,28 +3502,18 @@ mod tests {
         assert_eq!(body["error"], "промокод не найден");
     }
 
-    /// QR invitations end to end (flag `promo_qr`): the short link resolves
-    /// only while the flag is on and only for a one-quest coupon, counts
+    /// QR invitations end to end: the short link resolves only for a
+    /// one-quest coupon, counts
     /// people but not robots, follows a renamed code; the page's preview
     /// prices the gift and names each refusal; the funnel follows the invited
     /// player from the scan to their next purchase.
-    async fn scenario_promo_qr(app: &Router, ids: &Ids) {
+    async fn scenario_qr_invitation(app: &Router, ids: &Ids) {
         let admin = [("x-admin-token", TEST_ADMIN_TOKEN)];
         let person = [(
             "user-agent",
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1",
         )];
         let robot = [("user-agent", "TelegramBot (like TwitterBot)")];
-        let set_flag = |enabled: bool| async move {
-            let (st, _) = post_json_h(
-                app,
-                "/api/admin/features/promo_qr",
-                json!({ "enabled": enabled }),
-                &admin,
-            )
-            .await;
-            assert_eq!(st, StatusCode::OK);
-        };
         let code = ids.quest.to_ascii_uppercase();
         let gift = ids.quest.clone();
         let next = format!("{}-next", ids.quest);
@@ -3553,12 +3543,6 @@ mod tests {
         assert_eq!(created["qr_slug"], Value::Null, "no QR until asked for");
         let id = created["coupon_id"].as_str().expect("id").to_string();
         let qr_uri = format!("/api/admin/coupons/{id}/qr");
-
-        // Flag off: no QR is made.
-        set_flag(false).await;
-        let (st, _) = post_json_h(app, &qr_uri, json!({}), &admin).await;
-        assert_eq!(st, StatusCode::NOT_FOUND);
-        set_flag(true).await;
 
         // Only a one-quest coupon gets a QR: a wider code would open any quest.
         let (st, wide) = post_json_h(
@@ -3686,11 +3670,7 @@ mod tests {
         let (_, link) = post_json_h(app, &go, json!({}), &person).await;
         assert_eq!(link["code"], renamed.as_str());
 
-        // Flag off, or the coupon gone: the link is dead (the site opens the shop).
-        set_flag(false).await;
-        let (st, _) = post_json_h(app, &go, json!({}), &person).await;
-        assert_eq!(st, StatusCode::NOT_FOUND);
-        set_flag(true).await;
+        // The coupon gone: the link is dead (the site opens the shop).
         let (st, _) = post_json_h(
             app,
             &format!("/api/admin/coupons/{id}/delete"),
@@ -6720,7 +6700,7 @@ mod tests {
         admin_coupons_crud_validation_and_gating = ids scenario_admin_coupons / "cpncrud";
         coupon_validate_previews_without_consuming = ids scenario_coupon_validate / "cpnprev";
         checkout_redeems_coupons_with_limits_and_stats = ids scenario_coupon_redeem / "cpnrdm";
-        qr_invitation_link_counts_scans_and_funnel = ids scenario_promo_qr / "cpnqr";
+        qr_invitation_link_counts_scans_and_funnel = ids scenario_qr_invitation / "cpnqr";
         publish_requires_editor_role = ids scenario_publish_authz / "pubauthz";
         ctor_status_lifecycle_editor_session = ids scenario_ctor_status_lifecycle / "ctorstatus";
         ctor_list_carries_tile_figures = ids scenario_ctor_tile_figures / "ctortile";
@@ -7279,7 +7259,6 @@ mod tests {
                 ("ctor_tiles", true),
                 ("ctor_page_menu", true),
                 ("afisha", true),
-                ("promo_qr", true),
             ]
         );
     }
@@ -7307,7 +7286,6 @@ mod tests {
                     "ctor_tiles": false,
                     "ctor_page_menu": false,
                     "afisha": false,
-                    "promo_qr": false,
                 },
                 "universal_answer": null,
                 "soon_cities": [],
@@ -7338,7 +7316,6 @@ mod tests {
                 "ctor_tiles": false,
                 "ctor_page_menu": false,
                 "afisha": false,
-                "promo_qr": false,
             })
         );
     }
